@@ -86,3 +86,40 @@ def test_the_worker_is_not_cancelled_by_default(qapp):
     worker = TaskWorker(lambda _should_cancel: True)
 
     assert worker.should_cancel() is False
+
+
+def test_the_collector_is_held_off_while_the_task_runs(qapp):
+    """A collection on the worker thread can walk the GUI thread's Qt objects.
+
+    shiboken's objects are not built to be traversed from another thread, so the
+    task runs with the cyclic collector disabled — ``docs/dev_notes.md``, *The
+    macOS GUI segfault*.  Reference counting is unaffected, so only cycles wait.
+    """
+    import gc
+
+    from fea_toolkit.gui.controllers.worker import TaskWorker
+
+    observed = []
+
+    def _task(_should_cancel):
+        observed.append(gc.isenabled())
+        return "done"
+
+    _run(TaskWorker(_task), qapp)
+
+    assert observed == [False]
+    assert gc.isenabled() is True, "the collector must be restored when the task ends"
+
+
+def test_a_failing_task_still_restores_the_collector(qapp):
+    """The error path restores it too — otherwise the process keeps it off."""
+    import gc
+
+    from fea_toolkit.gui.controllers.worker import TaskWorker
+
+    def _boom(_should_cancel):
+        raise RuntimeError("nope")
+
+    _run(TaskWorker(_boom), qapp)
+
+    assert gc.isenabled() is True

@@ -120,10 +120,17 @@ and no unit system — so `Model ▸ Split elements` / `Meshed` stay disabled wh
 one is displayed.  Open the `.s2k` when you want to preprocess or re-analyse
 (`File ▸ Open`), and the results views are replaced by that model's own views.
 
-What is still to come: **deformed shapes and force diagrams** drawn *onto* the
-geometry, per case (milestones 6–7 of
-[the roadmap](gui_roadmap.md)).  Today a case view shows the geometry those
-results were computed on.
+**Results ▸ Deformed shape** draws the active case's **deformed shape** over that
+geometry, amplified by the **Scale** box on the main toolbar (default 50×,
+because a real deflection is a fraction of the model's size).  The action is
+enabled only for a case view whose archive actually carries nodal
+displacement — an archive written without it leaves the button greyed — and the
+amplification is a *display* factor: the displacements are read in model units
+and never modified.
+
+Switching views clears the overlay and unchecks the action, because a deformed
+shape belongs to **one** case's geometry: drawing case A's shape over case B's
+members would be a lie.  **Results ▸ Clear results** does the same on demand.
 
 ### A view is a lens
 
@@ -266,9 +273,9 @@ jarring than a greyed-out one.
 | **View** | Zoom to fit, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show shells, Clear highlights) | Show element labels, Show loads, Show force diagrams, Reset layout |
 | **Model** | Split elements, Mesh areas (enabled while a parsed model is open) | Selections, Units |
 | **Analysis** | — | Run, Static, Modal, Response spectrum, Pushover, Stop |
-| **Results** | — | Deformed shape, Force diagrams, Storey response, Pushover curve, Clear results |
+| **Results** | Deformed shape, Clear results | Force diagrams, Storey response, Pushover curve |
 | **Help** | Documentation, About | — |
-| Toolbars | Open; camera views; display toggles | Save/Export, Run, Mesh, results |
+| Toolbars | Open; camera views; display toggles; Split / Mesh; Deformed shape + Scale | Save / Export, Run / Stop, Force diagrams |
 
 ## Application identity
 
@@ -288,9 +295,8 @@ drives a *separately installed* OpenSees is the recorded route
 | Missing | Effect today |
 |---|---|
 | Analysis actions (milestone 5) | `Analysis ▸ …` is greyed; analyse from a script or notebook instead |
-| Load, deformed-shape and force overlays (milestones 6–7) | Use the [Visualisation Toolkit](viewer.md) and the `plot_*` functions for results |
+| Loads, force diagrams, storey and pushover plots (milestones 6–7) | A case's deformed shape *is* drawn in the GUI; these others still need the [Visualisation Toolkit](viewer.md) and the `plot_*` functions |
 | Element labels, the Property Tree tab, explicit interaction modes ([P23](_pending_work.md)) | The corresponding menu item and tab are greyed |
-| Refining a view with a `Selection`, and per-load-case result views (roadmap slices B–C) | Views cover the geometry stages today; filtering and result overlays are still to come |
 | Window-layout persistence (milestone 8) | Docks and window geometry are not remembered between sessions |
 | Quad view (milestone 10) | A single viewport; use the Camera menu and the view cube |
 

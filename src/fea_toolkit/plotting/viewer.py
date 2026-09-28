@@ -617,6 +617,29 @@ class ModelViewer:
 
     # ── Annotation ───────────────────────────────────────────────────
 
+    def clear_deformed(self) -> "ModelViewer":
+        """Remove the deformed-shape overlay, leaving the model itself drawn.
+
+        Returns:
+            ``self`` for chaining.
+        """
+        self._backend.clear_category("deformed")
+        return self
+
+    def clear_results(self) -> "ModelViewer":
+        """Remove every results overlay — the deformed shape and force flags.
+
+        The model, the node cloud and the annotations are untouched: this clears
+        what a *results* action put there, which is what a "clear results"
+        command should undo.
+
+        Returns:
+            ``self`` for chaining.
+        """
+        for category in ("deformed", "force_flags"):
+            self._backend.clear_category(category)
+        return self
+
     def annotate(
         self,
         text: str,

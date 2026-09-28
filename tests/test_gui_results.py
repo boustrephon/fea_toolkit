@@ -19,9 +19,18 @@ def qapp():
     yield QApplication.instance() or QApplication(["pytest-fea-gui"])
 
 
-def _write_archive(tmp_path, *, cases=("DEAD", "COMB1")):
-    """A minimal results archive: one member, two nodes, those cases."""
+def _write_archive(tmp_path, *, cases=("DEAD", "COMB1"), with_displacement=False):
+    """A minimal results archive: one member, two nodes, those cases.
+
+    ``with_displacement`` adds nodal displacement — a cantilever bending 0.02 m
+    at the base and 0.10 m at the tip, so an amplified shape is recognisable by
+    eye and assertable exactly.
+    """
     path = tmp_path / "results.npz"
+    payload = {f"static/{case}/fx_i": np.zeros(1) for case in cases}
+    if with_displacement:
+        for case in cases:
+            payload[f"static/{case}/node_dx"] = np.array([0.02, 0.10])
     np.savez_compressed(
         path,
         node_tag=np.array([1, 2], dtype=int),
@@ -37,7 +46,7 @@ def _write_archive(tmp_path, *, cases=("DEAD", "COMB1")):
         frame_node_j=np.array([2], dtype=int),
         static_case_labels=np.array(list(cases), dtype=str),
         static_case_group=np.array(list(cases), dtype=str),
-        **{f"static/{case}/fx_i": np.zeros(1) for case in cases},
+        **payload,
     )
     return path
 
@@ -124,3 +133,76 @@ def test_a_file_that_is_not_a_results_archive_is_reported(window, tmp_path):
 def test_a_missing_file_is_reported(window, tmp_path):
     assert window.open_results_path(str(tmp_path / "nope.npz")) is False
     assert "Failed to open results" in window._message_log.toPlainText()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Deformed shape — M7's first results action
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _deformed_points(window):
+    """The deformed overlay's vertices as drawn (``None`` when there is none)."""
+    actors = window._backend.actors("deformed")
+    if not actors:
+        return None
+    return np.asarray(actors[0].mapper.dataset.points, dtype=float)
+
+
+class TestDeformedShape:
+    """Results ▸ Deformed shape, driven through the real actions.
+
+    Amplification is a *display* factor: the archive's displacements are read in
+    model units and never modified, so every expected value below is the
+    archive's number times the toolbar's scale.
+    """
+
+    def test_it_is_disabled_without_displacement(self, window, tmp_path):
+        """No displacement in the archive → greyed, not a button that only refuses."""
+        window.open_results_path(str(_write_archive(tmp_path)))
+        assert window._actions["results.deformed"].isEnabled() is False
+
+    def test_it_is_enabled_once_a_case_carries_displacement(self, window, tmp_path):
+        window.open_results_path(str(_write_archive(tmp_path, with_displacement=True)))
+        assert window._actions["results.deformed"].isEnabled() is True
+
+    def test_it_draws_the_shape_at_the_toolbar_scale(self, window, tmp_path):
+        window.open_results_path(str(_write_archive(tmp_path, with_displacement=True)))
+        window._deformed_scale.setValue(50.0)
+        window._actions["results.deformed"].trigger()
+
+        points = _deformed_points(window)
+        assert points is not None, "no deformed overlay was drawn"
+        assert points[0] == pytest.approx([1.0, 0.0, 0.0])  # base: 0.02 * 50
+        assert points[1] == pytest.approx([5.0, 0.0, 10.0])  # tip: 0.10 * 50, at z = 10
+
+    def test_changing_the_scale_redraws_at_the_new_factor(self, window, tmp_path):
+        window.open_results_path(str(_write_archive(tmp_path, with_displacement=True)))
+        window._actions["results.deformed"].trigger()
+        window._deformed_scale.setValue(100.0)
+
+        points = _deformed_points(window)
+        assert points[0] == pytest.approx([2.0, 0.0, 0.0])  # 0.02 * 100
+
+    def test_the_scale_alone_never_starts_drawing(self, window, tmp_path):
+        """Turning the knob must not be a second way to trigger the action."""
+        window.open_results_path(str(_write_archive(tmp_path, with_displacement=True)))
+        window._deformed_scale.setValue(200.0)
+        assert _deformed_points(window) is None
+
+    def test_switching_cases_drops_the_overlay(self, window, tmp_path):
+        """The shape belongs to one case's geometry, so a switch must clear it."""
+        window.open_results_path(str(_write_archive(tmp_path, with_displacement=True)))
+        window._actions["results.deformed"].trigger()
+        assert _deformed_points(window) is not None
+
+        assert window._select_entity_in_tree("views", "COMB1") is True
+        assert _deformed_points(window) is None
+        assert window._actions["results.deformed"].isChecked() is False
+
+    def test_clear_results_removes_the_overlay(self, window, tmp_path):
+        window.open_results_path(str(_write_archive(tmp_path, with_displacement=True)))
+        window._actions["results.deformed"].trigger()
+        window._actions["results.clear"].trigger()
+
+        assert _deformed_points(window) is None
+        assert window._actions["results.deformed"].isChecked() is False

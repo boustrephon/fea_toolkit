@@ -774,6 +774,68 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-24 — GUI M7 part 1: a results case's deformed shape)
+
+Milestone 7 is under way; the first increment draws one thing well per case.
+
+- **Package layer** (`io/results_repository.py`): `has_displacements(case)` — the
+  cheap pre-check that decides whether to *offer* a deformed shape — and
+  `nodal_displacements(case)`, `{node_id: (dx, dy, dz)}`.  Both are concrete on
+  the ABC, built from `display_geometry` + `arrays_for`, so every backend has
+  them, and the ids are exactly the ones `as_model()` names its nodes with —
+  which is what the viewers are keyed by.  A component the archive omits reads as
+  zero; an archive with no displacement returns `{}`, a *state* rather than an
+  error, because displacement recording is optional.
+- **Viewer** (`plotting/viewer.py`): `clear_deformed()` and `clear_results()`, so
+  the GUI never reaches into `_backend` for a category name.
+- **GUI**: `Results ▸ Deformed shape` is real (it was a Milestone-7 placeholder) —
+  a checkable action **enabled only for a case view whose archive carries
+  displacement**, drawn at the new **Scale** spin box on the main toolbar
+  (1–10000, default 50×).  Amplification is display-only; the displacements are
+  read in model units and never modified.  Switching views clears the overlay and
+  unchecks the action, because a shape belongs to **one** case's geometry.
+  `Results ▸ Clear results` is real too.
+
+Tests: 5 in `tests/test_results_repository.py` (ids match the display model,
+values from the case arrays, an omitted component reading as zero, the
+no-displacement archive, the cheap pre-check) and 7 in `tests/test_gui_results.py`
+(disabled/enabled by the data, the drawn vertices at the toolbar scale, redraw on
+a scale change, the scale never *starting* a draw, the overlay dropped on a case
+switch, clear-results).
+
+Still to come in M7: force diagrams, storey response, pushover curve and
+`write_results_npz`.
+
+## DONE (2026-09-24 — the worker-thread GC crash: mechanism fixed, not mitigated)
+
+The M7 overlay work made the macOS segfault reproducible again, which allowed a
+clean attribution on one eleven-file GUI set:
+
+| state | runs | exit codes |
+|---|---|---|
+| `HEAD`, before M7 | 3 | 0, 0, 0 |
+| M7 overlay, no worker fix | 2 | **139, 139** |
+| M7 + the worker fix | 4 | 0, 0, 0, 0 |
+
+`TaskWorker.run()` now holds the **cyclic collector off for the task's duration**
+(`gc.disable()` … `finally: gc.enable()`), and `MainWindow._preprocess_ended` —
+wired to the worker's `finished`, which fires on both outcomes — collects on the
+GUI thread once it has stopped.
+
+That is the mechanism rather than another mitigation: the crash needs a
+collection to run *on the worker thread* while shiboken objects are alive.
+`gc.freeze()` protected what existed at the freeze; every window and actor
+created afterwards stayed collectable, so more GUI churn meant more chances for a
+worker-thread collection to walk one.  Disabling the collector removes the
+collection, not the object — reference counting still frees as usual, only cycles
+wait, and they are reclaimed where traversal is safe.
+
+Pinned by two tests in `tests/test_gui_worker.py`, including the error path (a
+worker that left the collector off would be a silent leak).  `gc.freeze()` stays:
+the freeze covers the objects that predate the first task, the disable covers
+each task's window.  Rationale and the residual risk: `docs/dev_notes.md` →
+*The macOS GUI segfault*.
+
 ## DONE (2026-09-24 — copy-on-write replaces the Preprocessor's model deepcopy)
 
 `Preprocessor.run()` promised not to mutate the caller's `SAPModelData` and
@@ -828,9 +890,10 @@ builder path that does mutate (`subdivide_elements` for brace buckling) already
 deep-copies into `_brace_canonical`.  Documented in `docs/dev_notes.md` →
 *Copy-on-write replaces the model deepcopy*.
 
-`gc.freeze()` (`main_window._freeze_gc_once()`) is **not** retired: the worker
-still allocates new children and mesh nodes, so the race class remains — this
-removed the largest allocation burst, not the mechanism.
+`gc.freeze()` (`main_window._freeze_gc_once()`) is **not** retired: it and the
+worker-side collector hold added later (see the *worker-thread GC crash* entry
+above) are complementary — this change removed the largest allocation burst, that
+one removed the collection the burst could trigger.
 
 Tests: `tests/test_preprocessor.py` (new) — source-model snapshot equality,
 object-identity sharing, and a `copy.deepcopy` spy pinning that the model is

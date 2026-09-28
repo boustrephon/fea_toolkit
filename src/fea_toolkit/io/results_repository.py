@@ -27,7 +27,7 @@ from typing import Any, Optional
 
 import numpy as np
 
-from .results_schema import CASE_META_KEYS, GEOMETRY_ARRAYS
+from .results_schema import CASE_META_KEYS, GEOMETRY_ARRAYS, STATIC_NODAL_ARRAYS
 
 __all__ = ["NpzResultsRepository", "ResultsRepository", "mesh_model_from_geometry"]
 
@@ -221,6 +221,56 @@ class ResultsRepository(ABC):
         system, so nothing here can be analysed.
         """
         return mesh_model_from_geometry(self.display_geometry())
+
+    def has_displacements(self, case: str) -> bool:
+        """Whether *case* carries nodal displacement — the cheap pre-check.
+
+        Displacement recording is optional, so a perfectly valid archive can
+        have none; a caller deciding whether to *offer* a deformed shape wants
+        to know that without building the arrays.
+
+        Args:
+            case: Static load-case label, as in :meth:`cases`.
+
+        Returns:
+            ``True`` when any displacement component is present for *case*.
+        """
+        arrays = self.arrays_for(case)
+        return any(name in arrays for name in STATIC_NODAL_ARRAYS)
+
+    def nodal_displacements(self, case: str) -> dict:
+        """``{node_id: (dx, dy, dz)}`` for *case* — a deformed shape's input.
+
+        Concrete rather than abstract, because it is assembled from
+        :meth:`display_geometry` and :meth:`arrays_for`, so every backend has
+        it.  The ids are the ones :meth:`as_model` names its nodes with, which
+        is what the viewers are keyed by.
+
+        Args:
+            case: Static load-case label, as in :meth:`cases`.
+
+        Returns:
+            ``{node_id: np.ndarray}`` of ``(dx, dy, dz)`` in model units,
+            with zero for a node the archive does not cover.  Empty when the
+            archive recorded no displacement for *case* — a normal state, not
+            an error, so callers report it rather than raising.
+        """
+        arrays = self.arrays_for(case)
+        if not any(name in arrays for name in STATIC_NODAL_ARRAYS):
+            return {}
+
+        geometry = self.display_geometry()
+        node_ids = _texts(geometry.get("node_sap_id"))
+        node_tags = _ints(geometry.get("node_tag"))
+        components = [np.asarray(arrays.get(name, []), dtype=float) for name in STATIC_NODAL_ARRAYS]
+
+        displacements: dict = {}
+        for index, tag in enumerate(node_tags):
+            node_id = _at(node_ids, index) or str(tag)
+            displacements[node_id] = np.array(
+                [_at(component, index, 0.0) for component in components], dtype=float
+            )
+        return displacements
 
     @abstractmethod
     def table(self, *columns: str) -> dict:

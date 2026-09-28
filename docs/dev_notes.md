@@ -538,6 +538,49 @@ The coordinate conversion is sound on Retina, which is worth stating because it
 is the one thing a headless run cannot check: `to_device` maps the widget centre
 (306, 215) to (613, 430) inside a 1226×860 render window — exactly its centre.
 
+### The mechanism, finally fixed (2026-09-24)
+
+Adding the Milestone 7 results overlay made this crash reproducible again, and
+the attribution came out cleanly — same eleven-file GUI set, three states:
+
+| state | runs | exit codes |
+|---|---|---|
+| `HEAD`, before M7 | 3 | 0, 0, 0 |
+| M7 overlay, no worker fix | 2 | **139, 139** |
+| M7 + the worker fix | 4 | 0, 0, 0, 0 |
+
+Small samples, but consistent: the overlay work creates and destroys VTK actors,
+which is *more* collectable Qt/VTK state, and that is what the race needs.
+
+**The fix.**  `TaskWorker.run()` now holds the **cyclic collector off for the
+task's duration** (`gc.disable()`, restored in a `finally`), and
+`MainWindow._preprocess_ended` — wired to the worker's `finished`, which fires on
+both outcomes — collects on the GUI thread once it has stopped.
+
+Why this is the mechanism rather than another mitigation: the crash needs a
+collection to *run on the worker thread* while shiboken objects are alive.
+`gc.freeze()` made everything that existed at the first freeze immune, but every
+window, actor and model created **afterwards** stayed collectable — so more GUI
+churn meant more chances for a worker-thread collection to walk one. Disabling
+the collector removes the *collection*, not the object: reference counting still
+frees as usual, so only cycles wait, and they are reclaimed where traversal is
+safe.
+
+Pinned by `tests/test_gui_worker.py::test_the_collector_is_held_off_while_the_task_runs`
+and `::test_a_failing_task_still_restores_the_collector` — a worker that left the
+collector off would be a silent leak, so the error path is pinned too.
+
+**`gc.freeze()` stays.**  The two are complementary: the freeze protects the
+objects that predate the first task, the disable protects each task's window.
+Neither suffices alone, and the rule for future work is simply: **never run a
+collection on a worker thread** — no `gc.collect()` in a task, no leaving the
+collector on around one.
+
+**Still open.**  Long interactive sessions were not re-measured on the real
+backend beyond two driven runs; if the crash is ever seen again, the first thing
+to check is whether something new is allocating Qt/VTK objects *inside* a task.
+
+
 
 Related: the Preprocessor's `copy.deepcopy` ran on the GUI's worker thread and
 hit the same race.  `main_window._freeze_gc_once()` (a `gc.freeze()` before the

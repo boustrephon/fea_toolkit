@@ -14,12 +14,14 @@ the viewport, plus the node / shell display toggles.
 """
 
 import contextlib
+import gc
 from typing import Any, Optional
 
 from qtpy.QtCore import QItemSelectionModel, Qt, QTimer, QUrl
 from qtpy.QtGui import QAction, QDesktopServices, QKeySequence
 from qtpy.QtWidgets import (
     QDockWidget,
+    QDoubleSpinBox,
     QFileDialog,
     QLabel,
     QMainWindow,
@@ -66,10 +68,12 @@ def _freeze_gc_once() -> None:
     copy, and the largest allocation burst on that thread.
 
     That deepcopy is gone (the Preprocessor is copy-on-write now, see
-    ``docs/dev_notes.md`` → *Copy-on-write replaces the model deepcopy*), but
-    the freeze stays: the worker still allocates new child elements and mesh
-    nodes, so a collection can still run there.  Removing the burst removes the
-    biggest trigger, not the mechanism.
+    ``docs/dev_notes.md`` → *Copy-on-write replaces the model deepcopy*), and the
+    worker now holds the collector off for its whole task
+    (:meth:`~fea_toolkit.gui.controllers.worker.TaskWorker.run`), so no
+    collection runs there at all.  This freeze is still worth its one line: it
+    protects the Qt/VTK objects created *before* the first task — the window among
+    them — which a per-task hold cannot reach back to.
 
     ``gc.freeze()`` moves everything alive *now* -- Qt, VTK, the window, the
     renderer -- into the permanent generation, so no later collection looks at
@@ -110,6 +114,26 @@ def _case_view_name(case: str, meta: dict) -> str:
     if group and group != case:
         return f"{case} ({group})"
     return case
+
+
+#: Prefix of a results view's key; the load-case label follows it.
+_RESULTS_KEY_PREFIX = "results:"
+
+#: Default amplification for the deformed-shape overlay.  A real transverse
+#: displacement is a small fraction of the model's size, so the shape is
+#: invisible 1:1 — the same reason SAP2000 offers a scale box.
+_DEFAULT_DEFORMED_SCALE = 50.0
+
+
+def _case_of(view: Optional[View]) -> str:
+    """The load case a results view stands for (``""`` for any other view).
+
+    The case is carried in the view's key (``"results:DEAD"``), which is what
+    :meth:`MainWindow.open_results_path` registers; this is its inverse.
+    """
+    if view is None or not view.key.startswith(_RESULTS_KEY_PREFIX):
+        return ""
+    return view.key[len(_RESULTS_KEY_PREFIX) :]
 
 
 class MainWindow(QMainWindow):
@@ -302,14 +326,28 @@ class MainWindow(QMainWindow):
         act.setEnabled(False)
         return act
 
-    def _toggle_action(self, text: str, slot: Any, *, tip: Optional[str] = None) -> QAction:
-        """Build a checkable, initially-checked action (a display toggle)."""
+    def _toggle_action(
+        self,
+        text: str,
+        slot: Any,
+        *,
+        tip: Optional[str] = None,
+        checked: bool = True,
+        enabled: bool = True,
+    ) -> QAction:
+        """Build a checkable action (a display toggle).
+
+        The geometry toggles start **checked** — the model is drawn unless asked
+        otherwise — while a *results* overlay starts unchecked and disabled,
+        because it needs a view that can supply the data.
+        """
         act = QAction(text, self)
         act.setCheckable(True)
-        act.setChecked(True)
+        act.setChecked(checked)
         act.setStatusTip(tip or text)
         if tip:
             act.setToolTip(tip)
+        act.setEnabled(enabled)
         act.toggled.connect(slot)
         return act
 
@@ -391,11 +429,21 @@ class MainWindow(QMainWindow):
         a["analysis.spectrum"] = self._placeholder("Response spectrum", "Milestone 5")
         a["analysis.pushover"] = self._placeholder("Pushover", "Milestone 5")
         a["analysis.stop"] = self._placeholder("Stop", "Milestone 5")
-        a["results.deformed"] = self._placeholder("Deformed shape", "Milestone 7")
+        a["results.deformed"] = self._toggle_action(
+            "Deformed shape",
+            self._on_deformed_toggled,
+            tip="Draw the active load case's deformed shape, amplified by the scale",
+            checked=False,
+            enabled=False,
+        )
         a["results.forces"] = self._placeholder("Force diagrams", "Milestone 7")
         a["results.storey"] = self._placeholder("Storey response", "Milestone 7")
         a["results.pushover_curve"] = self._placeholder("Pushover curve", "Milestone 7")
-        a["results.clear"] = self._placeholder("Clear results", "Milestone 7")
+        a["results.clear"] = self._real_action(
+            "Clear results",
+            self._on_clear_results,
+            tip="Remove the deformed shape and force diagrams from the viewport",
+        )
 
     # ── Menus + toolbars ────────────────────────────────────────────
 
@@ -468,6 +516,29 @@ class MainWindow(QMainWindow):
     def _build_toolbars(self) -> None:
         a = self._actions
 
+        # The deformed-shape scale sits on the toolbar rather than in a dialog:
+        # it is adjusted *while* looking at the shape, and re-drawing on every
+        # change is what makes finding a readable amplification quick.
+        self._deformed_scale = QDoubleSpinBox(self)
+        self._deformed_scale.setObjectName("deformed_scale")
+        self._deformed_scale.setRange(1.0, 10000.0)
+        self._deformed_scale.setDecimals(1)
+        self._deformed_scale.setSingleStep(10.0)
+        self._deformed_scale.setValue(_DEFAULT_DEFORMED_SCALE)
+        self._deformed_scale.setToolTip("Deformed-shape scale factor")
+        self._deformed_scale.setStatusTip("Deformed-shape scale factor")
+        self._deformed_scale.valueChanged.connect(self._on_deformed_scale_changed)
+
+        def _put(bar: QToolBar, key: Any) -> None:
+            """Add one entry: ``None`` is a separator, ``"@name"`` a widget."""
+            if key is None:
+                bar.addSeparator()
+            elif key == "@deformed_scale":
+                bar.addWidget(QLabel("Scale"))
+                bar.addWidget(self._deformed_scale)
+            else:
+                bar.addAction(a[key])
+
         main = QToolBar("Main", self)
         main.setObjectName("toolbar_main")
         main.setMovable(False)
@@ -482,11 +553,12 @@ class MainWindow(QMainWindow):
             "model.split",
             "model.mesh",
             "results.deformed",
+            "@deformed_scale",
             "results.forces",
             None,
             "model.units",
         ):
-            main.addSeparator() if key is None else main.addAction(a[key])
+            _put(main, key)
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, main)
         self._toolbar_main = main
 
@@ -508,7 +580,7 @@ class MainWindow(QMainWindow):
             "view.show_loads",
             "view.show_forces",
         ):
-            view.addSeparator() if key is None else view.addAction(a[key])
+            _put(view, key)
         self.addToolBar(Qt.ToolBarArea.RightToolBarArea, view)
         self._toolbar_view = view
 
@@ -675,7 +747,9 @@ class MainWindow(QMainWindow):
 
         # A new model replaces the previous scene outright -- the backend
         # *appends* actors, so without this the old geometry would linger
-        # behind the new one.
+        # behind the new one.  A results overlay belongs to *one* view's
+        # geometry, so the toggle is reset along with it.
+        self._reset_results_overlay()
         self._backend.clear()
 
         if isinstance(model, MeshModel):
@@ -854,6 +928,14 @@ class MainWindow(QMainWindow):
         self._actions["edit.edit_selection"].setEnabled(
             active is not None and active.parent is not None
         )
+        # A deformed shape needs a results view that carries displacement:
+        # a pressed button that could only report "nothing to draw" is worse
+        # than a disabled one that is greyed until it can work.
+        repository = self._views.results(active.key) if active is not None else None
+        case = _case_of(active)
+        self._actions["results.deformed"].setEnabled(
+            repository is not None and bool(case) and repository.has_displacements(case)
+        )
 
     def _highlight_entity(self, entity: Any) -> None:
         """Highlight *entity* in the viewport, replacing the previous highlight.
@@ -878,6 +960,83 @@ class MainWindow(QMainWindow):
         """Drop the current selection highlight from the viewport."""
         if self._viewer is not None:
             self._viewer.clear_highlights()
+
+    # ── Results overlays (Results menu) ─────────────────────────────
+
+    def _on_deformed_toggled(self, checked: bool) -> None:
+        """**Results ▸ Deformed shape**: overlay the active case's deformation.
+
+        The amplification is a *display* choice: the archive's displacements are
+        read in model units and never modified, only drawn at the toolbar scale.
+
+        Args:
+            checked: Whether the overlay should now be drawn.
+        """
+        if not checked:
+            self._clear_deformed()
+            return
+
+        displacements = self._active_displacements()
+        if not displacements:
+            self.log("No displacement data in this view — nothing to deform.", "error")
+            self._set_deformed_checked(False)
+            return
+
+        self._viewer.overlay_deformed(displacements, scale=float(self._deformed_scale.value()))
+        self._viewer.show()
+        self.log(f"Deformed shape: scale {self._deformed_scale.value():g}.")
+
+    def _on_deformed_scale_changed(self, _value: float) -> None:
+        """Re-draw the deformed shape after the scale changed.
+
+        Only when it is already on — changing the scale must not *start*
+        drawing, which would make the spin box a second way to trigger the
+        action.
+        """
+        if self._actions["results.deformed"].isChecked():
+            self._clear_deformed()
+            self._on_deformed_toggled(True)
+
+    def _on_clear_results(self) -> None:
+        """**Results ▸ Clear results**: remove every results overlay."""
+        self._clear_deformed()
+        self._set_deformed_checked(False)
+        self.log("Cleared the results overlay.")
+
+    def _active_displacements(self) -> dict:
+        """``{node_id: (dx, dy, dz)}`` for the active results view, else ``{}``."""
+        view = self._views.active
+        if view is None:
+            return {}
+        repository = self._views.results(view.key)
+        case = _case_of(view)
+        if repository is None or not case:
+            return {}
+        return repository.nodal_displacements(case)
+
+    def _clear_deformed(self) -> None:
+        """Remove the deformed overlay, leaving the model itself drawn."""
+        if self._viewer is not None:
+            self._viewer.clear_deformed()
+
+    def _set_deformed_checked(self, checked: bool) -> None:
+        """Set the deformed toggle without re-entering its handler."""
+        action = self._actions.get("results.deformed")
+        if action is None or action.isChecked() == checked:
+            return
+        action.blockSignals(True)
+        action.setChecked(checked)
+        action.blockSignals(False)
+
+    def _reset_results_overlay(self) -> None:
+        """Forget the results overlay whose scene :meth:`show_model` replaced.
+
+        The backend's ``clear()`` has already removed the actor, so this only
+        has to put the toggle back — hence ``blockSignals`` in
+        :meth:`_set_deformed_checked`: re-entering the handler would try to
+        clear an actor that is gone.
+        """
+        self._set_deformed_checked(False)
 
     def _on_show_nodes(self, checked: bool) -> None:
         """Show or hide the node-marker overlay."""
@@ -990,11 +1149,18 @@ class MainWindow(QMainWindow):
         self.log(f"Preprocessing failed: {message}", "error")
 
     def _preprocess_ended(self) -> None:
-        """Restore the UI once the worker has stopped, successfully or not."""
+        """Restore the UI once the worker has stopped, successfully or not.
+
+        The collection here is the other half of the worker's ``gc.disable()``
+        (:mod:`fea_toolkit.gui.controllers.worker`): cycles created while the
+        task ran are reclaimed on the **GUI thread**, where traversing the
+        PySide6/VTK objects the window owns is safe.
+        """
         self._worker = None
         self._progress.setVisible(False)
         self._progress.setRange(0, 100)
         self._set_model_actions_enabled(self._store is not None)
+        gc.collect()
 
     def _set_model_actions_enabled(self, enabled: bool) -> None:
         """Enable the preprocessing actions — they need a parsed source model.

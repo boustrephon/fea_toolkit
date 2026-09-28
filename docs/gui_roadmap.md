@@ -8,7 +8,7 @@ related: [viewer.md, workflow.md, results_schema.md, rhino_export.md, report_gen
 ---
 # Desktop GUI Roadmap
 
-## Status: 🚧 In progress — Milestones 1–4 landed (viewport spike, chrome, model tree + inspector, bidirectional selection + display toggles), the mouse-interaction policy is configurable, and the Model Tree carries a **Views** group: geometry views over the storage seam, derived views filtered by a `Selection`, and results archives opened as a view per load case, 2026-09-24
+## Status: 🚧 In progress — Milestones 1–4 landed (viewport spike, chrome, model tree + inspector, bidirectional selection + display toggles), the mouse-interaction policy is configurable, the Model Tree carries a **Views** group (geometry views over the storage seam, derived views filtered by a `Selection`, results archives opened as a view per load case), and **Milestone 7 is under way**: a results case's deformed shape now draws in the viewport, 2026-09-24
 
 > **User-facing guide:** [`docs/gui.md`](gui.md) — what the application does
 > today, how to select, the camera and display controls, and the settings file.
@@ -603,7 +603,7 @@ class QtRenderBackend(RenderBackend):
 | 4 | ✅ Selection sync | both directions work.  **Tree→viewport**: `ModelViewer.highlight_elements` / `highlight_nodes`, redrawn (replacing the old highlight) on every click.  **Viewport→tree**: a right-click resolves the picked batch + cell index through the Qt-free `SelectionIndex`, expands the lazy group, selects the row and scrolls to it — which then drives the inspector and the highlight through the ordinary tree wiring.  Verified end-to-end against real pyvista picks (`tests/test_picking.py`, `tests/test_gui_pick.py`) |
 | 5 | Import + analysis | Open runs `SAP2000Parser` on a worker; Run executes `run_static_analysis()` (then modal/spectrum/pushover) with progress + log; Stop cancels cooperatively |
 | 6 | Load rendering | `render_loads()` + `extract_load_glyphs()` draw joint/line/area/gravity glyphs scaled to model units |
-| 7 | Results + export | deformed/force/storey/pushover plots + `write_results_npz` wired to menus |
+| 7 | ⚠️ Partial — deformed shape | ✅ a results case's **deformed shape** draws from its own archive (`Results ▸ Deformed shape`, amplified by the toolbar `Scale` box); `Results ▸ Clear results` removes it.  Force diagrams, storey response, pushover curve and `write_results_npz` still to come |
 | 8 | Persistence | geometry + dock state round-trip through `QSettings` |
 | 9 | Tests | headless `QT_QPA_PLATFORM=offscreen` suite green; `needs_gui` marker; `ops.wipe()` hygiene |
 | 10 | Quad-view + polish | central `QWidget` container hosts iso/front/top/side `QtInteractor`s with shared camera toggles |

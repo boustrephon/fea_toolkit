@@ -235,3 +235,62 @@ def test_a_repository_can_be_backed_by_a_plain_dict():
     assert len(repo) == 1
     assert repo.get("node_x").tolist() == [0.0, 0.0]
     assert repo.get("absent") is None
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Nodal displacement — the deformed-shape input
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestNodalDisplacements:
+    """The deformed shape's input: node-keyed, and tied to the display model."""
+
+    def test_the_ids_match_the_display_model(self, archive):
+        """Ids must be ``as_model``'s — that is what ``render_deformed`` looks up."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        repository = NpzResultsRepository(str(archive))
+        displacements = repository.nodal_displacements("COMB1")
+        assert set(displacements) == set(repository.as_model().nodes)
+
+    def test_the_values_come_from_the_case_arrays(self, archive):
+        """``static/COMB1/node_dx`` is ones(3), so x is 1 and y/z are unset."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        displacements = NpzResultsRepository(str(archive)).nodal_displacements("COMB1")
+        assert np.allclose(displacements["2"], [1.0, 0.0, 0.0])
+
+    def test_a_component_the_archive_omits_reads_as_zero(self, archive):
+        """Only ``node_dx`` was written; the shape must not be corrupted by that."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        displacements = NpzResultsRepository(str(archive)).nodal_displacements("COMB1")
+        assert all(np.allclose(value, [1.0, 0.0, 0.0]) for value in displacements.values())
+
+    def test_an_archive_without_displacement_returns_empty(self, tmp_path):
+        """Displacement recording is optional: absence is a state, not an error."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        path = tmp_path / "forces_only.npz"
+        np.savez_compressed(
+            path,
+            node_tag=np.array([1, 2], dtype=int),
+            node_x=np.zeros(2),
+            node_y=np.zeros(2),
+            node_z=np.array([0.0, 10.0]),
+            frame_eid=np.array([1], dtype=int),
+            frame_node_i=np.array([1], dtype=int),
+            frame_node_j=np.array([2], dtype=int),
+            static_case_labels=np.array(["DEAD"], dtype=str),
+            **{"static/DEAD/fx_i": np.zeros(1)},
+        )
+        repository = NpzResultsRepository(str(path))
+        assert repository.nodal_displacements("DEAD") == {}
+
+    def test_has_displacements_is_the_cheap_pre_check(self, archive):
+        """What a caller consults before offering to draw a deformed shape."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        repository = NpzResultsRepository(str(archive))
+        assert repository.has_displacements("DEAD") is True
+        assert repository.has_displacements("NOT_A_CASE") is False

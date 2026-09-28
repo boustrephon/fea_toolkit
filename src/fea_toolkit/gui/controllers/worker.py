@@ -12,6 +12,7 @@ mid-call, so cancellation only takes effect at the next task boundary; a forced
 thread kill would leave shared OpenSees state inconsistent.
 """
 
+import gc
 from threading import Event
 from typing import Any, Callable
 
@@ -54,7 +55,21 @@ class TaskWorker(QThread):
     # ── QThread ──────────────────────────────────────────────────────
 
     def run(self) -> None:
-        """QThread entry point: run the task, emit the outcome."""
+        """QThread entry point: run the task, emit the outcome.
+
+        The **cyclic collector is held off for the task's duration**.  A
+        collection triggered here walks the whole heap — including the
+        PySide6/VTK objects the GUI thread owns — and shiboken's objects are not
+        built to be traversed from another thread.  On macOS that is an
+        intermittent segfault: ``docs/dev_notes.md`` → *The macOS GUI segfault*.
+
+        Reference counting still frees as usual, so only *cycles* wait, and the
+        GUI thread reclaims them when the task reports in
+        (``MainWindow._preprocess_ended``).  ``gc.freeze()`` covers the objects
+        that existed before the task started; this covers the window itself.
+        """
+        collector_was_on = gc.isenabled()
+        gc.disable()
         try:
             result = self._task(self.should_cancel)
         except Exception as exc:
@@ -62,4 +77,7 @@ class TaskWorker(QThread):
             # print it and the caller would never learn it failed.
             self.failed.emit(f"{type(exc).__name__}: {exc}")
             return
+        finally:
+            if collector_was_on:
+                gc.enable()
         self.succeeded.emit(result)
