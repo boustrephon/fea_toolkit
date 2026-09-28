@@ -115,7 +115,10 @@ def test_selecting_a_node_fills_the_inspector(window):
     from qtpy.QtCore import QItemSelectionModel
 
     tree = window._tree_model
-    group = tree.index(0, 0)  # Nodes
+    # Find the group by key rather than assuming its position: the synthetic
+    # **Views** group leads the tree whenever any view is registered.
+    group_row = next(row for row, group in enumerate(tree._groups) if group.key == "nodes")
+    group = tree.index(group_row, 0)
     tree.fetchMore(group)
     child = tree.index(0, 0, group)
     window._tree_view.selectionModel().setCurrentIndex(

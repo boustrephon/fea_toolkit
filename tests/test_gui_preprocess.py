@@ -115,16 +115,15 @@ def _inspector_rows(window) -> dict:
 
 
 def test_the_actions_need_a_parsed_source_model(qapp, monkeypatch, tmp_path):
-    """Handed a ``MeshModel`` there is nothing to preprocess, so they are off."""
+    """With nothing to preprocess, the Model-menu actions stay off."""
     from fea_toolkit.gui.controllers.interaction import CONFIG_ENV_VAR
     from fea_toolkit.gui.main_window import MainWindow
 
     monkeypatch.setenv(CONFIG_ENV_VAR, str(tmp_path / "absent.json"))
     win = MainWindow(model=_t_junction_model())
-    win._model = object()  # a display target with no parsed source behind it
-    win._remember_source_model(win._model)
+    win._remember_source(object())  # a model the Preprocessor cannot consume
     try:
-        assert win._source_model is None
+        assert win._store is None
         win._set_model_actions_enabled(False)
         assert win._actions["model.split"].isEnabled() is False
         win._on_split_elements()
@@ -195,36 +194,6 @@ def test_the_inspector_surfaces_the_parent_child_topology(window):
     assert "1-1" in parent["child_ids"]
 
 
-def test_showing_original_members_collapses_the_split(window):
-    """**View ▸ Display ▸ Show original members** re-renders the unsplit model."""
-    _run_preprocess(window, "model.split")
-    assert len(window._viewer.geometry()[0]) == 3  # two sub-elements + the column
-
-    window._actions["view.show_parents"].setChecked(True)
-
-    assert window._viewer._collapse_to_parents is True
-    assert len(window._viewer.geometry()[0]) == 2  # the original beam + the column
-
-    window._actions["view.show_parents"].setChecked(False)
-
-    assert window._viewer._collapse_to_parents is False
-    assert len(window._viewer.geometry()[0]) == 3
-
-
-def test_the_display_toggle_keeps_the_selection(window):
-    """Collapsing is a display change — the tree selection is untouched."""
-    from qtpy.QtCore import Qt
-
-    _run_preprocess(window, "model.split")
-    assert window._select_entity_in_tree("frame_elements", "1-0") is True
-
-    window._actions["view.show_parents"].setChecked(True)
-
-    current = window._tree_view.currentIndex()
-    assert current.isValid()
-    assert current.data(Qt.ItemDataRole.UserRole).elem_id == "1-0"
-
-
 def _camera_flat(window):
     """The viewport camera as a flat float array.
 
@@ -245,14 +214,12 @@ def _camera_flat(window):
     return np.array(_flatten(window._interactor.camera_position))
 
 
-def test_preprocessing_and_the_toggle_keep_the_camera(window):
-    """The view must not jump when the model is preprocessed or collapsed."""
+def test_preprocessing_keeps_the_camera(window):
+    """The view must not jump when the model is preprocessed."""
     import numpy as np
 
     camera = _camera_flat(window)
 
     _run_preprocess(window, "model.split")
-    assert np.allclose(_camera_flat(window), camera, rtol=1e-6, atol=1e-9)
 
-    window._actions["view.show_parents"].setChecked(True)
     assert np.allclose(_camera_flat(window), camera, rtol=1e-6, atol=1e-9)

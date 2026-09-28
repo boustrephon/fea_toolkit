@@ -35,6 +35,7 @@ from qtpy.QtWidgets import (
 from .app import APP_NAME
 from .controllers.interaction import load_policy
 from .controllers.selection import SelectionIndex
+from .controllers.view_registry import View, ViewRegistry
 from .controllers.worker import TaskWorker
 from .models.tree_model import ModelTreeModel
 from .render_backend import QtRenderBackend
@@ -78,7 +79,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(APP_NAME)
 
         self._model: Any = None
-        self._source_model: Any = None
+        self._store: Any = None
+        self._views = ViewRegistry()
+        self._source_label = ""
         self._viewer: Any = None
         self._interactor: Any = None
         self._backend: Any = None
@@ -105,24 +108,36 @@ class MainWindow(QMainWindow):
         self.log(f"Ready.  {button} an element to select it; drag to orbit.")
 
         if model is not None:
-            self._remember_source_model(model)
+            self._remember_source(model)
             self.show_model(model)
 
-    def _remember_source_model(self, model: Any) -> None:
-        """Keep the parsed ``SAPModelData`` the Preprocessor can be re-run on.
+    def _remember_source(self, model: Any, source: str = "") -> None:
+        """Wrap the loaded model in a store and start a fresh list of views.
 
         The Preprocessor consumes a ``SAPModelData`` and returns a ``MeshModel``,
-        and so does preprocess a *copy* — so re-running from the parsed source is
+        and it preprocesses a *copy* — so re-running it from the parsed source is
         always safe, while re-running on a ``MeshModel`` would not be.  Handed a
-        ``MeshModel`` or ``AnalysisBuilder`` directly (tests, scripts), there is
-        no source to preprocess and the Model-menu actions stay disabled.
+        ``MeshModel`` or ``AnalysisBuilder`` directly (tests, scripts, a stage
+        file) there is nothing to preprocess and the Model-menu actions stay
+        disabled; the model still gets a view so the tree and Inspector work.
 
         Args:
             model: The model about to be displayed.
+            source: Human-readable provenance, e.g. the file name.
         """
+        from ..io.model_store import InMemoryModelStore
+        from ..model.mesh_model import MeshModel
         from ..model.sap_data import SAPModelData
 
-        self._source_model = model if isinstance(model, SAPModelData) else None
+        self._source_label = source
+        self._store = None
+        self._views = ViewRegistry()
+        if isinstance(model, SAPModelData):
+            self._store = InMemoryModelStore(model, source=source)
+            self._views = ViewRegistry(self._store)
+            self._views.add_geometry("unprocessed", "Unprocessed", model, source=source)
+        elif isinstance(model, MeshModel):
+            self._views.add_geometry("processed", "Processed", model, source=source)
 
     # ── Viewport ────────────────────────────────────────────────────
 
@@ -288,16 +303,6 @@ class MainWindow(QMainWindow):
         a["view.show_shells"] = self._toggle_action(
             "Show shells", self._on_show_shells, tip="Show or hide area elements"
         )
-        a["view.show_parents"] = self._toggle_action(
-            "Show original members",
-            self._on_show_parents,
-            tip="Show the unsplit members instead of their split sub-elements",
-        )
-        # Off by default: a preprocessed model displays its active sub-elements.
-        show_parents = a["view.show_parents"]
-        show_parents.blockSignals(True)
-        show_parents.setChecked(False)
-        show_parents.blockSignals(False)
         a["view.show_labels"] = self._placeholder("Show element labels", "P23")
         a["view.show_loads"] = self._placeholder("Show loads", "Milestone 6")
         a["view.show_forces"] = self._placeholder("Show force diagrams", "Milestone 7")
@@ -358,7 +363,6 @@ class MainWindow(QMainWindow):
         for key in (
             "view.show_nodes",
             "view.show_shells",
-            "view.show_parents",
             "view.show_labels",
             "view.show_loads",
             "view.show_forces",
@@ -572,7 +576,7 @@ class MainWindow(QMainWindow):
         model: Any,
         color_by_section: bool = True,
         *,
-        collapse_to_parents: Optional[bool] = None,
+        collapse_to_parents: bool = False,
         reset_view: bool = True,
         rebuild_tree: bool = True,
     ) -> None:
@@ -582,10 +586,11 @@ class MainWindow(QMainWindow):
             model: A ``SAPModelData``, a ``MeshModel`` or an ``AnalysisBuilder``.
             color_by_section: Colour elements by section name.
             collapse_to_parents: Draw the unsplit members rather than their
-                split sub-elements.  ``None`` (the default) uses the
-                **View ▸ Display ▸ Show original members** toggle.
+                split sub-elements.  The GUI reaches the drawn members through
+                the **Unprocessed** view instead, so this is ``False`` here and
+                remains for callers that want the collapsed render directly.
             reset_view: Reset the camera first.  ``False`` keeps the current
-                view, which is what the display toggles want.
+                view, which is what switching views wants.
             rebuild_tree: Rebuild the Model Tree for *model*.  ``False`` for a
                 pure display change — the same model, so rebuilding would only
                 throw away the user's selection and expansion.
@@ -593,9 +598,6 @@ class MainWindow(QMainWindow):
         from ..model.mesh_model import MeshModel
         from ..model.sap_data import SAPModelData
         from ..plotting.viewer import ModelViewer
-
-        if collapse_to_parents is None:
-            collapse_to_parents = self._actions["view.show_parents"].isChecked()
 
         camera = None
         if not reset_view:
@@ -631,14 +633,14 @@ class MainWindow(QMainWindow):
         self._model = model
         self._selection_index = SelectionIndex.from_viewer(viewer)
         if rebuild_tree:
-            self._tree_model.set_model(model)
+            self._tree_model.set_model(model, self._views.views())
         self._reset_display_toggles()
         if camera is None:
             self._interactor.reset_camera()
         else:
             self._interactor.camera_position = camera
         self._update_units_label()
-        self._set_model_actions_enabled(self._source_model is not None)
+        self._set_model_actions_enabled(self._store is not None)
         self.log("Displayed model geometry.")
 
     def _reset_display_toggles(self) -> None:
@@ -656,14 +658,12 @@ class MainWindow(QMainWindow):
 
     def _update_units_label(self) -> None:
         """Show the model's unit system in the status bar."""
-        md = getattr(self._model, "model", self._model)  # unwrap an AnalysisBuilder
-        units = getattr(md, "units", None)
-        if not units:
+        from ..io.model_store import model_header
+
+        if self._model is None:
             self._units_label.setText("units \u2014")
             return
-        self._units_label.setText(
-            f"{units.get('F', '?')} \u00b7 {units.get('L', '?')} \u00b7 {units.get('T', '?')}"
-        )
+        self._units_label.setText(model_header(self._model).units_label())
 
     # ── Logging ─────────────────────────────────────────────────────
 
@@ -676,15 +676,35 @@ class MainWindow(QMainWindow):
     def _on_tree_selection(self, current, _previous=None) -> None:
         """Show the selected entity in the inspector and highlight it below.
 
-        The viewport half rides on ``ModelViewer.highlight_elements`` /
-        ``highlight_nodes``, which resolve SAP labels back to geometry from
-        the *same* extracted geometry the display was built from -- so the
-        reverse (tree -> viewport) direction needs no cell-id map, only the
-        pick direction does (``docs/gui_roadmap.md`` design rule 7).
+        Two kinds of row reach here: a **view** (switch the scene and report the
+        view's counts) and a **model entity** (inspect it and highlight it).  The
+        viewport half rides on ``ModelViewer.highlight_elements`` /
+        ``highlight_nodes``, which resolve SAP labels back to geometry from the
+        *same* extracted geometry the display was built from -- so the reverse
+        (tree -> viewport) direction needs no cell-id map, only the pick
+        direction does (``docs/gui_roadmap.md`` design rule 7).
         """
         entity = current.data(Qt.ItemDataRole.UserRole) if current.isValid() else None
+        if isinstance(entity, View):
+            self._activate_view(entity)
+            return
         self._inspector.show_object(entity)
         self._highlight_entity(entity)
+
+    def _activate_view(self, view: View) -> None:
+        """Display the scene *view* names, without disturbing the tree.
+
+        The geometry lives in the registry, so a view carries only its counts and
+        provenance; the camera is kept, because switching between views of the
+        same model should not move the user's viewpoint.
+        """
+        source = self._views.source(view.key)
+        if source is None:
+            return
+        self._views.set_active(view.key)
+        self._inspector.show_object(self._views.get(view.key))
+        self.show_model(source, reset_view=False, rebuild_tree=False)
+        self.log(f"Showing view: {view.name}.")
 
     def _highlight_entity(self, entity: Any) -> None:
         """Highlight *entity* in the viewport, replacing the previous highlight.
@@ -718,37 +738,38 @@ class MainWindow(QMainWindow):
         """Show or hide the area-element overlay."""
         self._backend.set_category_visible("shells", checked)
 
-    def _on_show_parents(self, checked: bool) -> None:
-        """Draw the unsplit members instead of their split sub-elements.
-
-        A pure display change: the model, the tree and the selection are the
-        same, so only the scene is redrawn (the cell→entity index is rebuilt,
-        because the rendered geometry is what a pick lands on).
-        """
-        if self._model is None:
-            return
-        self.show_model(
-            self._model,
-            collapse_to_parents=checked,
-            reset_view=False,
-            rebuild_tree=False,
-        )
-
     # ── Preprocessing (Model menu) ───────────────────────────────────
 
     def _on_split_elements(self) -> None:
         """**Model ▸ Split elements**: preprocess, splitting frames at joints."""
-        self._start_preprocess({"split_elements": True}, "Splitting elements at joints")
+        self._start_preprocess(
+            {"split_elements": True},
+            "Splitting elements at joints",
+            key="processed",
+            name="Processed",
+            source="Preprocessor: split_elements",
+        )
 
     def _on_mesh_areas(self) -> None:
         """**Model ▸ Mesh areas**: preprocess with shells (area meshing)."""
         self._start_preprocess(
             {"split_elements": True, "create_shells": True},
             "Splitting elements at joints and meshing areas",
+            key="meshed",
+            name="Meshed",
+            source="Preprocessor: split_elements + create_shells",
         )
 
-    def _start_preprocess(self, config: dict, label: str) -> None:
-        """Run the Preprocessor on a worker and display the result.
+    def _start_preprocess(
+        self,
+        config: dict,
+        label: str,
+        *,
+        key: str,
+        name: str,
+        source: str,
+    ) -> None:
+        """Run the Preprocessor on a worker and register the result as a view.
 
         The Preprocessor is pure topology — it never calls OpenSees — but it
         still runs off the GUI thread: splitting and area meshing a large model
@@ -757,32 +778,36 @@ class MainWindow(QMainWindow):
         Args:
             config: Preprocessor configuration, e.g. ``{"split_elements": True}``.
             label: What is happening, for the message log.
+            key: View key to register the result under — replacing any earlier
+                run of the same kind, so views do not pile up.
+            name: Display name for that view.
+            source: Provenance recorded on the view.
         """
-        if self._source_model is None:
+        if self._store is None:
             self.log("Open a SAP2000 model before preprocessing.", "warn")
             return
         if self._worker is not None and self._worker.isRunning():
             self.log("Preprocessing is already running.", "warn")
             return
 
-        from ..opensees.preprocessor import preprocess_model
-
-        source = self._source_model
+        store = self._store
         settings = dict(config)
         self._set_model_actions_enabled(False)
         self._progress.setRange(0, 0)  # busy: the preprocessor reports no progress
         self._progress.setVisible(True)
         self.log(f"{label} \u2026")
 
-        worker = TaskWorker(lambda _should_cancel: preprocess_model(source, settings), parent=self)
-        worker.succeeded.connect(self._preprocess_finished)
+        worker = TaskWorker(lambda _should_cancel: store.mesh(settings), parent=self)
+        worker.succeeded.connect(
+            lambda mesh_model: self._preprocess_finished(mesh_model, key, name, source)
+        )
         worker.failed.connect(self._preprocess_failed)
         worker.finished.connect(self._preprocess_ended)
         self._worker = worker
         worker.start()
 
-    def _preprocess_finished(self, mesh_model: Any) -> None:
-        """Display a preprocessed model, reporting what changed.
+    def _preprocess_finished(self, mesh_model: Any, key: str, name: str, source: str) -> None:
+        """Report what changed, register the result as a view and display it.
 
         Splitting is *opt-in per element* in the model itself (SAP2000's
         auto-mesh flags: ``AtJoints`` / ``AtFrames``), so a model that asks for
@@ -791,6 +816,9 @@ class MainWindow(QMainWindow):
 
         Args:
             mesh_model: The ``MeshModel`` produced on the worker.
+            key: View key to register it under.
+            name: Display name for the view.
+            source: Provenance recorded on the view.
         """
         elements = mesh_model.frame_elements.values()
         children = sum(1 for elem in elements if getattr(elem, "parent_id", None))
@@ -803,7 +831,9 @@ class MainWindow(QMainWindow):
             f"Preprocessed: {len(mesh_model.frame_elements)} frame elements ({detail}), "
             f"{len(mesh_model.area_elements)} area elements."
         )
+        self._views.add_geometry(key, name, mesh_model, source=source)
         self.show_model(mesh_model, reset_view=False)
+        self.log(f"Added view: {name}.")
 
     def _preprocess_failed(self, message: str) -> None:
         """Report a preprocessing failure, leaving the display alone."""
@@ -814,7 +844,7 @@ class MainWindow(QMainWindow):
         self._worker = None
         self._progress.setVisible(False)
         self._progress.setRange(0, 100)
-        self._set_model_actions_enabled(self._source_model is not None)
+        self._set_model_actions_enabled(self._store is not None)
 
     def _set_model_actions_enabled(self, enabled: bool) -> None:
         """Enable the preprocessing actions — they need a parsed source model.
@@ -852,7 +882,7 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self.log(f"Failed to open {path}: {exc}", "error")
             return False
-        self._remember_source_model(model)
+        self._remember_source(model, source=path)
         self.show_model(model)
         return True
 

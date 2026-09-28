@@ -9,7 +9,17 @@ adapter that materialises rows lazily as the user expands them.
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-__all__ = ["TreeGroup", "build_groups", "element_label", "load_label"]
+__all__ = [
+    "VIEWS_GROUP_KEY",
+    "TreeGroup",
+    "build_groups",
+    "element_label",
+    "load_label",
+    "views_group",
+]
+
+#: Group key of the synthetic **Views** group (UI state, not a model attribute).
+VIEWS_GROUP_KEY = "views"
 
 
 @dataclass(frozen=True)
@@ -96,12 +106,37 @@ def _list_loader(seq: list, labeller: Callable[[Any], str]) -> Callable[[], list
     return load
 
 
-def build_groups(model: Any) -> list:
+def views_group(views: list) -> TreeGroup:
+    """The synthetic **Views** group: one row per registered view.
+
+    Views are UI state rather than model entities, so they are handed in rather
+    than derived from the model — but they present exactly like any other group
+    (a label, a count, lazily-materialised rows), so the tree needs no special
+    case beyond placing this group first.
+
+    Args:
+        views: The registered :class:`~fea_toolkit.gui.controllers.view_registry.View` objects.
+
+    Returns:
+        A :class:`TreeGroup` whose rows are the views themselves.
+    """
+    items = [(view.name, view) for view in views]
+    return TreeGroup(
+        key=VIEWS_GROUP_KEY,
+        label="Views",
+        count=len(items),
+        load_items=lambda: list(items),
+    )
+
+
+def build_groups(model: Any, views: Optional[list] = None) -> list:
     """Describe the tree groups for *model*.
 
     Args:
         model: A ``SAPModelData``, a ``MeshModel`` or an ``AnalysisBuilder``
             (whose ``.model`` is used).
+        views: Registered views; rendered as a **Views** group ahead of the
+            model's own groups.
 
     Returns:
         One :class:`TreeGroup` per **non-empty** group, in a stable order.
@@ -109,6 +144,9 @@ def build_groups(model: Any) -> list:
     """
     source = getattr(model, "model", model)  # AnalysisBuilder -> MeshModel
     groups: list = []
+
+    if views:
+        groups.append(views_group(list(views)))
 
     for attr, label in _DICT_GROUPS:
         bag = getattr(source, attr, None)
