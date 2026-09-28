@@ -124,6 +124,11 @@ class ModelViewer:
     elements are used instead of their active child sub-elements, showing
     the model as drawn in SAP2000 (unsplit geometry).
 
+    A *selection* narrows what is drawn without copying the model: only the
+    matching elements (and the joints they touch) reach the backend, and a
+    joint-only selection brings the members framing into it along with it
+    (:meth:`fea_toolkit.model.selection.Selection.resolve_connected`).
+
     Args:
         builder: An ``AnalysisBuilder`` instance that has been built.
             If ``None``, provide *model_data* or *mesh_model* instead.
@@ -133,6 +138,8 @@ class ModelViewer:
             *model_data* is provided.  This is the post-split topology
             and is sufficient for ``show_model()`` — no builder needed.
         collapse_to_parents: Show unsplit parent elements (default ``False``).
+        selection: Optional ``Selection`` narrowing the drawn geometry
+            (default ``None`` draws the whole model).
         backend: Render backend name — ``'pyvista'`` (default) or
             ``'rhino'``.
         **kwargs: Passed to the backend constructor.
@@ -144,6 +151,7 @@ class ModelViewer:
         model_data: Any = None,
         mesh_model: Any = None,
         collapse_to_parents: bool = False,
+        selection: Any = None,
         backend: Union[str, RenderBackend] = "pyvista",
         **kwargs,
     ):
@@ -160,6 +168,7 @@ class ModelViewer:
             raise ValueError("Provide one of 'builder', 'model_data', or 'mesh_model'.")
 
         self._collapse_to_parents = collapse_to_parents
+        self._selection = selection
         if isinstance(backend, RenderBackend):
             # An explicit backend instance was injected -- e.g. the Qt GUI's
             # QtRenderBackend wrapping an embedded QtInteractor.
@@ -183,6 +192,9 @@ class ModelViewer:
         When ``collapse_to_parents=True``, inactive parent elements are
         included instead of their active child sub-elements, showing the
         model as drawn in SAP2000.
+
+        When a ``selection`` was given, only the elements and joints it
+        resolves to are extracted; the model itself is untouched.
         """
         if self._geom_extracted:
             return
@@ -194,6 +206,18 @@ class ModelViewer:
         # elements (those without a parent); skip active children.
         # Otherwise: active elements only.
         collapse = self._collapse_to_parents
+
+        # A selection is a filter over the *same* model: resolve it once to
+        # (frames, areas, nodes) and keep only those.  ``resolve_connected``
+        # brings the members framing into a selected joint with it.
+        frame_sel = area_sel = node_sel = None
+        if self._selection is not None:
+            selected_frames, selected_areas, selected_nodes = self._selection.resolve_connected(md)
+            frame_sel, area_sel, node_sel = (
+                set(selected_frames),
+                set(selected_areas),
+                set(selected_nodes),
+            )
 
         def include(_eid, elem) -> bool:
             inactive = getattr(elem, "inactive", False)
@@ -216,6 +240,8 @@ class ModelViewer:
         for eid, elem in elements.items():
             if not include(eid, elem):
                 continue
+            if frame_sel is not None and eid not in frame_sel:
+                continue
             sec = assignments.get(eid, "")
             ni = md.nodes.get(elem.node_i)
             nj = md.nodes.get(elem.node_j)
@@ -236,6 +262,8 @@ class ModelViewer:
         for aid, ae in md.area_elements.items():
             if not include(aid, ae):
                 continue
+            if area_sel is not None and aid not in area_sel:
+                continue
             sec = md.area_assignments.get(aid, "")
             verts = []
             for nid in ae.node_ids:
@@ -255,6 +283,8 @@ class ModelViewer:
 
         # Nodes
         for nid, nd in md.nodes.items():
+            if node_sel is not None and nid not in node_sel:
+                continue
             self._nodes.append(
                 NodeGeom(
                     node_id=nid,

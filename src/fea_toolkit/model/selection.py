@@ -37,10 +37,26 @@ SELECT_KEYS: dict[str, str] = {
     "z": "elevation_range",
     "elevation": "elevation_range",
     "elevation_range": "elevation_range",
+    "story": "story",
+    "stories": "story",
 }
 
 #: Human-readable key list, for CLI help and error messages.
 SELECT_KEYS_HELP = "type, section, material, group, constraint, id, z"
+
+#: Field → canonical expression key, in the order :meth:`Selection.to_string`
+#: emits them.  The short forms are the ones the help text and the examples in
+#: this file use, so an expression round-trips through ``from_string`` unchanged.
+SELECT_FIELD_KEYS: dict[str, str] = {
+    "element_types": "type",
+    "sections": "section",
+    "materials": "material",
+    "groups": "group",
+    "constraints": "constraint",
+    "element_ids": "id",
+    "story": "story",
+    "elevation_range": "z",
+}
 
 #: One ``KEY=VALUE`` clause.  The value runs until the next ``KEY=`` (which
 #: may be separated by whitespace or a semicolon) or the end of the
@@ -326,6 +342,29 @@ class Selection:
                 kwargs[field] = values
         return cls(**kwargs)
 
+    def to_string(self) -> str:
+        """The ``KEY=VALUE`` expression that reproduces this selection.
+
+        The inverse of :meth:`from_string`, using the canonical short keys, so a
+        selection can be displayed, edited and re-parsed without loss::
+
+            >>> Selection(sections=["Roof slab"], elevation_range=(3.0, 6.0)).to_string()
+            'section=Roof slab z=3:6'
+
+        Returns:
+            The expression (``""`` for an empty selection).
+        """
+        clauses = []
+        for field_name, key in SELECT_FIELD_KEYS.items():
+            values = getattr(self, field_name)
+            if not values:
+                continue
+            if field_name == "elevation_range":
+                clauses.append(f"{key}={values[0]:g}:{values[1]:g}")
+            else:
+                clauses.append(f"{key}={', '.join(str(value) for value in values)}")
+        return " ".join(clauses)
+
     # ── helpers ──────────────────────────────────────────────────────────────
 
     def _match_element_type(self, etype: str) -> bool:
@@ -553,6 +592,78 @@ class Selection:
         :class:`Node` objects, so the same lookup serves both.
         """
         return {nid: model.nodes[nid] for nid in self.get_node_ids(model)}
+
+    # ── Display resolution ───────────────────────────────────────────────────
+
+    def resolve_connected(
+        self, model: Union["SAPModelData", "MeshModel"]
+    ) -> tuple[set[str], set[str], set[str]]:
+        """Resolve this selection for **display**: ``(frames, areas, nodes)``.
+
+        Unlike :meth:`get_frame_ids` / :meth:`get_area_ids` / :meth:`get_node_ids`
+        — which return exactly what matches a criterion, and are what the
+        analysis callers want — this is the *view* semantics: **a joint selection
+        shows the members framing into it**, as FEA preprocessors do.  A lone node
+        marker is not a useful thing to look at; the connection is.
+
+        The node set is the joints of the elements shown, plus any nodes selected
+        in their own right.  Expansion is **one hop**: selecting a joint on a
+        three-member chain shows that joint and the one member incident on it,
+        never the whole chain.
+
+        Expansion happens **only** when the selection opts into nodes
+        (:attr:`element_types` names ``Node``, or :attr:`constraints` is set), so
+        a pure ``section=`` / ``material=`` / ``z=`` filter never drags the node
+        set in.  Inactive split parents are skipped, matching what the viewport
+        draws by default.
+
+        Args:
+            model: The ``SAPModelData`` or ``MeshModel`` to resolve against.
+
+        Returns:
+            ``(frame_ids, area_ids, node_ids)`` as sets of SAP labels.
+        """
+        frame_ids = set(self.get_frame_ids(model))
+        area_ids = set(self.get_area_ids(model))
+        node_ids = set(self.get_node_ids(model))
+
+        if self._selects_nodes_explicitly():
+            # Frozen snapshot of the selected joints.  Testing against this --
+            # rather than the growing set -- keeps the expansion exactly one hop,
+            # whatever order the elements happen to be stored in.
+            seeds: Optional[set[str]] = set(node_ids)
+        else:
+            # Nodes are not selected in their own right, and they match section /
+            # material criteria trivially, so start empty and let the joints of
+            # the elements that *do* match accumulate below.
+            seeds = None
+            node_ids = set()
+
+        frames = getattr(model, "frame_elements", None) or {}
+        areas = getattr(model, "area_elements", None) or {}
+
+        for eid, elem in frames.items():
+            if getattr(elem, "inactive", False):
+                continue
+            node_i = getattr(elem, "node_i", None)
+            node_j = getattr(elem, "node_j", None)
+            incident = seeds is not None and (node_i in seeds or node_j in seeds)
+            if not (eid in frame_ids or incident):
+                continue
+            frame_ids.add(eid)
+            node_ids.update(nid for nid in (node_i, node_j) if nid is not None)
+
+        for aid, elem in areas.items():
+            if getattr(elem, "inactive", False):
+                continue
+            corners = tuple(getattr(elem, "node_ids", None) or ())
+            incident = seeds is not None and any(nid in seeds for nid in corners)
+            if not (aid in area_ids or incident):
+                continue
+            area_ids.add(aid)
+            node_ids.update(corners)
+
+        return frame_ids, area_ids, node_ids
 
     # ── Load filters ─────────────────────────────────────────────────────────
 

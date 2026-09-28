@@ -148,7 +148,7 @@ class ViewRegistry:
         Returns:
             The registered :class:`View`.
         """
-        header = self._store.header(model) if self._store is not None else model_header(model)
+        header = self._header_for(model)
         self._views[key] = View.from_header(key, name, GEOMETRY, source, header)
         self._sources[key] = model
         if activate or self._active is None:
@@ -158,6 +158,67 @@ class ViewRegistry:
     def set_store(self, store: Optional[ModelStore]) -> None:
         """Point the registry at a different store (headers come from it)."""
         self._store = store
+
+    def add_derived(
+        self,
+        key: str,
+        name: str,
+        parent_key: str,
+        selection: Any,
+        *,
+        activate: bool = True,
+    ) -> Optional[View]:
+        """Register a view rendering its parent's geometry through *selection*.
+
+        A derived view is a **lens on a lens**: it shares the parent's geometry
+        object — no copy, no second model — and adds the filter, so any number of
+        refinements cost one model between them.  Its counts are the **filtered**
+        counts, because the Inspector should report what the view actually shows.
+
+        Args:
+            key: Stable identifier for the derived view.
+            name: Display name.
+            parent_key: Key of the view being refined.
+            selection: The ``Selection`` narrowing it (``None`` for no filter).
+            activate: Make this the displayed view.
+
+        Returns:
+            The registered view, or ``None`` when *parent_key* is unknown.
+        """
+        if parent_key not in self._views:
+            return None
+        source = self._sources.get(parent_key)
+        header = self._header_for(source)
+        if selection is not None and source is not None:
+            frames, areas, nodes = selection.resolve_connected(source)
+            header = replace(
+                header,
+                n_nodes=len(nodes),
+                n_frames=len(frames),
+                n_frames_active=len(frames),
+                n_shells=len(areas),
+            )
+        parent = self._views[parent_key]
+        view = View.from_header(
+            key,
+            name,
+            GEOMETRY,
+            parent.source,
+            header,
+            parent=parent_key,
+            selection=selection,
+        )
+        self._views[key] = view
+        self._sources[key] = source
+        if activate or self._active is None:
+            self._active = key
+        return self.get(key)
+
+    def _header_for(self, model: Any) -> "ModelHeader":
+        """Counts for *model* — through the store when there is one."""
+        if self._store is not None:
+            return self._store.header(model)
+        return model_header(model)
 
     def reset(self) -> None:
         """Drop every view and its geometry."""
