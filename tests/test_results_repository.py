@@ -86,6 +86,96 @@ def test_an_unknown_column_is_reported(archive):
         NpzResultsRepository(archive).table("node_x", "no_such_array")
 
 
+def _geometry() -> dict:
+    """Geometry arrays for a split member plus a triangular panel.
+
+    Nothing here is a model: these are the arrays an archive carries, which is
+    exactly what :func:`mesh_model_from_geometry` rebuilds a display model from.
+    """
+    return {
+        "node_tag": np.array([1, 2, 3], dtype=int),
+        "node_sap_id": np.array(["1", "2", "3"], dtype=str),
+        "node_x": np.zeros(3),
+        "node_y": np.zeros(3),
+        "node_z": np.array([0.0, 10.0, 20.0]),
+        "frame_eid": np.array([1, 2, 3, 4], dtype=int),
+        "frame_sap_id": np.array(["1", "1-0", "1-1", "2"], dtype=str),
+        "frame_sec_name": np.array(["UB300"] * 4, dtype=str),
+        "frame_parent_sap_id": np.array(["", "1", "1", ""], dtype=str),
+        "frame_node_i": np.array([1, 1, 2, 2], dtype=int),
+        "frame_node_j": np.array([3, 2, 3, 3], dtype=int),
+        "shell_eid": np.array([11], dtype=int),
+        "shell_sap_id": np.array(["A1"], dtype=str),
+        "shell_sec_name": np.array(["Slab"], dtype=str),
+        "shell_parent_sap_id": np.array([""], dtype=str),
+        "shell_node_1": np.array([1], dtype=int),
+        "shell_node_2": np.array([2], dtype=int),
+        "shell_node_3": np.array([3], dtype=int),
+        "shell_node_4": np.array([0], dtype=int),  # a triangle stores a blank corner
+    }
+
+
+class TestModelFromGeometry:
+    """An archive rebuilds a *display* model, so a view needs no ``.s2k``."""
+
+    def test_it_rebuilds_the_drawable_model(self):
+        from fea_toolkit.io.results_repository import mesh_model_from_geometry
+
+        md = mesh_model_from_geometry(_geometry())
+
+        assert sorted(md.nodes) == ["1", "2", "3"]
+        assert md.nodes["3"].z == 20.0
+        assert sorted(md.frame_elements) == ["1", "1-0", "1-1", "2"]
+        # Connectivity is stored as node *tags*, and comes back as SAP labels.
+        assert md.frame_elements["1-0"].node_i == "1"
+        assert md.frame_elements["1-0"].node_j == "2"
+        assert md.frame_assignments["1-0"] == "UB300"
+
+    def test_it_rebuilds_the_split_hierarchy(self):
+        """Parents and children are recovered, so the model collapses like the real one."""
+        from fea_toolkit.io.results_repository import mesh_model_from_geometry
+
+        md = mesh_model_from_geometry(_geometry())
+
+        assert md.frame_elements["1"].inactive is True
+        assert md.frame_elements["1"].child_ids == ["1-0", "1-1"]
+        assert md.frame_elements["1-0"].parent_id == "1"
+        assert md.frame_elements["2"].inactive is False
+
+    def test_a_triangle_stored_with_a_blank_corner_keeps_three_nodes(self):
+        from fea_toolkit.io.results_repository import mesh_model_from_geometry
+
+        md = mesh_model_from_geometry(_geometry())
+
+        assert md.area_elements["A1"].node_ids == ["1", "2", "3"]
+        assert md.area_assignments["A1"] == "Slab"
+
+    def test_an_element_without_geometry_is_skipped(self):
+        """A dangling connectivity reference is dropped, not drawn at the origin."""
+        from fea_toolkit.io.results_repository import mesh_model_from_geometry
+
+        geometry = _geometry()
+        geometry["frame_node_j"] = np.array([3, 2, 3, 99], dtype=int)
+
+        md = mesh_model_from_geometry(geometry)
+
+        assert "2" not in md.frame_elements
+        assert "1" in md.frame_elements
+
+    def test_the_rebuilt_model_agrees_with_the_reported_counts(self):
+        """``as_model`` and ``geometry_counts`` must not disagree about size."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        geometry = _geometry()
+        repository = NpzResultsRepository(geometry)
+        model = repository.as_model()
+        counts = repository.geometry_counts()
+
+        assert len(model.nodes) == counts["n_nodes"]
+        assert len(model.frame_elements) == counts["n_frames"]
+        assert len(model.area_elements) == counts["n_shells"]
+
+
 def test_is_results_archive_recognises_the_unified_schema(archive):
     """The sniff lives in the reader, so consumers never call ``np.load``."""
     from fea_toolkit.io.npz_reader import is_results_archive

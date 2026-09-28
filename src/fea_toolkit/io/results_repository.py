@@ -29,13 +29,153 @@ import numpy as np
 
 from .results_schema import CASE_META_KEYS, GEOMETRY_ARRAYS
 
-__all__ = ["NpzResultsRepository", "ResultsRepository"]
+__all__ = ["NpzResultsRepository", "ResultsRepository", "mesh_model_from_geometry"]
 
 
 def _array_length(arrays: dict, name: str) -> int:
     """Length of *name* in *arrays*, or ``0`` when it is absent."""
     values = arrays.get(name)
     return 0 if values is None else int(len(values))
+
+
+def _floats(values: Any) -> list:
+    """Coerce an optional numeric array to a list of floats (``[]`` if absent)."""
+    return [] if values is None else [float(value) for value in values]
+
+
+def _ints(values: Any) -> list:
+    """Coerce an optional integer array to a list of ints (``[]`` if absent)."""
+    return [] if values is None else [int(value) for value in values]
+
+
+def _texts(values: Any) -> list:
+    """Coerce an optional string array to a list of ``str`` (``[]`` if absent)."""
+    return [] if values is None else [str(value) for value in values]
+
+
+def _at(sequence: list, index: int, default: Any = 0) -> Any:
+    """``sequence[index]``, or *default* when the array is shorter (or absent)."""
+    return sequence[index] if index < len(sequence) else default
+
+
+def _children_by_parent(ids: list, parents: list) -> dict:
+    """Map each parent label to the ids that name it as their parent."""
+    children: dict = {}
+    for elem_id, parent in zip(ids, parents):
+        if parent:
+            children.setdefault(parent, []).append(elem_id)
+    return children
+
+
+def mesh_model_from_geometry(geometry: dict) -> Any:
+    """Build a displayable ``MeshModel`` from an archive's geometry arrays.
+
+    An archive carries enough geometry to *draw* a model — node coordinates,
+    element connectivity, section names and parent/child links — and not enough
+    to analyse one.  The model returned here is therefore for **display**: a
+    results view renders it without needing the ``.s2k`` it came from, and
+    analysis from it is impossible because there are no materials, loads or
+    restraints behind it.  Archives carry no unit system either, so the model
+    reports the toolkit's default.
+
+    Parent links are reconstructed rather than trusted: an element named in
+    another's ``*_parent_sap_id`` is marked ``inactive`` with its ``child_ids``,
+    exactly as the Preprocessor leaves it, so a rebuilt model collapses and
+    expands the way the analysed one did.
+
+    Args:
+        geometry: The arrays from :meth:`ResultsRepository.display_geometry`.
+            Missing blocks are skipped, so a frame-only or shell-only archive
+            rebuilds cleanly.
+
+    Returns:
+        A ``MeshModel`` ready for ``ModelViewer(mesh_model=...)``.
+    """
+    from ..model.mesh_model import MeshModel
+    from ..model.sap_data import AreaElement, FrameElement, Node
+
+    node_ids = _texts(geometry.get("node_sap_id"))
+    node_tags = _ints(geometry.get("node_tag"))
+    xs, ys, zs = (_floats(geometry.get(name)) for name in ("node_x", "node_y", "node_z"))
+
+    nodes: dict = {}
+    node_of_tag: dict = {}
+    for index, tag in enumerate(node_tags):
+        node_id = _at(node_ids, index) or str(tag)
+        nodes[node_id] = Node(
+            node_id=node_id,
+            node_tag=int(tag),
+            x=_at(xs, index, 0.0),
+            y=_at(ys, index, 0.0),
+            z=_at(zs, index, 0.0),
+        )
+        node_of_tag[str(tag)] = node_id
+
+    frame_ids = _texts(geometry.get("frame_sap_id"))
+    frame_tags = _ints(geometry.get("frame_eid"))
+    frame_i = _ints(geometry.get("frame_node_i"))
+    frame_j = _ints(geometry.get("frame_node_j"))
+    frame_sections = _texts(geometry.get("frame_sec_name"))
+    frame_parents = _texts(geometry.get("frame_parent_sap_id"))
+    frame_children = _children_by_parent(frame_ids, frame_parents)
+
+    frames: dict = {}
+    frame_assignments: dict = {}
+    for index, elem_id in enumerate(frame_ids):
+        node_i = node_of_tag.get(str(_at(frame_i, index)))
+        node_j = node_of_tag.get(str(_at(frame_j, index)))
+        if node_i is None or node_j is None:
+            continue  # an element with no drawable geometry
+        frames[elem_id] = FrameElement(
+            elem_id=elem_id,
+            elem_tag=int(_at(frame_tags, index, index + 1)),
+            node_i=node_i,
+            node_j=node_j,
+            inactive=elem_id in frame_children,
+            parent_id=_at(frame_parents, index) or None,
+            child_ids=list(frame_children.get(elem_id, ())),
+        )
+        section = _at(frame_sections, index)
+        if section:
+            frame_assignments[elem_id] = section
+
+    shell_ids = _texts(geometry.get("shell_sap_id"))
+    shell_tags = _ints(geometry.get("shell_eid"))
+    shell_sections = _texts(geometry.get("shell_sec_name"))
+    shell_parents = _texts(geometry.get("shell_parent_sap_id"))
+    shell_children = _children_by_parent(shell_ids, shell_parents)
+    corners = [_ints(geometry.get(f"shell_node_{column}")) for column in (1, 2, 3, 4)]
+
+    areas: dict = {}
+    area_assignments: dict = {}
+    for index, area_id in enumerate(shell_ids):
+        node_ids_of_area: list = []
+        for column in corners:
+            node_id = node_of_tag.get(str(_at(column, index)))
+            if node_id is not None and node_id not in node_ids_of_area:
+                node_ids_of_area.append(node_id)
+        if len(node_ids_of_area) < 3:
+            continue  # a triangle stored with a repeated corner still has three
+        areas[area_id] = AreaElement(
+            area_id=area_id,
+            area_tag=int(_at(shell_tags, index, index + 1)),
+            node_ids=node_ids_of_area,
+            inactive=area_id in shell_children,
+            parent_id=_at(shell_parents, index) or None,
+            child_ids=list(shell_children.get(area_id, ())),
+        )
+        section = _at(shell_sections, index)
+        if section:
+            area_assignments[area_id] = section
+
+    return MeshModel(
+        nodes=nodes,
+        frame_elements=frames,
+        frame_assignments=frame_assignments,
+        area_elements=areas,
+        area_assignments=area_assignments,
+        frame_dist_loads=[],
+    )
 
 
 class ResultsRepository(ABC):
@@ -71,6 +211,16 @@ class ResultsRepository(ABC):
         Read without converting anything, so a view can report what an archive
         holds without materialising it.
         """
+
+    def as_model(self) -> Any:
+        """A **displayable** ``MeshModel`` built from this archive's geometry.
+
+        What lets a results view draw the deformed — or simply the analysed —
+        geometry without the ``.s2k`` it came from.  The model is for display
+        only: an archive carries no materials, loads or restraints, and no unit
+        system, so nothing here can be analysed.
+        """
+        return mesh_model_from_geometry(self.display_geometry())
 
     @abstractmethod
     def table(self, *columns: str) -> dict:

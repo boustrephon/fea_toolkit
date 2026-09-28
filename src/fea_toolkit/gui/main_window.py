@@ -92,6 +92,19 @@ def _entity_identity(entity: Any) -> tuple[Optional[str], Optional[str]]:
     return None, None
 
 
+def _case_view_name(case: str, meta: dict) -> str:
+    """Display name for a results view: the case, qualified by its combination.
+
+    The unified schema records which combination a case was generated from; when
+    the two names differ the label says so, because the variants of one
+    combination would otherwise look identical in the tree.
+    """
+    group = meta.get("group") if meta else None
+    if group and group != case:
+        return f"{case} ({group})"
+    return case
+
+
 class MainWindow(QMainWindow):
     """Top-level window hosting the 3-D viewport and the application chrome.
 
@@ -301,6 +314,11 @@ class MainWindow(QMainWindow):
         a["file.open"] = self._real_action(
             "Open", self._on_open, shortcut="Ctrl+O", tip="Open a SAP2000 .s2k or JSON model"
         )
+        a["file.open_results"] = self._real_action(
+            "Open results\u2026",
+            self._on_open_results,
+            tip="Open an NPZ/HDF5 results archive and add a view per load case",
+        )
         a["file.quit"] = self._real_action("Quit", self.close, shortcut="Ctrl+Q")
         a["view.fit"] = self._real_action("Zoom to fit", self._on_zoom_fit)
         a["view.iso"] = self._real_action("Isometric", self._view_iso, tip="Isometric view")
@@ -380,6 +398,7 @@ class MainWindow(QMainWindow):
 
         m = bar.addMenu("&File")
         m.addAction(a["file.open"])
+        m.addAction(a["file.open_results"])
         m.addSeparator()
         for key in ("file.save_results", "file.export_tcl", "file.export_image"):
             m.addAction(a[key])
@@ -992,6 +1011,73 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(
                 self, "Open failed", f"Could not open:\n{path}\n\nSee the message log."
             )
+
+    def _on_open_results(self) -> None:
+        """**File ▸ Open results…**: choose an archive and register its cases."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open results",
+            "",
+            "Results archive (*.npz *.h5 *.hdf5);;All files (*)",
+        )
+        if path and not self.open_results_path(path):
+            QMessageBox.critical(
+                self,
+                "Open failed",
+                f"Could not open results:\n{path}\n\nSee the message log.",
+            )
+
+    def open_results_path(self, path: str) -> bool:
+        """Open a results archive and register one view per load case.
+
+        Dialog-free so tests can drive it directly.  An archive carries its own
+        display geometry, so this works with **no model open** — the views draw
+        the geometry the archive was written from — and the display model is
+        built once and shared by every case view, so a dozen cases cost one
+        model between them.
+
+        Args:
+            path: Archive path (NPZ or HDF5).
+
+        Returns:
+            ``False`` when the file is missing, unreadable or not a results
+            archive; ``True`` otherwise.
+        """
+        from pathlib import Path
+
+        from ..io.npz_reader import is_results_archive
+        from ..io.results_repository import NpzResultsRepository
+
+        self.log(f"Opening results {path} \u2026")
+        try:
+            if not is_results_archive(path):
+                self.log(f"{path} is not a results archive.", "error")
+                return False
+            repository = NpzResultsRepository(path)
+            cases = repository.cases()
+            model = repository.as_model()
+        except Exception as exc:
+            self.log(f"Failed to open results {path}: {exc}", "error")
+            return False
+
+        name = Path(path).name
+        keys = cases or [name]
+        for case in keys:
+            meta = repository.case_meta(case) if cases else {}
+            self._views.add_results(
+                f"results:{case}",
+                _case_view_name(case, meta),
+                repository,
+                source=f"{name} \u00b7 {case}",
+                model=model,
+                activate=False,
+            )
+        self.log(f"Opened {len(keys)} results view(s) from {name}.")
+
+        first = self._views.get(f"results:{keys[0]}")
+        if first is not None:
+            self._show_view(first, rebuild_tree=True)
+        return True
 
     def open_path(self, path: str) -> bool:
         """Parse *path* and display it; return False on failure (no dialog).

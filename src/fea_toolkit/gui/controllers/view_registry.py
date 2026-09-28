@@ -227,22 +227,25 @@ class ViewRegistry:
         name: str,
         repository: Any,
         source: str = "",
+        model: Any = None,
         *,
         activate: bool = True,
     ) -> View:
-        """Register a results view over *repository* — no model required.
+        """Register a results view over *repository* — no ``ModelStore`` needed.
 
         An archive carries its own display geometry, so this view needs neither a
-        ``ModelStore`` nor an open model, and its counts come from the archive's
-        array shapes (never a walk).  Drawing the results themselves — deformed
-        shapes, force diagrams — is the next slice; until then the repository is
-        kept as the view's payload, ready for it.
+        store nor an open model, and its counts come from the archive's array
+        shapes (never a walk).  Passing *model* is what makes it **drawable**:
+        callers build one display model from the archive and share it across the
+        cases, so several case views cost one model between them.
 
         Args:
             key: Stable identifier.
             name: Display name.
             repository: A ``ResultsRepository``.
-            source: Human-readable provenance, e.g. the file name.
+            source: Human-readable provenance, e.g. the file name and case.
+            model: Optional model to render (see
+                :meth:`ResultsRepository.as_model`).
             activate: Make this the displayed view.
 
         Returns:
@@ -262,6 +265,8 @@ class ViewRegistry:
         )
         self._views[key] = view
         self._results[key] = repository
+        if model is not None:
+            self._sources[key] = model
         if activate or self._active is None:
             self._active = key
         return self.get(key)
