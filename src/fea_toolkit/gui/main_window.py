@@ -184,7 +184,7 @@ class MainWindow(QMainWindow):
 
     def _create_viewport(self) -> None:
         """Create the embedded PyVistaQt interactor and its render backend."""
-        from pyvistaqt import QtInteractor
+        from .render_backend import MainThreadQtInteractor
 
         # Quad-view-ready container: holds a single viewport today, a grid of
         # them later (roadmap design rule 10).
@@ -193,7 +193,7 @@ class MainWindow(QMainWindow):
         self._viewport_layout.setContentsMargins(0, 0, 0, 0)
         self.setCentralWidget(self._viewport_container)
 
-        self._interactor = QtInteractor(self._viewport_container)
+        self._interactor = MainThreadQtInteractor(self._viewport_container)
         self._viewport_layout.addWidget(self._interactor)
         self._backend = QtRenderBackend(self._interactor)
         self._create_interaction()

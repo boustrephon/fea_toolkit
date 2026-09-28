@@ -2,7 +2,44 @@
 
 from typing import Any
 
+from pyvistaqt import QtInteractor
+
 from ..plotting.renderers.pyvista import PyVistaRenderer
+
+
+class MainThreadQtInteractor(QtInteractor):
+    """``QtInteractor`` that renders **without spawning a thread**.
+
+    On macOS, pyvistaqt wraps ``render()`` in a ``threading.Thread`` -- the
+    decorator is ``@conditional_decorator(threaded, platform.system() == "Darwin")``
+    in ``pyvistaqt/plotting.py``.  That thread does nothing but ``emit()`` the
+    render signal: the render itself runs on the Qt thread from that signal,
+    exactly as it does on Linux and Windows, where pyvistaqt creates no thread at
+    all.
+
+    This subclass emits the signal on the calling thread, which restores the
+    cross-platform behaviour.  It matters because a thread created per render is
+    both wasteful and hazardous here: if the cyclic collector runs while that
+    thread bootstraps, the process segfaults, shiboken/VTK objects not being
+    traversable from another thread (reproduced in this project's GUI tests --
+    see ``docs/dev_notes.md`` → *The macOS GUI segfault*).
+
+    Rendering is only ever driven from the GUI thread, in response to user
+    actions, so the deferred emit the thread provided is not needed.
+    """
+
+    def render(self) -> None:
+        """Emit the render signal on this thread (pyvistaqt's Linux path)."""
+        # Never render after the plotter has been closed: the render window has
+        # been finalized and touching its OpenGL context can crash (pyvistaqt
+        # issue #762).
+        if getattr(self, "_closed", False):
+            return None
+        self._rendered = True  # BasePlotter needs to know this has rendered
+        try:
+            return self.render_signal.emit()
+        except RuntimeError:  # the wrapped C/C++ object has been deleted
+            return None
 
 
 class QtRenderBackend(PyVistaRenderer):

@@ -33,6 +33,28 @@ def window(qapp):
     win.close()
 
 
+def test_the_embedded_interactor_renders_without_a_thread(window):
+    """pyvistaqt wraps ``render`` in a thread on macOS only; ours must not.
+
+    A thread created per render is what races the cyclic collector and segfaults
+    (``docs/dev_notes.md`` → *The macOS GUI segfault*).  pyvistaqt's wrapper is
+    not ``functools.wraps``-decorated, so a still-threaded ``render`` shows up as
+    a callable named ``wrapper``.
+    """
+    import platform
+
+    from pyvistaqt import QtInteractor
+
+    from fea_toolkit.gui.render_backend import MainThreadQtInteractor
+
+    assert isinstance(window._interactor, MainThreadQtInteractor)
+    assert MainThreadQtInteractor.render.__name__ == "render"
+    if platform.system() == "Darwin":
+        # If this starts failing, pyvistaqt changed its macOS workaround: check
+        # whether the subclass is still needed before deleting it.
+        assert QtInteractor.render.__name__ == "wrapper"
+
+
 def test_menubar_has_the_full_menu_set(window):
     """All seven roadmap menus exist (the full-but-greyed decision)."""
     titles = [a.text().replace("&", "") for a in window.menuBar().actions()]
