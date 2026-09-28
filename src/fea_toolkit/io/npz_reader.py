@@ -25,6 +25,49 @@ from typing import Any, Optional
 import numpy as np
 
 
+def is_results_archive(path: str) -> bool:
+    """Whether *path* is a unified results archive.
+
+    A *header* test -- the key list of an ``.npz`` is read, never its arrays --
+    for callers that must decide **how** to read a file before reading it.  An
+    ``.h5`` / ``.hdf5`` file is always treated as unified: the stage files live
+    in that container too, and :func:`fea_toolkit.io.stage_reader.read_model_stages`
+    is what separates them.
+
+    Keeping this decision here is what lets consumers stay off ``np.load``
+    entirely (see ``docs/dev_notes.md`` → *Results repository and the NumPy-typed
+    seam*).
+
+    Args:
+        path: Archive path.
+
+    Returns:
+        ``True`` when the file carries the unified schema's marker arrays
+        (``analysis_types`` or the frame geometry block), ``False`` otherwise.
+    """
+    if Path(path).suffix.lower() in (".h5", ".hdf5"):
+        return True
+    with np.load(str(Path(path).resolve()), allow_pickle=False) as data:
+        return "analysis_types" in data or "frame_eid" in data
+
+
+def read_legacy_npz(path: str) -> dict[str, Any]:
+    """Load a **legacy** results archive: a loose ``{name: array}`` dict.
+
+    Archives that predate the unified schema may carry object arrays, so this is
+    the one read in the toolkit that passes ``allow_pickle=True``.  Prefer
+    :func:`read_results` for anything written since schema 2, and ask
+    :func:`is_results_archive` which you are looking at.
+
+    Args:
+        path: Archive path.
+
+    Returns:
+        A plain ``{array name: ndarray}`` dict.
+    """
+    return dict(np.load(str(Path(path).resolve()), allow_pickle=True))
+
+
 def read_results(path: str) -> dict[str, Any]:
     """Load a unified results file (NPZ or HDF5) and return a dict of arrays.
 

@@ -32,6 +32,12 @@ from .results_schema import CASE_META_KEYS, GEOMETRY_ARRAYS
 __all__ = ["NpzResultsRepository", "ResultsRepository"]
 
 
+def _array_length(arrays: dict, name: str) -> int:
+    """Length of *name* in *arrays*, or ``0`` when it is absent."""
+    values = arrays.get(name)
+    return 0 if values is None else int(len(values))
+
+
 class ResultsRepository(ABC):
     """Read-only access to one results archive, as NumPy arrays.
 
@@ -57,6 +63,14 @@ class ResultsRepository(ABC):
     @abstractmethod
     def display_geometry(self) -> dict:
         """Node coordinates, frame/shell connectivity and ids — enough to draw."""
+
+    @abstractmethod
+    def geometry_counts(self) -> dict:
+        """Geometry size, from array shapes: ``n_nodes`` / ``n_frames`` / ``n_shells``.
+
+        Read without converting anything, so a view can report what an archive
+        holds without materialising it.
+        """
 
     @abstractmethod
     def table(self, *columns: str) -> dict:
@@ -124,6 +138,16 @@ class NpzResultsRepository(ResultsRepository):
             name: self._data[name]
             for name in GEOMETRY_ARRAYS
             if isinstance(self._data.get(name), np.ndarray)
+        }
+
+    def geometry_counts(self) -> dict:
+        """Geometry sizes from the array shapes — no array is converted."""
+        geometry = self.display_geometry()
+        n_frames = _array_length(geometry, "frame_node_i")
+        return {
+            "n_nodes": _array_length(geometry, "node_tag"),
+            "n_frames": n_frames,
+            "n_shells": _array_length(geometry, "shell_node_1"),
         }
 
     def table(self, *columns: str) -> dict:

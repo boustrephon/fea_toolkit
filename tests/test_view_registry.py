@@ -91,3 +91,42 @@ def test_reset_drops_the_views_and_their_geometry():
     assert registry.views() == []
     assert registry.source("unprocessed") is None
     assert registry.active is None
+
+
+class _StubRepository:
+    """A repository only has to answer the counts a results view reports."""
+
+    def __init__(self, counts: dict) -> None:
+        self._counts = counts
+
+    def geometry_counts(self) -> dict:
+        return self._counts
+
+
+def test_a_results_view_reports_the_archives_counts_without_a_model():
+    """An archive carries its own geometry, so a results view needs no model."""
+    from fea_toolkit.gui.controllers.view_registry import RESULTS, ViewRegistry
+
+    registry = ViewRegistry()
+    view = registry.add_results(
+        "results:DEAD",
+        "DEAD",
+        _StubRepository({"n_nodes": 40, "n_frames": 32, "n_shells": 8}),
+        source="results.npz",
+    )
+
+    assert view.kind == RESULTS
+    assert (view.n_nodes, view.n_frames, view.n_shells) == (40, 32, 8)
+    assert view.n_frames_active == 32
+    assert registry.active.key == "results:DEAD"
+    assert registry.source("results:DEAD") is None  # nothing to draw yet
+    assert registry.results("results:DEAD") is not None
+
+
+def test_a_geometry_view_has_no_repository():
+    from fea_toolkit.gui.controllers.view_registry import ViewRegistry
+
+    registry = ViewRegistry()
+    registry.add_geometry("unprocessed", "Unprocessed", _model())
+
+    assert registry.results("unprocessed") is None

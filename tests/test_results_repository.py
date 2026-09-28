@@ -86,6 +86,54 @@ def test_an_unknown_column_is_reported(archive):
         NpzResultsRepository(archive).table("node_x", "no_such_array")
 
 
+def test_is_results_archive_recognises_the_unified_schema(archive):
+    """The sniff lives in the reader, so consumers never call ``np.load``."""
+    from fea_toolkit.io.npz_reader import is_results_archive
+
+    assert is_results_archive(archive) is True
+
+
+def test_is_results_archive_rejects_another_npz(tmp_path):
+    """An archive of somebody else's arrays is not a results file."""
+    import numpy as np
+
+    from fea_toolkit.io.npz_reader import is_results_archive
+
+    path = tmp_path / "other.npz"
+    np.savez_compressed(path, something=np.zeros(3))
+
+    assert is_results_archive(path) is False
+
+
+def test_an_hdf5_path_is_treated_as_unified(tmp_path):
+    """Stage files share the container, so the extension decides — no file read."""
+    from fea_toolkit.io.npz_reader import is_results_archive
+
+    assert is_results_archive(tmp_path / "model.h5") is True
+
+
+def test_geometry_counts_come_from_the_array_shapes(archive):
+    """Counts without converting anything — the same discipline as the model store."""
+    from fea_toolkit.io.results_repository import NpzResultsRepository
+
+    assert NpzResultsRepository(archive).geometry_counts() == {
+        "n_nodes": 3,
+        "n_frames": 2,
+        "n_shells": 0,
+    }
+
+
+def test_geometry_counts_of_an_empty_archive_are_zero():
+    """A missing block reads as zero, never an error — archives vary by analysis."""
+    from fea_toolkit.io.results_repository import NpzResultsRepository
+
+    assert NpzResultsRepository({}).geometry_counts() == {
+        "n_nodes": 0,
+        "n_frames": 0,
+        "n_shells": 0,
+    }
+
+
 def test_a_repository_can_be_backed_by_a_plain_dict():
     """The seam does not require a file — a caller may already hold the arrays."""
     from fea_toolkit.io.results_repository import NpzResultsRepository, ResultsRepository

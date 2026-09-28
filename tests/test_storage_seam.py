@@ -11,14 +11,10 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "fea_toolkit"
 
-#: Modules allowed to call ``np.load``: the readers, plus one format sniff.
+#: Modules allowed to call ``np.load``: the readers, and nothing else.
 _LOAD_ALLOWED = {
     "io/npz_reader.py",
     "io/results_schema.py",
-    # Not a results read: it sniffs whether a path is a unified archive or a
-    # legacy file, then delegates.  Moving the sniff into the reader is a
-    # recorded follow-up, not a licence for consumers to load archives.
-    "rhino/colour_from_npz.py",
 }
 
 #: Modules allowed to write archives.

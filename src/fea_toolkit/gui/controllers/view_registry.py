@@ -120,6 +120,7 @@ class ViewRegistry:
         self._store = store
         self._views: dict[str, View] = {}
         self._sources: dict[str, Any] = {}
+        self._results: dict[str, Any] = {}
         self._active: Optional[str] = None
 
     # ── Registration ─────────────────────────────────────────────────
@@ -220,10 +221,60 @@ class ViewRegistry:
             return self._store.header(model)
         return model_header(model)
 
+    def add_results(
+        self,
+        key: str,
+        name: str,
+        repository: Any,
+        source: str = "",
+        *,
+        activate: bool = True,
+    ) -> View:
+        """Register a results view over *repository* — no model required.
+
+        An archive carries its own display geometry, so this view needs neither a
+        ``ModelStore`` nor an open model, and its counts come from the archive's
+        array shapes (never a walk).  Drawing the results themselves — deformed
+        shapes, force diagrams — is the next slice; until then the repository is
+        kept as the view's payload, ready for it.
+
+        Args:
+            key: Stable identifier.
+            name: Display name.
+            repository: A ``ResultsRepository``.
+            source: Human-readable provenance, e.g. the file name.
+            activate: Make this the displayed view.
+
+        Returns:
+            The registered view.
+        """
+        counts = repository.geometry_counts()
+        n_frames = int(counts.get("n_frames", 0))
+        view = View(
+            key=key,
+            name=name,
+            kind=RESULTS,
+            source=source,
+            n_nodes=int(counts.get("n_nodes", 0)),
+            n_frames=n_frames,
+            n_frames_active=n_frames,
+            n_shells=int(counts.get("n_shells", 0)),
+        )
+        self._views[key] = view
+        self._results[key] = repository
+        if activate or self._active is None:
+            self._active = key
+        return self.get(key)
+
+    def results(self, key: str) -> Any:
+        """The repository a results view reads (``None`` for a geometry view)."""
+        return self._results.get(key)
+
     def reset(self) -> None:
         """Drop every view and its geometry."""
         self._views.clear()
         self._sources.clear()
+        self._results.clear()
         self._active = None
 
     # ── Lookup ───────────────────────────────────────────────────────

@@ -867,13 +867,18 @@ def create_result_flags(
     import scriptcontext as sc
 
     # ── Load results data (auto-detect .npz / .h5 / stage file) ────
+    from ..io.npz_reader import is_results_archive, read_legacy_npz
+
     is_h5 = str(npz_path).lower().endswith((".h5", ".hdf5"))
     if is_h5:
         data = _load_unified(npz_path, stage=stage)
         is_unified = True
     else:
-        raw = np.load(npz_path, allow_pickle=True)
-        is_unified = "analysis_types" in raw or "frame_eid" in raw
+        # One place decides what an archive is (docs/dev_notes.md -> the seam).
+        # The loose legacy dict is read only when it is needed -- the unified
+        # branch never touches it.
+        is_unified = is_results_archive(npz_path)
+        raw = None if is_unified else read_legacy_npz(npz_path)
 
     if is_unified:
         from ..io.npz_reader import _get_static_cases
