@@ -10,6 +10,8 @@ table_registry — SAP2000 table-coverage registry + unhandled-table detection.
 npz_writer — Serialise analysis results to NPZ archives.
 npz_reader — Deserialise NPZ archives and convert to PyVista meshes.
 results_schema — NPZ key layout and validation.
+model_store — Metadata-only model headers and the model-store seam.
+results_repository — One NumPy-typed read seam for results archives.
 unified_writer — Combined NPZ/HDF5 writer with geometry + results.
 report — pandas-based summary tables (modal, section, load, etc.).
 ground_motion — PEER record reading, scaling, baseline correction.
@@ -27,6 +29,7 @@ from .ground_motion import (
     scale_to_target_sa,
 )
 from .model_loader import load_model_data
+from .model_store import InMemoryModelStore, ModelHeader, ModelStore, model_header
 from .npz_reader import (
     GEOMETRY_ARRAY_KEYS,
     describe_results_npz,
@@ -42,6 +45,7 @@ from .npz_reader import (
     read_results_npz,
 )
 from .npz_writer import write_results_npz
+from .results_repository import NpzResultsRepository, ResultsRepository
 from .results_schema import SCHEMA_VERSION, SCHEMA_VERSION_LEGACY, make_static_key, validate_npz
 from .s2k_parser import SAP2000Parser
 from .stage_reader import (
@@ -120,6 +124,11 @@ __all__ = [
     "GEOMETRY_ARRAY_KEYS",
     "SCHEMA_VERSION",
     "SCHEMA_VERSION_LEGACY",
+    "InMemoryModelStore",
+    "ModelHeader",
+    "ModelStore",
+    "NpzResultsRepository",
+    "ResultsRepository",
     "SAP2000Parser",
     "TableCoverage",
     "area_section_summary",
@@ -140,6 +149,7 @@ __all__ = [
     "modal_participation_df",
     "modal_table",
     "modal_table_enhanced",
+    "model_header",
     "npz_build_child_map",
     "npz_build_id_tag_map",
     "npz_build_parent_map",
