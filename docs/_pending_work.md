@@ -240,38 +240,6 @@ implemented, config-gated **off by default** (existing models unchanged):
   element with degrading shear) are recorded here and in
   `docs/vecchio_emara_benchmark.md`.
 
-#### P28 — `check_self_weight_consistency` under-counts vertical shells (XY-projected area)
-
-Source: the 2026-09-28 P27 acceptance check, on the Admin Building
-(`Admin_0.7E_short term unfixed.s2k`), where it reports a −21.7 % **false**
-inconsistency on a model whose self-weight is exactly right.
-
-**What.**  `model/checks.py::check_self_weight_consistency()` computes the
-*expected* shell self-weight with a **shoelace area on x/y only** (≈ lines
-470-487 — `xs`/`ys` from the vertices, z never used).  A **vertical** wall
-therefore projects to approximately nothing and contributes ~0, so the expected
-total comes out short for any model with walls.  On the Admin Building it
-reports `expected = 40 568.8` against `applied = 51 818.5`.
-
-**The application path is right — and proves it.**  `_loads.py` applies shell
-self-weight as `polygon_area_3d(pts) × thickness × unit_weight` (≈ line 719),
-which is orientation-independent.  An independent sum over the model — frames
-`Σ A·ρ·L = 21 339.7` + shells `Σ polygon_area_3d·t·ρ = 30 478.8` =
-**51 818.459** — matches the solve's summed base reaction **to the digit**,
-while the same sum with the XY-projected area gives only `19 229.1` for the
-shells (the source of the −21.7 %).
-
-**Fix.**  Use `polygon_area_3d` (already used by `_loads.py`; lives in
-`model/geometry`) in `check_self_weight_consistency` instead of the inline
-shoelace, and add a regression test with a **vertical** wall panel — e.g. a
-single-wall model whose expected weight is known by hand, which fails today.
-
-**Why it matters.**  This check is the toolkit's self-weight audit — the thing a
-reviewer runs to confirm "the gravity load is what the model says it is".  A
-false −22 % alarm on a correct model is worse than no check: it trains the
-reader to ignore it.  Until it is fixed, `passed` cannot be trusted for any
-model with vertical shells.
-
 ### Tier 3 — Feature gaps (placeholders / partial)
 
 #### P25 — classic support symbols on top of the per-DOF glyphs
@@ -911,6 +879,46 @@ an implementation detail.
 
 **Trigger.** Revisit when a run is dominated by extraction rather than solving, or
 when a time-history model's per-step results no longer fit comfortably in memory.
+## DONE (2026-09-28 — P28: the self-weight audit counts vertical shells)
+
+`model/checks.py::check_self_weight_consistency()` computed the *expected* shell
+self-weight with a **shoelace area on x/y only**, so a **vertical** panel
+projected to approximately nothing and every wall dropped out of the total.  A
+correct model therefore reported a false self-weight inconsistency.
+
+**Found from the model, not the code.**  Running `model.review --self-weight` on
+the Admin Building printed `Shear Wall 0.0` and `brick wall 0.0` while
+`concrete slabs` showed exactly the XY-projected figure — and the "expected"
+total was 21.7 % below the base reaction the solve actually produced.
+
+**The application path was right, which proved the audit was wrong.**
+`opensees/_loads.py` uses `polygon_area_3d(pts) × thickness × unit_weight`,
+which is orientation-independent.  An independent sum — frames `Σ A·ρ·L =
+21 339.7` + shells `Σ polygon_area_3d·t·ρ = 30 478.8` = **51 818.459** — matched
+the solve's summed base reaction **to the digit**.
+
+**Fix.**  `check_self_weight_consistency` now uses the same `polygon_area_3d`
+helper (function-local import, alongside the existing `ShellSection` one), so
+the audit and the load application cannot disagree about what a panel weighs.
+On the Admin Building the reported expected weight moves
+
+| section | before | after |
+|---|---|---|
+| `Shear Wall` | 0.0 | 5 033.1 |
+| `brick wall` | 0.0 | 5 906.0 |
+| `concrete slabs` | 19 229.1 | 19 229.1 (unchanged) |
+| **Total** | **40 568.8** | **51 507.8** |
+
+and on the `… unfixed` variant the total is exactly **51 818.5** — the value the
+solve's reaction confirms.  (The two differ because they are different models;
+the "fixed" one adds `engbrick` and different sections.)
+
+**Test.**  `tests/test_review.py::TestSelfWeight::test_a_vertical_panel_weighs_its_full_area`
+adds a hand-computed vertical wall (2 m × 3 m × 0.2 m × 25 kN/m³ = 30 kN) beside
+a horizontal slab (4 m² × 0.1 × 25 = 10 kN): the wall would have weighed 0
+before, the slab is unchanged.
+
+
 ## DONE (2026-09-28 — Analysis ▸ Run lands in the GUI: solve, view, save; no archive needed)
 
 P27 increments **I2–I4** — the static-linear slice of GUI milestone 5 — with the
@@ -1028,9 +1036,8 @@ self-weight with an **XY shoelace** area, so a vertical wall projects to
 approximately nothing: it reports `40 568.8` for this model where the correct
 total is `51 818.5` — a **−21.7 % false "inconsistency"** on a model that is
 actually consistent.  The *application* path (`_loads.py`) uses
-`polygon_area_3d` and is right, as the exact match above shows.  The fix is to
-use `polygon_area_3d` in the check too; until then the check is unusable on any
-model with vertical shells.  Filed as **P28** (Tier 2).
+`polygon_area_3d` and is right, as the exact match above shows.  The check was
+fixed with that same helper — **P28**, see the DONE register above.
 
 **Tests.**  Qt-free: `tests/test_case_listing.py` (listing + `run_static_cases`)
 and `tests/test_run_case_set.py` (the in-memory archive, combination reduction,

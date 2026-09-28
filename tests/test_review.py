@@ -23,6 +23,7 @@ from fea_toolkit.model.review import (
 )
 from fea_toolkit.model.sap_data import (
     FRAME_RELEASE_DOF_LABELS,
+    AreaElement,
     Constraint,
     FrameElement,
     FrameRelease,
@@ -32,6 +33,7 @@ from fea_toolkit.model.sap_data import (
     Restraint,
     SAPModelData,
     Section,
+    ShellSection,
 )
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -886,6 +888,62 @@ class TestSelfWeight:
         md_text = format_review_markdown(result)
         assert "**By material**" in md_text
         assert "| STEEL" in md_text
+
+    def _wall_and_slab_model(self) -> SAPModelData:
+        """A vertical wall (X–Z) and a horizontal slab (X–Y), one material.
+
+        The vertical panel is the shape an area **projected** onto x/y collapses
+        to ~0 — the regression this models.
+        """
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 2.0, 0.0, 0.0),
+            "3": Node("3", 3, 2.0, 0.0, 3.0),
+            "4": Node("4", 4, 0.0, 0.0, 3.0),  # wall: 2 m x 3 m = 6 m2
+            "5": Node("5", 5, 0.0, 0.0, 6.0),
+            "6": Node("6", 6, 2.0, 0.0, 6.0),
+            "7": Node("7", 7, 2.0, 2.0, 6.0),
+            "8": Node("8", 8, 0.0, 2.0, 6.0),  # slab: 2 m x 2 m = 4 m2
+        }
+        return SAPModelData(
+            nodes=nodes,
+            restraints={"1": Restraint([1, 1, 1, 1, 1, 1])},
+            materials={
+                "C40": Material(name="C40", type="Concrete", E_mod=3.2e10, unit_weight=25.0)
+            },
+            sections={
+                "WALL": ShellSection(name="WALL", shape="Shell", material="C40", thickness=0.2),
+                "SLAB": ShellSection(name="SLAB", shape="Shell", material="C40", thickness=0.1),
+            },
+            frame_elements={},
+            area_elements={
+                "A1": AreaElement("A1", 1, ["1", "2", "3", "4"]),
+                "A2": AreaElement("A2", 2, ["5", "6", "7", "8"]),
+            },
+            frame_assignments={},
+            area_assignments={"A1": "WALL", "A2": "SLAB"},
+            groups={},
+            frame_auto_mesh={},
+        )
+
+    def test_a_vertical_panel_weighs_its_full_area(self):
+        """Regression: the expected area must be the true 3-D polygon area.
+
+        A shoelace on x/y alone projects a vertical (X–Z) panel to ~0, so every
+        wall was dropped from the expected weight — a building model then
+        reported a -21.7 % "self-weight inconsistency" against its own exact
+        applied load.  ``polygon_area_3d`` is orientation-independent, and is the
+        same helper the load *application* path uses.
+        """
+        md = self._wall_and_slab_model()
+        sw = review_model(md, self_weight=True)["self_weight"]
+
+        # wall: 6 m2 x 0.2 m x 25 kN/m3 = 30 kN  (an XY projection would give 0)
+        assert sw["by_section"]["WALL"] == pytest.approx(30.0)
+        # slab: 4 m2 x 0.1 m x 25 kN/m3 = 10 kN  (unchanged by the fix)
+        assert sw["by_section"]["SLAB"] == pytest.approx(10.0)
+        assert sw["expected"] == pytest.approx(40.0)
+        assert sum(sw["by_section"].values()) == pytest.approx(sw["expected"])
 
 
 # ═══════════════════════════════════════════════════════════════════

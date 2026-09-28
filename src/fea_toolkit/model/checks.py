@@ -431,6 +431,7 @@ def check_self_weight_consistency(
         ``by_material`` (the same weight grouped by each section's
         material).
     """
+    from fea_toolkit.model.geometry import polygon_area_3d
     from fea_toolkit.model.sap_data import ShellSection
 
     # ── Compute expected self-weight from geometry ──
@@ -475,18 +476,20 @@ def check_self_weight_consistency(
         thickness = sec.thickness
         if thickness < 1e-12:
             continue
-        # Polygon area via shoelace formula
-        verts = [md.nodes[nid] for nid in area.node_ids if nid in md.nodes]
+        # True 3-D polygon area.  A shoelace on x/y alone projects a **vertical**
+        # panel to ~0, so every wall was silently dropped from the expected
+        # weight — a false "self-weight inconsistency" of −21.7 % on a real
+        # building model.  ``polygon_area_3d`` is the same helper the load
+        # *application* path uses (``opensees/_loads.py``), so the two cannot
+        # disagree about what a panel weighs.
+        verts = [
+            (md.nodes[nid].x, md.nodes[nid].y, md.nodes[nid].z)
+            for nid in area.node_ids
+            if nid in md.nodes
+        ]
         if len(verts) < 3:
             continue
-        xs = [v.x for v in verts]
-        ys = [v.y for v in verts]
-        area_val = 0.5 * abs(
-            sum(
-                xs[i] * ys[(i + 1) % len(verts)] - xs[(i + 1) % len(verts)] * ys[i]
-                for i in range(len(verts))
-            )
-        )
+        area_val = polygon_area_3d(verts)
         w = area_val * thickness * mat.unit_weight
         expected += w
         by_section[sec_name] = by_section.get(sec_name, 0.0) + w
