@@ -284,22 +284,24 @@ def _mesh_has_shells(mesh_model) -> bool:
 
     The Preprocessor can leave areas in one of two states: **shells** (meshed,
     carrying their own pressure) or **loads-only** (demoted to frame edge loads).
-    It records the demoted ones on ``MeshModel.loads_only_area_ids``, so any area
-    element *not* in that set is a shell the builder has to create.
+    The reliable signal is ``MeshModel.area_element_types``: the Preprocessor
+    fills it *only* when it created shells (``area_element_types`` is 0 entries
+    for a split-only run, one entry per shell for a meshed one).
 
-    This is what makes the builder's config follow the mesh: without it a
-    wall/slab-stiffened model is built with its areas silently missing — a
-    mechanism, and the singular-matrix failure the Admin Building run hit.
+    ``loads_only_area_ids`` looks like the obvious discriminator but is **not
+    usable**: the Preprocessor only populates it on the ``load_shell_selection``
+    path, so a plain ``create_shells=False`` run leaves it *empty* while every
+    area is in fact loads-only.  Reading it made a split-only mesh look meshed,
+    which then forced ``create_shells`` on the builder — building shell elements
+    the user had deliberately not asked for.
 
     Args:
-        mesh_model: A ``MeshModel`` (or anything with the two attributes).
+        mesh_model: A ``MeshModel`` (or anything with the attribute).
 
     Returns:
-        ``True`` when at least one area element is not loads-only.
+        ``True`` when the mesh was built with shells.
     """
-    areas = getattr(mesh_model, "area_elements", None) or {}
-    loads_only = set(getattr(mesh_model, "loads_only_area_ids", None) or ())
-    return any(area_id not in loads_only for area_id in areas)
+    return bool(getattr(mesh_model, "area_element_types", None))
 
 
 def run_static_cases(

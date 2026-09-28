@@ -159,7 +159,13 @@ and vice versa.
 1. **Model ▸ Split elements** (or **Mesh areas**) must have been run first.  Run
    deliberately does *not* preprocess for you — a topology change is something
    to see reported, not something to happen silently — so until then Run stays
-   greyed and its tooltip names the step it needs.
+   greyed and its tooltip names the step it needs.  **Which of the two matters:**
+   in a building-shell model the walls and slabs are what tie the members
+   together, so only **Mesh areas** makes it solvable — `Split elements` alone
+   leaves those areas as loads-only, members that frame into them stay detached,
+   and the run reports a non-convergence rather than quietly solving something
+   else (the Model Review's *floating sub-structures* count warns of this before
+   you run).
 2. The dialog lists the model's **static cases**, each with a **load
    multiplier** (default `1.0`, meaning *exactly as the `.s2k` defines it*).
    Tick several to run several solves.  The model's **combinations** are listed

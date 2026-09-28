@@ -151,24 +151,38 @@ def test_cancelling_before_the_first_case_produces_nothing(model, mesh):
 
 
 class _Stub:
-    """Just the two ``MeshModel`` attributes the shell decision reads."""
+    """Just the ``MeshModel`` attribute the shell decision reads."""
 
-    def __init__(self, areas, loads_only) -> None:
-        self.area_elements = areas
-        self.loads_only_area_ids = loads_only
+    def __init__(self, area_element_types) -> None:
+        self.area_element_types = area_element_types
 
 
-def test_shell_areas_are_built_when_the_mesh_carries_them():
-    """``create_shells`` follows the mesh, not a hard-coded default.
+def test_shells_are_built_when_the_mesh_records_shell_element_types():
+    """``create_shells`` follows the mesh's own record, not a hard-coded default.
 
     A preprocessed model whose areas are shells needs the builder to create
     them, or a wall/slab-stiffened model is a mechanism — the singular-matrix
-    failure the Admin Building run hit.  ``loads_only_area_ids`` is the
-    Preprocessor's record of which areas were demoted to load-only.
+    failure the Admin Building run hit.  ``area_element_types`` is non-empty
+    exactly when the Preprocessor built shells.
     """
     from fea_toolkit.analysis.linear import _mesh_has_shells
 
-    assert _mesh_has_shells(_Stub({"1": object()}, set())) is True  # meshed
-    assert _mesh_has_shells(_Stub({"1": object()}, {"1"})) is False  # loads-only
-    assert _mesh_has_shells(_Stub({"1": object(), "2": object()}, {"1"})) is True
-    assert _mesh_has_shells(_Stub({}, set())) is False  # no areas at all
+    assert _mesh_has_shells(_Stub({"1": "ShellMITC4"})) is True
+    assert _mesh_has_shells(_Stub({})) is False  # split only / no shells
+
+
+def test_a_split_only_mesh_is_not_mistaken_for_a_meshed_one():
+    """Regression: a split-only mesh must not force ``create_shells`` on.
+
+    ``loads_only_area_ids`` is **empty** for a plain ``create_shells=False`` run
+    (the Preprocessor only fills it on the selection path), while every area is
+    in fact loads-only.  Deriving from it made a split-only mesh look meshed, so
+    the builder was told to create 323 shells the user had not asked for.
+    """
+    from fea_toolkit.analysis.linear import _mesh_has_shells
+
+    split_only = _Stub({})
+    split_only.area_elements = {"1": object(), "2": object()}  # areas do exist…
+    split_only.loads_only_area_ids = set()  # …and this is empty for split-only
+
+    assert _mesh_has_shells(split_only) is False
