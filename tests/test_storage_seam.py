@@ -81,3 +81,19 @@ def test_the_repository_interface_imports_only_numpy():
 def test_the_model_store_imports_nothing_heavy():
     """Same rule for the topology seam: no Qt, no ``ops``, no ``h5py``."""
     assert _top_level_imports("io/model_store.py") <= {"abc", "dataclasses", "typing"}
+
+
+def test_the_io_package_reexports_both_seams():
+    """The seams are part of the ``io`` facade, like the readers and the writers."""
+    from fea_toolkit import io
+
+    for name in (
+        "InMemoryModelStore",
+        "ModelHeader",
+        "ModelStore",
+        "NpzResultsRepository",
+        "ResultsRepository",
+        "model_header",
+    ):
+        assert name in io.__all__
+        assert getattr(io, name) is not None

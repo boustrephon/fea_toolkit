@@ -154,6 +154,22 @@ class TestDuplicateView:
         }
         assert rows["parent"] == "unprocessed"
         assert rows["n_frames"] == "2"
+        # The expression itself is inspectable, so a view explains its own filter.
+        assert rows["selection"].startswith("Selection(")
+        assert "element_ids=['2']" in rows["selection"]
+
+    def test_picking_follows_the_filtered_scene(self, window, monkeypatch):
+        """The pick index is rebuilt from what is drawn, so hidden cells are not pickable."""
+        from fea_toolkit.model.selection import Selection
+
+        _stub_dialog(monkeypatch, Selection(element_types=["Node"], element_ids=["2"]))
+
+        window._on_duplicate_view()
+
+        index = window._selection_index
+        assert len(index.frames) == 2  # members 1 and 2
+        assert index.label("frames", 1) is not None
+        assert index.label("frames", 2) is None  # nothing is drawn as cell 2
 
 
 class TestEditViewSelection:

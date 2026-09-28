@@ -29,6 +29,22 @@ def _chain_model():
     return md
 
 
+def _branched_model():
+    """The chain plus a branch framing into the *interior* of member 2.
+
+    An interior joint is what the Preprocessor splits at, so this is the model
+    that makes "an inactive parent is not drawn" observable.
+    """
+    from fea_toolkit.model.sap_data import FrameElement, Node
+
+    md = _chain_model()
+    md.nodes["5"] = Node(node_id="5", node_tag=5, x=0.0, y=0.0, z=15.0)  # on member 2
+    md.frame_elements["4"] = FrameElement(elem_id="4", elem_tag=4, node_i="5", node_j="9")
+    md.frame_assignments["4"] = "UB300"
+    md.frame_auto_mesh = {"2": {"AtJoints": True}}
+    return md
+
+
 class TestSelectionExpression:
     """``Selection.to_string`` is the inverse of ``from_string``."""
 
@@ -57,6 +73,13 @@ class TestSelectionExpression:
         from fea_toolkit.model.selection import Selection
 
         assert Selection().to_string() == ""
+
+    def test_from_string_accepts_the_story_aliases(self):
+        """``story`` is part of the grammar, so the round-trip covers every field."""
+        from fea_toolkit.model.selection import Selection
+
+        assert Selection.from_string("story=Level 2").story == ["Level 2"]
+        assert Selection.from_string("stories=Level 1, Level 2").story == ["Level 1", "Level 2"]
 
 
 class TestResolveConnected:
@@ -104,6 +127,34 @@ class TestResolveConnected:
             set(),
         )
 
+    def test_a_joint_selection_brings_the_panels_touching_it(self):
+        """Areas join the same one-hop expansion as frames."""
+        from fea_toolkit.model.sap_data import AreaElement
+        from fea_toolkit.model.selection import Selection
+
+        md = _chain_model()
+        md.area_elements["A1"] = AreaElement(area_id="A1", area_tag=101, node_ids=["3", "4", "9"])
+        md.area_assignments["A1"] = "UB300"
+
+        frames, areas, nodes = Selection(
+            element_types=["Node"], element_ids=["3"]
+        ).resolve_connected(md)
+
+        assert areas == {"A1"}  # the panel on joint 3 ...
+        assert nodes == {"2", "3", "4", "9"}  # ... drawn closed, plus member 2's far end
+        assert frames == {"2", "3"}  # the members on joint 3 — never member 1 further up
+
+    def test_inactive_split_parents_are_not_drawn(self):
+        """A preprocessed model shows its active sub-elements, not the parent."""
+        from fea_toolkit.model.selection import Selection
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
+        mesh = preprocess_model(_branched_model(), {"split_elements": True})
+        frames, _areas, _nodes = Selection(sections=["UB300"]).resolve_connected(mesh)
+
+        assert "2" not in frames  # the superseded parent
+        assert {"2-0", "2-1"} <= frames  # its active sub-elements
+
 
 @pytest.mark.needs_pyvista
 class TestViewerAppliesTheLens:
@@ -129,6 +180,35 @@ class TestViewerAppliesTheLens:
 
         assert sorted(frame.elem_id for frame in frames) == ["1", "2", "3"]
         assert sorted(node.node_id for node in nodes) == ["1", "2", "3", "4", "9"]
+
+    def test_a_collapsed_and_filtered_view_composes(self):
+        """``collapse_to_parents`` and a selection are independent predicates."""
+        from fea_toolkit.model.selection import Selection
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.plotting.viewer import ModelViewer
+
+        mesh = preprocess_model(_branched_model(), {"split_elements": True})
+        viewer = ModelViewer(
+            mesh_model=mesh,
+            collapse_to_parents=True,
+            selection=Selection(sections=["UB300"]),
+        )
+        frames, _shells, _nodes = viewer.geometry()
+
+        # Collapsed: the unsplit members, so member 2 rather than its sub-elements.
+        assert sorted(frame.elem_id for frame in frames) == ["1", "2", "3", "4"]
+
+    def test_an_empty_selection_draws_the_members_and_their_joints(self):
+        """An empty expression means "everything" — minus joints on nothing."""
+        from fea_toolkit.model.selection import Selection
+        from fea_toolkit.plotting.viewer import ModelViewer
+
+        frames, _shells, nodes = ModelViewer(
+            model_data=_chain_model(), selection=Selection()
+        ).geometry()
+
+        assert sorted(frame.elem_id for frame in frames) == ["1", "2", "3"]
+        assert sorted(node.node_id for node in nodes) == ["1", "2", "3", "4"]  # not "9"
 
 
 class TestDerivedViews:
@@ -178,3 +258,21 @@ class TestDerivedViews:
 
         assert registry.add_derived("derived", "Derived", "no-such-parent", None) is None
         assert len(registry) == 0
+
+    def test_a_derived_view_can_be_registered_without_activating_it(self):
+        """``activate=False`` keeps the user where they were."""
+        from fea_toolkit.gui.controllers.view_registry import ViewRegistry
+        from fea_toolkit.model.selection import Selection
+
+        registry = ViewRegistry()
+        registry.add_geometry("unprocessed", "Unprocessed", _chain_model())
+        derived = registry.add_derived(
+            "unprocessed:1",
+            "joint 2",
+            "unprocessed",
+            Selection(element_types=["Node"], element_ids=["2"]),
+            activate=False,
+        )
+
+        assert derived.active is False
+        assert registry.active.key == "unprocessed"

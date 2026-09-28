@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 if TYPE_CHECKING:
     from .mesh_model import MeshModel
@@ -596,7 +596,7 @@ class Selection:
     # ── Display resolution ───────────────────────────────────────────────────
 
     def resolve_connected(
-        self, model: Union["SAPModelData", "MeshModel"]
+        self, model: Union["SAPModelData", "MeshModel"], include_parents: bool = False
     ) -> tuple[set[str], set[str], set[str]]:
         """Resolve this selection for **display**: ``(frames, areas, nodes)``.
 
@@ -614,17 +614,30 @@ class Selection:
         Expansion happens **only** when the selection opts into nodes
         (:attr:`element_types` names ``Node``, or :attr:`constraints` is set), so
         a pure ``section=`` / ``material=`` / ``z=`` filter never drags the node
-        set in.  Inactive split parents are skipped, matching what the viewport
-        draws by default.
+        set in.
 
         Args:
             model: The ``SAPModelData`` or ``MeshModel`` to resolve against.
+            include_parents: Keep superseded (inactive) split parents, which a
+                viewport in collapse-to-parents mode draws.  The default drops
+                them, matching what a view draws — and keeping a view's reported
+                counts equal to what it actually shows.
 
         Returns:
             ``(frame_ids, area_ids, node_ids)`` as sets of SAP labels.
         """
-        frame_ids = set(self.get_frame_ids(model))
-        area_ids = set(self.get_area_ids(model))
+        frames = getattr(model, "frame_elements", None) or {}
+        areas = getattr(model, "area_elements", None) or {}
+
+        def visible(elem: Any) -> bool:
+            """Whether a view would draw *elem* at all."""
+            return include_parents or not getattr(elem, "inactive", False)
+
+        # ``get_*_ids`` match on the criteria alone (and nodes ignore section /
+        # material criteria trivially), so the visibility of a matched element is
+        # this method's own business.
+        frame_ids = {eid for eid in self.get_frame_ids(model) if visible(frames.get(eid))}
+        area_ids = {aid for aid in self.get_area_ids(model) if visible(areas.get(aid))}
         node_ids = set(self.get_node_ids(model))
 
         if self._selects_nodes_explicitly():
@@ -633,17 +646,13 @@ class Selection:
             # whatever order the elements happen to be stored in.
             seeds: Optional[set[str]] = set(node_ids)
         else:
-            # Nodes are not selected in their own right, and they match section /
-            # material criteria trivially, so start empty and let the joints of
-            # the elements that *do* match accumulate below.
+            # Nodes are not selected in their own right, so start empty and let
+            # the joints of the elements that *do* match accumulate below.
             seeds = None
             node_ids = set()
 
-        frames = getattr(model, "frame_elements", None) or {}
-        areas = getattr(model, "area_elements", None) or {}
-
         for eid, elem in frames.items():
-            if getattr(elem, "inactive", False):
+            if not visible(elem):
                 continue
             node_i = getattr(elem, "node_i", None)
             node_j = getattr(elem, "node_j", None)
@@ -654,7 +663,7 @@ class Selection:
             node_ids.update(nid for nid in (node_i, node_j) if nid is not None)
 
         for aid, elem in areas.items():
-            if getattr(elem, "inactive", False):
+            if not visible(elem):
                 continue
             corners = tuple(getattr(elem, "node_ids", None) or ())
             incident = seeds is not None and any(nid in seeds for nid in corners)

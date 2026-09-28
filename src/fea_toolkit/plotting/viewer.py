@@ -212,7 +212,10 @@ class ModelViewer:
         # brings the members framing into a selected joint with it.
         frame_sel = area_sel = node_sel = None
         if self._selection is not None:
-            selected_frames, selected_areas, selected_nodes = self._selection.resolve_connected(md)
+            # Collapsed mode draws the parents, so it must resolve with them.
+            selected_frames, selected_areas, selected_nodes = self._selection.resolve_connected(
+                md, include_parents=collapse
+            )
             frame_sel, area_sel, node_sel = (
                 set(selected_frames),
                 set(selected_areas),
