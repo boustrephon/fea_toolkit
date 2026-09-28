@@ -495,6 +495,50 @@ subclass can then be deleted rather than kept on faith).
 **CI cannot catch this**: every job, the GUI one included, runs
 `ubuntu-latest`, where the decorator is never applied.
 
+### Validated on the real backend (2026-09-24)
+
+The offscreen suite cannot make this claim: under `QT_QPA_PLATFORM=offscreen`
+there is **no GL context**, so `ViewportInteraction.install()` degrades to
+"picking unavailable" and the crash was never exercised on the platform it
+actually happened on.  A driver (`local/gui_real_run.py`, private — it needs a
+display) runs the same `MainWindow` on **cocoa**:
+
+```bash
+unset QT_QPA_PLATFORM
+PYTHONPATH=<repo> python local/gui_real_run.py 4     # arg = rounds
+```
+
+Each round triggers a camera action and both display toggles (twice each, so the
+checkable state returns to start), runs `model.split` and `model.mesh` awaiting
+`window._worker`, switches **every** registered view, selects a tree row, and
+clicks the viewport three times with real Qt events — `QTest.mouseClick` → the
+`qt_mouse` filter → the live picker, i.e. the whole chain, unstubbed.
+
+Result — **six runs (one 6-round, then five 4-round), every one exit 0**, no
+signal and no traceback:
+
+| evidence | value |
+|---|---|
+| Qt platform | `cocoa` — the platform that crashed |
+| viewport | 613×430 logical @ dpr 2.0 → render window 1226×860 |
+| views live per round | `Unprocessed`, `Processed`, `Meshed` |
+| picks that selected a tree row | **2 per 4-round run** (`Selected N in the tree from the viewport.`) |
+
+Two findings worth keeping:
+
+* **Picking is live on the real backend — and only there.**  A 25-point probe
+  grid (`local/gui_pick_probe.py`) hits 5 points, tracing the sample model's
+  single thin column.  So a near-zero hit count says something about the
+  *model*, not about the conversion — do not read it as a wiring fault.
+* **`highlight changed` is a weak signal** for the same reason: a click on
+  nothing *clears* the selection, which changes the highlight actors too.  Count
+  the log's "from the viewport" line instead when re-running this.
+
+The coordinate conversion is sound on Retina, which is worth stating because it
+is the one thing a headless run cannot check: `to_device` maps the widget centre
+(306, 215) to (613, 430) inside a 1226×860 render window — exactly its centre.
+
+
 Related: the Preprocessor's `copy.deepcopy` ran on the GUI's worker thread and
 hit the same race.  `main_window._freeze_gc_once()` (a `gc.freeze()` before the
 handoff) is the stop-gap there; the deepcopy itself has since been replaced by
