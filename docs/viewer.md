@@ -120,13 +120,32 @@ ModelViewer(builder=None, model_data=None, mesh_model=None, backend="pyvista", *
 
 ```python
 viewer.show_model(show_nodes=True, show_shells=True,
-                  color_by_section=True, opacity=1.0, node_size=0.02)
+                  color_by_section=True, opacity=1.0, node_size=0.02,
+                  shrink=1.0, shell_opacity=None)
 ```
 
 Draws the structural model — frame elements as coloured lines, shell
 elements as polygon faces (**quads stay quads**, so no fan diagonal is drawn
 across a slab; triangles stay triangles and only 5+ sided elements are fanned),
 nodes as points.  Elements are coloured by section name by default.
+
+Two display transforms are available, both applied while drawing so the model
+itself is never modified:
+
+* ``shrink`` draws every element at that fraction of its true size, centred on
+  its true position — SAP2000's *shrink elements*, which opens up the joints so
+  they can be seen and picked (``0.9`` leaves a 5 % gap at each end of a member,
+  and a 10 % margin inside a slab).  Highlights are shrunk with the model they
+  mark, or they would stick out past it.
+* ``shell_opacity`` sets area-element opacity **alone**.  ``None`` (the default)
+  falls back to ``opacity``, keeping the single-knob behaviour; passing a value
+  lets a slab go translucent while the frame lines stay crisp.
+
+Change the opacity live, without re-drawing:
+
+```python
+viewer.set_shell_opacity(0.7)   # in place — an actor property, not geometry
+```
 
 ### Results overlay
 

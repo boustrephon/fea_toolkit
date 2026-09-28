@@ -124,6 +124,11 @@ _RESULTS_KEY_PREFIX = "results:"
 #: invisible 1:1 — the same reason SAP2000 offers a scale box.
 _DEFAULT_DEFORMED_SCALE = 50.0
 
+#: Default opacity for area elements.  Slabs are drawn translucent so the joints
+#: and the members behind them stay readable — the reason a modeller reaches for
+#: the opacity control at all.
+_DEFAULT_SHELL_OPACITY = 0.7
+
 
 def _case_of(view: Optional[View]) -> str:
     """The load case a results view stands for (``""`` for any other view).
@@ -529,13 +534,42 @@ class MainWindow(QMainWindow):
         self._deformed_scale.setStatusTip("Deformed-shape scale factor")
         self._deformed_scale.valueChanged.connect(self._on_deformed_scale_changed)
 
+        # Display quality knobs.  Opacity is an actor property, so it updates in
+        # place; shrink is geometry and needs the model redrawn — the two are
+        # wired differently for that reason.
+        self._shell_opacity = QDoubleSpinBox(self)
+        self._shell_opacity.setObjectName("shell_opacity")
+        self._shell_opacity.setRange(0.05, 1.0)
+        self._shell_opacity.setDecimals(2)
+        self._shell_opacity.setSingleStep(0.05)
+        self._shell_opacity.setValue(_DEFAULT_SHELL_OPACITY)
+        self._shell_opacity.setToolTip("Opacity of area elements (shells)")
+        self._shell_opacity.setStatusTip("Opacity of area elements (shells)")
+        self._shell_opacity.valueChanged.connect(self._on_shell_opacity_changed)
+
+        self._shrink = QDoubleSpinBox(self)
+        self._shrink.setObjectName("shrink")
+        self._shrink.setRange(0.5, 1.0)
+        self._shrink.setDecimals(2)
+        self._shrink.setSingleStep(0.05)
+        self._shrink.setValue(1.0)
+        self._shrink.setToolTip("Draw elements shrunken, opening up the joints")
+        self._shrink.setStatusTip("Draw elements shrunken, opening up the joints")
+        self._shrink.valueChanged.connect(self._on_shrink_changed)
+
         def _put(bar: QToolBar, key: Any) -> None:
             """Add one entry: ``None`` is a separator, ``"@name"`` a widget."""
+            widgets = {
+                "@deformed_scale": ("Scale", self._deformed_scale),
+                "@shell_opacity": ("Shells", self._shell_opacity),
+                "@shrink": ("Shrink", self._shrink),
+            }
             if key is None:
                 bar.addSeparator()
-            elif key == "@deformed_scale":
-                bar.addWidget(QLabel("Scale"))
-                bar.addWidget(self._deformed_scale)
+            elif key in widgets:
+                text, widget = widgets[key]
+                bar.addWidget(QLabel(text))
+                bar.addWidget(widget)
             else:
                 bar.addAction(a[key])
 
@@ -579,6 +613,9 @@ class MainWindow(QMainWindow):
             "view.show_labels",
             "view.show_loads",
             "view.show_forces",
+            None,
+            "@shell_opacity",
+            "@shrink",
         ):
             _put(view, key)
         self.addToolBar(Qt.ToolBarArea.RightToolBarArea, view)
@@ -774,7 +811,12 @@ class MainWindow(QMainWindow):
                 selection=selection,
             )
 
-        viewer.show_model(show_nodes=True, color_by_section=color_by_section)
+        viewer.show_model(
+            show_nodes=True,
+            color_by_section=color_by_section,
+            shell_opacity=float(self._shell_opacity.value()),
+            shrink=float(self._shrink.value()),
+        )
         self._viewer = viewer
         self._model = model
         self._selection_index = SelectionIndex.from_viewer(viewer)
@@ -1045,6 +1087,44 @@ class MainWindow(QMainWindow):
     def _on_show_shells(self, checked: bool) -> None:
         """Show or hide the area-element overlay."""
         self._backend.set_category_visible("shells", checked)
+
+    def _on_shell_opacity_changed(self, value: float) -> None:
+        """Apply the new shell opacity to the drawn actors, in place.
+
+        No re-render: opacity is a render property, so this stays responsive.
+        A view rendered *later* takes the value from the spin box, so the setting
+        survives a view switch.
+        """
+        if self._viewer is not None:
+            self._viewer.set_shell_opacity(float(value))
+
+    def _on_shrink_changed(self, _value: float) -> None:
+        """Re-draw with the new shrink factor.
+
+        Unlike opacity this changes the *geometry*, so it needs a re-render —
+        done in place by :meth:`_refresh_display`, which keeps the camera and the
+        tree selection.
+        """
+        self._refresh_display()
+
+    def _refresh_display(self) -> None:
+        """Re-render the active view in place after a display-only change.
+
+        The source, the camera and the Model Tree are all kept: this is the same
+        model drawn differently, so resetting any of them would lose the user's
+        place.  A no-op when no view is active — the controls are usable before
+        anything is open.
+        """
+        active = self._views.active
+        source = self._views.source(active.key) if active is not None else None
+        if source is None:
+            return
+        self.show_model(
+            source,
+            reset_view=False,
+            rebuild_tree=False,
+            selection=active.selection,
+        )
 
     # ── Preprocessing (Model menu) ───────────────────────────────────
 

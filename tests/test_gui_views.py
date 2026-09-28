@@ -8,6 +8,7 @@ camera nor the tree selection is disturbed by the switch.
 
 import time
 
+import numpy as np
 import pytest
 
 pytestmark = pytest.mark.needs_gui
@@ -86,6 +87,46 @@ def window(qapp, monkeypatch, tmp_path):
 
     monkeypatch.setenv(CONFIG_ENV_VAR, str(tmp_path / "absent.json"))
     win = MainWindow(model=_beam_and_column())
+    win.resize(900, 700)
+    win.show()
+    yield win
+    win.close()
+
+
+def _slab_model():
+    """A 2 x 2 slab of quads on a 3 x 3 node grid — area elements to draw.
+
+    Built from archive-shaped geometry, which is the shape a results view
+    reconstructs, so this is a real display path rather than a test-only model.
+    """
+    from fea_toolkit.io.results_repository import mesh_model_from_geometry
+
+    xs = [0.0, 1.0, 2.0, 0.0, 1.0, 2.0, 0.0, 1.0, 2.0]
+    ys = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0]
+    geometry = {
+        "node_tag": np.arange(1, 10),
+        "node_x": np.array(xs),
+        "node_y": np.array(ys),
+        "node_z": np.zeros(9),
+        "shell_eid": np.arange(1, 5),
+        "shell_sap_id": np.array(["A1", "A2", "A3", "A4"]),
+        "shell_sec_name": np.array(["SLAB"] * 4),
+        "shell_node_1": np.array([1, 2, 4, 5]),
+        "shell_node_2": np.array([2, 3, 5, 6]),
+        "shell_node_3": np.array([5, 6, 8, 9]),
+        "shell_node_4": np.array([4, 5, 7, 8]),
+    }
+    return mesh_model_from_geometry(geometry)
+
+
+@pytest.fixture()
+def slab_window(qapp, monkeypatch, tmp_path):
+    """A ``MainWindow`` showing a model with area elements."""
+    from fea_toolkit.gui.controllers.interaction import CONFIG_ENV_VAR
+    from fea_toolkit.gui.main_window import MainWindow
+
+    monkeypatch.setenv(CONFIG_ENV_VAR, str(tmp_path / "absent.json"))
+    win = MainWindow(model=_slab_model())
     win.resize(900, 700)
     win.show()
     yield win
@@ -232,3 +273,63 @@ def test_switching_views_keeps_the_camera(window):
 
     window._select_entity_in_tree("views", "Processed")
     assert np.allclose(_camera_flat(window), camera, rtol=1e-6, atol=1e-9)
+
+
+class TestDisplayQuality:
+    """The View toolbar's shell-opacity and shrink knobs.
+
+    They are wired differently on purpose: opacity is an actor property, so it
+    changes in place; shrink is geometry, so it re-renders the active view.
+    """
+
+    @staticmethod
+    def _shell_actor(window):
+        actors = window._backend.actors("shells")
+        assert actors, "no shell actor was drawn"
+        return actors[0]
+
+    def test_the_default_shell_opacity_is_seventy_percent(self, slab_window):
+        """Slabs are translucent so what is behind them stays readable."""
+        assert slab_window._shell_opacity.value() == pytest.approx(0.7)
+        actor = self._shell_actor(slab_window)
+        assert actor.GetProperty().GetOpacity() == pytest.approx(0.7)
+
+    def test_changing_the_opacity_updates_the_actors_in_place(self, slab_window):
+        """No re-render — the same actor, just translucent, so it stays interactive."""
+        actor = self._shell_actor(slab_window)
+
+        slab_window._shell_opacity.setValue(0.3)
+
+        assert self._shell_actor(slab_window) is actor, "opacity must not rebuild the model"
+        assert actor.GetProperty().GetOpacity() == pytest.approx(0.3)
+
+    def test_the_opacity_survives_a_view_switch(self, slab_window):
+        """A later render takes the value from the knob, not from a default."""
+        slab_window._shell_opacity.setValue(0.25)
+
+        slab_window._refresh_display()
+
+        actor = self._shell_actor(slab_window)
+        assert actor.GetProperty().GetOpacity() == pytest.approx(0.25)
+
+    def test_changing_the_shrink_redraws_the_geometry_shrunken(self, slab_window):
+        """Shrink *is* geometry, so it re-renders — in place, keeping the view."""
+        before = np.asarray(self._shell_actor(slab_window).mapper.dataset.points)
+
+        slab_window._shrink.setValue(0.9)
+
+        after = np.asarray(self._shell_actor(slab_window).mapper.dataset.points)
+        assert not np.allclose(before, after), "the drawn geometry did not change"
+        # The 2 x 2 slab pulls inward from every edge.
+        assert after[:, 0].min() > before[:, 0].min()
+        assert after[:, 0].max() < before[:, 0].max()
+        # Still the same view: re-drawing must not lose the user's place.
+        assert slab_window._views.active is not None
+
+    def test_shrinking_leaves_the_viewers_geometry_true_sized(self, slab_window):
+        """Display-only: what the viewer reports is still the real model."""
+        slab_window._shrink.setValue(0.9)
+
+        # The 2 x 2 slab keeps its true extent in the extracted geometry.
+        maxima = [s.vertices[:, 0].max() for s in slab_window._viewer._shells]
+        assert max(maxima) == pytest.approx(2.0)

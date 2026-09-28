@@ -889,4 +889,42 @@ deterministic triangles, a mixed mesh keeps each cell's own shape, the colour
 array matches the cell count, a highlighted quad is a single face, and an
 end-to-end `ModelViewer` run over archive-shaped geometry agrees.
 
+## Display transforms — shrink and shell opacity
+
+Two display-only knobs (`render_*`'s `shrink`, and `shell_opacity` /
+`set_category_opacity`), surfaced as the View toolbar's **Shells** and **Shrink**
+boxes.  The design points that are easy to get wrong later:
+
+- **They transform at draw time, never the geometry.**  `render_frames` /
+  `render_shells` scale a *copy* as they build the mesh, so `ModelViewer._frames`
+  and `._shells` keep the true coordinates.  Selection, picking, results and the
+  deformed overlay all read that true geometry — the overlay especially, which
+  must **not** inherit a display shrink (a deformed shape drawn from shrunken
+  endpoints would be wrong, not merely odd).
+- **Highlights take the same shrink** —
+  `render_highlights(highlights, shrink=…)`.  A highlight is drawn *over* the
+  element it marks, so if only the model shrank the highlight would stick out
+  past it.  `ModelViewer` remembers `self._shrink` and passes it on, which is why
+  `highlight_elements` needs no new argument.
+- **Opacity changes in place; shrink re-renders.**  Opacity is a VTK actor
+  property (`set_category_opacity`, mirroring `set_category_visible`), so a
+  transparency control never rebuilds the mesh and stays smooth on a large model.
+  Shrink is geometry, so the GUI re-renders the active view through
+  `MainWindow._refresh_display`, which uses `reset_view=False` and
+  `rebuild_tree=False` — the same model drawn differently must not move the
+  camera or drop the tree selection.
+- **`shell_opacity` is deliberately separate from `opacity`.**  `opacity` still
+  governs everything (the pre-existing behaviour) and `shell_opacity=None`
+  inherits it, so nothing changed for existing callers.  The GUI passes a value
+  because slabs want transparency while frame lines want to stay crisp; 70 % is
+  the default — enough to see through a slab, not so little that its section
+  colour stops reading.
+
+Pinned by `tests/test_renderers_pyvista.py::TestShrinkAndOpacity` (the transform
+arithmetic, the untouched caller geometry, the shrunk highlight, in-place
+opacity) and `tests/test_gui_views.py::TestDisplayQuality` (the 70 % default, the
+in-place update, the survival of a view switch, and a shrink re-render that keeps
+the view).
+
+
 

@@ -774,6 +774,34 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-24 — shell opacity and shrunken elements)
+
+Two display-quality controls, on the **View toolbar**:
+
+- **Shells** — opacity of area elements, default **0.70**, adjustable 0.05–1.00.
+  `ModelViewer.show_model(shell_opacity=…)` and `set_shell_opacity()` back it.
+  Deliberately separate from the pre-existing `opacity`: `None` inherits it, so
+  old callers are unchanged, while the GUI passes a value so slabs go translucent
+  and the frame lines stay crisp.
+- **Shrink** — draw every element at a fraction of its true size, centred:
+  SAP2000's *shrink elements*, which opens up the joints.  `render_frames`,
+  `render_shells` and `render_highlights` take `shrink`, defaulting to `1.0`
+  (true geometry).  Off by default, like SAP's display option.
+
+Design points worth keeping (full version: `docs/dev_notes.md` → *Display
+transforms*): both transform **at draw time**, so `ModelViewer._frames`/`_shells`
+keep true coordinates and the deformed overlay never inherits a shrink;
+highlights share the shrink or they would stick out past the element they mark;
+opacity updates **in place** (`set_category_opacity`, an actor property) while
+shrink re-renders in place via `MainWindow._refresh_display`, keeping the camera
+and tree selection.
+
+Verified visually as well as by test: two stacked slabs rendered with
+`shell_opacity=0.7, shrink=0.9` show the lower slab through the upper one and a
+clean gap at every joint.  15 new tests —
+`tests/test_renderers_pyvista.py::TestShrinkAndOpacity` (10) and
+`tests/test_gui_views.py::TestDisplayQuality` (5).
+
 ## DONE (2026-09-24 — area elements draw as quads, not fan triangles)
 
 Reported from the GUI: slabs showed a diagonal, i.e. every quad was drawn as two

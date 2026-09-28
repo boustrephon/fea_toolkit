@@ -372,6 +372,23 @@ def _shell(area_id="1", section="SLAB", n_vertices=4):
     )
 
 
+def _quad_geometry() -> dict:
+    """One quad area element (2 x 1) on four nodes — archive-shaped geometry."""
+    return {
+        "node_tag": np.array([1, 2, 3, 4]),
+        "node_x": np.array([0.0, 2.0, 2.0, 0.0]),
+        "node_y": np.array([0.0, 0.0, 1.0, 1.0]),
+        "node_z": np.zeros(4),
+        "shell_eid": np.array([1]),
+        "shell_sap_id": np.array(["1"]),
+        "shell_sec_name": np.array(["SLAB"]),
+        "shell_node_1": np.array([1]),
+        "shell_node_2": np.array([2]),
+        "shell_node_3": np.array([3]),
+        "shell_node_4": np.array([4]),
+    }
+
+
 class TestShellFaces:
     """Area elements are drawn as their own polygon — no fan diagonal.
 
@@ -482,21 +499,8 @@ class TestShellFaces:
         from fea_toolkit.io.results_repository import mesh_model_from_geometry
         from fea_toolkit.plotting.viewer import ModelViewer
 
-        geometry = {
-            "node_tag": np.array([1, 2, 3, 4]),
-            "node_x": np.array([0.0, 2.0, 2.0, 0.0]),
-            "node_y": np.array([0.0, 0.0, 1.0, 1.0]),
-            "node_z": np.zeros(4),
-            "shell_eid": np.array([1]),
-            "shell_sap_id": np.array(["1"]),
-            "shell_sec_name": np.array(["SLAB"]),
-            "shell_node_1": np.array([1]),
-            "shell_node_2": np.array([2]),
-            "shell_node_3": np.array([3]),
-            "shell_node_4": np.array([4]),
-        }
         viewer = ModelViewer(
-            mesh_model=mesh_model_from_geometry(geometry),
+            mesh_model=mesh_model_from_geometry(_quad_geometry()),
             backend="pyvista",
             off_screen=True,
         )
@@ -505,5 +509,188 @@ class TestShellFaces:
             mesh = viewer._backend.actors("shells")[0].mapper.dataset
             assert mesh.n_cells == 1
             assert mesh.get_cell(0).n_points == 4
+        finally:
+            viewer._backend.plotter.close()
+
+
+class TestShrinkAndOpacity:
+    """The two display-quality knobs: shrink (geometry) and opacity (an actor).
+
+    Both are *display* transforms — the geometry the caller passes in is never
+    modified — which is what lets the same model be drawn true-sized or shrunken
+    without touching selection or results.
+    """
+
+    def test_shrinking_frames_pulls_the_endpoints_toward_the_midpoint(self):
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_frames(
+                [_frame(start=(0.0, 0.0, 0.0), end=(0.0, 0.0, 10.0))],
+                {"UB300": (1.0, 0.0, 0.0)},
+                shrink=0.9,
+            )
+            points = np.asarray(renderer.actors("frames")[0].mapper.dataset.points)
+            assert points[0] == pytest.approx([0.0, 0.0, 0.5])  # 5% of 10 either end
+            assert points[1] == pytest.approx([0.0, 0.0, 9.5])
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_shrinking_shells_scales_them_about_their_centroid(self):
+        """The 2 x 1 quad's centroid is (1, 0.5); half size pulls it inward."""
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_shells([_shell()], {"SLAB": (0.7, 0.7, 0.7)}, shrink=0.5)
+            points = np.asarray(renderer.actors("shells")[0].mapper.dataset.points)
+            assert points[:, 0].min() == pytest.approx(0.5)
+            assert points[:, 0].max() == pytest.approx(1.5)
+            assert points[:, 1].min() == pytest.approx(0.25)
+            assert points[:, 1].max() == pytest.approx(0.75)
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_the_geometry_passed_in_is_never_modified(self):
+        """Display-only: the caller's own arrays survive a shrunk draw."""
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        shell = _shell()
+        original = shell.vertices.copy()
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_shells([shell], {"SLAB": (0.7, 0.7, 0.7)}, shrink=0.5)
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+        assert np.array_equal(shell.vertices, original)
+
+    def test_a_highlight_is_shrunk_with_the_model_it_marks(self):
+        """Otherwise the highlight sticks out past the element it marks."""
+        from fea_toolkit.plotting.renderers.base import HighlightDef
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_highlights(
+                [HighlightDef(area_ids=["1"], shells=[_shell()], color=(1.0, 0.0, 0.0))],
+                shrink=0.5,
+            )
+            points = np.asarray(renderer.actors("highlights")[0].mapper.dataset.points)
+            assert points[:, 0].min() == pytest.approx(0.5)
+            assert points[:, 0].max() == pytest.approx(1.5)
+        finally:
+            renderer.clear()
+
+    def test_opacity_reaches_the_shell_actor(self):
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_shells([_shell()], {"SLAB": (0.7, 0.7, 0.7)}, opacity=0.4)
+            actor = renderer.actors("shells")[0]
+            assert actor.GetProperty().GetOpacity() == pytest.approx(0.4)
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_opacity_can_be_changed_without_rebuilding_the_mesh(self):
+        """What keeps a transparency control interactive on a large model."""
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_shells([_shell()], {"SLAB": (0.7, 0.7, 0.7)})
+            actor = renderer.actors("shells")[0]
+
+            renderer.set_category_opacity("shells", 0.3)
+
+            # The *actor* is the same object — only its opacity changed, so no
+            # mesh was rebuilt.  (Not ``mapper.dataset is …``: PyVista wraps the
+            # same VTK data in a new Python object on every access.)
+            assert renderer.actors("shells") == [actor], "the mesh was rebuilt"
+            assert actor.GetProperty().GetOpacity() == pytest.approx(0.3)
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_show_model_draws_shrunk_while_keeping_true_geometry(self):
+        """The viewer keeps the model as the source of truth for everything else."""
+        from fea_toolkit.io.results_repository import mesh_model_from_geometry
+        from fea_toolkit.plotting.viewer import ModelViewer
+
+        viewer = ModelViewer(
+            mesh_model=mesh_model_from_geometry(_quad_geometry()),
+            backend="pyvista",
+            off_screen=True,
+        )
+        try:
+            viewer.show_model(show_nodes=False, show_shells=True, shrink=0.5)
+            assert viewer._shrink == pytest.approx(0.5)
+            # The extracted geometry is still the true quad...
+            assert viewer._shells[0].vertices[:, 0].max() == pytest.approx(2.0)
+            # ...while what was drawn is the half-size one.
+            points = np.asarray(viewer._backend.actors("shells")[0].mapper.dataset.points)
+            assert points[:, 0].max() == pytest.approx(1.5)
+        finally:
+            viewer._backend.plotter.close()
+
+    def test_shell_opacity_is_independent_of_the_model_opacity(self):
+        """A slab goes translucent while the frame lines stay crisp."""
+        from fea_toolkit.io.results_repository import mesh_model_from_geometry
+        from fea_toolkit.plotting.viewer import ModelViewer
+
+        viewer = ModelViewer(
+            mesh_model=mesh_model_from_geometry(_quad_geometry()),
+            backend="pyvista",
+            off_screen=True,
+        )
+        try:
+            viewer.show_model(show_nodes=False, show_shells=True, shell_opacity=0.5)
+            shells = viewer._backend.actors("shells")[0]
+            assert shells.GetProperty().GetOpacity() == pytest.approx(0.5)
+            # This model has no frames, so draw one to check it stayed opaque.
+            viewer._backend.render_frames([_frame()], {"UB300": (1.0, 0.0, 0.0)})
+            frames = viewer._backend.actors("frames")[0]
+            assert frames.GetProperty().GetOpacity() == pytest.approx(1.0)
+        finally:
+            viewer._backend.plotter.close()
+
+    def test_shell_opacity_falls_back_to_the_single_opacity_knob(self):
+        """``opacity`` alone still governs everything — the pre-existing behaviour."""
+        from fea_toolkit.io.results_repository import mesh_model_from_geometry
+        from fea_toolkit.plotting.viewer import ModelViewer
+
+        viewer = ModelViewer(
+            mesh_model=mesh_model_from_geometry(_quad_geometry()),
+            backend="pyvista",
+            off_screen=True,
+        )
+        try:
+            viewer.show_model(show_nodes=False, show_shells=True, opacity=0.4)
+            shells = viewer._backend.actors("shells")[0]
+            assert shells.GetProperty().GetOpacity() == pytest.approx(0.4)
+        finally:
+            viewer._backend.plotter.close()
+
+    def test_set_shell_opacity_applies_in_place(self):
+        """The live path a GUI control uses, and the value is remembered."""
+        from fea_toolkit.io.results_repository import mesh_model_from_geometry
+        from fea_toolkit.plotting.viewer import ModelViewer
+
+        viewer = ModelViewer(
+            mesh_model=mesh_model_from_geometry(_quad_geometry()),
+            backend="pyvista",
+            off_screen=True,
+        )
+        try:
+            viewer.show_model(show_nodes=False, show_shells=True)
+            actor = viewer._backend.actors("shells")[0]
+            viewer.set_shell_opacity(0.35)
+            assert viewer._shell_opacity == pytest.approx(0.35)
+            assert actor.GetProperty().GetOpacity() == pytest.approx(0.35)
         finally:
             viewer._backend.plotter.close()

@@ -66,6 +66,36 @@ def _polygon_cells(polygons: list[np.ndarray]) -> tuple[np.ndarray, list[int]]:
     return np.array(faces, dtype=int), counts
 
 
+def _shrunk_segment(
+    start: np.ndarray, end: np.ndarray, shrink: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Pull a segment's endpoints toward its midpoint by *shrink*.
+
+    The SAP2000 *shrink elements* display: at ``shrink=0.9`` every member is
+    drawn at 90 % of its length, centred on its true position, so its joints read
+    as gaps.  ``shrink=1.0`` (the default) is the true geometry.
+    """
+    a = np.asarray(start, dtype=float)
+    b = np.asarray(end, dtype=float)
+    if shrink >= 1.0:
+        return a, b
+    mid = (a + b) * 0.5
+    return mid + (a - mid) * shrink, mid + (b - mid) * shrink
+
+
+def _shrunk_polygon(vertices: np.ndarray, shrink: float) -> np.ndarray:
+    """Scale a polygon toward its centroid by *shrink* — display only.
+
+    The area-element counterpart of :func:`_shrunk_segment`, matching
+    ``_build_deformed_mesh``'s ``shrink`` (which scales the rest positions before
+    displacing them, so its point-count stays animation-invariant).
+    """
+    if shrink >= 1.0:
+        return vertices
+    centroid = vertices.mean(axis=0)
+    return centroid + (vertices - centroid) * shrink
+
+
 def _flag_direction(
     quantity: str,
     start: np.ndarray,
@@ -268,6 +298,24 @@ class PyVistaRenderer(RenderBackend):
             with contextlib.suppress(Exception):
                 self._plotter.render()
 
+    def set_category_opacity(self, category: str, opacity: float) -> None:
+        """Set the opacity of every actor of *category*.
+
+        In place rather than by re-rendering: PyVista can change an actor's
+        opacity directly, so a transparency control does not have to rebuild the
+        mesh — which is what keeps adjusting it interactive on a large model.
+
+        Args:
+            category: Category name, as passed to :meth:`_add_actor`.
+            opacity: New opacity — ``0`` invisible, ``1`` opaque.
+        """
+        for actor in self._categories.get(category, []):
+            with contextlib.suppress(Exception):
+                actor.GetProperty().SetOpacity(float(opacity))
+        if self._plotter is not None:
+            with contextlib.suppress(Exception):
+                self._plotter.render()
+
     def actors(self, category: str) -> list:
         """Actors registered under *category*, in creation order.
 
@@ -310,6 +358,7 @@ class PyVistaRenderer(RenderBackend):
         frames: list[FrameGeom],
         colors: dict[str, tuple[float, float, float]],
         opacity: float = 1.0,
+        shrink: float = 1.0,
     ) -> None:
         if not frames:
             return
@@ -321,8 +370,7 @@ class PyVistaRenderer(RenderBackend):
         lines = np.zeros((n, 3), dtype=int)  # VTK: [n_pts, i, j]
         per_line_color = np.zeros((n, 3))
         for idx, f in enumerate(frames):
-            points[idx * 2] = f.start
-            points[idx * 2 + 1] = f.end
+            points[idx * 2], points[idx * 2 + 1] = _shrunk_segment(f.start, f.end, shrink)
             lines[idx] = [2, idx * 2, idx * 2 + 1]
             per_line_color[idx] = colors.get(f.section, (0.5, 0.5, 0.5))
 
@@ -347,13 +395,14 @@ class PyVistaRenderer(RenderBackend):
         shells: list[ShellGeom],
         colors: dict[str, tuple[float, float, float]],
         opacity: float = 1.0,
+        shrink: float = 1.0,
     ) -> None:
         if not shells:
             return
         p = self.plotter
         import pyvista as pv
 
-        verts = np.vstack([s.vertices for s in shells])
+        verts = np.vstack([_shrunk_polygon(s.vertices, shrink) for s in shells])
         faces, face_counts = _polygon_cells([s.vertices for s in shells])
 
         # One colour per *face*: a quad is a single face and takes a single
@@ -408,6 +457,7 @@ class PyVistaRenderer(RenderBackend):
     def render_highlights(
         self,
         highlights: list[HighlightDef],
+        shrink: float = 1.0,
     ) -> None:
         if not highlights:
             return
@@ -421,8 +471,7 @@ class PyVistaRenderer(RenderBackend):
                 pts = np.zeros((n * 2, 3))
                 lines = np.zeros((n, 3), dtype=int)
                 for idx, f in enumerate(h.frames):
-                    pts[idx * 2] = f.start
-                    pts[idx * 2 + 1] = f.end
+                    pts[idx * 2], pts[idx * 2 + 1] = _shrunk_segment(f.start, f.end, shrink)
                     lines[idx] = [2, idx * 2, idx * 2 + 1]
                 r = h.radius or 0.03
                 mesh = pv.PolyData(pts, lines=lines)
@@ -451,7 +500,7 @@ class PyVistaRenderer(RenderBackend):
 
             # ── Highlighted shells ──
             if h.shells:
-                verts = np.vstack([s.vertices for s in h.shells])
+                verts = np.vstack([_shrunk_polygon(s.vertices, shrink) for s in h.shells])
                 faces, face_counts = _polygon_cells([s.vertices for s in h.shells])
                 n_faces = sum(face_counts)
                 if n_faces > 0:

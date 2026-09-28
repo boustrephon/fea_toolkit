@@ -181,6 +181,10 @@ class ModelViewer:
         self._shells: list[ShellGeom] = []
         self._nodes: list[NodeGeom] = []
         self._section_colors: dict[str, tuple[float, float, float]] = {}
+        # Display transforms — applied when drawing, never to the geometry above,
+        # so the model itself stays the source of truth for results and selection.
+        self._shrink: float = 1.0
+        self._shell_opacity: float = 1.0
         self._geom_extracted = False
         self._model_diag: Optional[float] = None
 
@@ -306,6 +310,8 @@ class ModelViewer:
         color_by_section: bool = True,
         opacity: float = 1.0,
         node_size: float = 0.02,
+        shrink: float = 1.0,
+        shell_opacity: Optional[float] = None,
     ) -> "ModelViewer":
         """Display the structural model.
 
@@ -315,6 +321,14 @@ class ModelViewer:
             color_by_section: If True, colour elements by section name.
             opacity: Element opacity.
             node_size: Node marker size.
+            shrink: Draw every element at this fraction of its true size,
+                centred on its true position — SAP2000's *shrink elements*, which
+                opens up the joints so they can be seen and clicked.  ``1.0``
+                (the default) is the true geometry.
+            shell_opacity: Opacity for area elements **alone**.  ``None`` (the
+                default) uses *opacity*, keeping the single-knob behaviour;
+                passing a value lets a slab be made translucent while the frame
+                lines stay crisp.
 
         Returns:
             ``self`` for chaining.
@@ -326,14 +340,38 @@ class ModelViewer:
         else:
             colors = dict.fromkeys(self._section_colors, (0.5, 0.5, 0.5))
 
-        self._backend.render_frames(self._frames, colors, opacity=opacity)
+        self._shrink = shrink
+        self._shell_opacity = opacity if shell_opacity is None else shell_opacity
+
+        self._backend.render_frames(self._frames, colors, opacity=opacity, shrink=shrink)
 
         if show_shells:
-            self._backend.render_shells(self._shells, colors, opacity=opacity)
+            self._backend.render_shells(
+                self._shells, colors, opacity=self._shell_opacity, shrink=shrink
+            )
 
         if show_nodes:
             self._backend.render_nodes(self._nodes, color=(0.3, 0.3, 0.3), radius=node_size)
 
+        return self
+
+    def set_shell_opacity(self, opacity: float) -> "ModelViewer":
+        """Re-apply an opacity to the drawn area elements, in place.
+
+        The live counterpart of ``show_model(shell_opacity=…)``: an actor's
+        opacity is a render property, so changing it does not have to rebuild the
+        mesh — which is what lets a transparency control stay interactive on a
+        large model.  The value is remembered, so it also applies to whatever
+        this viewer draws next.
+
+        Args:
+            opacity: New opacity — ``0`` invisible, ``1`` opaque.
+
+        Returns:
+            ``self`` for chaining.
+        """
+        self._shell_opacity = float(opacity)
+        self._backend.set_category_opacity("shells", opacity)
         return self
 
     # ── Results overlay ──────────────────────────────────────────────
@@ -571,7 +609,7 @@ class ModelViewer:
             shells=matched_shells,
         )
 
-        self._backend.render_highlights([h])
+        self._backend.render_highlights([h], shrink=self._shrink)
         return self
 
     def highlight_nodes(
@@ -600,7 +638,7 @@ class ModelViewer:
             label=label,
             nodes=matched_nodes,
         )
-        self._backend.render_highlights([h])
+        self._backend.render_highlights([h], shrink=self._shrink)
         return self
 
     def clear_highlights(self) -> "ModelViewer":

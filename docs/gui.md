@@ -223,6 +223,20 @@ switched.  It is recorded as [P23](_pending_work.md).
 | **View ▸ Display ▸ Show loads** | Pending the load-rendering milestone (6) |
 | **View ▸ Display ▸ Show force diagrams** | Pending the results milestone (7) |
 
+### Display quality
+
+Two knobs sit on the **View toolbar**:
+
+| Knob | What it does | Default |
+|---|---|---|
+| **Shells** | Opacity of area elements.  Applied in place, so turning it stays interactive; frame lines are untouched | `0.70` |
+| **Shrink** | Draw every element at this fraction of its true size, centred, which opens up the joints (SAP2000's *shrink elements*) | `1.00` — off |
+
+Both are *display* transforms: the model, the selection and any results are
+unaffected, and a value set here is kept while you switch views.  Shrink
+re-draws the model in place, keeping the camera and the tree selection.
+
+
 The toggles are re-checked whenever a model is displayed, so what the menu says
 always matches what is on screen.
 
@@ -276,6 +290,7 @@ jarring than a greyed-out one.
 | **Results** | Deformed shape, Clear results | Force diagrams, Storey response, Pushover curve |
 | **Help** | Documentation, About | — |
 | Toolbars | Open; camera views; display toggles; Split / Mesh; Deformed shape + Scale | Save / Export, Run / Stop, Force diagrams |
+| View toolbar | Zoom/camera; display toggles; **Shells** opacity and **Shrink** | Show labels, Show loads, Show force diagrams |
 
 ## Application identity
 

@@ -86,6 +86,7 @@ class RenderBackend(ABC):
         frames: list[FrameGeom],
         colors: dict[str, tuple[float, float, float]],
         opacity: float = 1.0,
+        shrink: float = 1.0,
     ) -> None:
         """Draw frame elements as lines or tubes.
 
@@ -93,6 +94,10 @@ class RenderBackend(ABC):
             frames: List of frame geometries.
             colors: ``{section_name: (r, g, b)}`` — RGB in 0..1 range.
             opacity: Opacity (0 = transparent, 1 = opaque).
+            shrink: Display shrink factor toward each element's midpoint —
+                ``1.0`` draws true length, ``0.9`` leaves a gap at every joint
+                (SAP2000's *shrink elements*).  Purely a display transform: the
+                geometry passed in is never modified.
         """
         ...
 
@@ -102,6 +107,7 @@ class RenderBackend(ABC):
         shells: list[ShellGeom],
         colors: dict[str, tuple[float, float, float]],
         opacity: float = 1.0,
+        shrink: float = 1.0,
     ) -> None:
         """Draw shell elements as planar surfaces.
 
@@ -109,6 +115,10 @@ class RenderBackend(ABC):
             shells: List of shell geometries.
             colors: ``{section_name: (r, g, b)}`` — RGB in 0..1 range.
             opacity: Opacity (0 = transparent, 1 = opaque).
+            shrink: Display shrink factor toward each element's centroid, so a
+                joint or a node can be seen between the elements (SAP2000's
+                *shrink elements*).  Display only — the caller's geometry is
+                never modified.
         """
         ...
 
@@ -132,11 +142,16 @@ class RenderBackend(ABC):
     def render_highlights(
         self,
         highlights: list[HighlightDef],
+        shrink: float = 1.0,
     ) -> None:
         """Draw highlighted elements/nodes on top of the model.
 
         Args:
             highlights: List of highlight definitions.
+            shrink: The same display shrink the model was drawn with.  A
+                highlight must match what it points at, so a shrunk display
+                needs a shrunk highlight — otherwise the highlight sticks out
+                past the element it marks.
         """
         ...
 
