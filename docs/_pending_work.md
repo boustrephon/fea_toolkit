@@ -836,9 +836,9 @@ before this — the coverage gap is what let it through.
 coincident with the model's own shell with grey edges; against 70 % shells it
 washed out, and an outline drawn on the same coincident surface did not survive
 either.  A selected area element is now a **thin slab straddling it**
-(`_selection_slab`: two faces offset along the normal, joined by a rim), opaque,
-at the same model-scaled half-thickness the frame tube uses — volume instead of a
-coincident surface, which is exactly why the frame cue is a tube.
+(`_selection_slab`: two faces offset along the normal, joined by a rim) at **85 %
+opacity**, at the same model-scaled half-thickness the frame tube uses — volume
+instead of a coincident surface, which is exactly why the frame cue is a tube.
 
 Full write-up: `docs/dev_notes.md` → *Selection feedback*.  Verified by rendering a
 2 × 2 slab at 70 % opacity with one element selected: a solid orange panel against

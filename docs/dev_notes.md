@@ -1014,11 +1014,13 @@ shell-pick test at all) missed this.
 **The cue is now volume.**  `_selection_slab` extrudes each selected element
 slightly along its normal — two faces offset to either side joined by a rim — so the
 highlight *surrounds* the element instead of lying on it, exactly as a selected
-frame is a tube rather than a recoloured line.  It is drawn **opaque** (a selection
-cue has to read over any section colour) at the same model-scaled half-thickness
-the tube uses, so the two cues read as one gesture.  Verified by rendering a 2 × 2
-slab at 70 % shell opacity with one element selected: a solid orange panel against
-the grey remainder.
+frame is a tube rather than a recoloured line.  It is drawn at **85 % opacity** —
+solid enough to read as a cue over any section colour (the frame tube stays fully
+opaque), translucent enough to see what it covers — at the same model-scaled
+half-thickness the tube uses, so the two cues read as one gesture.  Translucency
+costs the slab no clarity, because it is volume and not a coincident surface.
+Verified by rendering a 2 × 2 slab at 70 % shell opacity with one element selected:
+a solid orange panel against the grey remainder.
 
 Two smaller lessons from the same work, both of which bit here and are now pinned
 in tests: PyVista's `mapper.dataset` returns a **new Python wrapper** on every

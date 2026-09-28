@@ -962,8 +962,9 @@ class TestNodeMarkersAndSelection:
             mesh = slab.mapper.dataset
             assert mesh.n_points == 8
             assert mesh.bounds[4] < 0.0 < mesh.bounds[5]
-            # Opaque, like the frame tube: a selection cue must read over any colour.
-            assert slab.GetProperty().GetOpacity() == pytest.approx(1.0)
+            # 85 %: reads as a cue over any section colour, still shows what it
+            # covers.  The slab is volume, so translucency costs it no clarity.
+            assert slab.GetProperty().GetOpacity() == pytest.approx(0.85)
             assert slab.GetProperty().GetColor() == pytest.approx((1.0, 0.45, 0.0), abs=0.01)
         finally:
             renderer.clear()

@@ -590,7 +590,11 @@ class PyVistaRenderer(RenderBackend):
                     actor = p.add_mesh(
                         mesh,
                         color=h.color,
-                        opacity=1.0,  # a selection cue must read over any section colour
+                        # Opaque enough to read as a cue over any section colour (the
+                        # frame tube stays fully opaque), translucent enough to see
+                        # what it covers.  The slab is volume rather than a coincident
+                        # surface, so translucency costs it no clarity.
+                        opacity=0.85,
                         show_scalar_bar=False,
                     )
                     self._add_overlay(actor, "highlights")
