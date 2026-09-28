@@ -36,7 +36,7 @@ from qtpy.QtWidgets import (
 
 from .app import APP_NAME
 from .controllers.interaction import load_policy
-from .controllers.selection import SelectionIndex
+from .controllers.selection import CATEGORY_NOUNS, SelectionIndex
 from .controllers.view_registry import View, ViewRegistry
 from .controllers.worker import TaskWorker
 from .models.tree_model import ModelTreeModel
@@ -268,7 +268,8 @@ class MainWindow(QMainWindow):
             return
         group_key = self._selection_index.group_key(category)
         if self._select_entity_in_tree(group_key, label):
-            self.log(f"Selected {label} in the tree from the viewport.")
+            noun = CATEGORY_NOUNS.get(category, "entity")
+            self.log(f"Selected {noun} {label} in the tree from the viewport.")
 
     def _clear_selection(self) -> None:
         """Empty the inspector, the tree selection and the viewport highlight."""

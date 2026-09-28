@@ -164,7 +164,9 @@ identity index (`gui/controllers/selection.py`), so they cannot drift apart:
 * **Viewport → tree.**  **Left-click** an element in the viewport: its entry in
   the Model Tree is selected, the containing group is expanded and scrolled to,
   and the Inspector and highlight follow.  Clicking a joint selects the
-  **node**, not the member passing through it.
+  **node**, not the member passing through it.  The message log names what was
+  picked in full — *Selected node 146 in the tree from the viewport.* — so a
+  selection can be identified from the log alone.
 * **A left-*drag* orbits** and never selects — a press that travels more than
   `drag_threshold_px` is treated as camera movement.
 * **Clicking empty space clears** the selection (highlight and Inspector).

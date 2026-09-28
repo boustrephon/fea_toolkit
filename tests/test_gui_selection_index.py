@@ -8,7 +8,11 @@ pick.
 
 import numpy as np
 
-from fea_toolkit.gui.controllers.selection import CATEGORY_GROUPS, SelectionIndex
+from fea_toolkit.gui.controllers.selection import (
+    CATEGORY_GROUPS,
+    CATEGORY_NOUNS,
+    SelectionIndex,
+)
 from fea_toolkit.plotting.renderers.base import (
     FrameGeom,
     NodeGeom,
@@ -47,6 +51,21 @@ def test_nodes_resolve_by_cell_order():
     index = SelectionIndex(nodes=[_node("3"), _node("4")])
     assert index.label("nodes", 0) == "3"
     assert index.label("nodes", 1) == "4"
+
+
+def test_every_render_category_has_a_group_and_a_noun():
+    """The category maps must cover the same keys.
+
+    A category missing from ``CATEGORY_GROUPS`` selects nothing when clicked; one
+    missing from ``CATEGORY_NOUNS`` logs a bare id with no kind.  Both are silent,
+    so the maps are pinned against each other here rather than by a third
+    click-through test — the log line is one dict lookup, not a code path.
+    """
+    assert set(CATEGORY_GROUPS) == set(CATEGORY_NOUNS)
+    # Singular, lower-case, ready to drop into a sentence.
+    assert CATEGORY_NOUNS["frames"] == "frame element"
+    assert CATEGORY_NOUNS["shells"] == "area element"
+    assert CATEGORY_NOUNS["nodes"] == "node"
 
 
 def test_shell_cells_follow_the_renderers_own_faces():

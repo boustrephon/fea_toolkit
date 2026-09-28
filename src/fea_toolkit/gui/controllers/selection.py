@@ -27,7 +27,7 @@ from typing import Any, Optional
 # invisible until a click selects the wrong element.
 from ...plotting.renderers.base import polygon_face_count
 
-__all__ = ["CATEGORY_GROUPS", "SelectionIndex"]
+__all__ = ["CATEGORY_GROUPS", "CATEGORY_NOUNS", "SelectionIndex"]
 
 #: Render category -> the model tree group key holding its entities
 #: (keys as defined by ``models/model_index.py``).
@@ -35,6 +35,18 @@ CATEGORY_GROUPS = {
     "frames": "frame_elements",
     "shells": "area_elements",
     "nodes": "nodes",
+}
+
+#: Render category -> the singular noun the message log uses for it.
+#:
+#: Kept alongside :data:`CATEGORY_GROUPS` and matching the tree's own group labels
+#: ("Frame Elements", "Area Elements") so a message names an entity in the same
+#: vocabulary as the row it selected — "Selected node 146 …" rather than a bare
+#: number whose kind the reader has to infer.
+CATEGORY_NOUNS = {
+    "frames": "frame element",
+    "shells": "area element",
+    "nodes": "node",
 }
 
 #: Render category -> the identity attribute its entities carry.

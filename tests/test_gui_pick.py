@@ -92,6 +92,10 @@ def test_a_clean_click_selects_the_matching_tree_row(window, monkeypatch):
     _click(window)
 
     assert _current_label(window) == frame.elem_id
+    # The log names *what* was selected, not just its id.
+    assert f"Selected frame element {frame.elem_id} in the tree" in (
+        window._message_log.toPlainText()
+    )
     # The group was never expanded by hand -- the click must expand it.
     current = window._tree_view.selectionModel().currentIndex()
     assert window._tree_view.isExpanded(current.parent())
@@ -113,6 +117,7 @@ def test_a_node_click_selects_the_node_row(window, monkeypatch):
     _click(window)
 
     assert _current_label(window) == nodes[1].node_id
+    assert f"Selected node {nodes[1].node_id} in the tree" in (window._message_log.toPlainText())
 
 
 def test_a_drag_never_picks(window, monkeypatch):
