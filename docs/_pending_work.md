@@ -240,6 +240,38 @@ implemented, config-gated **off by default** (existing models unchanged):
   element with degrading shear) are recorded here and in
   `docs/vecchio_emara_benchmark.md`.
 
+#### P28 — `check_self_weight_consistency` under-counts vertical shells (XY-projected area)
+
+Source: the 2026-09-28 P27 acceptance check, on the Admin Building
+(`Admin_0.7E_short term unfixed.s2k`), where it reports a −21.7 % **false**
+inconsistency on a model whose self-weight is exactly right.
+
+**What.**  `model/checks.py::check_self_weight_consistency()` computes the
+*expected* shell self-weight with a **shoelace area on x/y only** (≈ lines
+470-487 — `xs`/`ys` from the vertices, z never used).  A **vertical** wall
+therefore projects to approximately nothing and contributes ~0, so the expected
+total comes out short for any model with walls.  On the Admin Building it
+reports `expected = 40 568.8` against `applied = 51 818.5`.
+
+**The application path is right — and proves it.**  `_loads.py` applies shell
+self-weight as `polygon_area_3d(pts) × thickness × unit_weight` (≈ line 719),
+which is orientation-independent.  An independent sum over the model — frames
+`Σ A·ρ·L = 21 339.7` + shells `Σ polygon_area_3d·t·ρ = 30 478.8` =
+**51 818.459** — matches the solve's summed base reaction **to the digit**,
+while the same sum with the XY-projected area gives only `19 229.1` for the
+shells (the source of the −21.7 %).
+
+**Fix.**  Use `polygon_area_3d` (already used by `_loads.py`; lives in
+`model/geometry`) in `check_self_weight_consistency` instead of the inline
+shoelace, and add a regression test with a **vertical** wall panel — e.g. a
+single-wall model whose expected weight is known by hand, which fails today.
+
+**Why it matters.**  This check is the toolkit's self-weight audit — the thing a
+reviewer runs to confirm "the gravity load is what the model says it is".  A
+false −22 % alarm on a correct model is worse than no check: it trains the
+reader to ignore it.  Until it is fixed, `passed` cannot be trusted for any
+model with vertical shells.
+
 ### Tier 3 — Feature gaps (placeholders / partial)
 
 #### P25 — classic support symbols on top of the per-DOF glyphs
@@ -969,9 +1001,13 @@ was easy to get wrong:
 * **`admin_report.py` runs `pattern_scales={"DEAD": 1.0}`, but in *this* model
   `DEAD` is an empty pattern.**  The raw table is
   `LoadPat=DEAD … SelfWtMult=0` with no loads assigned to it; the gravity load
-  lives in the pattern named `Self weight` (`SelfWtMult=1`).  A `DEAD` run
-  therefore converges on **zero** load (summed base reaction `Fz = 0.000`, max
-  |dz| = 0) — a trivial solve, not the gravity case.  The figures above come
+  lives in the pattern named `Self weight` (`SelfWtMult=1`).  The intent was
+  `Self weight` = member self-weight and `DEAD` = **superimposed** dead load —
+  but the file contains **no frame or joint load table at all** (69 tables; the
+  only load table is `AREA LOADS - UNIFORM`, carrying the `LL` panel loads), so
+  the SDL loads are absent from the export, not dropped by the parser.  A `DEAD`
+  run therefore converges on **zero** load (summed base reaction `Fz = 0.000`,
+  max |dz| = 0) — a trivial solve, not the gravity case.  The figures above come
   from a real `Self weight` run.
 * **Self-weight is applied per pattern from its own `SelfWtMult`, as
   volume × unit weight — verified numerically.**  An independent sum over the
@@ -994,7 +1030,7 @@ total is `51 818.5` — a **−21.7 % false "inconsistency"** on a model that is
 actually consistent.  The *application* path (`_loads.py`) uses
 `polygon_area_3d` and is right, as the exact match above shows.  The fix is to
 use `polygon_area_3d` in the check too; until then the check is unusable on any
-model with vertical shells.  (Worth promoting to a P-item in this register.)
+model with vertical shells.  Filed as **P28** (Tier 2).
 
 **Tests.**  Qt-free: `tests/test_case_listing.py` (listing + `run_static_cases`)
 and `tests/test_run_case_set.py` (the in-memory archive, combination reduction,
