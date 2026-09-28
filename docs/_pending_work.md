@@ -774,6 +774,29 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-24 — GUI Slice C: results archives open as views)
+
+**File ▸ Open results…** reads an `.npz` / `.h5` results archive and adds a view
+per load case, and the views **draw** — with no model open at all:
+
+- `mesh_model_from_geometry(arrays)` rebuilds a **display model** from the
+  archive's own geometry (node coordinates, connectivity, section names, and the
+  parent/child links, which are recovered rather than trusted so the model
+  collapses the way the analysed one did).  `ResultsRepository.as_model()` is the
+  seam method; a dangling connectivity reference is dropped rather than drawn at
+  the origin, and a triangle stored with a blank fourth corner still has three
+  nodes.
+- `ViewRegistry.add_results(..., model=...)` makes a results view drawable by
+  sharing one display model across every case view — a lens, not a copy.
+- `MainWindow.open_results_path(path)` (dialog-free, so tests drive it) registers
+  the views, activates the first and reports what happened; a file that is not a
+  results archive, or is missing, is logged and refused.  Because an archive has
+  no materials, loads, restraints or unit system, the Model-menu actions stay
+  disabled while its views are displayed — it is display-only.
+
+Still to come: drawing the **results themselves** (deformed shapes, force
+diagrams per case) onto that geometry — milestones 6–7 of the roadmap.
+
 ## DONE (2026-09-24 — GUI Slice C, part 1: the results foundation)
 
 The first half of the results views, with nothing half-wired in the interface:

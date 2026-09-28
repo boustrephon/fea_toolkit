@@ -107,10 +107,30 @@ elements shows those elements and their joints.  Those two readings are
 deliberately different — the reasoning is in
 [Development Notes](dev_notes.md) → *Selection: two resolutions*.
 
+### Results views
+
+**File ▸ Open results…** reads an `.npz` / `.h5` results archive and adds a
+**view per load case**, labelled with the case name (qualified by its
+combination when the two differ).  An archive carries the geometry it was
+written from, so this works with **no model open**: the views draw the analysed
+geometry, and the case views share one display model between them.
+
+Those views are display-only — an archive has no materials, loads or restraints
+and no unit system — so `Model ▸ Split elements` / `Meshed` stay disabled while
+one is displayed.  Open the `.s2k` when you want to preprocess or re-analyse
+(`File ▸ Open`), and the results views are replaced by that model's own views.
+
+What is still to come: **deformed shapes and force diagrams** drawn *onto* the
+geometry, per case (milestones 6–7 of
+[the roadmap](gui_roadmap.md)).  Today a case view shows the geometry those
+results were computed on.
+
+### A view is a lens
+
 A view is a **lens, not a copy**: every view shares the one model in memory, and
 re-running `Split` refreshes the `Processed` view rather than piling up
-duplicates.  Results views (deformed shapes and force diagrams per load case)
-will join the same group when analysis lands.
+duplicates.  That holds for results views too — a dozen cases cost one model
+between them.
 
 ## Camera controls
 
@@ -241,8 +261,8 @@ jarring than a greyed-out one.
 
 | Menu | Live | Greyed |
 |---|---|---|
-| **File** | Open (`Ctrl+O`), Quit | Save results, Export Tcl, Export screenshot |
-| **Edit** | — | Copy, Preferences |
+| **File** | Open (`Ctrl+O`), Open results…, Quit | Save results, Export Tcl, Export screenshot |
+| **Edit** | Duplicate view, Edit view selection… | Copy, Preferences |
 | **View** | Zoom to fit, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show shells, Clear highlights) | Show element labels, Show loads, Show force diagrams, Reset layout |
 | **Model** | Split elements, Mesh areas (enabled while a parsed model is open) | Selections, Units |
 | **Analysis** | — | Run, Static, Modal, Response spectrum, Pushover, Stop |
