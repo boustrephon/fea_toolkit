@@ -129,14 +129,20 @@ class InMemoryModelStore(ModelStore):
 
     Args:
         raw: The parsed ``SAPModelData``.
-        mesh_model: Optional already-preprocessed model to return from
-            :meth:`mesh` without re-running the pipeline.
+        mesh_model: Optional **already-preprocessed** model to serve from
+            :meth:`mesh` (and :meth:`preprocessed`) without re-running the
+            pipeline.  Leave it ``None`` — the GUI's case — so that every
+            :meth:`mesh` call runs the Preprocessor with the config it was
+            given.
         source: Human-readable provenance, e.g. a file name.
     """
 
     def __init__(self, raw: Any, mesh_model: Any = None, source: str = "") -> None:
         self._raw = raw
-        self._mesh_model = mesh_model
+        self._injected = mesh_model
+        #: The last mesh this store *produced* (not injected).  Kept apart from
+        #: ``_injected`` deliberately — see :meth:`mesh`.
+        self._produced: Any = None
         self.source = source
 
     def header(self, model: Any = None) -> ModelHeader:
@@ -147,22 +153,36 @@ class InMemoryModelStore(ModelStore):
         return self._raw
 
     def mesh(self, config: Optional[dict] = None) -> Any:
-        """Preprocess the raw model (uncached — configs differ per run)."""
-        if self._mesh_model is not None:
-            return self._mesh_model
+        """Preprocess the raw model with *config*.
+
+        A mesh passed to the constructor short-circuits this — the caller has
+        already done the work.  Otherwise the pipeline runs **every time, with
+        the config given**: ``Model ▸ Split elements`` and ``Model ▸ Mesh
+        areas`` are two different configs, and returning the first result for
+        the second silently made the second a no-op (the Admin Building was then
+        analysed with 323 un-meshed areas instead of 1177 shells, and the run
+        went singular).
+        """
+        if self._injected is not None:
+            return self._injected
         from ..opensees.preprocessor import preprocess_model
 
         return preprocess_model(self._raw, dict(config or {}))
 
     def preprocessed(self) -> Any:
-        """The ``MeshModel`` already produced for this store, or ``None``."""
-        return self._mesh_model
+        """The preprocessed model this store holds, or ``None``.
+
+        The injected one if there is one, else the last one :meth:`mesh`
+        produced.
+        """
+        return self._injected if self._injected is not None else self._produced
 
     def set_preprocessed(self, mesh_model: Any) -> None:
-        """Record *mesh_model* so :meth:`preprocessed` and a later run see it.
+        """Record *mesh_model* as the last preprocessed model this store produced.
 
         The GUI calls this when a ``Model ▸ Split`` / ``Mesh areas`` run
         finishes, so a following analysis uses the topology the user is looking
-        at rather than silently preprocessing again (P27, refinement 1).
+        at (P27, refinement 1).  It is a **record, not a cache**: :meth:`mesh`
+        still re-runs the pipeline for a new config.
         """
-        self._mesh_model = mesh_model
+        self._produced = mesh_model

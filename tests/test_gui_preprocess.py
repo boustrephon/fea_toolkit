@@ -223,3 +223,68 @@ def test_preprocessing_keeps_the_camera(window):
     _run_preprocess(window, "model.split")
 
     assert np.allclose(_camera_flat(window), camera, rtol=1e-6, atol=1e-9)
+
+
+# ── Split then Mesh areas: the second action must actually mesh ────────
+
+
+def _slab_model():
+    """A single four-node area — enough to see meshing happen."""
+    from fea_toolkit.model.sap_data import (
+        AreaElement,
+        Material,
+        Node,
+        Restraint,
+        SAPModelData,
+        ShellSection,
+    )
+
+    return SAPModelData(
+        nodes={
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 4.0, 0.0, 0.0),
+            "3": Node("3", 3, 4.0, 4.0, 0.0),
+            "4": Node("4", 4, 0.0, 4.0, 0.0),
+        },
+        restraints={"1": Restraint([1, 1, 1, 1, 1, 1])},
+        materials={"C30": Material(name="C30", type="Concrete", E_mod=3.0e10, unit_weight=25.0)},
+        sections={"SLAB": ShellSection(name="SLAB", shape="Shell", material="C30", thickness=0.2)},
+        frame_elements={},
+        area_elements={"A1": AreaElement("A1", 1, ["1", "2", "3", "4"])},
+        frame_assignments={},
+        area_assignments={"A1": "SLAB"},
+        groups={},
+        frame_auto_mesh={},
+    )
+
+
+@pytest.fixture()
+def slab_window(qapp, monkeypatch, tmp_path):
+    """A ``MainWindow`` showing a single area element."""
+    from fea_toolkit.gui.controllers.interaction import CONFIG_ENV_VAR
+    from fea_toolkit.gui.main_window import MainWindow
+
+    monkeypatch.setenv(CONFIG_ENV_VAR, str(tmp_path / "absent.json"))
+    win = MainWindow(model=_slab_model())
+    win.resize(900, 700)
+    win.show()
+    yield win
+    win.close()
+
+
+def test_mesh_areas_after_split_really_meshes(slab_window):
+    """Regression: ``Mesh areas`` must not silently reuse the ``Split`` result.
+
+    ``InMemoryModelStore.mesh()`` short-circuited on the model
+    ``set_preprocessed()`` had stored, so the second config was ignored and the
+    second action returned the first's model.  On a real building that meant a
+    split-only mesh was labelled "Meshed" and analysed with un-meshed areas — a
+    mechanism, so every case failed with ``matrix singular``.
+    """
+    _run_preprocess(slab_window, "model.split")
+    assert not slab_window._model.area_element_types  # split only: no shells
+
+    _run_preprocess(slab_window, "model.mesh")
+    assert slab_window._model.area_element_types  # the config was honoured
+    assert slab_window._store.preprocessed() is slab_window._model
+    assert "Meshed" in slab_window._message_log.toPlainText()

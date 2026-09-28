@@ -74,3 +74,72 @@ def test_the_store_answers_a_header_for_any_model_it_is_given():
 
     assert store.header(mesh).n_frames == len(mesh.frame_elements)
     assert store.header().n_frames == len(md.frame_elements)
+
+
+def _slab_model():
+    """A four-node area — enough to tell a meshed run from a split-only one."""
+    from fea_toolkit.model.sap_data import (
+        AreaElement,
+        Material,
+        Node,
+        Restraint,
+        SAPModelData,
+        ShellSection,
+    )
+
+    return SAPModelData(
+        nodes={
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 4.0, 0.0, 0.0),
+            "3": Node("3", 3, 4.0, 4.0, 0.0),
+            "4": Node("4", 4, 0.0, 4.0, 0.0),
+        },
+        restraints={"1": Restraint([1, 1, 1, 1, 1, 1])},
+        materials={"C30": Material(name="C30", type="Concrete", E_mod=3.0e10, unit_weight=25.0)},
+        sections={"SLAB": ShellSection(name="SLAB", shape="Shell", material="C30", thickness=0.2)},
+        frame_elements={},
+        area_elements={"A1": AreaElement("A1", 1, ["1", "2", "3", "4"])},
+        frame_assignments={},
+        area_assignments={"A1": "SLAB"},
+        groups={},
+        frame_auto_mesh={},
+    )
+
+
+def test_a_new_config_is_not_defeated_by_the_last_preprocessed_model():
+    """``mesh(config)`` must run with *config*, never return a stale mesh.
+
+    ``Model ▸ Split elements`` then ``Model ▸ Mesh areas`` are two different
+    configs.  ``mesh()`` short-circuited on the model ``set_preprocessed()`` had
+    stored, so the second action silently did nothing — the Admin Building was
+    then analysed with 323 **un-meshed** areas (a mechanism, hence the singular
+    matrix) instead of 1177 shells.
+    """
+    from fea_toolkit.io.model_store import InMemoryModelStore
+
+    store = InMemoryModelStore(_slab_model())
+
+    split_only = store.mesh({"split_elements": True})
+    store.set_preprocessed(split_only)  # what the GUI records after the action
+    assert not split_only.area_element_types  # split only: no shells built
+
+    meshed = store.mesh({"split_elements": True, "create_shells": True})
+
+    assert meshed is not split_only
+    assert meshed.area_element_types  # the config was honoured
+    # ``set_preprocessed`` is a record, not a cache: it still reports the last
+    # model the *caller* recorded, until the caller records the new one.
+    assert store.preprocessed() is split_only
+
+
+def test_an_injected_mesh_short_circuits_the_pipeline():
+    """A mesh handed to the constructor is served as-is (its documented job)."""
+    from fea_toolkit.io.model_store import InMemoryModelStore
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+
+    md = _slab_model()
+    injected = preprocess_model(md, {"split_elements": True})
+    store = InMemoryModelStore(md, mesh_model=injected)
+
+    assert store.mesh({"split_elements": True, "create_shells": True}) is injected
+    assert store.preprocessed() is injected
