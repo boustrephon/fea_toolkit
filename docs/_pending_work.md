@@ -242,6 +242,39 @@ implemented, config-gated **off by default** (existing models unchanged):
 
 ### Tier 3 — Feature gaps (placeholders / partial)
 
+#### P25 — classic support symbols on top of the per-DOF glyphs
+
+Source: this register, *DONE — support restraints*; `docs/dev_notes.md` →
+*Support symbols*.
+
+**What.**  Restraint display shipped as **per-DOF glyphs**: an arrow per
+restrained translation, a curl per restrained rotation.  Per-DOF is correct for
+*any* six-flag set.  The staged follow-up, chosen deliberately, is to draw the
+textbook symbol for the patterns that have one:
+
+- a hatched "ground" line under a fully **fixed** base;
+- a **pin** triangle for `[1, 1, 1, 0, 0, 0]`;
+- a **roller** symbol for the single-translation sets;
+- the arrows above as the **fallback** for everything else, so no restraint set
+  is ever left undrawn.
+
+**Two decisions to settle first** — which is why this is not folded into the
+glyph work:
+
+1. *Which plane a symbol is drawn in.*  A ground hatch is unambiguous on paper
+   and not in 3D.  SAP resolves it with **joint local axes**, and `Restraint`
+   carries no coordinate system — so either draw the symbol in the plane normal to
+   the restrained axis (fine for one-DOF sets, arbitrary for a fixed base) or
+   default to the global X–Y plane and document that.
+2. *Whether the rotation glyphs belong to a "fixed base" symbol* or stay
+   separate: one hatch is quieter than three arrows plus three curls, but the DOF
+   detail would then live only in the Inspector row.
+
+**Where.**  One geometry builder per symbol in
+`plotting/restraint_glyphs.py`, beside the arrows; the pattern table and its
+names in `model/supports.py`, so the glyph and the Inspector label cannot
+disagree about what a set is called.
+
 #### P23 — GUI Milestone 4 remainder: interaction modes, element labels, macOS name
 Source: `docs/gui_roadmap.md` milestone rows 3–4 and design rule 7;
 `docs/dev_notes.md` ("macOS application-menu label", "PyVista picking contract",
@@ -773,6 +806,52 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
 - **Deeper opstool result-post-processing integration** — closed as **no
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
+
+## DONE (2026-09-24 — support restraints: per-DOF glyphs, and support rows in the Inspector)
+
+Two halves of one fact — a node's boundary conditions — now visible.
+
+**Viewport.**  `View ▸ Display ▸ Show restraints` (on by default, also on the View
+toolbar) draws a support symbol at every restrained node: **one glyph per
+restrained DOF** — an arrow pointing at the joint per translation, a curl per
+rotation.  Per-DOF is what makes it right for **any** six-flag set rather than
+only the textbook patterns: a fixed base is arrows plus curls, a pin is three
+arrows, a roller along Z is a single arrow.  The classic-symbol refinement is
+registered as **P25**.
+
+- New **Qt-free** geometry module `plotting/restraint_glyphs.py` (numpy plus
+  `pv.Arrow`/`pv.Cone`), so the shapes are measurable without a render window.
+- `RenderBackend.render_restraints(restraints, size, color)` and
+  `RestraintGeom`; `ModelViewer` extracts them from the model (`restraints`, keyed
+  by node id) and sizes the glyphs at **6 % of the bounding-box diagonal** —
+  self-scaling like the highlight radius, but generous, because a support must
+  read at whole-model zoom (3 % measured barely a few pixels, checked by
+  rendering and corrected).
+- Drawn as a **non-pickable overlay**: a support is not a thing to pick, and the
+  click belongs to the node behind it.
+
+**Inspector.**  Selecting a node now reports its support conditions, from the new
+Qt-free `model/supports.py` — shared by both halves precisely so the naming
+cannot drift between the picture and the table:
+
+| Property | Value |
+|---|---|
+| Restraints | `Fixed (U1 U2 U3 R1 R2 R3)`, `Pinned (U1 U2 U3)`, or just `U2 U3` for an unconventional set |
+| Constraint | `D1 (DIAPHRAGM)` — the joint assignment plus its type |
+
+Only rows with something to say are added, so ordinary nodes gain no clutter and
+an archive (no restraints, no assignments) adds none at all.  Support conditions
+live on the **model** while the Inspector describes one **object**, so
+`PropertyInspector.set_source_model()` is fed the parsed source from
+`MainWindow.show_model` — which keeps them visible from the Processed and Meshed
+views too, not only Unprocessed.
+
+29 new tests: `tests/test_supports.py` (13, Qt-free labels and rows),
+`TestRestraintGlyphs` in `tests/test_renderers_pyvista.py` (11: per-axis geometry,
+a free node drawing nothing, the non-pickable overlay, the category toggle, and an
+end-to-end `ModelViewer` run), `TestSupportDisplay` in `tests/test_gui_views.py`
+(5: Inspector rows for a restrained and an unrestrained node, the drawn symbols,
+and their toggle).
 
 ## DONE (2026-09-24 — shell opacity and shrunken elements)
 

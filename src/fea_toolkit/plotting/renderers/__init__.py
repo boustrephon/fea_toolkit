@@ -15,6 +15,7 @@ from .base import (
     HighlightDef,
     NodeGeom,
     RenderBackend,
+    RestraintGeom,
     ShellGeom,
 )
 
@@ -24,5 +25,6 @@ __all__ = [
     "HighlightDef",
     "NodeGeom",
     "RenderBackend",
+    "RestraintGeom",
     "ShellGeom",
 ]

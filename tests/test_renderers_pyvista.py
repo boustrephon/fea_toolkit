@@ -694,3 +694,143 @@ class TestShrinkAndOpacity:
             assert actor.GetProperty().GetOpacity() == pytest.approx(0.35)
         finally:
             viewer._backend.plotter.close()
+
+
+def _restraint(node_id="1", position=(0.0, 0.0, 0.0), dofs=(1, 1, 1, 0, 0, 0)):
+    """Build a restrained node for renderer tests."""
+    from fea_toolkit.plotting.renderers.base import RestraintGeom
+
+    return RestraintGeom(
+        node_id=node_id,
+        position=np.array(position, dtype=float),
+        dofs=tuple(dofs),
+    )
+
+
+class TestRestraintGlyphs:
+    """Support symbols: one glyph per restrained DOF.
+
+    Arrows for translations and curls for rotations, which is what makes **any**
+    restraint set drawable — not only the textbook patterns — and what the
+    classic-symbol refinement will keep as its fallback.
+    """
+
+    def test_a_translation_is_an_arrow_pointing_at_the_joint(self):
+        from fea_toolkit.plotting.restraint_glyphs import support_glyph
+
+        glyph = support_glyph(np.zeros(3), [1, 0, 0, 0, 0, 0], 1.0)
+        xmin, xmax, ymin, ymax, _zmin, _zmax = glyph.bounds
+        assert (xmin, xmax) == pytest.approx((0.0, 1.0))  # tail a size away, head on it
+        # Thin about its own axis, so three of them read as three DOFs.
+        assert abs(ymin) < 0.2
+        assert abs(ymax) < 0.2
+
+    def test_a_y_translation_uses_the_y_axis(self):
+        from fea_toolkit.plotting.restraint_glyphs import support_glyph
+
+        glyph = support_glyph(np.zeros(3), [0, 1, 0, 0, 0, 0], 1.0)
+        assert glyph.bounds[2:4] == pytest.approx((0.0, 1.0))
+        assert glyph.bounds[0:2] == pytest.approx((-0.12, 0.12), abs=0.02)
+
+    def test_a_rotation_curls_about_its_axis(self):
+        """R1 turns about X, so the glyph spans Y and Z, not X."""
+        from fea_toolkit.plotting.restraint_glyphs import support_glyph
+
+        glyph = support_glyph(np.zeros(3), [0, 0, 0, 1, 0, 0], 1.0)
+        xmin, xmax, ymin, ymax, zmin, zmax = glyph.bounds
+        assert ymin == pytest.approx(-0.5, abs=0.02) and ymax == pytest.approx(0.5, abs=0.02)
+        assert zmin <= -0.4 and zmax >= 0.4
+        assert abs(xmin) < 0.2 and abs(xmax) < 0.2
+
+    def test_a_pinned_node_draws_three_arrows(self):
+        from fea_toolkit.plotting.restraint_glyphs import support_glyph
+
+        glyph = support_glyph(np.zeros(3), [1, 1, 1, 0, 0, 0], 1.0)
+        bounds = glyph.bounds
+        for low, high in ((0, 1), (2, 3), (4, 5)):
+            assert bounds[high] == pytest.approx(1.0)
+            assert bounds[low] == pytest.approx(-0.12, abs=0.02)
+
+    def test_a_free_node_draws_nothing(self):
+        from fea_toolkit.plotting.restraint_glyphs import support_glyph
+
+        assert support_glyph(np.zeros(3), [0, 0, 0, 0, 0, 0], 1.0) is None
+
+    def test_the_glyph_follows_the_node(self):
+        from fea_toolkit.plotting.restraint_glyphs import support_glyph
+
+        glyph = support_glyph(np.array([10.0, 0.0, 0.0]), [1, 0, 0, 0, 0, 0], 1.0)
+        assert glyph.bounds[0:2] == pytest.approx((10.0, 11.0))
+
+    def test_render_restraints_adds_a_non_pickable_overlay(self):
+        """A support is not a thing to pick — the click belongs to the node."""
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_restraints([_restraint()], size=0.5)
+            actors = renderer.actors("restraints")
+            assert len(actors) == 1
+            # VTK's getters return an int, so this is truthiness, not identity.
+            assert not actors[0].GetPickable()
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_the_category_toggle_hides_the_symbols(self):
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_restraints([_restraint()], size=0.5)
+            actor = renderer.actors("restraints")[0]
+
+            renderer.set_category_visible("restraints", False)
+            assert not actor.GetVisibility()
+            renderer.set_category_visible("restraints", True)
+            assert actor.GetVisibility()
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_a_free_node_contributes_no_actor(self):
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_restraints([_restraint(dofs=(0, 0, 0, 0, 0, 0))], size=0.5)
+            assert renderer.actors("restraints") == []
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_show_model_draws_the_supports_it_found(self):
+        """End to end: the model's restraints reach the scene, scaled to it."""
+        from fea_toolkit.io.results_repository import mesh_model_from_geometry
+        from fea_toolkit.model.sap_data import Restraint
+        from fea_toolkit.plotting.viewer import ModelViewer
+
+        model = mesh_model_from_geometry(_quad_geometry())
+        model.restraints = {"1": Restraint([1, 1, 1, 1, 1, 1])}
+        viewer = ModelViewer(mesh_model=model, backend="pyvista", off_screen=True)
+        try:
+            viewer.show_model(show_nodes=False, show_shells=False)
+            assert [r.node_id for r in viewer._restraints] == ["1"]
+            assert viewer.restraint_size() > 0
+            assert len(viewer._backend.actors("restraints")) == 1
+        finally:
+            viewer._backend.plotter.close()
+
+    def test_show_model_can_leave_the_supports_out(self):
+        from fea_toolkit.io.results_repository import mesh_model_from_geometry
+        from fea_toolkit.model.sap_data import Restraint
+        from fea_toolkit.plotting.viewer import ModelViewer
+
+        model = mesh_model_from_geometry(_quad_geometry())
+        model.restraints = {"1": Restraint([1, 1, 1, 0, 0, 0])}
+        viewer = ModelViewer(mesh_model=model, backend="pyvista", off_screen=True)
+        try:
+            viewer.show_model(show_nodes=False, show_shells=False, show_restraints=False)
+            assert viewer._backend.actors("restraints") == []
+        finally:
+            viewer._backend.plotter.close()

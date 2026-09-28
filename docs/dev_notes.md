@@ -928,3 +928,34 @@ the view).
 
 
 
+
+## Support symbols — one glyph per restrained DOF
+
+`render_restraints` draws a support at every restrained node.  The choice of
+**per-DOF glyphs** over textbook symbols was deliberate:
+
+- A restraint is an arbitrary six-flag set.  A pattern table covers fixed / pin /
+  roller and then has to guess at everything else; one glyph per restrained DOF is
+  correct for *any* set, so nothing is ever left undrawn.  The classic symbols stay
+  a planned *refinement* (`_pending_work.md` P25) that falls back to these arrows
+  for the patterns it does not recognise.
+- Translations become `pv.Arrow`s starting a *size* away and pointing **at the
+  joint** — the ground pushing the node back — and rotations become curls about
+  their axis.  Verified by rendering three bases side by side: the fixed base read
+  as arrows plus curls, the pin as three arrows, the roller along Z as one arrow.
+- **Sizing is 6 % of the model's bounding-box diagonal** — self-scaling like the
+  highlight radius, but deliberately more generous.  3 % was measured at barely a
+  few pixels at whole-model zoom, which is exactly the zoom a support has to be
+  readable at; the first attempt looked right in a close-up render and invisible in
+  a normal one, which is why both views were checked before settling.
+- The glyphs are a **non-pickable overlay**.  A support is not an entity a user
+  picks — the click belongs to the node behind it — and a pickable glyph would
+  steal that click (the *PyVista picking contract*, above).
+- `plotting/restraint_glyphs.py` is Qt-free and plotter-free, so the shapes are
+  measurable in a unit test; `model/supports.py` holds the naming and is shared
+  with the Inspector, so a glyph and the row describing it cannot disagree about
+  what a set is called.
+- A results archive carries **no** restraints (`mesh_model_from_geometry` does not
+  populate them), so supports appear on an open model only.  Adding them to the
+  archive schema is a separate decision, not a bug in this one.
+

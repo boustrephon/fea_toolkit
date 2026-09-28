@@ -333,3 +333,40 @@ class TestDisplayQuality:
         # The 2 x 2 slab keeps its true extent in the extracted geometry.
         maxima = [s.vertices[:, 0].max() for s in slab_window._viewer._shells]
         assert max(maxima) == pytest.approx(2.0)
+
+
+class TestSupportDisplay:
+    """Support symbols in the viewport, and support rows in the Inspector.
+
+    The beam-and-column model fixes node 4 (``Restraint([1, 1, 1, 1, 1, 1])``),
+    which is what makes it the fixture for both halves of this.
+    """
+
+    def test_a_restrained_node_reports_its_supports(self, window):
+        """A node's conditions live on the model, so the Inspector is given it."""
+        assert window._select_entity_in_tree("nodes", "4") is True
+        assert _inspector_rows(window)["Restraints"] == "Fixed (U1 U2 U3 R1 R2 R3)"
+
+    def test_an_unrestrained_node_gains_no_support_rows(self, window):
+        """Only rows with something to say — ordinary nodes stay uncluttered."""
+        assert window._select_entity_in_tree("nodes", "1") is True
+        assert "Restraints" not in _inspector_rows(window)
+
+    def test_the_model_draws_support_symbols(self, window):
+        assert window._backend.actors("restraints"), "no support symbols were drawn"
+
+    def test_the_display_toggle_hides_and_shows_them(self, window):
+        actor = window._backend.actors("restraints")[0]
+
+        window._actions["view.show_restraints"].setChecked(False)
+        assert not actor.GetVisibility()  # VTK's getter returns an int
+
+        window._actions["view.show_restraints"].setChecked(True)
+        assert actor.GetVisibility()
+
+    def test_a_node_selection_does_not_object_to_an_archive(self, window):
+        """No store means no constraint source — the node rows carry on alone."""
+        window._select_entity_in_tree("nodes", "4")
+        window._inspector.set_source_model(None)
+        window._inspector.show_object(window._views.source("unprocessed").nodes["4"])
+        assert "Restraints" not in _inspector_rows(window)

@@ -29,6 +29,7 @@ from typing import Any, Optional, Union
 import numpy as np
 
 from .renderers import AnnotationDef, FrameGeom, HighlightDef, NodeGeom, RenderBackend, ShellGeom
+from .renderers.base import RestraintGeom
 
 
 def _resolve_backend(backend: str, **kwargs) -> RenderBackend:
@@ -113,6 +114,13 @@ def _end_force_values(entry: dict, quantity: str, use_local: bool) -> Optional[t
 _HIGHLIGHT_RADIUS_FRACTION = 0.0075
 _HIGHLIGHT_RADIUS_MIN = 0.01
 
+#: Support-glyph length, as a fraction of the model's bounding-box diagonal and
+#: floored in model units — the same self-scaling approach as the highlight, but
+#: generous: a support symbol is meant to be read at whole-model zoom, where 3 %
+#: of the diagonal is barely a few pixels.
+_RESTRAINT_SIZE_FRACTION = 0.06
+_RESTRAINT_SIZE_MIN = 0.1
+
 
 class ModelViewer:
     """Backend-agnostic 3D viewer for structural models and results.
@@ -180,6 +188,7 @@ class ModelViewer:
         self._frames: list[FrameGeom] = []
         self._shells: list[ShellGeom] = []
         self._nodes: list[NodeGeom] = []
+        self._restraints: list[RestraintGeom] = []
         self._section_colors: dict[str, tuple[float, float, float]] = {}
         # Display transforms — applied when drawing, never to the geometry above,
         # so the model itself stays the source of truth for results and selection.
@@ -299,6 +308,23 @@ class ModelViewer:
                 )
             )
 
+        # Supports — only the nodes that actually restrain something, so the
+        # renderer never has to decide whether an entry means anything.  An
+        # archive has no restraints at all (``mesh_model_from_geometry`` leaves
+        # them empty), which is why this reads defensively.
+        for nid, restraint in (getattr(md, "restraints", None) or {}).items():
+            dofs = tuple(int(flag) for flag in getattr(restraint, "dofs", ()))
+            nd = md.nodes.get(nid)
+            if nd is None or not any(dofs):
+                continue
+            self._restraints.append(
+                RestraintGeom(
+                    node_id=nid,
+                    position=np.array([nd.x, nd.y, nd.z], dtype=float),
+                    dofs=dofs,
+                )
+            )
+
         self._geom_extracted = True
 
     # ── Model display ────────────────────────────────────────────────
@@ -312,6 +338,7 @@ class ModelViewer:
         node_size: float = 0.02,
         shrink: float = 1.0,
         shell_opacity: Optional[float] = None,
+        show_restraints: bool = True,
     ) -> "ModelViewer":
         """Display the structural model.
 
@@ -329,6 +356,11 @@ class ModelViewer:
                 default) uses *opacity*, keeping the single-knob behaviour;
                 passing a value lets a slab be made translucent while the frame
                 lines stay crisp.
+            show_restraints: If True, draw a support symbol at each restrained
+                node — one glyph per restrained DOF (see
+                :mod:`fea_toolkit.plotting.restraint_glyphs`).  Models without
+                restraints, and results archives (which carry none), simply draw
+                nothing.
 
         Returns:
             ``self`` for chaining.
@@ -352,6 +384,9 @@ class ModelViewer:
 
         if show_nodes:
             self._backend.render_nodes(self._nodes, color=(0.3, 0.3, 0.3), radius=node_size)
+
+        if show_restraints and self._restraints:
+            self._backend.render_restraints(self._restraints, size=self.restraint_size())
 
         return self
 
@@ -569,6 +604,14 @@ class ModelViewer:
             floored at ``_HIGHLIGHT_RADIUS_MIN``.
         """
         return max(_HIGHLIGHT_RADIUS_FRACTION * self._model_diagonal(), _HIGHLIGHT_RADIUS_MIN)
+
+    def restraint_size(self) -> float:
+        """Glyph length for support symbols, in model units.
+
+        Scaled to the model exactly as :meth:`highlight_radius` is: a fixed length
+        would be invisible on a bridge and swamp a small frame.
+        """
+        return max(_RESTRAINT_SIZE_FRACTION * self._model_diagonal(), _RESTRAINT_SIZE_MIN)
 
     def highlight_elements(
         self,

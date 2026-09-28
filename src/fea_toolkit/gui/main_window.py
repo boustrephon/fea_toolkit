@@ -409,6 +409,11 @@ class MainWindow(QMainWindow):
         a["view.show_shells"] = self._toggle_action(
             "Show shells", self._on_show_shells, tip="Show or hide area elements"
         )
+        a["view.show_restraints"] = self._toggle_action(
+            "Show restraints",
+            self._on_show_restraints,
+            tip="Show or hide support symbols at restrained nodes",
+        )
         a["view.show_labels"] = self._placeholder("Show element labels", "P23")
         a["view.show_loads"] = self._placeholder("Show loads", "Milestone 6")
         a["view.show_forces"] = self._placeholder("Show force diagrams", "Milestone 7")
@@ -482,6 +487,7 @@ class MainWindow(QMainWindow):
         for key in (
             "view.show_nodes",
             "view.show_shells",
+            "view.show_restraints",
             "view.show_labels",
             "view.show_loads",
             "view.show_forces",
@@ -610,6 +616,7 @@ class MainWindow(QMainWindow):
             None,
             "view.show_nodes",
             "view.show_shells",
+            "view.show_restraints",
             "view.show_labels",
             "view.show_loads",
             "view.show_forces",
@@ -816,10 +823,17 @@ class MainWindow(QMainWindow):
             color_by_section=color_by_section,
             shell_opacity=float(self._shell_opacity.value()),
             shrink=float(self._shrink.value()),
+            show_restraints=self._actions["view.show_restraints"].isChecked(),
         )
         self._viewer = viewer
         self._model = model
         self._selection_index = SelectionIndex.from_viewer(viewer)
+        # The Inspector describes one object, but support conditions live on the
+        # model (keyed by node id), so it is given the parsed source — which keeps
+        # its restraints and constraint assignments across every view — rather
+        # than the model currently drawn.  With no store (an archive) it falls
+        # back to the displayed model, which simply has neither.
+        self._inspector.set_source_model(self._store.raw() if self._store is not None else model)
         if rebuild_tree:
             self._tree_model.set_model(model, self._views.views())
         self._reset_display_toggles()
@@ -839,7 +853,7 @@ class MainWindow(QMainWindow):
         unchecked by the previous model would otherwise contradict what is on
         screen.  Signals are blocked: there is nothing to re-render yet.
         """
-        for key in ("view.show_nodes", "view.show_shells"):
+        for key in ("view.show_nodes", "view.show_shells", "view.show_restraints"):
             action = self._actions[key]
             action.blockSignals(True)
             action.setChecked(True)
@@ -1087,6 +1101,10 @@ class MainWindow(QMainWindow):
     def _on_show_shells(self, checked: bool) -> None:
         """Show or hide the area-element overlay."""
         self._backend.set_category_visible("shells", checked)
+
+    def _on_show_restraints(self, checked: bool) -> None:
+        """Show or hide the support symbols."""
+        self._backend.set_category_visible("restraints", checked)
 
     def _on_shell_opacity_changed(self, value: float) -> None:
         """Apply the new shell opacity to the drawn actors, in place.

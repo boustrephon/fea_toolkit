@@ -218,6 +218,7 @@ switched.  It is recorded as [P23](_pending_work.md).
 |---|---|
 | **View ▸ Display ▸ Show nodes** | Live — show or hide the node markers |
 | **View ▸ Display ▸ Show shells** | Live — show or hide area elements |
+| **View ▸ Display ▸ Show restraints** | Live — support symbols at restrained nodes (one glyph per restrained DOF) |
 | **View ▸ Display ▸ Clear highlights** | Live — drop the selection highlight |
 | **View ▸ Display ▸ Show element labels** | Not yet — nothing draws labels, so the toggle waits for that renderer ([P23](_pending_work.md)) |
 | **View ▸ Display ▸ Show loads** | Pending the load-rendering milestone (6) |
@@ -235,6 +236,26 @@ Two knobs sit on the **View toolbar**:
 Both are *display* transforms: the model, the selection and any results are
 unaffected, and a value set here is kept while you switch views.  Shrink
 re-draws the model in place, keeping the camera and the tree selection.
+
+### Supports
+
+**View ▸ Display ▸ Show restraints** draws a support symbol at every restrained
+node — **one glyph per restrained DOF**: an arrow pointing at the joint for each
+restrained translation (U1/U2/U3) and a curl for each restrained rotation
+(R1/R2/R3).  That covers any restraint set, so a fixed base shows arrows plus
+curls, a pin shows three arrows, and a roller one arrow.  They scale with the
+model and need no setup; turning the toggle off hides them.
+
+Selecting a **node** also reports its support conditions in the Inspector:
+
+| Property | Value |
+|---|---|
+| Restraints | `Fixed (U1 U2 U3 R1 R2 R3)`, `Pinned (U1 U2 U3)`, or just `U2 U3` for an unconventional set |
+| Constraint | the joint constraint assigned to the node, e.g. `D1 (DIAPHRAGM)` |
+
+Only rows with something to say appear, and a results archive — which carries no
+restraints — adds none.
+
 
 
 The toggles are re-checked whenever a model is displayed, so what the menu says

@@ -5,12 +5,14 @@ from typing import Any, Optional
 
 import numpy as np
 
+from ..restraint_glyphs import support_glyph
 from .base import (
     AnnotationDef,
     FrameGeom,
     HighlightDef,
     NodeGeom,
     RenderBackend,
+    RestraintGeom,
     ShellGeom,
 )
 
@@ -245,8 +247,8 @@ class PyVistaRenderer(RenderBackend):
         Args:
             actor: The actor returned by ``plotter.add_mesh``.
             category: Logical group -- ``"frames"``, ``"shells"``, ``"nodes"``,
-                ``"highlights"``, ``"annotations"``, ``"deformed"`` or
-                ``"force_flags"``.
+                ``"restraints"``, ``"highlights"``, ``"annotations"``,
+                ``"deformed"`` or ``"force_flags"``.
         """
         self._actors.append(actor)
         self._categories.setdefault(category, []).append(actor)
@@ -320,8 +322,9 @@ class PyVistaRenderer(RenderBackend):
         """Actors registered under *category*, in creation order.
 
         Args:
-            category: ``"frames"``, ``"shells"``, ``"nodes"``, ``"highlights"``,
-                ``"annotations"``, ``"deformed"`` or ``"force_flags"``.
+            category: ``"frames"``, ``"shells"``, ``"nodes"``, ``"restraints"``,
+                ``"highlights"``, ``"annotations"``, ``"deformed"`` or
+                ``"force_flags"``.
 
         Returns:
             The actors, empty when the category has none.
@@ -451,6 +454,39 @@ class PyVistaRenderer(RenderBackend):
             show_scalar_bar=False,
         )
         self._add_actor(actor, "nodes")
+
+    # ── Supports ─────────────────────────────────────────────────────
+
+    def render_restraints(
+        self,
+        restraints: list[RestraintGeom],
+        size: float = 1.0,
+        color: tuple[float, float, float] = (0.1, 0.4, 0.6),
+    ) -> None:
+        if not restraints:
+            return
+        p = self.plotter
+
+        # One glyph per restrained DOF, merged into a single mesh — a support is
+        # something the model has, not a thing to pick, so it is an overlay.
+        glyphs = [
+            glyph
+            for glyph in (support_glyph(r.position, r.dofs, size) for r in restraints)
+            if glyph is not None
+        ]
+        if not glyphs:
+            return
+        merged = glyphs[0]
+        for glyph in glyphs[1:]:
+            merged = merged.merge(glyph)
+
+        actor = p.add_mesh(
+            merged,
+            color=color,
+            lighting=True,
+            show_scalar_bar=False,
+        )
+        self._add_overlay(actor, "restraints")
 
     # ── Highlights ───────────────────────────────────────────────────
 

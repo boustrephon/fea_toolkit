@@ -140,6 +140,9 @@ itself is never modified:
 * ``shell_opacity`` sets area-element opacity **alone**.  ``None`` (the default)
   falls back to ``opacity``, keeping the single-knob behaviour; passing a value
   lets a slab go translucent while the frame lines stay crisp.
+* ``show_restraints`` draws a support symbol at every restrained node — one glyph
+  per restrained DOF (an arrow per translation, a curl per rotation), sized to the
+  model.  See :mod:`fea_toolkit.plotting.restraint_glyphs`.
 
 Change the opacity live, without re-drawing:
 

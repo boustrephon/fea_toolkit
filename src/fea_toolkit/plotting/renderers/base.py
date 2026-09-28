@@ -40,6 +40,20 @@ class NodeGeom:
 
 
 @dataclass
+class RestraintGeom:
+    """One node's support restraint, ready for rendering.
+
+    A restraint is the six DOF flags [U1, U2, U3, R1, R2, R3], ``1`` = fixed —
+    the model's own encoding, carried through unchanged so the renderer and the
+    Inspector describe the same set.
+    """
+
+    node_id: str
+    position: np.ndarray  # shape (3,)
+    dofs: tuple  # [U1, U2, U3, R1, R2, R3], 1 = fixed
+
+
+@dataclass
 class HighlightDef:
     """A set of elements or nodes to highlight.
 
@@ -135,6 +149,27 @@ class RenderBackend(ABC):
             nodes: List of node geometries.
             color: Marker colour, RGB in 0..1 range.
             radius: Marker size relative to model scale.
+        """
+        ...
+
+    @abstractmethod
+    def render_restraints(
+        self,
+        restraints: list[RestraintGeom],
+        size: float = 1.0,
+        color: tuple[float, float, float] = (0.1, 0.4, 0.6),
+    ) -> None:
+        """Draw support symbols at restrained nodes.
+
+        One glyph per restrained DOF — an arrow for a translation, a curl for a
+        rotation — so **any** restraint set is drawn, not only the textbook ones
+        (:mod:`fea_toolkit.plotting.restraint_glyphs`).
+
+        Args:
+            restraints: The restrained nodes to draw.
+            size: Glyph length in **model units** — the caller scales it to the
+                model, as it does the highlight radius.
+            color: Glyph colour, RGB in 0..1 range.
         """
         ...
 

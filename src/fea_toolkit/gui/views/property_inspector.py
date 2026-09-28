@@ -67,6 +67,21 @@ def object_title(obj: Any) -> str:
     return type(obj).__name__
 
 
+def _support_rows(obj: Any, model: Any) -> list:
+    """A node's support rows — restraints and its joint constraint.
+
+    Only nodes have them, and a node's conditions live on the *model* rather than
+    on the node, so both the object and the context have to agree.  Anything else,
+    and any model that carries none (a results archive), reports nothing.
+    """
+    from ...model.sap_data import Node
+    from ...model.supports import support_rows
+
+    if model is None or not isinstance(obj, Node):
+        return []
+    return support_rows(model, obj.node_id)
+
+
 class PropertyInspector(QWidget):
     """Read-only property table for the current selection.
 
@@ -76,6 +91,7 @@ class PropertyInspector(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self._source_model: Any = None
         self._title = QLabel(object_title(None), self)
         self._title.setEnabled(False)
 
@@ -94,11 +110,30 @@ class PropertyInspector(QWidget):
         layout.addWidget(self._title)
         layout.addWidget(table)
 
+    def set_source_model(self, model: Any) -> None:
+        """Set the model that supplies a node's restraints and constraint.
+
+        The Inspector describes one *object*, but support conditions are stored
+        on the model — ``restraints`` and ``constraint_assignments`` are keyed by
+        node id — so the context is set alongside the display rather than threaded
+        through every :meth:`show_object` call.  ``None`` (no model, or a results
+        archive, which carries none) adds no support rows.
+
+        Args:
+            model: A ``SAPModelData`` or ``MeshModel``, or ``None``.
+        """
+        self._source_model = model
+
     def show_object(self, obj: Any) -> None:
-        """Display *obj*'s fields (``None`` clears the inspector)."""
+        """Display *obj*'s fields (``None`` clears the inspector).
+
+        A node also reports its support conditions — restrained DOFs and its
+        joint constraint — taken from the model set by
+        :meth:`set_source_model`.
+        """
         self._title.setText(object_title(obj))
         self._title.setEnabled(obj is not None)
-        rows = describe(obj)
+        rows = describe(obj) + _support_rows(obj, self._source_model)
         self._table.setRowCount(len(rows))
         for row, (name, value) in enumerate(rows):
             self._table.setItem(row, 0, QTableWidgetItem(name))
