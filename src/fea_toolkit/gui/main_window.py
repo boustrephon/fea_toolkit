@@ -101,6 +101,7 @@ class MainWindow(QMainWindow):
         self._build_docks()
         self._build_status_bar()
         self._set_model_actions_enabled(False)
+        self._set_view_actions_enabled()
         self._decorate_view()
         for note in self._policy_notes:
             self.log(note, "warn")
@@ -295,6 +296,16 @@ class MainWindow(QMainWindow):
         a["file.export_tcl"] = self._placeholder("Export Tcl", "Milestone 7")
         a["file.export_image"] = self._placeholder("Export screenshot", "Milestone 7")
         a["edit.copy"] = self._placeholder("Copy", "a future release")
+        a["edit.duplicate_view"] = self._real_action(
+            "Duplicate view",
+            self._on_duplicate_view,
+            tip="Copy the current view and narrow it with a selection expression",
+        )
+        a["edit.edit_selection"] = self._real_action(
+            "Edit view selection\u2026",
+            self._on_edit_view_selection,
+            tip="Change the selection expression of a derived view",
+        )
         a["edit.preferences"] = self._placeholder("Preferences", "Milestone 8")
         a["edit.preferences"].setMenuRole(QAction.MenuRole.PreferencesRole)
         a["view.show_nodes"] = self._toggle_action(
@@ -350,6 +361,8 @@ class MainWindow(QMainWindow):
 
         m = bar.addMenu("&Edit")
         m.addAction(a["edit.copy"])
+        m.addAction(a["edit.duplicate_view"])
+        m.addAction(a["edit.edit_selection"])
         m.addSeparator()
         m.addAction(a["edit.preferences"])
 
@@ -577,6 +590,7 @@ class MainWindow(QMainWindow):
         color_by_section: bool = True,
         *,
         collapse_to_parents: bool = False,
+        selection: Any = None,
         reset_view: bool = True,
         rebuild_tree: bool = True,
     ) -> None:
@@ -589,6 +603,8 @@ class MainWindow(QMainWindow):
                 split sub-elements.  The GUI reaches the drawn members through
                 the **Unprocessed** view instead, so this is ``False`` here and
                 remains for callers that want the collapsed render directly.
+            selection: Optional ``Selection`` narrowing what is drawn — a view's
+                lens, applied without copying the model.
             reset_view: Reset the camera first.  ``False`` keeps the current
                 view, which is what switching views wants.
             rebuild_tree: Rebuild the Model Tree for *model*.  ``False`` for a
@@ -614,18 +630,21 @@ class MainWindow(QMainWindow):
                 mesh_model=model,
                 backend=self._backend,
                 collapse_to_parents=collapse_to_parents,
+                selection=selection,
             )
         elif isinstance(model, SAPModelData):
             viewer = ModelViewer(
                 model_data=model,
                 backend=self._backend,
                 collapse_to_parents=collapse_to_parents,
+                selection=selection,
             )
         else:
             viewer = ModelViewer(
                 builder=model,
                 backend=self._backend,
                 collapse_to_parents=collapse_to_parents,
+                selection=selection,
             )
 
         viewer.show_model(show_nodes=True, color_by_section=color_by_section)
@@ -641,6 +660,7 @@ class MainWindow(QMainWindow):
             self._interactor.camera_position = camera
         self._update_units_label()
         self._set_model_actions_enabled(self._store is not None)
+        self._set_view_actions_enabled()
         self.log("Displayed model geometry.")
 
     def _reset_display_toggles(self) -> None:
@@ -698,13 +718,89 @@ class MainWindow(QMainWindow):
         provenance; the camera is kept, because switching between views of the
         same model should not move the user's viewpoint.
         """
+        self._show_view(view)
+
+    def _show_view(self, view: View, *, rebuild_tree: bool = False) -> None:
+        """Render *view* — its source, through its selection — and report it.
+
+        Args:
+            view: The view to display.
+            rebuild_tree: Rebuild the Model Tree.  Needed when the view's *name*
+                changed (the row's label is the name); a rebuild invalidates the
+                current index, so it is skipped for a plain switch — otherwise Qt
+                reports an empty selection and the Inspector is cleared again.
+        """
         source = self._views.source(view.key)
         if source is None:
             return
         self._views.set_active(view.key)
+        self.show_model(
+            source,
+            reset_view=False,
+            rebuild_tree=rebuild_tree,
+            selection=view.selection,
+        )
         self._inspector.show_object(self._views.get(view.key))
-        self.show_model(source, reset_view=False, rebuild_tree=False)
         self.log(f"Showing view: {view.name}.")
+
+    # ── Derived views (Edit menu) ────────────────────────────────────
+
+    def _on_duplicate_view(self) -> None:
+        """**Edit ▸ Duplicate view**: copy the active view and narrow it.
+
+        The duplicate is a *lens on a lens* — it shares its parent's geometry and
+        adds a ``Selection`` — so the dialog asks for that selection straight
+        away: an unfiltered duplicate would just be the parent again.
+        """
+        parent = self._views.active
+        if parent is None:
+            return
+        from .views.selection_dialog import SelectionDialog
+
+        selection = SelectionDialog.edit(parent.selection, self)
+        if selection is None:  # cancelled
+            return
+        key = self._next_derived_key(parent.key)
+        name = f"{parent.name} \u00b7 {selection.to_string() or 'unfiltered'}"
+        view = self._views.add_derived(key, name, parent.key, selection)
+        if view is None:
+            return
+        self._show_view(view, rebuild_tree=True)
+        self.log(f"Added view: {name}.")
+
+    def _on_edit_view_selection(self) -> None:
+        """**Edit ▸ Edit view selection…**: re-filter the active derived view."""
+        view = self._views.active
+        if view is None or view.parent is None:
+            return
+        parent = self._views.get(view.parent)
+        from .views.selection_dialog import SelectionDialog
+
+        selection = SelectionDialog.edit(view.selection, self)
+        if selection is None:  # cancelled
+            return
+        stem = parent.name if parent is not None else view.name
+        name = f"{stem} \u00b7 {selection.to_string() or 'unfiltered'}"
+        updated = self._views.add_derived(view.key, name, view.parent, selection)
+        if updated is None:
+            return
+        self._show_view(updated, rebuild_tree=True)
+        self.log(f"Updated view: {name}.")
+
+    def _next_derived_key(self, parent_key: str) -> str:
+        """A derived-view key no registered view is using."""
+        index = 1
+        while self._views.get(f"{parent_key}:{index}") is not None:
+            index += 1
+        return f"{parent_key}:{index}"
+
+    def _set_view_actions_enabled(self) -> None:
+        """Enable duplication / selection editing to match the active view."""
+        active = self._views.active
+        self._actions["edit.duplicate_view"].setEnabled(active is not None)
+        self._actions["edit.edit_selection"].setEnabled(
+            active is not None and active.parent is not None
+        )
 
     def _highlight_entity(self, entity: Any) -> None:
         """Highlight *entity* in the viewport, replacing the previous highlight.

@@ -11,6 +11,7 @@ __all__ = [
     "PickResult",
     "PropertyInspector",
     "QtMouseFilter",
+    "SelectionDialog",
     "ViewportInteraction",
     "install_mouse_filter",
 ]
@@ -19,6 +20,7 @@ _LAZY_EXPORTS = {
     "MessageLog": ".message_log",
     "PropertyInspector": ".property_inspector",
     "PickResult": ".interactor",
+    "SelectionDialog": ".selection_dialog",
     "ViewportInteraction": ".interactor",
     "QtMouseFilter": ".qt_mouse",
     "install_mouse_filter": ".qt_mouse",
