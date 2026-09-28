@@ -207,13 +207,19 @@ patterns, which is what makes it valid for a nonlinear analysis.  The model's ow
 combinations come back from `build_combination_results` instead, because they
 reduce case results.
 
-## The GUI is the planned consumer
+## The GUI is the consumer
 
-The Analysis menu (milestone 5 in the [GUI Roadmap](gui_roadmap.md)) is where
-this becomes clickable: list the model's load cases and combinations, choose one,
-run it on a worker, and see the result as a case view.  Because the read seam is
-dict-based, the in-memory path above means **no archive is needed to look at a
-result** — `File ▸ Save results` writes one when persistence is wanted.
+**Analysis ▸ Run…** (milestone 5 in the [GUI Roadmap](gui_roadmap.md)) is where
+this becomes clickable: it lists the model's static cases and combinations — each
+case with a **load multiplier** — runs the chosen set on a worker, and shows each
+result as a case view.  Because the read seam is dict-based, the in-memory path
+above means **no archive is needed to look at a result** — `File ▸ Save results…`
+writes one when persistence is wanted.
+
+The Qt-free pieces are the seam: `analysis/case_listing.py` answers *what can be
+run*, and `analysis/linear.run_case_set()` answers *run it* — solve the cases,
+reduce any combinations, assemble the archive dict.  The dialog is a thin view
+over the two.  See `docs/_pending_work.md` → **P27**.
 
 ## References
 

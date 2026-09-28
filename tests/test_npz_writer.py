@@ -110,3 +110,85 @@ def test_a_non_local_coordinate_system_is_refused():
     md = make_sample_model()
     with pytest.raises(ValueError, match="forces_coordinate_system"):
         results_arrays(md, static_results=_static_results(md), forces_coordinate_system="global")
+
+
+def test_saving_an_assembled_dict_round_trips_it(tmp_path):
+    """``save_results_arrays`` writes the dict it is handed — the P27/I4 seam.
+
+    A caller that already holds the arrays (the GUI's ``Analysis ▸ Run``)
+    persists through the same function ``write_results_npz`` ends in, so the two
+    can never write two different layouts.
+    """
+    from fea_toolkit.io.npz_reader import read_results
+    from fea_toolkit.io.npz_writer import results_arrays, save_results_arrays
+
+    md = make_sample_model()
+    arrays = results_arrays(md, static_results=_static_results(md))
+
+    path = save_results_arrays(str(tmp_path / "saved.npz"), arrays)
+    written = read_results(path)
+
+    assert set(written) == set(arrays)
+    for name, value in arrays.items():
+        if name == "created":  # a timestamp, by definition different
+            continue
+        assert np.array_equal(written[name], value), name
+
+
+def test_saving_what_a_repository_serves_round_trips_a_case(tmp_path):
+    """The GUI saves ``repository.raw()`` — that has to read back as a case."""
+    from fea_toolkit.io.npz_writer import results_arrays, save_results_arrays
+
+    md = make_sample_model()
+    repository = NpzResultsRepository(results_arrays(md, static_results=_static_results(md)))
+
+    path = save_results_arrays(str(tmp_path / "again.npz"), repository.raw())
+
+    assert NpzResultsRepository(path).cases() == ["DEAD"]
+
+
+# ── Node keying: the mesh's derived ids are labels, not numbers ─────────
+
+
+def _model_with_a_derived_node():
+    """The sample model plus one node whose id a meshed model would produce.
+
+    A split/meshed model's derived node ids are strings like ``"5_af_0_1"``,
+    which is what ``int(key)`` choked on when displacements were sorted.
+    """
+    from fea_toolkit.model.sap_data import Node
+
+    md = make_sample_model()
+    md.nodes["5_af_0_1"] = Node(node_id="5_af_0_1", node_tag=999, x=1.0, y=0.0, z=5.0)
+    return md
+
+
+def test_a_derived_node_id_does_not_break_the_displacement_arrays():
+    """Displacement keyed by node **id** (what the runner produces) aligns.
+
+    The arrays are written in the geometry's node order and read index-wise, so
+    they must never be ordered by parsing the key as a number.
+    """
+    from fea_toolkit.io.npz_writer import results_arrays
+
+    md = _model_with_a_derived_node()
+    order = list(md.nodes)
+    disp = {nid: (0.1 * (index + 1), 0.0, 0.0) for index, nid in enumerate(order)}
+
+    arrays = results_arrays(md, static_results={"DEAD": {"nodal_displacements": disp}})
+
+    assert arrays["static/DEAD/node_dx"].tolist() == [0.1 * (i + 1) for i in range(len(order))]
+
+
+def test_tag_keyed_displacement_still_resolves():
+    """Hand-built payloads key by tag — both keyings have to work."""
+    from fea_toolkit.io.npz_writer import results_arrays
+
+    md = _model_with_a_derived_node()
+    disp = {nd.node_tag: (float(nd.node_tag), 0.0, 0.0) for nd in md.nodes.values()}
+
+    arrays = results_arrays(md, static_results={"DEAD": {"nodal_displacements": disp}})
+
+    assert arrays["static/DEAD/node_dx"].tolist() == [
+        float(nd.node_tag) for nd in md.nodes.values()
+    ]

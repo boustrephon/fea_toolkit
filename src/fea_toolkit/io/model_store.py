@@ -102,6 +102,27 @@ class ModelStore(ABC):
         GUI thread (the roadmap's threading model).
         """
 
+    def preprocessed(self) -> Any:
+        """The ``MeshModel`` a previous :meth:`mesh` produced, or ``None``.
+
+        Distinct from :meth:`mesh`, which *produces* one: this only reports what
+        a completed run left behind.  ``Analysis ▸ Run`` reads it to decide
+        whether preprocessing is a prerequisite it must ask the user for
+        (``docs/_pending_work.md`` → P27, refinement 1), so it must never
+        trigger the pipeline itself.  A backend that does not cache a
+        preprocessed model simply answers ``None``.
+        """
+        return None
+
+    def set_preprocessed(self, mesh_model: Any) -> None:
+        """Record *mesh_model* as the preprocessed model this store serves.
+
+        The default is a no-op: only a backend that caches a preprocessed model
+        (the in-memory one) needs to keep it, and one that does not cannot
+        answer :meth:`preprocessed` either.
+        """
+        return None
+
 
 class InMemoryModelStore(ModelStore):
     """Default backend: the model is a Python object already in memory.
@@ -132,3 +153,16 @@ class InMemoryModelStore(ModelStore):
         from ..opensees.preprocessor import preprocess_model
 
         return preprocess_model(self._raw, dict(config or {}))
+
+    def preprocessed(self) -> Any:
+        """The ``MeshModel`` already produced for this store, or ``None``."""
+        return self._mesh_model
+
+    def set_preprocessed(self, mesh_model: Any) -> None:
+        """Record *mesh_model* so :meth:`preprocessed` and a later run see it.
+
+        The GUI calls this when a ``Model ▸ Split`` / ``Mesh areas`` run
+        finishes, so a following analysis uses the topology the user is looking
+        at rather than silently preprocessing again (P27, refinement 1).
+        """
+        self._mesh_model = mesh_model

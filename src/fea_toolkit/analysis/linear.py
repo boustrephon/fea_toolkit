@@ -279,6 +279,29 @@ def static_load_verification(md, mesh_model, config: Optional[dict] = None):
     return pd.DataFrame(rows)
 
 
+def _mesh_has_shells(mesh_model) -> bool:
+    """Whether a preprocessed model carries areas the builder must build as shells.
+
+    The Preprocessor can leave areas in one of two states: **shells** (meshed,
+    carrying their own pressure) or **loads-only** (demoted to frame edge loads).
+    It records the demoted ones on ``MeshModel.loads_only_area_ids``, so any area
+    element *not* in that set is a shell the builder has to create.
+
+    This is what makes the builder's config follow the mesh: without it a
+    wall/slab-stiffened model is built with its areas silently missing — a
+    mechanism, and the singular-matrix failure the Admin Building run hit.
+
+    Args:
+        mesh_model: A ``MeshModel`` (or anything with the two attributes).
+
+    Returns:
+        ``True`` when at least one area element is not loads-only.
+    """
+    areas = getattr(mesh_model, "area_elements", None) or {}
+    loads_only = set(getattr(mesh_model, "loads_only_area_ids", None) or ())
+    return any(area_id not in loads_only for area_id in areas)
+
+
 def run_static_cases(
     mesh_model,
     cases: dict[str, dict[str, float]],
@@ -307,7 +330,10 @@ def run_static_cases(
         cases: ``{case_name: {pattern: factor}}`` — the cases to solve, in run
             order.  :func:`~fea_toolkit.analysis.case_listing.list_static_cases`
             produces this for the model's own cases.
-        config: Optional ``AnalysisBuilder`` config (solver settings).
+        config: Optional ``AnalysisBuilder`` config (solver settings).  When it
+            does not set ``create_shells``, that is derived from the mesh — see
+            :func:`_mesh_has_shells` — so a shell-stiffened model is built with
+            its areas rather than as a mechanism.
         raw_out: Optional dict filled with each case's raw results —
             ``raw_out[case] = {"nodal_displacements": ..., "element_forces": {...}}``
             — the shape :func:`~fea_toolkit.io.npz_writer.results_arrays` accepts
@@ -328,6 +354,11 @@ def run_static_cases(
     from fea_toolkit.utils import sum_reactions_with_overturning
 
     ab_config = {"element_type": "elasticBeamColumn", "verbose": False}
+    # Build what the mesh holds: a preprocessed model with shell areas needs
+    # ``create_shells`` set, or those areas are never created and a
+    # wall/slab-stiffened model is a mechanism.  A caller's explicit setting wins.
+    if _mesh_has_shells(mesh_model):
+        ab_config["create_shells"] = True
     if config:
         ab_config.update(config)
 
@@ -393,6 +424,97 @@ def run_static_cases(
         )
 
     return rows
+
+
+def run_case_set(
+    md: SAPModelData,
+    mesh_model,
+    cases: dict[str, dict[str, float]],
+    *,
+    combinations: Optional[dict[str, dict[str, float]]] = None,
+    config: Optional[dict] = None,
+    raw_out: Optional[dict] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
+    on_progress: Optional[Callable[[int, str, int], None]] = None,
+) -> dict:
+    """Solve cases, reduce any combinations, and assemble an in-memory archive.
+
+    The whole of the GUI's ``Analysis ▸ Run`` in one call, kept Qt-free so it is
+    tested without the ``[gui]`` extra: it solves each case with
+    :func:`run_static_cases`, reduces the requested combinations with
+    :func:`~fea_toolkit.analysis.combinations.build_combination_results`, and
+    assembles the archive with
+    :func:`~fea_toolkit.io.npz_writer.results_arrays`.  **Nothing is written to
+    disk** — the returned ``"arrays"`` goes straight to
+    :class:`~fea_toolkit.io.results_repository.NpzResultsRepository`, which is
+    what lets a result be viewed without an archive (P27).
+
+    A combination whose leaf cases did not all solve is **not** reduced: an
+    envelope over a missing case would be quietly wrong, so it is reported in
+    ``"unreduced"`` instead.
+
+    Args:
+        md: Parsed :class:`~fea_toolkit.model.sap_data.SAPModelData` — supplies
+            the combination definitions and the archive's unit labels.
+        mesh_model: The preprocessed model the cases are built from.
+        cases: ``{case_name: {pattern: factor}}`` to solve, in run order.
+        combinations: ``{combination_name: {leaf_case: factor}}`` to reduce from
+            the case results.  The factors here are only used to decide whether
+            a combination is reducible; the reduction reads its factors from the
+            model's own combination definitions.
+        raw_out: Optional dict filled with each case's raw results (see
+            :func:`run_static_cases`).
+        config: Optional ``AnalysisBuilder`` config.  ``create_shells`` is
+            derived from the mesh when it is not given (see
+            :func:`run_static_cases`).
+        should_cancel: Polled between cases (see :func:`run_static_cases`).
+        on_progress: ``(index, case_name, total)`` before each case (see
+            :func:`run_static_cases`).
+
+    Returns:
+        ``{"arrays": {name: ndarray}, "cases": [name, ...], "failed": [...],
+        "unreduced": [...], "cancelled": bool}`` — ``"failed"`` are the cases
+        that did not converge, ``"unreduced"`` the combinations that could not
+        be formed from what did.
+    """
+    from ..io.npz_writer import results_arrays
+    from .combinations import build_combination_results
+
+    raw: dict = {} if raw_out is None else raw_out
+    run_static_cases(
+        mesh_model,
+        cases,
+        config=config,
+        raw_out=raw,
+        should_cancel=should_cancel,
+        on_progress=on_progress,
+    )
+
+    static_results: dict = dict(raw)
+    requested = dict(combinations or {})
+    unreduced = [name for name, leaves in requested.items() if not set(leaves) <= set(raw)]
+    reducible = [name for name in requested if name not in unreduced]
+
+    case_meta = None
+    if reducible:
+        combined, case_meta = build_combination_results(
+            raw, model=md, combinations=reducible, return_meta=True
+        )
+        static_results.update(combined)
+
+    arrays = results_arrays(
+        md, static_results=static_results, mesh_model=mesh_model, case_meta=case_meta
+    )
+    cancelled = bool(should_cancel()) if should_cancel is not None else False
+    return {
+        "arrays": arrays,
+        "cases": list(static_results),
+        # A cancelled case did not *fail* — it was never run — so the two are
+        # reported apart and the caller can say which happened.
+        "failed": [] if cancelled else sorted(set(cases) - set(raw)),
+        "unreduced": unreduced,
+        "cancelled": cancelled,
+    }
 
 
 def run_linear_cases(

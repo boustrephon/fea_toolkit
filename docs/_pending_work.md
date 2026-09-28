@@ -540,9 +540,14 @@ Source: the 2026-09-28 planning session; `docs/load_cases_and_combinations.md`
 2. **I2 — a Qt-free listing helper**: the model's analysable cases with their
    `{pattern: factor}` maps, the combinations with the cases they need, and the
    custom-case dict form (`{"ULT": {"Dead": 1.4, "Live": 1.6}}`).
+   **Landed 2026-09-28** (`analysis/case_listing.py`) — see the DONE register.
 3. **I3 — the dialog + worker + a result registered as a case view** through
    `ResultsRepository` (never a file path), with progress, cancel and log.
+   **Landed 2026-09-28** — see the DONE register.  The dialog gained a
+   **per-option load multiplier** (default `1.0` = the case as defined) as the
+   refinement: ticking several cases runs several solves, each at its own factor.
 4. **I4 — `File ▸ Save results`**, writing the currently displayed result.
+   **Landed 2026-09-28** — see the DONE register.
 
 **Static-linear only in this slice.**  Modal / spectrum / pushover stay greyed,
 each naming its milestone: pushover is minutes-long and would make the slice
@@ -874,6 +879,99 @@ an implementation detail.
 
 **Trigger.** Revisit when a run is dominated by extraction rather than solving, or
 when a time-history model's per-step results no longer fit comfortably in memory.
+## DONE (2026-09-28 — Analysis ▸ Run lands in the GUI: solve, view, save; no archive needed)
+
+P27 increments **I2–I4** — the static-linear slice of GUI milestone 5 — with the
+real acceptance target met: run a case on the Admin Building and see it, without
+ever writing an NPZ.
+
+**I2 — a Qt-free listing helper.**  New `analysis/case_listing.py`: the model's
+analysable static cases as `{case: {pattern: factor}}` (`list_static_cases`), the
+combinations with the load cases each needs (`list_combinations`, expanded
+through `build_combo_tree`), and the pattern names a hand-authored case may name
+(`list_patterns`).  The auto-detect and zero-load filter **moved here** from
+`run_linear_cases`, which now calls `list_static_cases` — so the dialog offers
+exactly what the runner would solve, with no second, drifting copy.
+
+**The static half of `run_linear_cases` is now its own function.**
+`run_static_cases(mesh, cases, *, config, raw_out, should_cancel, on_progress)`
+runs *only* static cases — no response-spectrum or modal pass — with cooperative
+cancellation polled between cases and a per-case progress hook.
+`run_linear_cases` delegates to it and keeps the RS/modal work.
+
+**I3 — the dialog + worker + an in-memory case view.**  `analysis.run_case_set()`
+is the whole run Qt-free: solve with `run_static_cases`, reduce the requested
+combinations with `build_combination_results`, assemble with `results_arrays`,
+and report `{arrays, cases, failed, unreduced, cancelled}`.  **Nothing is
+written** — the dict goes straight to `NpzResultsRepository`, so the result is
+viewable with no file.  A combination whose leaf cases did not all solve is
+*not* reduced (an envelope over a missing case would be quietly wrong); it is
+reported in `unreduced` instead.
+
+`gui/views/analysis_dialog.py` is the thin view over that listing: the model's
+static cases and combinations, a **per-option load multiplier** (default `1.0` =
+the case as defined — the user's refinement), and a custom-case author (`name` +
+per-pattern factors, i.e. the `{"ULT": {"Dead": 1.4, "Live": 1.6}}` form).  A
+combination needing a case this slice cannot run is greyed with the reason.
+`MainWindow.run_analysis()` is the dialog-free entry point; the worker carries a
+new `TaskWorker.progress` signal, and each solved case is registered as a
+`results:<case>` view — re-running a case replaces it, a new one is added beside
+it (refinement 2).
+
+**Refinement 1 — preprocessing is a prerequisite, never silent.**  `ModelStore`
+gained `preprocessed()` / `set_preprocessed()`; the GUI records the mesh a
+`Model ▸ Split` / `Mesh areas` run produced, and `Analysis ▸ Run` is greyed with
+a tooltip naming that step until one exists.  Auto-preprocessing on Run stays
+deferred, deliberately.
+
+**I4 — `File ▸ Save results…`.**  `io.npz_writer.save_results_arrays(path,
+arrays)` is the write half of the in-memory seam, and `write_results_npz` now
+ends in it, so both paths share one save implementation.  The action prompts for
+a path with a suggested name, so variants that differ by a small change can be
+kept side by side.
+
+**Two latent bugs the acceptance run found — both now fixed, both pre-existing.**
+The Admin Building run is what the plan asked for, and it failed twice before it
+worked; both failures were real, and neither was in the new code:
+
+1. **The builder did not follow the mesh.**  `AnalysisBuilder` builds shell
+   elements only when its own config says `create_shells` — it does not infer
+   them from the `MeshModel` — so a run over a preprocessed shell model was
+   built **with every wall and slab missing**: a mechanism, and the
+   ``matrix singular U(i,i) = 0`` failure the first attempt hit.
+   `run_static_cases` now derives it: any area element the Preprocessor did not
+   demote to loads-only is a shell, so ``create_shells`` is set from
+   `MeshModel.loads_only_area_ids` (a caller's explicit setting still wins).
+2. **`int(node_id)` on a meshed model.**  `io/npz_writer._collect_static` wrote
+   the nodal-displacement arrays by sorting the displacement dict
+   numerically — so a meshed model, whose derived node ids are labels like
+   ``"5_af_0_1"``, raised ``ValueError: invalid literal for int()``.  The
+   arrays must be written in the **geometry's** node order (they are read
+   index-wise against ``node_tag`` / ``node_sap_id``), and a producer may key
+   displacement by node **id** (``run_static_analysis``) or by integer **tag**
+   (hand-built payloads), so both now resolve.
+
+**Acceptance.**  `Admin_0.7E_short term unfixed.s2k` → `fix_base_restraints`
+(the project's own prep, `local/…/admin_report.py`) → `preprocess_model` with
+`split_elements` + `create_shells` → `run_case_set` on the custom `DEAD` case:
+**converged**, 1028 nodes carrying displacement, 849 frames and 1009 shells in
+the archive, served through `NpzResultsRepository` — and **no NPZ written**.
+
+**Tests.**  Qt-free: `tests/test_case_listing.py` (listing + `run_static_cases`)
+and `tests/test_run_case_set.py` (the in-memory archive, combination reduction,
+cancellation), plus two `save_results_arrays` round-trips in
+`tests/test_npz_writer.py`.  Qt (`needs_gui`): `tests/test_gui_analysis.py` — the
+enablement gate, a run registering a case view **with no NPZ anywhere**, a
+combination's own view, the save round-trip, and the dialog's factor semantics.
+`tests/test_gui_app.py` moved its placeholder assertion to a still-greyed
+action.  Full suite green in `venv_opensees` (3.12): 167 GUI tests, and the rest
+of the suite alongside.
+
+**Docs.**  `docs/gui.md` (*Running an analysis*, menu/toolbar tables, what is
+still missing), `docs/gui_roadmap.md` §9.6 (milestone 5 → ⚠️ partial, static
+slice landed), `docs/load_cases_and_combinations.md` (*The GUI is the consumer*).
+
+
 No work is planned before then.
 
 ## DONE (2026-09-28 — docs: the pattern → case → combination chain as an analysis input)

@@ -44,7 +44,7 @@ from .npz_reader import (
     read_results,
     read_results_npz,
 )
-from .npz_writer import results_arrays, write_results_npz
+from .npz_writer import results_arrays, save_results_arrays, write_results_npz
 from .results_repository import NpzResultsRepository, ResultsRepository
 from .results_schema import SCHEMA_VERSION, SCHEMA_VERSION_LEGACY, make_static_key, validate_npz
 from .s2k_parser import SAP2000Parser
@@ -168,6 +168,7 @@ __all__ = [
     "read_time_history_csv",
     "record_summary",
     "results_arrays",
+    "save_results_arrays",
     "scale_to_pga",
     "scale_to_target_sa",
     "section_summary",

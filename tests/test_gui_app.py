@@ -84,13 +84,19 @@ def test_message_log_records_activity(window):
 
 
 def test_real_actions_enabled_placeholders_disabled(window):
-    """Live actions are enabled; placeholders carry their milestone and are off."""
+    """Live actions are enabled; greyed ones carry the milestone that wires them."""
     assert window._actions["file.open"].isEnabled()
     assert window._actions["view.iso"].isEnabled()
     assert window._actions["help.about"].isEnabled()
+    # Run is live, but greyed until the model has been preprocessed (P27,
+    # refinement 1) -- and it names the step that un-greys it.
     run = window._actions["analysis.run"]
     assert not run.isEnabled()
-    assert "Milestone 5" in run.toolTip()
+    assert "Model \u25b8 Split" in run.toolTip()
+    # The analyses this slice does not implement still name their milestone.
+    pushover = window._actions["analysis.pushover"]
+    assert not pushover.isEnabled()
+    assert "Milestone 5" in pushover.toolTip()
 
 
 def test_show_is_graceful_without_an_interactive_viewport(window):

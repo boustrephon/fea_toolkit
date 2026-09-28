@@ -39,6 +39,7 @@ from .case_listing import (
 )
 from .combinations import build_combination_results
 from .linear import (
+    run_case_set,
     run_linear_cases,
     run_static_cases,
     static_load_verification,
@@ -87,6 +88,7 @@ __all__ = [
     "list_static_cases",
     "member_shear_capacity",
     "report_shear_failure",
+    "run_case_set",
     "run_linear_cases",
     "run_modal_analysis",
     "run_nonlinear_dynamic_analysis",

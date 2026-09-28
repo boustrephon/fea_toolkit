@@ -196,9 +196,50 @@ def _collect_geometry(
     return arrays
 
 
+def _displacement_order(disp: dict, node_ids: Optional[list], node_tags: Optional[list]) -> list:
+    """``[(node_id, node_tag), ...]`` in geometry order for a displacement dict.
+
+    The displacement arrays are read **index-wise** against the geometry
+    (``node_tag`` / ``node_sap_id``), so they have to be written in the
+    geometry's own order.  Sorting the keys cannot do that once a model has been
+    split or meshed: the derived node ids are not numbers at all, which is how
+    ``int("5_af_0_1")`` used to reach a caller as a ``ValueError``.
+
+    Without a geometry (a standalone call) the producer's order is kept as-is,
+    which is all a caller can mean in that case.
+    """
+    if node_ids is not None or node_tags is not None:
+        return list(zip(node_ids or [], node_tags or []))
+    return [(key, key) for key in disp]
+
+
+def _displacement_component(disp: dict, node_id: Any, node_tag: Any, component: int) -> float:
+    """One displacement component for a node, whichever key the producer used.
+
+    Producers differ: :meth:`AnalysisBuilder.run_static_analysis` keys by node
+    **id** (the SAP label — a derived string such as ``"5_af_0_1"`` once the
+    model has been split or meshed), while hand-built payloads key by integer
+    **tag**.  Resolve both, and treat a node the producer did not cover as zero —
+    the same rule the repository's readers apply.
+    """
+    for key in (node_id, node_tag):
+        if key is None:
+            continue
+        value = disp.get(key)
+        if value is None:
+            continue
+        try:
+            return float(value[component])
+        except (IndexError, TypeError, ValueError):
+            return 0.0
+    return 0.0
+
+
 def _collect_static(
     static_results: dict[str, Any],
     case_meta: Optional[dict[str, dict[str, str]]] = None,
+    node_ids: Optional[list] = None,
+    node_tags: Optional[list] = None,
 ) -> dict[str, np.ndarray]:
     """Extract static analysis arrays.
 
@@ -208,8 +249,9 @@ def _collect_static(
     * The standard 12 frame force keys (``fx_i`` … ``mz_j``) are written as
       per-element arrays (shape ``(n_elem,)``, empty when no element forces
       are recorded).
-    * ``nodal_displacements`` — dict of ``{tag: [dx, dy, dz]}`` — is written
-      as ``node_dx`` / ``node_dy`` / ``node_dz`` arrays ordered by node tag.
+    * ``nodal_displacements`` — a dict keyed by node **id** or integer **tag** —
+      is written as ``node_dx`` / ``node_dy`` / ``node_dz`` arrays in the
+      **geometry's** node order, which is the index the readers zip against.
     * **Scalar entries** — any remaining key whose value is a JSON-scalar
       (``int`` / ``float`` / ``str`` / ``bool`` / ``np.bool_`` / ``np.number``)
       or a ``{"value": scalar}`` dict — are persisted as shape-``(1,)``
@@ -250,14 +292,19 @@ def _collect_static(
             vals = data.get(key, data.get("element_forces", {}).get(key, []))
             arrays[make_static_key(case, key)] = np.asarray(vals, dtype=float)
 
-        # Nodal displacements
+        # Nodal displacements, in the geometry's node order so they line up
+        # with ``node_tag`` / ``node_sap_id`` on read.
         disp = data.get("nodal_displacements", {})
         if disp:
-            # Convert dict to array ordered by node_tag
-            tags = sorted(disp.keys(), key=int)
-            for i, dof in enumerate(["dx", "dy", "dz"]):
-                arr = np.array([disp[t][i] for t in tags], dtype=float)
-                arrays[make_static_key(case, f"node_{dof}")] = arr
+            order = _displacement_order(disp, node_ids, node_tags)
+            for index, dof in enumerate(("dx", "dy", "dz")):
+                arrays[make_static_key(case, f"node_{dof}")] = np.array(
+                    [
+                        _displacement_component(disp, node_id, node_tag, index)
+                        for node_id, node_tag in order
+                    ],
+                    dtype=float,
+                )
 
         # Scalar entries (including ``{"value": scalar}`` wrappers).
         # Keys already consumed above are skipped.
@@ -444,7 +491,8 @@ def results_arrays(
     arrays: dict[str, np.ndarray] = {}
 
     # Geometry
-    arrays.update(_collect_geometry(md, mesh_model))
+    geometry = _collect_geometry(md, mesh_model)
+    arrays.update(geometry)
 
     # Derive unit labels from the model when not explicitly overridden
     force_unit = force_unit or force_unit_label(getattr(md, "units", {}))
@@ -454,7 +502,16 @@ def results_arrays(
     analysis_types = []
     if static_results:
         analysis_types.append("static")
-        arrays.update(_collect_static(static_results, case_meta))
+        # Displacement arrays are read index-wise against the geometry, so the
+        # geometry's node order is handed down — see :func:`_displacement_order`.
+        arrays.update(
+            _collect_static(
+                static_results,
+                case_meta,
+                node_ids=[str(value) for value in geometry.get("node_sap_id", [])],
+                node_tags=[int(value) for value in geometry.get("node_tag", [])],
+            )
+        )
     if modal_result:
         analysis_types.append("modal")
         arrays.update(_collect_modal(modal_result, mode_shapes))
@@ -535,7 +592,27 @@ def write_results_npz(
         mesh_model=mesh_model,
         case_meta=case_meta,
     )
+    return save_results_arrays(path, arrays)
 
+
+def save_results_arrays(path: str, arrays: dict[str, np.ndarray]) -> str:
+    """Save an already-assembled archive dict to *path*.
+
+    The write half of the in-memory seam.  :func:`write_results_npz` assembles
+    with :func:`results_arrays` and saves in one step; a caller that already
+    holds the arrays — the GUI's ``Analysis ▸ Run``, which registers them as
+    views without writing anything — saves them through here when persistence is
+    wanted (P27 / I4), so both paths share one save implementation.
+
+    Args:
+        path: Output ``.npz`` file path.
+        arrays: ``{name: ndarray}``, as :func:`results_arrays` returns it (or as
+            a :class:`~fea_toolkit.io.results_repository.NpzResultsRepository`
+            serves it back through ``raw()``).
+
+    Returns:
+        Absolute path to the saved file.
+    """
     path = str(Path(path).resolve())
     # Pyright's numpy stub declares ``allow_pickle`` before ``**kwds``;
     # ``**dict[str, ndarray]`` expansion triggers a false-positive overlap

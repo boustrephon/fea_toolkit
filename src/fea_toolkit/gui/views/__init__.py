@@ -7,6 +7,7 @@ importing this package -- for instance a non-Qt test reaching for
 """
 
 __all__ = [
+    "AnalysisDialog",
     "MessageLog",
     "PickResult",
     "PropertyInspector",
@@ -17,6 +18,7 @@ __all__ = [
 ]
 
 _LAZY_EXPORTS = {
+    "AnalysisDialog": ".analysis_dialog",
     "MessageLog": ".message_log",
     "PropertyInspector": ".property_inspector",
     "PickResult": ".interactor",

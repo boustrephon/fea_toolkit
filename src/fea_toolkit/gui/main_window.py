@@ -185,6 +185,7 @@ class MainWindow(QMainWindow):
         self._build_docks()
         self._build_status_bar()
         self._set_model_actions_enabled(False)
+        self._set_analysis_actions_enabled()
         self._set_view_actions_enabled()
         self._decorate_view()
         for note in self._policy_notes:
@@ -396,7 +397,12 @@ class MainWindow(QMainWindow):
         a["help.about"].setMenuRole(QAction.MenuRole.AboutRole)
 
         # ── Greyed placeholders (each names its milestone) ──
-        a["file.save_results"] = self._placeholder("Save results", "Milestone 7")
+        a["file.save_results"] = self._real_action(
+            "Save results\u2026",
+            self._on_save_results,
+            tip="Write the displayed result to an NPZ archive",
+        )
+        a["file.save_results"].setEnabled(False)
         a["file.export_tcl"] = self._placeholder("Export Tcl", "Milestone 7")
         a["file.export_image"] = self._placeholder("Export screenshot", "Milestone 7")
         a["edit.copy"] = self._placeholder("Copy", "a future release")
@@ -442,12 +448,21 @@ class MainWindow(QMainWindow):
         )
         a["model.selections"] = self._placeholder("Selections", "a future release")
         a["model.units"] = self._placeholder("Units", "a future release")
-        a["analysis.run"] = self._placeholder("Run", "Milestone 5")
-        a["analysis.static"] = self._placeholder("Static analysis", "Milestone 5")
+        a["analysis.run"] = self._real_action(
+            "Run\u2026",
+            self._on_analysis_run,
+            shortcut="Ctrl+R",
+            tip="Choose static cases or combinations to solve (needs a preprocessed model)",
+        )
         a["analysis.modal"] = self._placeholder("Modal analysis", "Milestone 5")
         a["analysis.spectrum"] = self._placeholder("Response spectrum", "Milestone 5")
         a["analysis.pushover"] = self._placeholder("Pushover", "Milestone 5")
-        a["analysis.stop"] = self._placeholder("Stop", "Milestone 5")
+        a["analysis.stop"] = self._real_action(
+            "Stop",
+            self._on_analysis_stop,
+            tip="Stop the running analysis at its next case boundary",
+        )
+        a["analysis.stop"].setEnabled(False)
         a["results.deformed"] = self._toggle_action(
             "Deformed shape",
             self._on_deformed_toggled,
@@ -518,7 +533,9 @@ class MainWindow(QMainWindow):
             m.addAction(a[key])
 
         m = bar.addMenu("&Analysis")
-        for key in ("analysis.static", "analysis.modal", "analysis.spectrum", "analysis.pushover"):
+        m.addAction(a["analysis.run"])
+        m.addSeparator()
+        for key in ("analysis.modal", "analysis.spectrum", "analysis.pushover"):
             m.addAction(a[key])
         m.addSeparator()
         m.addAction(a["analysis.stop"])
@@ -876,6 +893,7 @@ class MainWindow(QMainWindow):
             self._interactor.camera_position = camera
         self._update_units_label()
         self._set_model_actions_enabled(self._store is not None)
+        self._set_analysis_actions_enabled()
         self._set_view_actions_enabled()
         self.log("Displayed model geometry.")
 
@@ -1031,6 +1049,8 @@ class MainWindow(QMainWindow):
         has_forces = repository is not None and bool(case) and repository.has_forces(case)
         self._actions["results.forces"].setEnabled(has_forces)
         self._force_quantity.setEnabled(has_forces)
+        # Saving needs a result to write — the active view decides.
+        self._actions["file.save_results"].setEnabled(repository is not None)
 
     def _highlight_entity(self, entity: Any) -> None:
         """Highlight *entity* in the viewport, replacing the previous highlight.
@@ -1363,9 +1383,15 @@ class MainWindow(QMainWindow):
             f"Preprocessed: {len(mesh_model.frame_elements)} frame elements ({detail}), "
             f"{len(mesh_model.area_elements)} area elements."
         )
+        # Record the preprocessed model on the store, so Analysis ▸ Run uses the
+        # topology just displayed rather than preprocessing again (P27,
+        # refinement 1: preprocessing is a user action, never silent).
+        if self._store is not None:
+            self._store.set_preprocessed(mesh_model)
         self._views.add_geometry(key, name, mesh_model, source=source)
         self.show_model(mesh_model, reset_view=False)
         self.log(f"Added view: {name}.")
+        self._set_analysis_actions_enabled()
 
     def _preprocess_failed(self, message: str) -> None:
         """Report a preprocessing failure, leaving the display alone."""
@@ -1383,6 +1409,7 @@ class MainWindow(QMainWindow):
         self._progress.setVisible(False)
         self._progress.setRange(0, 100)
         self._set_model_actions_enabled(self._store is not None)
+        self._set_analysis_actions_enabled()
         gc.collect()
 
     def _set_model_actions_enabled(self, enabled: bool) -> None:
@@ -1393,6 +1420,28 @@ class MainWindow(QMainWindow):
         """
         for key in ("model.split", "model.mesh"):
             self._actions[key].setEnabled(enabled)
+
+    def _set_analysis_actions_enabled(self) -> None:
+        """Enable **Analysis ▸ Run** only when a preprocessed model exists.
+
+        ``run_static_cases`` needs a ``MeshModel`` beside the parsed model, and
+        Run deliberately does **not** preprocess on its own: a topology change
+        the user should see reported comes from ``Model ▸ Split`` / ``Mesh
+        areas`` (P27, refinement 1).  Until one has been run, the action stays
+        greyed and its tooltip names the step it needs.  A run already in flight
+        also keeps it disabled, so a second dialog cannot be opened over it.
+        """
+        store = self._store
+        mesh = store.preprocessed() if store is not None else None
+        running = self._worker is not None and self._worker.isRunning()
+        action = self._actions["analysis.run"]
+        action.setEnabled(mesh is not None and not running)
+        if mesh is None:
+            action.setToolTip(
+                "Run \u2014 needs a preprocessed model: Model \u25b8 Split elements or Mesh areas"
+            )
+        else:
+            action.setToolTip("Choose static cases or combinations to solve")
 
     # ── Handlers ────────────────────────────────────────────────────
 
@@ -1475,6 +1524,42 @@ class MainWindow(QMainWindow):
             self._show_view(first, rebuild_tree=True)
         return True
 
+    def _on_save_results(self) -> None:
+        """**File ▸ Save results…**: write the displayed result to a chosen NPZ.
+
+        The path is always prompted for — with a suggested name — rather than a
+        fixed output, so variants differing by a small change can be kept side
+        by side (P27, refinement 2).  What is saved is the archive the active
+        view is reading, so the file round-trips to exactly what the view shows,
+        and the run itself stays viewable without it.
+        """
+        from pathlib import Path
+
+        view = self._views.active
+        repository = self._views.results(view.key) if view is not None else None
+        if repository is None:
+            self.log("Nothing to save \u2014 show a results case first.", "warn")
+            return
+
+        case = _case_of(view) or "results"
+        stem = Path(self._source_label).stem or "results"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save results", f"{stem}_{case}.npz", "Results archive (*.npz)"
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".npz"):
+            path += ".npz"
+
+        from ..io.npz_writer import save_results_arrays
+
+        try:
+            saved = save_results_arrays(path, repository.raw())
+        except Exception as exc:  # pragma: no cover - a filesystem failure
+            self.log(f"Could not save results: {exc}", "error")
+            return
+        self.log(f"Saved results to {saved}.")
+
     def open_path(self, path: str) -> bool:
         """Parse *path* and display it; return False on failure (no dialog).
 
@@ -1520,6 +1605,204 @@ class MainWindow(QMainWindow):
             "A FEA to OpenSees/Rhino conversion toolkit.<br>"
             "GUI: Milestone 4 (selection sync).",
         )
+
+    # ── Analysis (Analysis menu) ────────────────────────────────────
+
+    def _on_analysis_run(self) -> None:
+        """**Analysis ▸ Run…**: pick cases, solve on a worker, register the views.
+
+        The listing is built Qt-free (``analysis.case_listing``) and handed to
+        the dialog, which adds the per-case load multipliers; what comes back is
+        a set of static solves.  Nothing is written to disk — the in-memory
+        archive is registered as one view per case, so a result can be looked at
+        without an NPZ.  ``File ▸ Save results`` persists one when wanted.
+        """
+        store = self._store
+        mesh = store.preprocessed() if store is not None else None
+        if store is None or mesh is None:
+            self.log(
+                "Run needs a preprocessed model \u2014 use Model \u25b8 Split elements "
+                "or Mesh areas first.",
+                "warn",
+            )
+            return
+        if self._worker is not None and self._worker.isRunning():
+            self.log("An analysis is already running.", "warn")
+            return
+
+        from ..analysis.case_listing import (
+            list_combinations,
+            list_patterns,
+            list_static_cases,
+        )
+        from .views.analysis_dialog import AnalysisDialog
+
+        md = store.raw()
+        specs = {spec.name: spec for spec in list_combinations(md)}
+        request = AnalysisDialog.get_request(
+            list_static_cases(md, mesh),
+            list(specs.values()),
+            list_patterns(md),
+            self,
+        )
+        if request is None:  # cancelled
+            return
+
+        cases = request.cases
+        combos = {name: dict(specs[name].leaves) for name in request.combinations if name in specs}
+        self.run_analysis(cases, combos)
+
+    def run_analysis(self, cases: dict, combinations: Optional[dict] = None) -> bool:
+        """Solve *cases* (and reduce *combinations*) on a worker — dialog-free.
+
+        The entry point the dialog defers to, and that tests drive directly,
+        exactly as :meth:`open_results_path` is for ``File ▸ Open results``.
+
+        Args:
+            cases: ``{case: {pattern: factor}}`` to solve.
+            combinations: ``{combination: {leaf_case: factor}}`` to reduce.
+
+        Returns:
+            ``True`` when the run started; ``False`` when it cannot yet (no
+            preprocessed model) or one is already running.
+        """
+        store = self._store
+        mesh = store.preprocessed() if store is not None else None
+        if store is None or mesh is None:
+            self.log(
+                "Run needs a preprocessed model \u2014 use Model \u25b8 Split elements "
+                "or Mesh areas first.",
+                "warn",
+            )
+            return False
+        if self._worker is not None and self._worker.isRunning():
+            self.log("An analysis is already running.", "warn")
+            return False
+        self._start_analysis(store.raw(), mesh, dict(cases), dict(combinations or {}))
+        return True
+
+    def _on_analysis_stop(self) -> None:
+        """**Analysis ▸ Stop**: ask the worker to stop at its next case boundary.
+
+        Cancellation is cooperative, exactly as the threading model requires: a
+        single ``run_static_analysis`` call is atomic, so the run ends *between*
+        cases rather than mid-solve.
+        """
+        if self._worker is None or not self._worker.isRunning():
+            return
+        self._worker.cancel()
+        self._actions["analysis.stop"].setEnabled(False)
+        self.log("Stop requested \u2014 the run ends at the next case boundary.", "warn")
+
+    def _start_analysis(self, md: Any, mesh: Any, cases: dict, combos: dict) -> None:
+        """Solve *cases* (and reduce *combos*) on a worker.
+
+        Args:
+            md: The parsed model — needed to reduce combinations.
+            mesh: The preprocessed model the cases are built from.
+            cases: ``{case: {pattern: factor}}`` to solve, in run order.
+            combos: ``{combination: {leaf_case: factor}}`` to reduce afterwards.
+        """
+        self.log(f"Running {len(cases)} case(s) and {len(combos)} combination(s) \u2026")
+        self._progress.setRange(0, 0)  # busy until the first case reports
+        self._progress.setValue(0)
+        self._progress.setVisible(True)
+        self._actions["analysis.stop"].setEnabled(True)
+        self._actions["analysis.run"].setEnabled(False)
+
+        # The task reports progress through the worker's signal; the reporter is
+        # published in a one-element list because the worker does not exist yet
+        # where the task is defined.
+        reporter: list = []
+
+        def task(should_cancel: Any) -> dict:
+            from ..analysis.linear import run_case_set
+
+            return run_case_set(
+                md,
+                mesh,
+                cases,
+                combinations=combos,
+                should_cancel=should_cancel,
+                on_progress=lambda index, name, total: reporter[0](index, total, name),
+            )
+
+        _freeze_gc_once()
+        worker = TaskWorker(task, parent=self)
+        reporter.append(worker.report_progress)
+        worker.progress.connect(self._analysis_progress)
+        worker.succeeded.connect(self._analysis_finished)
+        worker.failed.connect(self._analysis_failed)
+        worker.finished.connect(self._analysis_ended)
+        self._worker = worker
+        worker.start()
+
+    def _analysis_progress(self, current: int, total: int, label: str = "") -> None:
+        """Show determinate progress, and log which case is being solved."""
+        self._progress.setRange(0, max(int(total), 1))
+        self._progress.setValue(int(current))
+        if label:
+            self.log(f"Solving {label} ({current}/{total}) \u2026")
+
+    def _analysis_finished(self, result: dict) -> None:
+        """Register the in-memory archive as one view per case and show the first.
+
+        The result is served through a ``NpzResultsRepository`` backed by the
+        array dict — never a file path — so the run's results can be viewed with
+        nothing written.  Re-running a case replaces its view (the same key),
+        while a different case adds one, so repeated runs do not pile up
+        (P27, refinement 2).
+        """
+        from ..io.results_repository import NpzResultsRepository
+
+        if result.get("cancelled"):
+            self.log("Analysis stopped before finishing.", "warn")
+        for name in result.get("failed") or []:
+            self.log(f"Case did not solve: {name}", "warn")
+        for name in result.get("unreduced") or []:
+            self.log(f"Combination not reduced (a required case is missing): {name}", "warn")
+
+        repository = NpzResultsRepository(result.get("arrays") or {})
+        cases = list(result.get("cases") or repository.cases())
+        if not cases:
+            self.log("The run produced no results.", "warn")
+            return
+
+        mesh = self._store.preprocessed() if self._store is not None else None
+        model = mesh if mesh is not None else repository.as_model()
+        for case in cases:
+            self._views.add_results(
+                f"{_RESULTS_KEY_PREFIX}{case}",
+                _case_view_name(case, repository.case_meta(case)),
+                repository,
+                source=f"Analysis run \u00b7 {case}",
+                model=model,
+                activate=False,
+            )
+        self.log(f"Run complete: {len(cases)} case(s) available as views.")
+
+        first = self._views.get(f"{_RESULTS_KEY_PREFIX}{cases[0]}")
+        if first is not None:
+            self._show_view(first, rebuild_tree=True)
+
+    def _analysis_failed(self, message: str) -> None:
+        """Report a run failure, leaving the display alone."""
+        self.log(f"Analysis failed: {message}", "error")
+
+    def _analysis_ended(self) -> None:
+        """Restore the UI once the analysis worker has stopped.
+
+        The collection is the other half of the worker's ``gc.disable()``: cycles
+        created while the task ran are reclaimed on the GUI thread, where
+        traversing the PySide6/VTK objects the window owns is safe.
+        """
+        self._worker = None
+        self._progress.setVisible(False)
+        self._progress.setRange(0, 100)
+        self._progress.setValue(0)
+        self._actions["analysis.stop"].setEnabled(False)
+        self._set_analysis_actions_enabled()
+        gc.collect()
 
     # ── Teardown ────────────────────────────────────────────────────
 

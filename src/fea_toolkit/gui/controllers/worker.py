@@ -36,6 +36,10 @@ class TaskWorker(QThread):
     succeeded = Signal(object)
     #: Emitted as ``"<ExceptionType>: <message>"`` when the task raises.
     failed = Signal(str)
+    #: Emitted as ``(current, total, label)`` when the task reports progress.
+    #: Emitted *from the worker thread*; Qt queues it onto the GUI thread, which
+    #: is what makes it safe to drive a progress bar from it.
+    progress = Signal(int, int, str)
 
     def __init__(self, task: Callable[[Callable[[], bool]], Any], parent: Any = None) -> None:
         super().__init__(parent)
@@ -51,6 +55,15 @@ class TaskWorker(QThread):
     def should_cancel(self) -> bool:
         """Whether :meth:`cancel` has been called (handed to the task)."""
         return self._cancel.is_set()
+
+    def report_progress(self, current: int, total: int, label: str = "") -> None:
+        """Emit :attr:`progress` — handed to a task that reports steps.
+
+        A task that wants a determinate bar is given this as an ``on_progress``
+        callback (see :meth:`MainWindow._start_analysis`); a task that does not
+        simply never calls it and the bar stays in busy mode.
+        """
+        self.progress.emit(int(current), int(total), str(label))
 
     # ── QThread ──────────────────────────────────────────────────────
 

@@ -15,9 +15,11 @@ message log and two-way selection between the tree and the 3-D view.
 **Status: partially complete.**  Milestones 1–4 of the
 [Desktop GUI Roadmap](gui_roadmap.md) have landed — viewport, application
 chrome, lazy Model Tree + inspector, and bidirectional selection with
-configurable mouse interaction.  Analysis actions, load and result overlays,
-persistence and the quad view are still ahead; see
-[What is still missing](#what-is-still-missing).
+configurable mouse interaction — and milestone 5's **static-linear** slice is
+in: **Analysis ▸ Run…** solves the model's own load cases in the application and
+shows each as a results view, and **File ▸ Save results…** writes one out.  Load
+glyphs, storey and pushover plots, persistence and the quad view are still
+ahead; see [What is still missing](#what-is-still-missing).
 
 ## Installing and launching
 
@@ -149,6 +151,42 @@ shared between the two overlays — both are drawn in model units, so one factor
 reads them both.  Switching views and **Results ▸ Clear results** drop it.  The
 two overlays are independent, so turning off the shape leaves the diagram drawn
 and vice versa.
+
+### Running an analysis
+
+**Analysis ▸ Run…** solves the model's own load cases inside the application.
+
+1. **Model ▸ Split elements** (or **Mesh areas**) must have been run first.  Run
+   deliberately does *not* preprocess for you — a topology change is something
+   to see reported, not something to happen silently — so until then Run stays
+   greyed and its tooltip names the step it needs.
+2. The dialog lists the model's **static cases**, each with a **load
+   multiplier** (default `1.0`, meaning *exactly as the `.s2k` defines it*).
+   Tick several to run several solves.  The model's **combinations** are listed
+   too — ticking one runs the cases it needs and then reduces them to
+   composites — and a combination that needs a case this slice cannot run (a
+   response-spectrum leaf, say) is greyed with the reason rather than quietly
+   skipped.
+3. Optionally author a **custom case**: name it, then tick load patterns and set
+   each one's factor — the `{"ULT": {"Dead": 1.4, "Live": 1.6}}` form as a UI.
+   It is one more solve, of factored patterns.
+4. **Run** solves on a worker, with a progress bar, a **Stop** that takes effect
+   at the next case boundary, and a Message Log line per case.  The factor is a
+   **load** multiplier, not a post-scaling of results — scaling results is what a
+   *combination* does.
+
+Each solved case becomes a **view**, exactly like a case from an opened archive,
+so **Results ▸ Deformed shape** and **Force diagrams** work on it immediately.
+**Nothing is written to disk**: the result is held in memory and served through
+the same read seam an archive uses.  Re-running a case replaces its view; a
+different case is added beside it.
+
+**File ▸ Save results…** writes the displayed case's archive when persistence is
+wanted — always asking for a path, with a suggested name, so variants that differ
+by a small change can be kept side by side.
+
+Modal, response-spectrum and pushover runs are not in this slice; their menu
+entries stay greyed.
 
 ### A view is a lens
 
@@ -334,14 +372,14 @@ jarring than a greyed-out one.
 
 | Menu | Live | Greyed |
 |---|---|---|
-| **File** | Open (`Ctrl+O`), Open results…, Quit | Save results, Export Tcl, Export screenshot |
+| **File** | Open (`Ctrl+O`), Open results…, Save results…, Quit | Export Tcl, Export screenshot |
 | **Edit** | Duplicate view, Edit view selection… | Copy, Preferences |
 | **View** | Zoom to fit, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show shells, Clear highlights) | Show element labels, Show loads, Show force diagrams, Reset layout |
 | **Model** | Split elements, Mesh areas (enabled while a parsed model is open) | Selections, Units |
-| **Analysis** | — | Run, Static, Modal, Response spectrum, Pushover, Stop |
+| **Analysis** | Run… (`Ctrl+R`), Stop | Modal analysis, Response spectrum, Pushover |
 | **Results** | Deformed shape, Force diagrams (+ Force selector), Clear results | Storey response, Pushover curve |
 | **Help** | Documentation, About | — |
-| Toolbars | Open; camera views; display toggles; Split / Mesh; Deformed shape + Scale; Force diagrams + Force selector | Save / Export, Run / Stop |
+| Toolbars | Open; camera views; display toggles; Split / Mesh; Run / Stop; Deformed shape + Scale; Force diagrams + Force selector | Save results (until a result is shown), Export Tcl / screenshot |
 | View toolbar | Zoom/camera; display toggles; **Shells** opacity and **Shrink** | Show labels, Show loads, Show force diagrams |
 
 ## Application identity
@@ -361,7 +399,7 @@ drives a *separately installed* OpenSees is the recorded route
 
 | Missing | Effect today |
 |---|---|
-| Analysis actions (milestone 5) | `Analysis ▸ …` is greyed; analyse from a script or notebook instead |
+| Modal / spectrum / pushover runs (milestone 5, the rest) | `Analysis ▸ Run…` does static-linear cases and combinations; those three menu entries are greyed |
 | Loads, storey and pushover plots (milestones 6–7) | A case's deformed shape *and* its member end forces **are** drawn in the GUI; load glyphs, storey plots and pushover curves still need the [Visualisation Toolkit](viewer.md) and the `plot_*` functions |
 | Element labels, the Property Tree tab, explicit interaction modes ([P23](_pending_work.md)) | The corresponding menu item and tab are greyed |
 | Window-layout persistence (milestone 8) | Docks and window geometry are not remembered between sessions |
