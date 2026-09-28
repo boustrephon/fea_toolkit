@@ -22,6 +22,11 @@ its meshes in geometry order, the lookup is a plain list index.  See
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+# The face-counting rule is a fact about the *renderer* — how many faces it builds
+# per element — so it is imported rather than restated here, where a stale copy is
+# invisible until a click selects the wrong element.
+from ...plotting.renderers.base import polygon_face_count
+
 __all__ = ["CATEGORY_GROUPS", "SelectionIndex"]
 
 #: Render category -> the model tree group key holding its entities
@@ -104,16 +109,20 @@ class SelectionIndex:
         return str(getattr(entity, attr, "") or "") or None
 
     def _shell_label(self, cell_id: int) -> Optional[str]:
-        """Resolve a *triangle* index to its shell, honouring the fan split.
+        """Resolve a rendered *cell* index to its area element.
 
-        ``PyVistaRenderer.render_shells`` fan-triangulates each shell into
-        ``len(vertices) - 2`` faces, in order, so a cell index has to be walked
-        down that cumulative count.
+        ``PyVistaRenderer.render_shells`` draws each element as its own polygon —
+        one face for a triangle or a quad, and a fan of ``n - 2`` for a 5+ sided
+        element — so a cell index has to be walked down that cumulative count.
+        The count comes from :func:`~fea_toolkit.plotting.renderers.base.polygon_face_count`
+        rather than being recomputed here: when the renderer emitted fan triangles
+        and this assumed one face per quad, a click on a slab resolved to the wrong
+        element (or to none), which looks exactly like the click doing nothing.
         """
         offset = 0
         for shell in self.shells:
-            triangles = max(0, len(shell.vertices) - 2)
-            if cell_id < offset + triangles:
+            faces = polygon_face_count(len(shell.vertices))
+            if cell_id < offset + faces:
                 return self._identify(shell, "shells")
-            offset += triangles
+            offset += faces
         return None

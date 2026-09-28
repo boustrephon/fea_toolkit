@@ -14,6 +14,7 @@ from .base import (
     RenderBackend,
     RestraintGeom,
     ShellGeom,
+    polygon_face_count,
 )
 
 
@@ -52,18 +53,14 @@ def _polygon_cells(polygons: list[np.ndarray]) -> tuple[np.ndarray, list[int]]:
     offset = 0
     for poly in polygons:
         n = len(poly)
-        if n < 3:
-            counts.append(0)
-        elif n == 3:
+        if n == 3:
             faces.extend([3, offset, offset + 1, offset + 2])
-            counts.append(1)
         elif n == 4:
             faces.extend([4, offset, offset + 1, offset + 2, offset + 3])
-            counts.append(1)
-        else:
+        elif n > 4:
             for i in range(1, n - 1):
                 faces.extend([3, offset, offset + i, offset + i + 1])
-            counts.append(n - 2)
+        counts.append(polygon_face_count(n))
         offset += n
     return np.array(faces, dtype=int), counts
 
@@ -96,6 +93,45 @@ def _shrunk_polygon(vertices: np.ndarray, shrink: float) -> np.ndarray:
         return vertices
     centroid = vertices.mean(axis=0)
     return centroid + (vertices - centroid) * shrink
+
+
+def _polygon_normal(vertices: np.ndarray) -> Optional[np.ndarray]:
+    """Unit normal of a polygon, or ``None`` when it is degenerate."""
+    if len(vertices) < 3:
+        return None
+    normal = np.cross(vertices[1] - vertices[0], vertices[2] - vertices[0])
+    length = float(np.linalg.norm(normal))
+    if length < 1e-12:
+        return None
+    return normal / length
+
+
+def _selection_slab(vertices: np.ndarray, half_thickness: float) -> Any:
+    """A thin slab straddling a polygon — the area-element counterpart of a tube.
+
+    Extruded symmetrically along the polygon's normal, so it **surrounds** the
+    element rather than lying on it: two faces offset to either side, joined by a
+    rim the width of the frame tube's diameter.
+
+    A coincident highlight has to win a depth test against the very surface it
+    marks, and against a translucent one — the default shell opacity — a
+    translucent highlight washes out entirely.  Both were tried on the real
+    viewport and both failed; volume cannot, which is exactly why a selected frame
+    is a tube.
+    """
+    import pyvista as pv
+
+    face = np.asarray(vertices, dtype=float)
+    normal = _polygon_normal(face)
+    if normal is None:
+        return pv.PolyData()
+    n = len(face)
+    points = np.vstack([face + normal * half_thickness, face - normal * half_thickness])
+    cells: list[int] = [n, *range(n), n, *range(n, 2 * n)]
+    for i in range(n):
+        j = (i + 1) % n
+        cells += [4, i, j, n + j, n + i]
+    return pv.PolyData(points, faces=np.array(cells, dtype=int))
 
 
 def _flag_direction(
@@ -538,44 +574,26 @@ class PyVistaRenderer(RenderBackend):
 
             # ── Highlighted shells ──
             if h.shells:
-                verts = np.vstack([_shrunk_polygon(s.vertices, shrink) for s in h.shells])
-                faces, face_counts = _polygon_cells([s.vertices for s in h.shells])
-                n_faces = sum(face_counts)
-                if n_faces > 0:
-                    mesh = pv.PolyData(verts, faces=faces)
-                    mesh.cell_data["rgb"] = np.array([h.color] * n_faces)
+                # A slab straddling each element, so the cue is volume rather than
+                # a coincident surface — see _selection_slab.  Its half-thickness is
+                # the same model-scaled radius the frame tube uses, so the two
+                # selection cues look like the same gesture.
+                half = h.radius or 0.02
+                slabs = [
+                    _selection_slab(_shrunk_polygon(s.vertices, shrink), half) for s in h.shells
+                ]
+                slabs = [slab for slab in slabs if slab.n_cells]
+                if slabs:
+                    mesh = slabs[0]
+                    for slab in slabs[1:]:
+                        mesh = mesh.merge(slab)
                     actor = p.add_mesh(
                         mesh,
-                        scalars="rgb",
-                        rgb=True,
-                        opacity=0.7,
-                        show_edges=True,
-                        edge_color=h.color,
-                        line_width=3,
-                        lighting=True,
+                        color=h.color,
+                        opacity=1.0,  # a selection cue must read over any section colour
                         show_scalar_bar=False,
                     )
                     self._add_overlay(actor, "highlights")
-
-                    # The fill is coincident with the model's own shell, so it can
-                    # z-fight, and against an equally translucent slab (the default
-                    # shell opacity) a translucent selection can simply vanish.
-                    # Lines cannot: outlining the element guarantees the selection
-                    # is visible whatever is behind it.
-                    outline = mesh.extract_feature_edges(
-                        boundary_edges=True,
-                        feature_edges=False,
-                        manifold_edges=False,
-                        non_manifold_edges=False,
-                    )
-                    if outline.n_cells:
-                        edge_actor = p.add_mesh(
-                            outline,
-                            color=h.color,
-                            line_width=4,
-                            show_scalar_bar=False,
-                        )
-                        self._add_overlay(edge_actor, "highlights")
 
             # ── Label ──
             if h.label:

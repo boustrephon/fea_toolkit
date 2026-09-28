@@ -974,29 +974,58 @@ the view).
   populate them), so supports appear on an open model only.  Adding them to the
   archive schema is a separate decision, not a bug in this one.
 
-## Selection feedback — a selected shell needs an outline
+## Selection feedback — a selected shell needs *volume*
 
-Frames and nodes always showed selection; area elements did not, and the reason is
-worth recording because the *symptom* (nothing appears to happen on click) looks
-like a plumbing bug.
+Frames and nodes always showed selection; area elements did not, and it took two
+fixes — the second one the real one.
 
-`render_highlights` drew a selected shell as a translucent fill (opacity 0.7)
-**coincident** with the model's own shell, with **grey** edges — the same grey as
-every unselected element.  Against an opaque slab that was merely subtle; once
-shells defaulted to 70 % opacity (the display-quality work), the two translucent
-surfaces cancelled out, and coincident faces z-fight besides.
+**Why the cue vanished.**  `render_highlights` drew a selected shell as a
+translucent fill (opacity 0.7) **coincident** with the model's own shell, with
+**grey** edges — the same grey as every unselected element.  Against an opaque slab
+that was merely subtle; once shells defaulted to 70 % opacity the two translucent
+surfaces cancelled out.  A first attempt then outlined the fill's boundary in the
+selection colour, but rendered against 70 % shells the *fill* survived and the
+outline did not, so the cue was still unreliable.
 
-The fix is to stop relying on a fill:
+**Why nothing appeared to happen at all** — the more important finding.  A click on
+a slab resolved to the **wrong element, or to none**:
+`SelectionIndex._shell_label` walked the renderer's cells assuming the old *fan*
+rule — `len(vertices) - 2` triangles per element — while `render_shells` had begun
+drawing quads as single quad faces.  Every cell index therefore mapped one element
+too far.  A click that resolves to nothing is indistinguishable from a click that
+did nothing, which is why this read as "selection does not work" rather than as a
+mapping bug.
 
-- the fill's edges become the **selection colour** — they are the element's own
-  outline, so this alone changes how the panel looks, and
-- the selected shell's **boundary is drawn as lines** on top
-  (`extract_feature_edges(boundary_edges=True)`, width 4, selection colour).
+Both rules now come from one function, `polygon_face_count`, used by the renderer
+*and* the index, and the tests are tied to it instead of restating it:
 
-Lines cannot z-fight and cannot be washed out by translucency, so the selection
-reads whatever is behind it — the same reasoning that makes a selected frame a
-*tube* rather than a recoloured line.  Verified by rendering a 2 × 2 slab with one
-element selected: filled orange with a thick outline against the grey remainder.
+- `test_renderers_pyvista.py::TestShellFaces::test_the_renderer_builds_exactly_the_faces_the_rule_predicts`
+  — the rule must describe what `render_shells` really emits;
+- `test_gui_selection_index.py::test_shell_cells_follow_the_renderers_own_faces`
+  — the index must walk those same faces;
+- `test_picking.py::test_a_slab_picks_the_element_under_the_cursor` — a real pick
+  on the *second* of two elements resolves to the second.
+
+All three were checked to fail against the old rule.  The latter two deliberately
+use **two** elements: with a single quad every cell maps to the same element, so a
+wrong rule hides — which is how the original test (and the renderer, which had no
+shell-pick test at all) missed this.
+
+**The cue is now volume.**  `_selection_slab` extrudes each selected element
+slightly along its normal — two faces offset to either side joined by a rim — so the
+highlight *surrounds* the element instead of lying on it, exactly as a selected
+frame is a tube rather than a recoloured line.  It is drawn **opaque** (a selection
+cue has to read over any section colour) at the same model-scaled half-thickness
+the tube uses, so the two cues read as one gesture.  Verified by rendering a 2 × 2
+slab at 70 % shell opacity with one element selected: a solid orange panel against
+the grey remainder.
+
+Two smaller lessons from the same work, both of which bit here and are now pinned
+in tests: PyVista's `mapper.dataset` returns a **new Python wrapper** on every
+access, so mesh identity cannot be asserted with `is` (assert the *actor* identity
+instead); and VTK stores colours at **8-bit** precision, so a colour assertion needs
+`abs=0.01`, not the default tolerance.
+
 
 Two smaller lessons from the same work, both of which bit here and are now pinned
 in tests: PyVista's `mapper.dataset` returns a **new Python wrapper** on every

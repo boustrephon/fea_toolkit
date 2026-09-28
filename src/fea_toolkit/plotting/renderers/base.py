@@ -39,6 +39,25 @@ class NodeGeom:
     position: np.ndarray  # shape (3,)
 
 
+def polygon_face_count(n_vertices: int) -> int:
+    """How many rendered faces an *n_vertices* area element becomes.
+
+    One for a triangle or a **quad** — a quad is drawn as a quad, not fanned into
+    two triangles — and ``n - 2`` for a 5+ sided element, which has no quad to
+    preserve.  Fewer than three vertices contributes nothing.
+
+    The single source of truth for that rule.  ``PyVistaRenderer.render_shells``
+    builds this many faces per element, and the GUI's ``SelectionIndex`` walks the
+    same counts to turn a picked *cell* back into an element: if the two ever
+    disagree, clicking a slab resolves to the wrong element — or to none at all,
+    which is silently indistinguishable from "nothing happened"
+    (``tests/test_gui_selection_index.py`` pins the pair).
+    """
+    if n_vertices < 3:
+        return 0
+    return 1 if n_vertices <= 4 else n_vertices - 2
+
+
 @dataclass
 class RestraintGeom:
     """One node's support restraint, ready for rendering.

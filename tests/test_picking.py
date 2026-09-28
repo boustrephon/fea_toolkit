@@ -67,6 +67,57 @@ def test_members_pick_to_their_own_cell_and_category(viewer):
         assert selection.label(category, plotter.iren.picker.GetCellId()) == frame.elem_id
 
 
+def _slab_viewer():
+    """An off-screen viewer over a 1 x 2 strip of two quad area elements."""
+    from fea_toolkit.io.results_repository import mesh_model_from_geometry
+
+    geometry = {
+        "node_tag": np.arange(1, 7),
+        "node_x": np.array([0.0, 1.0, 2.0, 0.0, 1.0, 2.0]),
+        "node_y": np.array([0.0, 0.0, 0.0, 1.0, 1.0, 1.0]),
+        "node_z": np.zeros(6),
+        "shell_eid": np.array([1, 2]),
+        "shell_sap_id": np.array(["A1", "A2"]),
+        "shell_sec_name": np.array(["SLAB", "SLAB"]),
+        "shell_node_1": np.array([1, 2]),
+        "shell_node_2": np.array([2, 3]),
+        "shell_node_3": np.array([5, 6]),
+        "shell_node_4": np.array([4, 5]),
+    }
+    viewer = ModelViewer(
+        mesh_model=mesh_model_from_geometry(geometry), backend="pyvista", off_screen=True
+    )
+    viewer.show_model(show_nodes=False, show_shells=True)
+    viewer._backend.plotter.show(auto_close=False)
+    return viewer
+
+
+def test_a_slab_picks_the_element_under_the_cursor():
+    """Clicking a slab must select *that* element, not its neighbour.
+
+    Two elements rather than one on purpose: with a single quad every cell maps to
+    the same element, so a wrong counting rule hides.  When ``render_shells`` began
+    drawing quads as quads and ``SelectionIndex`` kept counting the old fan
+    triangles, a click on the *second* quad resolved to the first — and a click
+    that resolves to the wrong element looks exactly like one that did nothing.
+    """
+    viewer = _slab_viewer()
+    try:
+        selection = SelectionIndex.from_viewer(viewer)
+        plotter = viewer._backend.plotter
+        plotter.enable_mesh_picking(callback=lambda *args: None, use_actor=True, show=False)
+
+        # The centre of the second quad (x in 1..2), then of the first.
+        assert _pick_at(plotter, np.array([1.5, 0.5, 0.0])) is True
+        assert selection.label("shells", plotter.iren.picker.GetCellId()) == "A2"
+
+        assert _pick_at(plotter, np.array([0.5, 0.5, 0.0])) is True
+        assert selection.label("shells", plotter.iren.picker.GetCellId()) == "A1"
+    finally:
+        viewer._backend.clear()
+        viewer._backend.plotter.close()
+
+
 def test_clicking_at_joints_resolves_to_a_real_entity(viewer):
     """Joint positions hit a member and/or the node cloud -- never a dead end.
 

@@ -174,9 +174,10 @@ elements and nodes**.  Materials, sections and load definitions have no
 geometry, so selecting them clears the highlight.
 
 What the highlight looks like depends on the entity: a frame gets a **tube**, a
-node a **blue sphere**, and an area element a **translucent fill outlined in
-orange** — the outline is what makes a selected slab read, because a fill drawn
-coincident with a slab (translucent by default) can otherwise be invisible.
+node a **blue sphere**, and an area element a **thin orange slab straddling it**.
+The slab carries volume rather than lying on the element, for the same reason the
+frame cue is a tube: a highlight drawn coincident with a translucent slab can wash
+out or z-fight, and a selection cue has to read.
 
 ## Mouse interaction is configurable
 

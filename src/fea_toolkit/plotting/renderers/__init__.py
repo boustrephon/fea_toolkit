@@ -17,6 +17,7 @@ from .base import (
     RenderBackend,
     RestraintGeom,
     ShellGeom,
+    polygon_face_count,
 )
 
 __all__ = [
@@ -27,4 +28,5 @@ __all__ = [
     "RenderBackend",
     "RestraintGeom",
     "ShellGeom",
+    "polygon_face_count",
 ]

@@ -9,7 +9,12 @@ pick.
 import numpy as np
 
 from fea_toolkit.gui.controllers.selection import CATEGORY_GROUPS, SelectionIndex
-from fea_toolkit.plotting.renderers.base import FrameGeom, NodeGeom, ShellGeom
+from fea_toolkit.plotting.renderers.base import (
+    FrameGeom,
+    NodeGeom,
+    ShellGeom,
+    polygon_face_count,
+)
 
 
 def _frame(elem_id: str) -> FrameGeom:
@@ -44,18 +49,25 @@ def test_nodes_resolve_by_cell_order():
     assert index.label("nodes", 1) == "4"
 
 
-def test_shell_cells_walk_the_fan_triangulation():
-    """A triangle is 1 cell, a quad 2, a hexagon 4 -- in render order."""
-    index = SelectionIndex(shells=[_shell("A", 3), _shell("B", 4), _shell("C", 6)])
-    assert [index.label("shells", cell) for cell in range(7)] == [
-        "A",
-        "B",
-        "B",
-        "C",
-        "C",
-        "C",
-        "C",
-    ]
+def test_shell_cells_follow_the_renderers_own_faces():
+    """The index must walk the faces ``render_shells`` really builds.
+
+    This test previously restated the old fan rule — "a quad is 2 cells" — and so
+    kept passing after ``render_shells`` began drawing quads *as quads*, while a
+    click on a slab silently resolved to the wrong element.  It now asks the
+    renderer's own :func:`polygon_face_count`, so the two cannot drift apart
+    again, and pins the concrete sequence so a change to the rule is visible here.
+    """
+    shells = [_shell("A", 3), _shell("B", 4), _shell("C", 6)]
+    index = SelectionIndex(shells=shells)
+
+    expected = []
+    for shell in shells:
+        expected += [shell.area_id] * polygon_face_count(len(shell.vertices))
+
+    assert expected == ["A", "B", "C", "C", "C", "C"]  # triangle, quad, 4-cell hexagon
+    assert [index.label("shells", cell) for cell in range(len(expected))] == expected
+    assert index.label("shells", len(expected)) is None
 
 
 def test_out_of_range_and_unknown_categories_return_none():

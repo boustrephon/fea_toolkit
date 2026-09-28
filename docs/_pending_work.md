@@ -807,6 +807,43 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-24 — selecting an area element: the cue, and the mapping bug behind it)
+
+Reported as "shell selection does not seem to be working — I can't see anything".
+It was two faults at once, and the second is the one that mattered.
+
+**The mapping bug (a regression from the quads change).**
+`SelectionIndex._shell_label` walked the renderer's cells assuming the old *fan*
+rule — `len(vertices) - 2` triangles per element — while `render_shells` had begun
+drawing quads as **single quad faces**.  Every cell index mapped one element too
+far, so a click on a slab resolved to the wrong element or to none at all — which
+is indistinguishable from a click that does nothing.
+
+Both rules now come from **one function**, `polygon_face_count` in
+`plotting/renderers/base.py`, used by the renderer *and* the index, and three tests
+are tied to it rather than restating it (all three verified to fail against the old
+rule):
+
+- the renderer must build exactly the faces the rule predicts;
+- the index must walk those same faces;
+- a real pick on the *second* of two elements must resolve to the second.
+
+The last two use two elements deliberately: with a single quad, every cell maps to
+the same element and a wrong rule hides.  There was no shell-pick test at all
+before this — the coverage gap is what let it through.
+
+**The cue.**  `render_highlights` drew a selected shell as a translucent fill
+coincident with the model's own shell with grey edges; against 70 % shells it
+washed out, and an outline drawn on the same coincident surface did not survive
+either.  A selected area element is now a **thin slab straddling it**
+(`_selection_slab`: two faces offset along the normal, joined by a rim), opaque,
+at the same model-scaled half-thickness the frame tube uses — volume instead of a
+coincident surface, which is exactly why the frame cue is a tube.
+
+Full write-up: `docs/dev_notes.md` → *Selection feedback*.  Verified by rendering a
+2 × 2 slab at 70 % opacity with one element selected: a solid orange panel against
+the grey remainder.
+
 ## DONE (2026-09-24 — support restraints: per-DOF glyphs, and support rows in the Inspector)
 
 Two halves of one fact — a node's boundary conditions — now visible.

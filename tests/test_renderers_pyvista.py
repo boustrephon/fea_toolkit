@@ -472,8 +472,33 @@ class TestShellFaces:
             renderer.clear()
             renderer.plotter.close()
 
-    def test_a_highlighted_quad_is_also_a_single_face(self):
-        """The highlight overlay fanned quads the same way; it is fixed with it."""
+    def test_the_renderer_builds_exactly_the_faces_the_rule_predicts(self):
+        """``polygon_face_count`` must describe what ``render_shells`` emits.
+
+        The GUI's selection index walks that rule to turn a picked cell back into
+        an element, so a drift between the two shows up as a click selecting the
+        wrong slab — which is exactly what happened when quads stopped being fanned
+        into triangles and the index kept counting triangles.
+        """
+        from fea_toolkit.plotting.renderers.base import polygon_face_count
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        shells = [
+            _shell("1", n_vertices=3),
+            _shell("2", n_vertices=4),
+            _shell("3", n_vertices=5),
+        ]
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_shells(shells, {"SLAB": (0.7, 0.7, 0.7)})
+            mesh = renderer.actors("shells")[0].mapper.dataset
+            assert mesh.n_cells == sum(polygon_face_count(len(s.vertices)) for s in shells)
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_a_highlighted_quad_becomes_a_slab_straddling_it(self):
+        """The cue is volume, not a coincident surface (see ``_selection_slab``)."""
         from fea_toolkit.plotting.renderers.base import HighlightDef
         from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
 
@@ -482,9 +507,11 @@ class TestShellFaces:
             renderer.render_highlights(
                 [HighlightDef(area_ids=["1"], shells=[_shell()], color=(1.0, 0.0, 0.0))]
             )
-            mesh = renderer.actors("highlights")[0].mapper.dataset
-            assert mesh.n_cells == 1
-            assert mesh.get_cell(0).n_points == 4
+            slab = renderer.actors("highlights")[0].mapper.dataset
+            assert slab.n_points == 8  # the quad, offset to either side
+            assert slab.n_cells == 6  # two caps and four rim faces
+            # The 2 x 1 quad lies in z = 0, so the slab straddles it.
+            assert slab.bounds[4] < 0.0 < slab.bounds[5]
         finally:
             renderer.clear()
             renderer.plotter.close()
@@ -916,12 +943,12 @@ class TestNodeMarkersAndSelection:
         finally:
             viewer._backend.plotter.close()
 
-    def test_a_selected_shell_is_outlined_as_well_as_filled(self):
-        """A translucent fill can vanish against a translucent slab; lines cannot.
+    def test_a_selected_shell_is_a_slab_straddling_it(self):
+        """A volume, so it cannot z-fight or be washed out by translucency.
 
-        The outline is why a selected area element now reads at all — it was
-        previously a coincident 0.7 fill with *grey* edges, which looked exactly
-        like an unselected one.
+        The previous attempt outlined a coincident translucent fill: against the
+        default 70 % shells the fill survived but the outline did not, and the
+        whole cue was invisible once the pick resolved to the wrong element.
         """
         from fea_toolkit.plotting.renderers.base import HighlightDef
         from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
@@ -931,14 +958,13 @@ class TestNodeMarkersAndSelection:
             renderer.render_highlights(
                 [HighlightDef(area_ids=["1"], shells=[_shell()], color=(1.0, 0.45, 0.0))]
             )
-            fill, outline = renderer.actors("highlights")
-            assert fill.mapper.dataset.n_cells == 1
-            # The outline is the quad's four boundary edges, in the selection
-            # colour and thicker than the model's own element edges.
-            assert outline.mapper.dataset.n_cells == 4
-            assert outline.GetProperty().GetColor() == pytest.approx((1.0, 0.45, 0.0), abs=0.01)
-            assert outline.GetProperty().GetLineWidth() >= 3
-            assert fill.GetProperty().GetEdgeColor() == pytest.approx((1.0, 0.45, 0.0), abs=0.01)
+            (slab,) = renderer.actors("highlights")  # one actor, not a fill + outline
+            mesh = slab.mapper.dataset
+            assert mesh.n_points == 8
+            assert mesh.bounds[4] < 0.0 < mesh.bounds[5]
+            # Opaque, like the frame tube: a selection cue must read over any colour.
+            assert slab.GetProperty().GetOpacity() == pytest.approx(1.0)
+            assert slab.GetProperty().GetColor() == pytest.approx((1.0, 0.45, 0.0), abs=0.01)
         finally:
             renderer.clear()
             renderer.plotter.close()
