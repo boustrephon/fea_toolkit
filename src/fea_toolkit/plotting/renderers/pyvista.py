@@ -254,7 +254,8 @@ class PyVistaRenderer(RenderBackend):
         self._categories.setdefault(category, []).append(actor)
 
     def _add_overlay(self, actor: Any, category: str) -> None:
-        """Track decoration: a highlight, label, deformed shape or force flag.
+        """Track decoration: a highlight, label, support marker, deformed shape or
+        force flag.
 
         Overlays are drawn *over* the elements, so they must not be pickable --
         otherwise a pickable overlay steals the click that was aimed at the
@@ -437,6 +438,7 @@ class PyVistaRenderer(RenderBackend):
         nodes: list[NodeGeom],
         color: tuple[float, float, float] = (0.3, 0.3, 0.3),
         radius: float = 0.02,
+        pickable: bool = True,
     ) -> None:
         if not nodes:
             return
@@ -453,7 +455,7 @@ class PyVistaRenderer(RenderBackend):
             render_points_as_spheres=True,
             show_scalar_bar=False,
         )
-        self._add_actor(actor, "nodes")
+        self._add_actor(actor, "nodes") if pickable else self._add_overlay(actor, "nodes")
 
     # ── Supports ─────────────────────────────────────────────────────
 
@@ -548,11 +550,32 @@ class PyVistaRenderer(RenderBackend):
                         rgb=True,
                         opacity=0.7,
                         show_edges=True,
-                        edge_color="grey",
+                        edge_color=h.color,
+                        line_width=3,
                         lighting=True,
                         show_scalar_bar=False,
                     )
                     self._add_overlay(actor, "highlights")
+
+                    # The fill is coincident with the model's own shell, so it can
+                    # z-fight, and against an equally translucent slab (the default
+                    # shell opacity) a translucent selection can simply vanish.
+                    # Lines cannot: outlining the element guarantees the selection
+                    # is visible whatever is behind it.
+                    outline = mesh.extract_feature_edges(
+                        boundary_edges=True,
+                        feature_edges=False,
+                        manifold_edges=False,
+                        non_manifold_edges=False,
+                    )
+                    if outline.n_cells:
+                        edge_actor = p.add_mesh(
+                            outline,
+                            color=h.color,
+                            line_width=4,
+                            show_scalar_bar=False,
+                        )
+                        self._add_overlay(edge_actor, "highlights")
 
             # ── Label ──
             if h.label:

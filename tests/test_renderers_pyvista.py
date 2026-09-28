@@ -834,3 +834,126 @@ class TestRestraintGlyphs:
             assert viewer._backend.actors("restraints") == []
         finally:
             viewer._backend.plotter.close()
+
+
+class TestNodeMarkersAndSelection:
+    """What marks a restrained node, and what marks a selected element.
+
+    The two have to be distinguishable at a glance: a restrained node is a little
+    larger and green, a *selected* node is a blue sphere of a fixed, larger size
+    drawn over it, and a selected area element is outlined.
+    """
+
+    @staticmethod
+    def _viewer(*, restraints=None, **kwargs):
+        """A viewer over the one-quad model, with *restraints* assigned."""
+        from fea_toolkit.io.results_repository import mesh_model_from_geometry
+        from fea_toolkit.model.sap_data import Restraint
+        from fea_toolkit.plotting.viewer import ModelViewer
+
+        model = mesh_model_from_geometry(_quad_geometry())
+        if restraints:
+            model.restraints = {node_id: Restraint(dofs) for node_id, dofs in restraints.items()}
+        viewer = ModelViewer(mesh_model=model, backend="pyvista", off_screen=True)
+        viewer.show_model(show_shells=False, **kwargs)
+        return viewer
+
+    def test_a_restrained_node_is_marked_green_and_a_little_larger(self):
+        """Without counting arrows, a support should read from the node dots."""
+        viewer = self._viewer(restraints={"1": [1, 0, 0, 0, 0, 0]})
+        try:
+            cloud, marker = viewer._backend.actors("nodes")
+            # The full cloud stays whole and pickable — that is the point.
+            assert cloud.mapper.dataset.n_points == 4
+            assert marker.mapper.dataset.n_points == 1
+            # VTK keeps colours at 8-bit precision, hence the tolerance.
+            assert cloud.GetProperty().GetColor() == pytest.approx((0.3, 0.3, 0.3), abs=0.01)
+            assert marker.GetProperty().GetColor() == pytest.approx((0.15, 0.65, 0.25), abs=0.01)
+            assert marker.GetProperty().GetPointSize() > cloud.GetProperty().GetPointSize()
+        finally:
+            viewer._backend.plotter.close()
+
+    def test_the_support_marker_is_not_pickable(self):
+        """A pick reports an index into the actor it hit.
+
+        So the marker is decoration over the one pickable cloud: a second
+        *pickable* node layer would shift that index away from the selection
+        index, and a click on a restrained node would select the wrong one
+        (``tests/test_picking.py::test_node_priority_wins_at_a_joint`` caught
+        exactly that when the cloud was briefly split in two).
+        """
+        viewer = self._viewer(restraints={"1": [1, 0, 0, 0, 0, 0]})
+        try:
+            cloud, marker = viewer._backend.actors("nodes")
+            assert cloud.GetPickable()
+            assert not marker.GetPickable()
+        finally:
+            viewer._backend.plotter.close()
+
+    def test_the_restrained_marker_stays_under_the_selection_overlay(self):
+        """A *selected* node is a 15 px blue sphere — green must not reach it."""
+        viewer = self._viewer(restraints={"1": [1, 1, 1, 0, 0, 0]})
+        try:
+            marker = viewer._backend.actors("nodes")[1]
+            assert marker.GetProperty().GetPointSize() < 15
+        finally:
+            viewer._backend.plotter.close()
+
+    def test_an_unrestrained_model_draws_one_node_cloud(self):
+        """No supports, no split — and nothing to be misread as one."""
+        viewer = self._viewer()
+        try:
+            assert len(viewer._backend.actors("nodes")) == 1
+        finally:
+            viewer._backend.plotter.close()
+
+    def test_the_support_glyphs_stay_a_small_fraction_of_the_model(self):
+        """Tuned down once already: pin the band, not one value."""
+        viewer = self._viewer(restraints={"1": [1, 1, 1, 0, 0, 0]})
+        try:
+            diagonal = viewer._model_diagonal()
+            assert 0.03 * diagonal < viewer.restraint_size() < 0.05 * diagonal
+        finally:
+            viewer._backend.plotter.close()
+
+    def test_a_selected_shell_is_outlined_as_well_as_filled(self):
+        """A translucent fill can vanish against a translucent slab; lines cannot.
+
+        The outline is why a selected area element now reads at all — it was
+        previously a coincident 0.7 fill with *grey* edges, which looked exactly
+        like an unselected one.
+        """
+        from fea_toolkit.plotting.renderers.base import HighlightDef
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_highlights(
+                [HighlightDef(area_ids=["1"], shells=[_shell()], color=(1.0, 0.45, 0.0))]
+            )
+            fill, outline = renderer.actors("highlights")
+            assert fill.mapper.dataset.n_cells == 1
+            # The outline is the quad's four boundary edges, in the selection
+            # colour and thicker than the model's own element edges.
+            assert outline.mapper.dataset.n_cells == 4
+            assert outline.GetProperty().GetColor() == pytest.approx((1.0, 0.45, 0.0), abs=0.01)
+            assert outline.GetProperty().GetLineWidth() >= 3
+            assert fill.GetProperty().GetEdgeColor() == pytest.approx((1.0, 0.45, 0.0), abs=0.01)
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_a_highlighted_frame_stays_a_single_actor(self):
+        """The outline is an area-element affair — frames already get a tube."""
+        from fea_toolkit.plotting.renderers.base import HighlightDef
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_highlights(
+                [HighlightDef(frame_ids=["1"], frames=[_frame()], color=(1.0, 0.45, 0.0))]
+            )
+            assert len(renderer.actors("highlights")) == 1
+        finally:
+            renderer.clear()
+            renderer.plotter.close()

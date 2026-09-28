@@ -943,11 +943,26 @@ the view).
   joint** — the ground pushing the node back — and rotations become curls about
   their axis.  Verified by rendering three bases side by side: the fixed base read
   as arrows plus curls, the pin as three arrows, the roller along Z as one arrow.
-- **Sizing is 6 % of the model's bounding-box diagonal** — self-scaling like the
-  highlight radius, but deliberately more generous.  3 % was measured at barely a
-  few pixels at whole-model zoom, which is exactly the zoom a support has to be
-  readable at; the first attempt looked right in a close-up render and invisible in
-  a normal one, which is why both views were checked before settling.
+- **Sizing is 4 % of the model's bounding-box diagonal** — self-scaling like the
+  highlight radius.  It began at 6 %, which measured right in a close-up render and
+  was reported as too large in use; 3 % had been too small at whole-model zoom.  The
+  lesson is the one this project keeps relearning: judge a display default on the
+  real viewport, not on a favourable screenshot — and pin the *band* (a test asserts
+  3–5 % of the diagonal) rather than the number, so tuning does not churn tests.
+- **A restrained node is drawn larger, in green**, over the full node cloud rather
+  than by splitting it in two — and that distinction earned its keep.  A pick
+  reports an index into the actor it hit, which the selection index maps back to a
+  node id, so a second **pickable** node layer shifts that index:
+  `tests/test_picking.py` immediately caught a click on a restrained node selecting
+  the wrong one.  The marker is therefore an **overlay**
+  (`render_nodes(..., pickable=False)`), which is also why the cloud and the marker
+  must share the ``"nodes"`` category — the display toggle then hides the marker
+  with the cloud it annotates.
+- It also has to stay unmistakable from *selection*: the selection overlay is a
+  **blue sphere of a fixed 15 px**, drawn over the nodes, so the green marker is
+  capped below it (14.4 px at the default) and uses a colour the selection never
+  uses.  A test asserts the cap explicitly, because those two cues drifting into
+  each other is exactly the failure this design exists to prevent.
 - The glyphs are a **non-pickable overlay**.  A support is not an entity a user
   picks — the click belongs to the node behind it — and a pickable glyph would
   steal that click (the *PyVista picking contract*, above).
@@ -958,4 +973,34 @@ the view).
 - A results archive carries **no** restraints (`mesh_model_from_geometry` does not
   populate them), so supports appear on an open model only.  Adding them to the
   archive schema is a separate decision, not a bug in this one.
+
+## Selection feedback — a selected shell needs an outline
+
+Frames and nodes always showed selection; area elements did not, and the reason is
+worth recording because the *symptom* (nothing appears to happen on click) looks
+like a plumbing bug.
+
+`render_highlights` drew a selected shell as a translucent fill (opacity 0.7)
+**coincident** with the model's own shell, with **grey** edges — the same grey as
+every unselected element.  Against an opaque slab that was merely subtle; once
+shells defaulted to 70 % opacity (the display-quality work), the two translucent
+surfaces cancelled out, and coincident faces z-fight besides.
+
+The fix is to stop relying on a fill:
+
+- the fill's edges become the **selection colour** — they are the element's own
+  outline, so this alone changes how the panel looks, and
+- the selected shell's **boundary is drawn as lines** on top
+  (`extract_feature_edges(boundary_edges=True)`, width 4, selection colour).
+
+Lines cannot z-fight and cannot be washed out by translucency, so the selection
+reads whatever is behind it — the same reasoning that makes a selected frame a
+*tube* rather than a recoloured line.  Verified by rendering a 2 × 2 slab with one
+element selected: filled orange with a thick outline against the grey remainder.
+
+Two smaller lessons from the same work, both of which bit here and are now pinned
+in tests: PyVista's `mapper.dataset` returns a **new Python wrapper** on every
+access, so mesh identity cannot be asserted with `is` (assert the *actor* identity
+instead); and VTK stores colours at **8-bit** precision, so a colour assertion needs
+`abs=0.01`, not the default tolerance.
 

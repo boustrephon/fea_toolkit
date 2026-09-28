@@ -142,6 +142,7 @@ class RenderBackend(ABC):
         nodes: list[NodeGeom],
         color: tuple[float, float, float] = (0.3, 0.3, 0.3),
         radius: float = 0.02,
+        pickable: bool = True,
     ) -> None:
         """Draw node markers.
 
@@ -149,6 +150,12 @@ class RenderBackend(ABC):
             nodes: List of node geometries.
             color: Marker colour, RGB in 0..1 range.
             radius: Marker size relative to model scale.
+            pickable: Whether a click may land on these markers.  The **main**
+                node cloud is pickable — a pick reports an index into the picked
+                actor's own point list, which is what the selection index maps back
+                to a node id — so any *additional* marker drawn over the same nodes
+                (a support marker, say) must pass ``False``, or it would shift that
+                index away from the cloud the picker is expected to hit.
         """
         ...
 

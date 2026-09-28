@@ -370,3 +370,31 @@ class TestSupportDisplay:
         window._inspector.set_source_model(None)
         window._inspector.show_object(window._views.source("unprocessed").nodes["4"])
         assert "Restraints" not in _inspector_rows(window)
+
+
+class TestSelectionFeedback:
+    """Selecting an element has to be visible in the viewport.
+
+    Frames get a tube; area elements get an **outline**, because a coincident
+    translucent fill is invisible over a translucent slab — the selection
+    previously read as nothing at all.
+    """
+
+    def test_selecting_an_area_element_outlines_it(self, slab_window):
+        from fea_toolkit.gui.main_window import _SELECT_COLOR
+
+        assert slab_window._select_entity_in_tree("area_elements", "A1") is True
+
+        highlights = slab_window._backend.actors("highlights")
+        assert len(highlights) == 2, "expected a fill and an outline"
+        fill, outline = highlights
+        assert fill.GetProperty().GetEdgeColor() == pytest.approx(_SELECT_COLOR, abs=0.01)
+        assert outline.mapper.dataset.n_cells == 4  # the quad's four boundary edges
+        assert outline.GetProperty().GetColor() == pytest.approx(_SELECT_COLOR, abs=0.01)
+
+    def test_clearing_the_highlight_removes_the_outline(self, slab_window):
+        slab_window._select_entity_in_tree("area_elements", "A1")
+
+        slab_window._actions["view.clear_highlights"].trigger()
+
+        assert slab_window._backend.actors("highlights") == []

@@ -116,10 +116,18 @@ _HIGHLIGHT_RADIUS_MIN = 0.01
 
 #: Support-glyph length, as a fraction of the model's bounding-box diagonal and
 #: floored in model units — the same self-scaling approach as the highlight, but
-#: generous: a support symbol is meant to be read at whole-model zoom, where 3 %
-#: of the diagonal is barely a few pixels.
-_RESTRAINT_SIZE_FRACTION = 0.06
-_RESTRAINT_SIZE_MIN = 0.1
+#: generous: a support symbol is meant to be read at whole-model zoom, where the
+#: highlight's 0.75 % would be a pixel or two.
+_RESTRAINT_SIZE_FRACTION = 0.04
+_RESTRAINT_SIZE_MIN = 0.08
+
+#: Node markers.  A restrained node is drawn a little larger, in green, so a
+#: model's supports read at a glance.  Both values stay **under** the selection
+#: overlay (a blue sphere of a fixed, larger size) and use a colour it never
+#: uses, so "restrained" and "selected" can never be mistaken for each other.
+_NODE_COLOR = (0.3, 0.3, 0.3)
+_CONSTRAINED_NODE_COLOR = (0.15, 0.65, 0.25)
+_CONSTRAINED_NODE_SIZE_FACTOR = 1.2
 
 
 class ModelViewer:
@@ -383,7 +391,23 @@ class ModelViewer:
             )
 
         if show_nodes:
-            self._backend.render_nodes(self._nodes, color=(0.3, 0.3, 0.3), radius=node_size)
+            # The full cloud first — it is the *pickable* one, and a pick reports
+            # an index into the actor it hit, which is how a click on a marker maps
+            # back to a node id.
+            self._backend.render_nodes(self._nodes, color=_NODE_COLOR, radius=node_size)
+
+            # A restrained node is then marked *over* that cloud: larger, green, and
+            # **non-pickable**.  Splitting the cloud in two instead would shift the
+            # pick index away from the one the selection index is built from, so the
+            # marker is drawn as decoration rather than as its own node layer.
+            supported = {r.node_id for r in self._restraints}
+            if supported:
+                self._backend.render_nodes(
+                    [n for n in self._nodes if n.node_id in supported],
+                    color=_CONSTRAINED_NODE_COLOR,
+                    radius=node_size * _CONSTRAINED_NODE_SIZE_FACTOR,
+                    pickable=False,
+                )
 
         if show_restraints and self._restraints:
             self._backend.render_restraints(self._restraints, size=self.restraint_size())

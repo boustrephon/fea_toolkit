@@ -173,6 +173,11 @@ Selectable entities are the ones with geometry of their own: **frames, area
 elements and nodes**.  Materials, sections and load definitions have no
 geometry, so selecting them clears the highlight.
 
+What the highlight looks like depends on the entity: a frame gets a **tube**, a
+node a **blue sphere**, and an area element a **translucent fill outlined in
+orange** — the outline is what makes a selected slab read, because a fill drawn
+coincident with a slab (translucent by default) can otherwise be invisible.
+
 ## Mouse interaction is configurable
 
 People arrive with different expectations, so the mouse behaviour is not
@@ -245,6 +250,11 @@ restrained translation (U1/U2/U3) and a curl for each restrained rotation
 (R1/R2/R3).  That covers any restraint set, so a fixed base shows arrows plus
 curls, a pin shows three arrows, and a roller one arrow.  They scale with the
 model and need no setup; turning the toggle off hides them.
+
+A **restrained node is itself drawn green and a little larger** than a free one,
+so a model's supports read at a glance without counting arrows.  The green marker
+is deliberately smaller than the blue selection sphere, and a different colour, so
+"restrained" and "selected" are never confused.
 
 Selecting a **node** also reports its support conditions in the Inspector:
 
