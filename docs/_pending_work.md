@@ -807,6 +807,56 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-28 — GUI M7 part 2: force diagrams, and the SAP force vocabulary)
+
+`Results ▸ Force diagrams` is real (it was a Milestone-7 placeholder): the active
+case's member end forces drawn as flag diagrams, in whichever component a new
+**Force** selector on the main toolbar names, at the **Scale** factor the
+deformed shape already uses.  The action is enabled only for a case view whose
+archive carries end forces (`ResultsRepository.has_forces()`), with the selector
+greyed alongside it; switching views or `Results ▸ Clear results` drops it, and
+the two overlays are independent of each other.
+
+**The vocabulary decision.**  The selector offers SAP2000's six local DOFs —
+`P`, `V2`, `V3`, `T`, `M2`, `M3` — and opens on `M3`, because those names read
+better than the schema's `Fx … Mz`.  It is not a new vocabulary: it is
+`FRAME_RELEASE_DOF_LABELS`, the same six DOFs a member-end release frees, and the
+mapping onto the result keys is `FORCE_QUANTITY_LABELS` in `model/sap_data.py`.
+It is also *established* rather than assumed — a frame's local axes come from
+`get_local_axes` via `get_SAP_vecxz`, so local z **is** axis 3 and local y **is**
+axis 2, which is why `V2`/`M2` mean what they appear to.  The labels name the
+**axis** only: the values stay OpenSees `localForces` and do not adopt SAP2000's
+output sign convention (recorded in `docs/results_schema.md` and `docs/gui.md`).
+
+`plot_force_diagram` deliberately keeps the x/y/z grammar.  Switching it later is
+one line at its single funnel, `_normalise_quantity`, because everything
+downstream (array-key derivation, flag direction) only ever sees the canonical
+key; the GUI is a thin adapter over the same constant, so the labels are not
+re-typed anywhere.
+
+Also in this change: `ModelViewer.clear_forces()` (whose sibling `clear_results()`
+now simply calls the two), and `ResultsRepository.forces_are_local()` made
+public — a flag diagram has to know how the archive records its forces *before*
+reading them, so a legacy archive without the `forces_coordinate_system` flag is
+read as global (and warns, as `overlay_forces` does) instead of silently drawing
+nothing while its button sits pressed.
+
+Tests: 13 in `tests/test_gui_results.py` — greyed without forces and with the
+selector, enabled with them, the selector opening on M3, the diagram at the
+toolbar scale, the scale redrawing it, neither control ever *starting* a draw, the
+label → key mapping for `P` and `V2` proven by the drawn flag's size against
+distinct archive values, a legacy no-flag archive read as global, switching cases,
+clear-results, and the shape and the diagram coexisting.  One in
+`tests/test_sap_data.py` pins the label order against `FRAME_RELEASE_DOF_LABELS`,
+and one in `tests/test_results_repository.py` covers the new public flag — 15 new
+tests, full suite **2203 passed / 1 skipped / 2 xfailed**.
+
+Still to come in M7: storey response, pushover curve and `write_results_npz`.
+The greyed `View ▸ Display ▸ Show force diagrams` is still a placeholder: it is a
+*visibility* toggle for the `force_flags` category (``set_category_visible``
+already handles it), separate from the results action, and not part of this
+increment.
+
 ## DONE (2026-09-28 — the results repository's force accessor: one join, at the seam)
 
 Force diagrams had every piece except the one that reads a case's end forces:

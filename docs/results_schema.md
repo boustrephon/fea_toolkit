@@ -160,6 +160,15 @@ use the element geometry to transform to global coordinates if needed.
 | `static/{case}/mz_i` | `(N_frame,)` | `float` | I‑end moment Z |
 | `static/{case}/fx_j` … `mz_j` | `(N_frame,)` | `float` | Same at J‑end |
 
+**SAP2000 local-DOF names.**  These six components *are* SAP's six local DOFs, so
+a UI can label them the way a SAP user reads them — `fx` = **P** (axial), `fy` =
+**V2**, `fz` = **V3**, `mx` = **T**, `my` = **M2**, `mz` = **M3**
+(``FORCE_QUANTITY_LABELS`` in ``model/sap_data.py``).  The correspondence holds
+because a frame's local axes are built by ``get_local_axes`` from
+``get_SAP_vecxz`` — local z *is* axis 3 and local y *is* axis 2.  These names
+label the **axis** a component acts along or about; the values are OpenSees
+``localForces`` and do **not** adopt SAP2000's output sign convention.
+
 **Explicit `*_local` alias arrays (optional):**
 
 The 12 arrays above are the required payload.  A producer *may* additionally

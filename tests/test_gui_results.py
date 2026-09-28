@@ -19,18 +19,42 @@ def qapp():
     yield QApplication.instance() or QApplication(["pytest-fea-gui"])
 
 
-def _write_archive(tmp_path, *, cases=("DEAD", "COMB1"), with_displacement=False):
+def _write_archive(
+    tmp_path, *, cases=("DEAD", "COMB1"), with_displacement=False, with_forces=False
+):
     """A minimal results archive: one member, two nodes, those cases.
 
     ``with_displacement`` adds nodal displacement — a cantilever bending 0.02 m
     at the base and 0.10 m at the tip, so an amplified shape is recognisable by
     eye and assertable exactly.
+
+    ``with_forces`` adds an end-force block with one distinguishing value per
+    component, so the *size* of a drawn flag identifies the quantity it came
+    from (the flag height is ``|value| * scale``, and the J-end negates it).
     """
     path = tmp_path / "results.npz"
     payload = {f"static/{case}/fx_i": np.zeros(1) for case in cases}
     if with_displacement:
         for case in cases:
             payload[f"static/{case}/node_dx"] = np.array([0.02, 0.10])
+    if with_forces:
+        # The toolkit's writers always declare this, so a realistic archive
+        # carries it; `test_a_legacy_archive_reads_its_bare_arrays_as_global`
+        # strips it again to cover a file from elsewhere.
+        payload["forces_coordinate_system"] = np.array(["local"], dtype=str)
+        for case in cases:
+            payload.update(
+                {
+                    f"static/{case}/fx_i": np.array([1.0]),
+                    f"static/{case}/fx_j": np.array([1.0]),
+                    f"static/{case}/fy_i": np.array([2.0]),
+                    f"static/{case}/fy_j": np.array([-2.0]),
+                    f"static/{case}/my_i": np.array([3.0]),
+                    f"static/{case}/my_j": np.array([-3.0]),
+                    f"static/{case}/mz_i": np.array([4.0]),
+                    f"static/{case}/mz_j": np.array([-4.0]),
+                }
+            )
     np.savez_compressed(
         path,
         node_tag=np.array([1, 2], dtype=int),
@@ -206,3 +230,168 @@ class TestDeformedShape:
 
         assert _deformed_points(window) is None
         assert window._actions["results.deformed"].isChecked() is False
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Force diagrams — M7's second results action
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _write_force_free_archive(tmp_path):
+    """The same archive with a case that carries no force arrays at all.
+
+    A perfectly valid archive — recording displacement without forces is
+    normal — and the state the force action has to stay greyed for.
+    """
+    path = _write_archive(tmp_path)
+    data = {
+        key: value
+        for key, value in dict(np.load(path, allow_pickle=False)).items()
+        if not key.startswith("static/")
+    }
+    np.savez_compressed(path, **data)
+    return path
+
+
+def _flag_offset(window):
+    """The drawn flag's largest distance from the member axis (``None`` if none).
+
+    The fixture member runs along global Z, and each of the six quantities is
+    extruded *perpendicular* to the member (``_flag_direction`` maps them onto
+    the local y or z axis), so the offset from the z-axis is the force times
+    the scale — without having to know which of the two axes it went along.
+    """
+    actors = window._backend.actors("force_flags")
+    if not actors:
+        return None
+    points = np.asarray(actors[0].mapper.dataset.points, dtype=float)
+    return float(np.hypot(points[:, 0], points[:, 1]).max())
+
+
+class TestForceDiagrams:
+    """Results ▸ Force diagrams, driven through the real action and selector.
+
+    The archive carries ``fx = 1``, ``fy = 2``, ``my = 3`` and ``mz = 4``, so a
+    flag's size says *which* quantity was drawn — a selector wired to the wrong
+    key, or to none at all, draws a diagram of the wrong size rather than an
+    empty scene.
+    """
+
+    def test_it_is_disabled_without_end_forces(self, window, tmp_path):
+        """No force arrays → greyed, selector included, not a button that refuses."""
+        window.open_results_path(str(_write_force_free_archive(tmp_path)))
+
+        assert window._actions["results.forces"].isEnabled() is False
+        assert window._force_quantity.isEnabled() is False
+
+    def test_it_is_enabled_once_a_case_carries_forces(self, window, tmp_path):
+        window.open_results_path(str(_write_archive(tmp_path, with_forces=True)))
+
+        assert window._actions["results.forces"].isEnabled() is True
+        assert window._force_quantity.isEnabled() is True
+
+    def test_the_selector_opens_on_m3(self, window, tmp_path):
+        """Bending is what a diagram is usually read for: M3 is the ``Mz`` key."""
+        window.open_results_path(str(_write_archive(tmp_path, with_forces=True)))
+
+        assert window._force_quantity.currentText() == "M3"
+
+    def test_it_draws_the_diagram_at_the_toolbar_scale(self, window, tmp_path):
+        window.open_results_path(str(_write_archive(tmp_path, with_forces=True)))
+        window._deformed_scale.setValue(50.0)
+        window._actions["results.forces"].trigger()
+
+        assert _flag_offset(window) == pytest.approx(4.0 * 50.0)  # mz = 4
+
+    def test_changing_the_scale_redraws_at_the_new_factor(self, window, tmp_path):
+        window.open_results_path(str(_write_archive(tmp_path, with_forces=True)))
+        window._actions["results.forces"].trigger()
+        window._deformed_scale.setValue(100.0)
+
+        assert _flag_offset(window) == pytest.approx(4.0 * 100.0)
+
+    def test_the_scale_alone_never_starts_drawing(self, window, tmp_path):
+        """Turning the knob must not be a second way to trigger the action."""
+        window.open_results_path(str(_write_archive(tmp_path, with_forces=True)))
+        window._deformed_scale.setValue(200.0)
+
+        assert _flag_offset(window) is None
+
+    def test_the_selector_chooses_the_component(self, window, tmp_path):
+        """The label maps to its schema key: M3 draws ``mz``, P draws ``fx``."""
+        window.open_results_path(str(_write_archive(tmp_path, with_forces=True)))
+        window._actions["results.forces"].trigger()
+
+        window._force_quantity.setCurrentText("P")
+
+        assert _flag_offset(window) == pytest.approx(1.0 * 50.0)  # fx = 1
+
+    def test_the_selector_reads_the_local_dof_it_names(self, window, tmp_path):
+        """V2 is the local-2 shear — ``fy`` (2), not ``my`` (3) and not ``mz``."""
+        window.open_results_path(str(_write_archive(tmp_path, with_forces=True)))
+        window._actions["results.forces"].trigger()
+
+        window._force_quantity.setCurrentText("V2")
+
+        assert _flag_offset(window) == pytest.approx(2.0 * 50.0)
+
+    def test_the_selector_alone_never_starts_drawing(self, window, tmp_path):
+        """Choosing a component must not be a second way to trigger the action."""
+        window.open_results_path(str(_write_archive(tmp_path, with_forces=True)))
+        window._force_quantity.setCurrentText("V2")
+
+        assert _flag_offset(window) is None
+
+    def test_a_legacy_archive_reads_its_bare_arrays_as_global(self, window, tmp_path):
+        """No ``forces_coordinate_system`` flag: the values are global, and read so.
+
+        Every archive this toolkit writes declares ``local``, but a file from
+        elsewhere may not — and a flag diagram of global components is only
+        geometrically honest when the local and global axes coincide, which
+        ``overlay_forces`` warns about rather than hides.
+        """
+        path = _write_archive(tmp_path, with_forces=True)
+        data = {
+            key: value
+            for key, value in dict(np.load(path, allow_pickle=False)).items()
+            if key != "forces_coordinate_system"
+        }
+        np.savez_compressed(path, **data)
+
+        window.open_results_path(str(path))
+        with pytest.warns(UserWarning):
+            window._actions["results.forces"].trigger()
+
+        assert _flag_offset(window) == pytest.approx(4.0 * 50.0)  # still mz = 4
+
+    def test_switching_cases_drops_the_overlay(self, window, tmp_path):
+        window.open_results_path(str(_write_archive(tmp_path, with_forces=True)))
+        window._actions["results.forces"].trigger()
+        assert _flag_offset(window) is not None
+
+        assert window._select_entity_in_tree("views", "COMB1") is True
+        assert _flag_offset(window) is None
+        assert window._actions["results.forces"].isChecked() is False
+
+    def test_clear_results_removes_the_overlay(self, window, tmp_path):
+        window.open_results_path(str(_write_archive(tmp_path, with_forces=True)))
+        window._actions["results.forces"].trigger()
+        window._actions["results.clear"].trigger()
+
+        assert _flag_offset(window) is None
+        assert window._actions["results.forces"].isChecked() is False
+
+    def test_the_shape_and_the_diagram_are_independent(self, window, tmp_path):
+        """Two overlays on one scene: toggling one off must not drop the other."""
+        window.open_results_path(
+            str(_write_archive(tmp_path, with_displacement=True, with_forces=True))
+        )
+        window._actions["results.deformed"].trigger()
+        window._actions["results.forces"].trigger()
+        assert _deformed_points(window) is not None
+        assert _flag_offset(window) is not None
+
+        window._actions["results.deformed"].trigger()  # toggle the shape off
+
+        assert _deformed_points(window) is None
+        assert _flag_offset(window) is not None

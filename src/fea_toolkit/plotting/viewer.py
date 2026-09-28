@@ -731,6 +731,19 @@ class ModelViewer:
         self._backend.clear_category("deformed")
         return self
 
+    def clear_forces(self) -> "ModelViewer":
+        """Remove the force-flag overlay, leaving the model itself drawn.
+
+        The sibling of :meth:`clear_deformed`: a flag diagram and a deformed
+        shape are independent overlays, so toggling one off must not disturb
+        the other.
+
+        Returns:
+            ``self`` for chaining.
+        """
+        self._backend.clear_category("force_flags")
+        return self
+
     def clear_results(self) -> "ModelViewer":
         """Remove every results overlay — the deformed shape and force flags.
 
@@ -741,8 +754,8 @@ class ModelViewer:
         Returns:
             ``self`` for chaining.
         """
-        for category in ("deformed", "force_flags"):
-            self._backend.clear_category(category)
+        self.clear_deformed()
+        self.clear_forces()
         return self
 
     def annotate(

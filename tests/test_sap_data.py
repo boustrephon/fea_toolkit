@@ -23,6 +23,8 @@ from fea_toolkit.model.geometry import (
     trapezoidal_force_split,
 )
 from fea_toolkit.model.sap_data import (
+    FORCE_QUANTITY_LABELS,
+    FRAME_RELEASE_DOF_LABELS,
     AngleSection,
     AreaElement,
     AreaGravityLoad,
@@ -1306,3 +1308,21 @@ class TestSAPModelDataMethods:
         assert s["X span (m)"] == 6.0
         assert s["Y span (m)"] == 8.0
         assert s["Z span (m)"] == 0.0
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Force-quantity labels
+# ═══════════════════════════════════════════════════════════════════
+
+
+def test_force_quantity_labels_name_the_release_dofs_in_order():
+    """One SAP DOF vocabulary, so the two constants cannot drift apart.
+
+    ``FORCE_QUANTITY_LABELS`` maps SAP's local-DOF names onto the schema's
+    result keys, and those six DOFs are exactly the ones a release frees — same
+    names, same order.  A label added, dropped or reordered on one side only
+    would mislabel a diagram without failing anything else, which is what this
+    pins.
+    """
+    assert tuple(FORCE_QUANTITY_LABELS) == FRAME_RELEASE_DOF_LABELS
+    assert list(FORCE_QUANTITY_LABELS.values()) == ["Fx", "Fy", "Fz", "Mx", "My", "Mz"]

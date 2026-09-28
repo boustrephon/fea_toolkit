@@ -20,6 +20,7 @@ from typing import Any, Optional
 from qtpy.QtCore import QItemSelectionModel, Qt, QTimer, QUrl
 from qtpy.QtGui import QAction, QDesktopServices, QKeySequence
 from qtpy.QtWidgets import (
+    QComboBox,
     QDockWidget,
     QDoubleSpinBox,
     QFileDialog,
@@ -123,6 +124,13 @@ _RESULTS_KEY_PREFIX = "results:"
 #: displacement is a small fraction of the model's size, so the shape is
 #: invisible 1:1 — the same reason SAP2000 offers a scale box.
 _DEFAULT_DEFORMED_SCALE = 50.0
+
+#: Which end-force component a flag diagram opens on.  This is the **label**,
+#: not the schema key: ``"M3"`` is SAP's local-DOF name for the moment about
+#: local 3 (``"Mz"`` underneath — see
+#: :data:`~fea_toolkit.model.sap_data.FORCE_QUANTITY_LABELS`), and bending is
+#: what a flag diagram is usually read for.
+_DEFAULT_FORCE_QUANTITY = "M3"
 
 #: Default opacity for area elements.  Slabs are drawn translucent so the joints
 #: and the members behind them stay readable — the reason a modeller reaches for
@@ -447,7 +455,13 @@ class MainWindow(QMainWindow):
             checked=False,
             enabled=False,
         )
-        a["results.forces"] = self._placeholder("Force diagrams", "Milestone 7")
+        a["results.forces"] = self._toggle_action(
+            "Force diagrams",
+            self._on_forces_toggled,
+            tip="Draw the active load case's member end forces, in the chosen component",
+            checked=False,
+            enabled=False,
+        )
         a["results.storey"] = self._placeholder("Storey response", "Milestone 7")
         a["results.pushover_curve"] = self._placeholder("Pushover curve", "Milestone 7")
         a["results.clear"] = self._real_action(
@@ -537,9 +551,25 @@ class MainWindow(QMainWindow):
         self._deformed_scale.setDecimals(1)
         self._deformed_scale.setSingleStep(10.0)
         self._deformed_scale.setValue(_DEFAULT_DEFORMED_SCALE)
-        self._deformed_scale.setToolTip("Deformed-shape scale factor")
-        self._deformed_scale.setStatusTip("Deformed-shape scale factor")
+        self._deformed_scale.setToolTip("Results-overlay scale factor")
+        self._deformed_scale.setStatusTip("Results-overlay scale factor")
         self._deformed_scale.valueChanged.connect(self._on_deformed_scale_changed)
+
+        # Which end-force component a flag diagram shows.  The SAP local-DOF
+        # names read better than the schema's x/y/z keys and are the same six
+        # local DOFs (see FORCE_QUANTITY_LABELS); the combo therefore holds the
+        # *label* and the handler passes the key underneath it.
+        from ..model.sap_data import FORCE_QUANTITY_LABELS
+
+        self._force_quantity = QComboBox(self)
+        self._force_quantity.setObjectName("force_quantity")
+        for label in FORCE_QUANTITY_LABELS:
+            self._force_quantity.addItem(label)
+        self._force_quantity.setCurrentText(_DEFAULT_FORCE_QUANTITY)
+        self._force_quantity.setToolTip("End-force component drawn as a flag diagram")
+        self._force_quantity.setStatusTip("End-force component drawn as a flag diagram")
+        self._force_quantity.currentIndexChanged.connect(self._on_force_quantity_changed)
+        self._force_quantity.setEnabled(False)  # until a view carries end forces
 
         # Display quality knobs.  Opacity is an actor property, so it updates in
         # place; shrink is geometry and needs the model redrawn — the two are
@@ -568,6 +598,7 @@ class MainWindow(QMainWindow):
             """Add one entry: ``None`` is a separator, ``"@name"`` a widget."""
             widgets = {
                 "@deformed_scale": ("Scale", self._deformed_scale),
+                "@force_quantity": ("Force", self._force_quantity),
                 "@shell_opacity": ("Shells", self._shell_opacity),
                 "@shrink": ("Shrink", self._shrink),
             }
@@ -596,6 +627,7 @@ class MainWindow(QMainWindow):
             "results.deformed",
             "@deformed_scale",
             "results.forces",
+            "@force_quantity",
             None,
             "model.units",
         ):
@@ -993,6 +1025,12 @@ class MainWindow(QMainWindow):
         self._actions["results.deformed"].setEnabled(
             repository is not None and bool(case) and repository.has_displacements(case)
         )
+        # The same rule for the flag diagram, on end forces — and the quantity
+        # selector is greyed with it, so it cannot look like it is choosing
+        # something the archive has none of.
+        has_forces = repository is not None and bool(case) and repository.has_forces(case)
+        self._actions["results.forces"].setEnabled(has_forces)
+        self._force_quantity.setEnabled(has_forces)
 
     def _highlight_entity(self, entity: Any) -> None:
         """Highlight *entity* in the viewport, replacing the previous highlight.
@@ -1036,7 +1074,7 @@ class MainWindow(QMainWindow):
         displacements = self._active_displacements()
         if not displacements:
             self.log("No displacement data in this view — nothing to deform.", "error")
-            self._set_deformed_checked(False)
+            self._set_toggle_checked("results.deformed", False)
             return
 
         self._viewer.overlay_deformed(displacements, scale=float(self._deformed_scale.value()))
@@ -1044,29 +1082,43 @@ class MainWindow(QMainWindow):
         self.log(f"Deformed shape: scale {self._deformed_scale.value():g}.")
 
     def _on_deformed_scale_changed(self, _value: float) -> None:
-        """Re-draw the deformed shape after the scale changed.
+        """Re-draw the results overlays after the scale changed.
 
-        Only when it is already on — changing the scale must not *start*
-        drawing, which would make the spin box a second way to trigger the
-        action.
+        Only the overlays already on — changing the scale must not *start*
+        drawing, which would make the spin box a second way to trigger an
+        action.  The scale is shared: a deformed shape and a flag diagram are
+        both drawn in model units, so the same factor reads them both.
         """
         if self._actions["results.deformed"].isChecked():
             self._clear_deformed()
             self._on_deformed_toggled(True)
+        if self._actions["results.forces"].isChecked():
+            self._clear_forces()
+            self._on_forces_toggled(True)
 
     def _on_clear_results(self) -> None:
         """**Results ▸ Clear results**: remove every results overlay."""
         self._clear_deformed()
-        self._set_deformed_checked(False)
+        self._set_toggle_checked("results.deformed", False)
+        self._clear_forces()
+        self._set_toggle_checked("results.forces", False)
         self.log("Cleared the results overlay.")
+
+    def _active_results_source(self) -> tuple[Any, str]:
+        """``(repository, case)`` for the active view — ``(None, "")`` without one.
+
+        Every results accessor needs the same pair, and the force overlay needs
+        it twice: once for the entries and once for how the archive records
+        them.
+        """
+        view = self._views.active
+        repository = self._views.results(view.key) if view is not None else None
+        case = _case_of(view) or ""
+        return repository, case
 
     def _active_displacements(self) -> dict:
         """``{node_id: (dx, dy, dz)}`` for the active results view, else ``{}``."""
-        view = self._views.active
-        if view is None:
-            return {}
-        repository = self._views.results(view.key)
-        case = _case_of(view)
+        repository, case = self._active_results_source()
         if repository is None or not case:
             return {}
         return repository.nodal_displacements(case)
@@ -1076,9 +1128,80 @@ class MainWindow(QMainWindow):
         if self._viewer is not None:
             self._viewer.clear_deformed()
 
-    def _set_deformed_checked(self, checked: bool) -> None:
-        """Set the deformed toggle without re-entering its handler."""
-        action = self._actions.get("results.deformed")
+    def _on_forces_toggled(self, checked: bool) -> None:
+        """**Results ▸ Force diagrams**: flag the active case's end forces.
+
+        The chosen quantity is a *label*: the selector shows SAP's local-DOF
+        names and this reads the schema key underneath, so ``"M3"`` becomes
+        ``"Mz"`` (see
+        :data:`~fea_toolkit.model.sap_data.FORCE_QUANTITY_LABELS`).  As with the
+        deformed shape the amplification is a *display* choice — the archive's
+        forces are read in model units and never modified.
+
+        Args:
+            checked: Whether the diagram should now be drawn.
+        """
+        if not checked:
+            self._clear_forces()
+            return
+
+        forces = self._active_element_forces()
+        if not forces:
+            self.log("No element forces in this view — nothing to draw.", "error")
+            self._set_toggle_checked("results.forces", False)
+            return
+
+        from ..model.sap_data import FORCE_QUANTITY_LABELS
+
+        label = self._force_quantity.currentText()
+        self._viewer.overlay_forces(
+            forces,
+            quantity=FORCE_QUANTITY_LABELS.get(label, label),
+            use_local=self._active_forces_are_local(),
+            scale_factor=float(self._deformed_scale.value()),
+        )
+        self._viewer.show()
+        self.log(f"Force diagram: {label} at scale {self._deformed_scale.value():g}.")
+
+    def _on_force_quantity_changed(self, _index: int) -> None:
+        """Re-draw the flag diagram after the quantity changed.
+
+        Only when it is already on — choosing a quantity must not *start*
+        drawing, the same rule the scale box follows.
+        """
+        if self._actions["results.forces"].isChecked():
+            self._clear_forces()
+            self._on_forces_toggled(True)
+
+    def _active_element_forces(self) -> dict:
+        """``{elem_id: {key: value}}`` for the active results view, else ``{}``."""
+        repository, case = self._active_results_source()
+        if repository is None or not case:
+            return {}
+        return repository.element_forces(case)
+
+    def _active_forces_are_local(self) -> bool:
+        """Whether the active view's archive records its end forces element-local.
+
+        The flag diagram draws *local* component values, so it has to know
+        before it reads them — see :meth:`ResultsRepository.forces_are_local`.
+        """
+        repository, _case = self._active_results_source()
+        return repository.forces_are_local() if repository is not None else False
+
+    def _clear_forces(self) -> None:
+        """Remove the force-flag overlay, leaving the model itself drawn."""
+        if self._viewer is not None:
+            self._viewer.clear_forces()
+
+    def _set_toggle_checked(self, key: str, checked: bool) -> None:
+        """Set a results toggle without re-entering its handler.
+
+        Args:
+            key: Action key, e.g. ``"results.deformed"``.
+            checked: The state to set.
+        """
+        action = self._actions.get(key)
         if action is None or action.isChecked() == checked:
             return
         action.blockSignals(True)
@@ -1090,10 +1213,11 @@ class MainWindow(QMainWindow):
 
         The backend's ``clear()`` has already removed the actor, so this only
         has to put the toggle back — hence ``blockSignals`` in
-        :meth:`_set_deformed_checked`: re-entering the handler would try to
+        :meth:`_set_toggle_checked`: re-entering the handler would try to
         clear an actor that is gone.
         """
-        self._set_deformed_checked(False)
+        self._set_toggle_checked("results.deformed", False)
+        self._set_toggle_checked("results.forces", False)
 
     def _on_show_nodes(self, checked: bool) -> None:
         """Show or hide the node-marker overlay."""

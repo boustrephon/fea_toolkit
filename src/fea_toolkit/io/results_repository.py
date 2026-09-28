@@ -370,7 +370,7 @@ class ResultsRepository(ABC):
         geometry = self.display_geometry()
         frame_ids = _texts(geometry.get("frame_sap_id"))
         frame_tags = _ints(geometry.get("frame_eid"))
-        is_local = self._forces_are_local()
+        is_local = self.forces_are_local()
 
         forces: dict = {}
         for index in range(_array_length(geometry, "frame_node_i")):
@@ -394,8 +394,14 @@ class ResultsRepository(ABC):
                 forces[elem_id] = entry
         return forces
 
-    def _forces_are_local(self) -> bool:
+    def forces_are_local(self) -> bool:
         """Whether this archive declares its end forces element-local.
+
+        The flag a force-diagram caller needs to read before choosing how to
+        consume :meth:`element_forces`: an overlay that draws *local* component
+        values passes ``use_local=True`` (then it reads these entries' ``*_local``
+        keys), while a legacy archive whose bare arrays are global has to be
+        read the other way.
 
         ``forces_coordinate_system`` is file-level, and ``"local"`` for
         everything this toolkit writes — the recorders use OpenSees

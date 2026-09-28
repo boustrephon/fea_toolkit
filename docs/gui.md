@@ -132,6 +132,24 @@ Switching views clears the overlay and unchecks the action, because a deformed
 shape belongs to **one** case's geometry: drawing case A's shape over case B's
 members would be a lie.  **Results ▸ Clear results** does the same on demand.
 
+**Results ▸ Force diagrams** draws the active case's **member end forces** as
+flag diagrams, in whichever component the **Force** selector beside the Scale
+box names.  The selector offers SAP2000's local-DOF vocabulary — `P` (axial),
+`V2` / `V3` (the local-2 / local-3 shears), `T` (torsion), `M2` / `M3` (the
+local-2 / local-3 moments) — and opens on `M3`.  Those are the same six local
+DOFs a member-end release frees, and they map onto the schema's `Fx … Mz` result
+keys (`FORCE_QUANTITY_LABELS` in `model/sap_data.py`), so the label is a
+*display* name and the key underneath is unchanged.  The labels name the **axis**
+a component acts along or about; the values remain the recorded OpenSees
+`localForces`, and so do not adopt SAP2000's output sign convention.
+
+The diagram follows the shape's rules: enabled only for a case view whose archive
+carries end forces, with the selector greyed alongside it, and the **Scale** box
+shared between the two overlays — both are drawn in model units, so one factor
+reads them both.  Switching views and **Results ▸ Clear results** drop it.  The
+two overlays are independent, so turning off the shape leaves the diagram drawn
+and vice versa.
+
 ### A view is a lens
 
 A view is a **lens, not a copy**: every view shares the one model in memory, and
@@ -321,9 +339,9 @@ jarring than a greyed-out one.
 | **View** | Zoom to fit, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show shells, Clear highlights) | Show element labels, Show loads, Show force diagrams, Reset layout |
 | **Model** | Split elements, Mesh areas (enabled while a parsed model is open) | Selections, Units |
 | **Analysis** | — | Run, Static, Modal, Response spectrum, Pushover, Stop |
-| **Results** | Deformed shape, Clear results | Force diagrams, Storey response, Pushover curve |
+| **Results** | Deformed shape, Force diagrams (+ Force selector), Clear results | Storey response, Pushover curve |
 | **Help** | Documentation, About | — |
-| Toolbars | Open; camera views; display toggles; Split / Mesh; Deformed shape + Scale | Save / Export, Run / Stop, Force diagrams |
+| Toolbars | Open; camera views; display toggles; Split / Mesh; Deformed shape + Scale; Force diagrams + Force selector | Save / Export, Run / Stop |
 | View toolbar | Zoom/camera; display toggles; **Shells** opacity and **Shrink** | Show labels, Show loads, Show force diagrams |
 
 ## Application identity
@@ -344,7 +362,7 @@ drives a *separately installed* OpenSees is the recorded route
 | Missing | Effect today |
 |---|---|
 | Analysis actions (milestone 5) | `Analysis ▸ …` is greyed; analyse from a script or notebook instead |
-| Loads, force diagrams, storey and pushover plots (milestones 6–7) | A case's deformed shape *is* drawn in the GUI; these others still need the [Visualisation Toolkit](viewer.md) and the `plot_*` functions |
+| Loads, storey and pushover plots (milestones 6–7) | A case's deformed shape *and* its member end forces **are** drawn in the GUI; load glyphs, storey plots and pushover curves still need the [Visualisation Toolkit](viewer.md) and the `plot_*` functions |
 | Element labels, the Property Tree tab, explicit interaction modes ([P23](_pending_work.md)) | The corresponding menu item and tab are greyed |
 | Window-layout persistence (milestone 8) | Docks and window geometry are not remembered between sessions |
 | Quad view (milestone 10) | A single viewport; use the Camera menu and the view cube |

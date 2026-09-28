@@ -112,6 +112,29 @@ class FrameEndOffset:
 # P = axial, V2/V3 = shear (local 2/3), T = torsion, M2/M3 = moment (local 2/3).
 FRAME_RELEASE_DOF_LABELS = ("P", "V2", "V3", "T", "M2", "M3")
 
+#: SAP2000's local-DOF names for the six frame force components, mapped to the
+#: toolkit's own result-quantity keys.  The two vocabularies name the **same**
+#: six local DOFs — :data:`FRAME_RELEASE_DOF_LABELS` for a member-end release,
+#: these for a recorded force — so a UI can offer the readable SAP names while
+#: every reader underneath keeps the x/y/z keys the schema and the plotters use
+#: (``"M3"`` is a *label*; ``"Mz"`` is the key).
+#:
+#: The correspondence is established, not assumed: a frame's local axes come
+#: from :func:`~fea_toolkit.model.geometry_core.get_local_axes`, which takes
+#: ``vz`` from ``get_SAP_vecxz`` (SAP2000 local z, i.e. axis **3**) and
+#: ``vy = vz × vx`` (axis **2**) — so local y/z *are* SAP's 2/3.
+#:
+#: These name the **axis** a component acts along or about.  They do not adopt
+#: SAP's output sign convention: the values remain OpenSees ``localForces``.
+FORCE_QUANTITY_LABELS: dict[str, str] = {
+    "P": "Fx",
+    "V2": "Fy",
+    "V3": "Fz",
+    "T": "Mx",
+    "M2": "My",
+    "M3": "Mz",
+}
+
 
 @dataclass
 class FrameRelease:

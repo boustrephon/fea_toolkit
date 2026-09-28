@@ -420,6 +420,13 @@ class TestElementForces:
         assert NpzResultsRepository(_geometry()).element_forces("COMB1") == {}
         assert NpzResultsRepository(_forces_archive()).element_forces("NOT_A_CASE") == {}
 
+    def test_the_local_flag_is_reported(self):
+        """What a caller consults before choosing ``use_local`` for the overlay."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        assert NpzResultsRepository(_forces_archive(local=True)).forces_are_local() is True
+        assert NpzResultsRepository(_forces_archive(local=False)).forces_are_local() is False
+
     def test_has_forces_is_the_cheap_pre_check(self):
         """What a caller consults before offering to draw a flag diagram."""
         from fea_toolkit.io.results_repository import NpzResultsRepository
