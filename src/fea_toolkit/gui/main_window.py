@@ -49,6 +49,33 @@ _CURSOR_POLL_MS = 60
 _SELECT_COLOR = (1.0, 0.45, 0.0)  # selected frame / area element
 _SELECT_NODE_COLOR = (0.15, 0.55, 1.0)  # selected node
 
+#: Once-only guard for :func:`_freeze_gc_once`.  A one-element list rather than a
+#: bool, so marking it does not need a ``global`` rebind (ruff PLW0603).
+_GC_FROZEN: list = []
+
+
+def _freeze_gc_once() -> None:
+    """Put this process's live objects beyond the collector's reach, once.
+
+    The Preprocessor deep-copies the model, and the GUI does that on a **worker
+    thread**.  A collection triggered inside that copy walks the whole heap --
+    including the PySide6/VTK objects the main thread owns -- and shiboken's
+    objects are not built to be traversed from another thread: on macOS it shows
+    up as an intermittent segfault inside ``copy.deepcopy``, reproducible in
+    ``tests/test_gui_views.py`` before this call existed.
+
+    ``gc.freeze()`` moves everything alive *now* -- Qt, VTK, the window, the
+    renderer -- into the permanent generation, so no later collection looks at
+    it.  Objects created afterwards (the copy, the ``MeshModel``) stay
+    collectable, which is what stops models from leaking.
+    """
+    if _GC_FROZEN:
+        return
+    import gc
+
+    _GC_FROZEN.append(True)
+    gc.freeze()
+
 
 def _entity_identity(entity: Any) -> tuple[Optional[str], Optional[str]]:
     """Locate *entity* in the viewport as ``(attribute_name, value)``.
@@ -893,6 +920,7 @@ class MainWindow(QMainWindow):
         self._progress.setVisible(True)
         self.log(f"{label} \u2026")
 
+        _freeze_gc_once()
         worker = TaskWorker(lambda _should_cancel: store.mesh(settings), parent=self)
         worker.succeeded.connect(
             lambda mesh_model: self._preprocess_finished(mesh_model, key, name, source)

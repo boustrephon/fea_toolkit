@@ -126,6 +126,23 @@ def _camera_flat(window):
     return np.array(_flatten(window._interactor.camera_position))
 
 
+def test_preprocessing_freezes_the_gc_before_handing_work_to_the_worker(window, monkeypatch):
+    """A worker-thread deepcopy must not walk Qt/VTK objects (macOS segfault).
+
+    The Preprocessor copies the model, and the GUI runs that on a worker thread;
+    a collection triggered there would traverse the main thread's shiboken
+    objects from the wrong thread.  ``gc.freeze()`` at the handoff is the fix --
+    see ``main_window._freeze_gc_once``.
+    """
+    from fea_toolkit.gui import main_window
+
+    monkeypatch.setattr(main_window, "_GC_FROZEN", [])
+
+    _run_preprocess(window)
+
+    assert main_window._GC_FROZEN == [True]
+
+
 def test_opening_a_model_registers_the_unprocessed_view(window):
     """A freshly parsed model is viewable straight away, as ``Unprocessed``."""
     view = window._views.get("unprocessed")
