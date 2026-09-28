@@ -207,6 +207,67 @@ General lesson: when a "missing field" bug appears, grep for **every** writer of
 that field before concluding the data is unavailable.  Here
 `grep -rn 'partiMassRatiosMX' src/` would have found both copies immediately.
 
+## Reading results out of OpenSees — the query API, and the recorder escape hatch
+
+Results are pulled into Python through OpenSees' **query API** — `ops.nodeDisp`,
+`ops.nodeReaction`, `ops.eleResponse`, `ops.nodeEigenvector` — and the toolkit
+then writes them itself (numpy → NPZ/H5).  No OpenSees `recorder` streams results
+to a persistent file anywhere in the analysis path:
+
+| Runner | Read with | Where |
+|---|---|---|
+| Static | `nodeDisp`, `nodeReaction`, `eleResponse(tag, "localForces")` | `_runner_static.py` |
+| Pushover | `nodeDisp` (control node), `nodeReaction` (base), `eleResponse(tag, "section", …)` | `_runner_pushover.py` |
+| Modal | `nodeEigenvector`, read immediately after `eigen` | `analysis_builder.py` |
+| RS | `eleResponse` per mode per element, `nodeEigenvector`; **plus one `Element` recorder** | `_runner_rs.py` |
+
+The single exception is RS element forces, whose `extraction="recorder"` mode is
+documented and *measured* in the section above: there the per-element
+`eleResponse` calls were the thing being optimised, and on the benchmark model the
+query API still **won on wall time** — the recorder's advantage is *call count*,
+not speed.  So the recorder path is not an automatic upgrade; it is a contingency.
+
+Two other things called "recorder" here are unrelated to results.
+`opensees/recorder.py::RecordingOpenSees` captures the **model-building** calls
+for Tcl/Python replay.  The Xara/Tcl export path reads results from the
+subprocess's own output files (`XaraTclRunner.read_recorder`) because a
+subprocess has no in-memory API to query.
+
+### Why the door stays open
+
+The query API is the right default: numpy-ready values, no parsing, and exactly
+what the results seam expects.  Its cost is **per-element, per-step Python↔C
+round trips**, plus the **accumulation** of the returned values in Python
+containers before the toolkit writes them.  That is fine at the scale the toolkit
+runs (a pushover of a 500-frame building spends seconds, not minutes, in
+extraction), and it is the wrong shape for two cases:
+
+- **Very large element counts** — extraction is linear in elements × steps, and
+  the round-trip overhead dominates once the solver gets fast.
+- **Time-history with many steps** — per-step element forces held in a Python
+  list are O(steps × elements) resident, while an OpenSees recorder writes each
+  step *incrementally during* the analysis and keeps nothing resident.
+
+### The constraint on any file-recorder ingest (decided 2026-09-28)
+
+A recorder-based path may be added later, but it must be a **second producer for
+the existing seam — never a second seam**:
+
+1. It normalises into the **same per-case payload dict** the query API produces —
+   `{case: {"nodal_displacements": {node_id: [...]}, "element_forces": {elem_id: {...}}}}`
+   — plus the geometry arrays and the case labels/metadata that travel with an
+   archive.
+2. It reaches consumers **only** through `ResultsRepository` (in memory as
+   `NpzResultsRepository(dict)`, or via the writers to NPZ/H5), so no consumer
+   ever learns where a result came from.
+3. It lives in `opensees/` (a runner concern) — not in `io/`, `plotting/` or
+   `gui/`.  Readers may import it; nothing else may parse a recorder file.
+
+Holding to those three means the GUI, the plotters and the reports need **no
+change** when the ingest path is added: the escape hatch stays an implementation
+detail behind the seam.  Tracked as **P26** in `docs/_pending_work.md`, with the
+trigger for actually doing it.
+
 ## PyVista animation timer — verified contract (`_add_animation_timer`)
 
 The toolkit has twice shipped a wrong assumption about `add_timer_event`.

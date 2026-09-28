@@ -146,6 +146,18 @@ library addition the GUI work needs, so that **the same dict** can be registered
 in memory *or* written — instead of writing an archive and reading it back just to
 look at a result.
 
+**The producer side is OpenSees' query API, and the file-recorder door is being
+held open.**  Results today come from `ops.nodeDisp` / `nodeReaction` /
+`eleResponse` / `nodeEigenvector` and are written by the toolkit — with one
+measured exception (RS element forces, whose recorder mode is slower on wall time
+but far fewer calls).  A recorder-based ingest is the recorded escape hatch for
+very large or many-step models, where per-step accumulation in Python is the
+wrong shape: it may be added later, but only as a second **producer** for this
+same payload dict, reaching consumers through `ResultsRepository` and living in
+`opensees/` — so nothing downstream changes when it arrives.  See
+[Development Notes](dev_notes.md) → *Reading results out of OpenSees* and
+**P26** in `docs/_pending_work.md`.
+
 **Composites are ordinary cases.**  A combination's composites are stored as
 `static/{composite}/…` blocks with the usual per-case arrays, so every plotter and
 viewer treats them exactly like a load case.  What distinguishes them is the

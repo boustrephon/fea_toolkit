@@ -807,6 +807,38 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+#### P26 — OpenSees recorder-based result ingest (the escape hatch for large / time-history runs)
+Source: `docs/dev_notes.md` → *Reading results out of OpenSees — the query API,
+and the recorder escape hatch*; `docs/load_cases_and_combinations.md` → *Results:
+in memory first*.
+
+**What.** Results are read through OpenSees' query API (`nodeDisp`,
+`nodeReaction`, `eleResponse`, `nodeEigenvector`) and the toolkit writes them
+itself.  Exactly one file-recorder use exists — the RS element-force path
+(`extraction="recorder"`) — and there it was *measured* to lose on wall time
+(0.72 s vs 0.09–0.47 s for 1263 elements × 20 modes) while winning on call count.
+So the query API is the default everywhere, and a recorder path is a
+**contingency, not an upgrade**.
+
+**Why the door stays open.** Extraction is linear in elements × steps, and its
+results accumulate in Python containers before the toolkit writes them, so
+per-step element forces are O(steps × elements) resident.  An OpenSees recorder
+writes incrementally *during* the analysis and keeps nothing resident — which is
+what matters for (a) very large element counts once the solver is fast, and (b)
+time-history with many steps.
+
+**Constraint (decided 2026-09-28 — applies to work that starts before this).**
+A recorder-based ingest must be a second **producer** for the existing seam, never
+a second seam: it normalises into the same per-case payload dict, reaches
+consumers only through `ResultsRepository` (or the writers), and lives in
+`opensees/` — no recorder-file parsing in `io/`, `plotting/` or `gui/`.  In
+particular, build the GUI's result views against `ResultsRepository` so this stays
+an implementation detail.
+
+**Trigger.** Revisit when a run is dominated by extraction rather than solving, or
+when a time-history model's per-step results no longer fit comfortably in memory.
+No work is planned before then.
+
 ## DONE (2026-09-28 — docs: the pattern → case → combination chain as an analysis input)
 
 New page `docs/load_cases_and_combinations.md` (categories `model-features` +
