@@ -807,6 +807,49 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-28 — docs: the pattern → case → combination chain as an analysis input)
+
+New page `docs/load_cases_and_combinations.md` (categories `model-features` +
+`core-pipeline`) fills the gap between `docs/load_combinations.md` — the
+combination *engine* — and the analysis layer: **which** tier of SAP2000's load
+model actually drives a solve, and the two routes to combined results.  Writing
+it down first was the point: it is the specification for the Analysis-menu slice
+that comes next, and it settles a design question that would otherwise be
+decided implicitly by the first UI that ships.
+
+Three things it records:
+
+- **A case drives one solve.**  `run_static_analysis(pattern_scales=…)` rebuilds
+  the domain with *only* those patterns active, each factored per load family —
+  so `{"Dead": 1.4, "Live": 1.6}` is a single factored *ultimate* case, not two
+  runs combined afterwards.  The pattern map comes from the model
+  (`patterns_from_case()`, which reads the case's `LOAD ASSIGNMENTS` block), from
+  code (`linear_cfg={"cases": [{"ULT": {…}}]}`), or as one pattern on its own.
+- **Two routes to combined results — and only one survives nonlinearity.**  For a
+  linear analysis a factored case and a post-hoc reduction are numerically
+  identical (superposition), which is exactly what makes route B cheap: one set
+  of case results feeds any number of combinations.  Once the analysis is
+  nonlinear (P-Delta, nonlinear materials, staged construction) route B is
+  **invalid** and the factored patterns must be applied together.  That asymmetry
+  is why SAP separates a load case from a load combination, and the same
+  three-tier split appears across FEA (NASTRAN `LOAD`/`SUBCASE`, Abaqus step,
+  ANSYS load step `FACT`, OpenSees `pattern` + constant time series).
+- **Results are in-memory first.**  A case payload is a plain dict and
+  `NpzResultsRepository(dict)` serves a view from it, so no archive is needed to
+  *look* at a result — the archive is its serialization.  The page names the one
+  seam still internal: the writer assembles the archive dict in
+  `_collect_geometry()` / `_collect_static()` and saves it in the same step, so
+  exposing that assembly is the small library addition the GUI work needs.
+
+CSI's own documentation is **linked, not reproduced** (licence §5.8), and the
+page says so.  `docs/load_combinations.md` gained the reciprocal link and now
+states plainly that a combination never drives an analysis itself.  Registered
+in the auto-generated docs index (60 docs, 191 tags).
+
+Next: the Analysis-menu slice — list load cases and combinations, run one on a
+worker, register the result as a case view (milestone 5 in `docs/gui_roadmap.md`
+§9.6).  This page is its specification.
+
 ## DONE (2026-09-28 — GUI M7 part 2: force diagrams, and the SAP force vocabulary)
 
 `Results ▸ Force diagrams` is real (it was a Milestone-7 placeholder): the active

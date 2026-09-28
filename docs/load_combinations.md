@@ -4,7 +4,7 @@ description: "Parsing, tree building and composite generation for SAP2000/ETABS 
 status: "partial"
 tags: [loads, combination, model, results, composite]
 category: [model-features]
-related: [analysis.md, builder_reference.md, results_schema.md, force_diagram_unification.md]
+related: [load_cases_and_combinations.md, analysis.md, builder_reference.md, results_schema.md, force_diagram_unification.md]
 ---
 # Load Combinations
 
@@ -17,6 +17,11 @@ A combination is expanded into one or more **composite load cases** which are
 then evaluated against the per-case results and exported as ordinary
 `static/{composite}/...` arrays, so a combination can be visualised exactly
 like a load case.
+
+A combination never drives an analysis itself: it reduces the results of the
+**load cases** it references.  Which tier drives a solve — and the two routes to
+combined results, only one of which survives nonlinearity — is the subject of
+[Load Cases and Combinations](load_cases_and_combinations.md).
 
 ## Pipeline
 

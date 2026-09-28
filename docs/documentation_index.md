@@ -30,6 +30,11 @@ for automated cross-referencing.
   > Canonical goal-to-code mapping, full public API surface by domain, and key technical constraints — structured for language model consumption.
   Tags: `llm`, `ai`, `guide`, `api-reference`, `usage`, `environment`
 
+- [Load Cases and Combinations](load_cases_and_combinations.md) — ✅ Complete
+  > The three-tier load model — patterns, cases, combinations — as an analysis input: which tier drives a solve, the two routes to combined results, and why only one of them survives nonlinearity.
+  Tags: `loads`, `load-case`, `combination`, `analysis`, `results`
+  Related: [Load Combinations](load_combinations.md) · [Analysis Helpers](analysis.md) · [Unified Results Schema](results_schema.md) · [Units Workflow (kN·m·s → kip·in Limit-State Analysis)](units_conversion.md) · [Desktop GUI](gui.md)
+
 - [SAP IDs vs OpenSees Tags](sap_ids_vs_tags.md) — ✅ Complete
   > The two distinct identifier systems (SAP2000 string IDs vs OpenSees integer tags), who creates each, NPZ storage conventions, and common pitfalls.
   Tags: `identifiers`, `sap2000`, `opensees`, `reference`, `architecture`
@@ -120,10 +125,15 @@ for automated cross-referencing.
   Tags: `elements`, `splitting`, `meshing`, `load-redistribution`
   Related: [Element Classification](element_classification.md) · [Builder Reference — Two-stage Pipeline](builder_reference.md) · [Analysis Workflow](workflow.md)
 
+- [Load Cases and Combinations](load_cases_and_combinations.md) — ✅ Complete
+  > The three-tier load model — patterns, cases, combinations — as an analysis input: which tier drives a solve, the two routes to combined results, and why only one of them survives nonlinearity.
+  Tags: `loads`, `load-case`, `combination`, `analysis`, `results`
+  Related: [Load Combinations](load_combinations.md) · [Analysis Helpers](analysis.md) · [Unified Results Schema](results_schema.md) · [Units Workflow (kN·m·s → kip·in Limit-State Analysis)](units_conversion.md) · [Desktop GUI](gui.md)
+
 - [Load Combinations](load_combinations.md) — ⚠️ Partial
   > Parsing, tree building and composite generation for SAP2000/ETABS load combinations, including the five CSI combination operators.
   Tags: `loads`, `combination`, `model`, `results`, `composite`
-  Related: [Analysis Helpers](analysis.md) · [Builder Reference — Two-stage Pipeline](builder_reference.md) · [Unified Results Schema](results_schema.md) · [Force-Diagram Unification (Phase B)](force_diagram_unification.md)
+  Related: [Load Cases and Combinations](load_cases_and_combinations.md) · [Analysis Helpers](analysis.md) · [Builder Reference — Two-stage Pipeline](builder_reference.md) · [Unified Results Schema](results_schema.md) · [Force-Diagram Unification (Phase B)](force_diagram_unification.md)
 
 - [Mander Confinement Model Validation](mander_confinement_validation.md) — ✅ Complete
   > Formula-by-formula conformance of the Mander confinement engine to Mander et al. (1988), documented simplifications, and comparison against NZSEE C5, OpenSees Concrete07, and TSC2018.
@@ -320,7 +330,7 @@ Tags across all documentation files:
 
 - **`aci-318`** — [stiffness_factors.md](stiffness_factors.md)
 - **`ai`** — [llm_guide.md](llm_guide.md)
-- **`analysis`** — [analysis.md](analysis.md)
+- **`analysis`** — [analysis.md](analysis.md), [load_cases_and_combinations.md](load_cases_and_combinations.md)
 - **`analysis-builder`** — [builder_reference.md](builder_reference.md), [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`analysis-type`** — [modal_analysis.md](modal_analysis.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [pushover_analysis.md](pushover_analysis.md), [storey_response.md](storey_response.md)
 - **`api-reference`** — [llm_guide.md](llm_guide.md)
@@ -344,7 +354,7 @@ Tags across all documentation files:
 - **`cli`** — [model_review.md](model_review.md)
 - **`codes`** — [capacity.md](capacity.md)
 - **`columns`** — [element_classification.md](element_classification.md)
-- **`combination`** — [load_combinations.md](load_combinations.md)
+- **`combination`** — [load_cases_and_combinations.md](load_cases_and_combinations.md), [load_combinations.md](load_combinations.md)
 - **`composite`** — [load_combinations.md](load_combinations.md)
 - **`config`** — [element_properties_config.md](element_properties_config.md)
 - **`confinement`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
@@ -410,8 +420,9 @@ Tags across all documentation files:
 - **`limit-state`** — [units_conversion.md](units_conversion.md)
 - **`linting`** — [linting_fix_plan.md](linting_fix_plan.md)
 - **`llm`** — [llm_guide.md](llm_guide.md)
+- **`load-case`** — [load_cases_and_combinations.md](load_cases_and_combinations.md)
 - **`load-redistribution`** — [element_splitting.md](element_splitting.md)
-- **`loads`** — [load_combinations.md](load_combinations.md)
+- **`loads`** — [load_cases_and_combinations.md](load_cases_and_combinations.md), [load_combinations.md](load_combinations.md)
 - **`macos`** — [openseespy_local_build.md](openseespy_local_build.md)
 - **`mander`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`mcft`** — [shear_failure_modelling.md](shear_failure_modelling.md)
@@ -454,7 +465,7 @@ Tags across all documentation files:
 - **`reporter`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`reporting`** — [report_generation.md](report_generation.md)
 - **`response-spectrum`** — [model_review.md](model_review.md)
-- **`results`** — [load_combinations.md](load_combinations.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
+- **`results`** — [load_cases_and_combinations.md](load_cases_and_combinations.md), [load_combinations.md](load_combinations.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
 - **`review`** — [model_review.md](model_review.md)
 - **`rhino`** — [model_stage_file.md](model_stage_file.md), [rhino_attributes.md](rhino_attributes.md), [rhino_export.md](rhino_export.md)
 - **`rigid-end-offset`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
