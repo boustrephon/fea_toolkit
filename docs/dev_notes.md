@@ -453,6 +453,52 @@ the growing set would silently walk the whole structure, order-dependently.
 lets the Edit-view dialog pre-fill an expression and re-parse it losslessly (the
 `story=` key was added so the expression grammar covers every field).
 
+## The macOS GUI segfault — pyvistaqt threads every render
+
+`MainWindow` embeds a `pyvistaqt.QtInteractor`, and **on macOS only** pyvistaqt
+wraps `QtInteractor.render` in a `threading.Thread`
+(`pyvistaqt/plotting.py`):
+
+```python
+@conditional_decorator(threaded, platform.system() == "Darwin")
+def render(self) -> None: ...
+```
+
+The thread exists to `emit()` `render_signal` from another thread, which Qt then
+delivers to the GUI thread — and the render itself already runs *on the Qt
+thread*, from that signal.  Linux and Windows create no thread at all, so macOS
+was paying one thread per render for a deferred emit.
+
+It is not free.  Creating a thread while the **cyclic collector** is running
+segfaults this process: shiboken/VTK objects are not safe to traverse from
+another thread, nor during thread bootstrap.  Measured, not inferred:
+
+- the crash stack ends in `threading._bootstrap` → `_maintain_shutdown_locks` →
+  *Garbage-collecting*, with the `threaded` wrapper (`pyvista
+  core/utilities/misc.py`) → `Thread.start`, called from `reset_camera` →
+  `self.parent.render()`;
+- on the affected machine `platform.system() == "Darwin"` **and**
+  `QtInteractor.render.__name__ == "wrapper"` — the two facts that identify the
+  decorator (the wrapper is not ``functools.wraps``-decorated, so it keeps that
+  name);
+- three consecutive GUI-suite runs aborted with exit 139 and no summary before
+  the fix; the same suite ran clean afterwards.
+
+`gui/render_backend.py::MainThreadQtInteractor` is the fix: it emits
+`render_signal` on the calling thread — exactly what pyvistaqt does on Linux — so
+no thread is created.  Rendering here is only ever driven from the GUI thread, in
+response to user actions, so the deferred emit is not needed.
+`tests/test_gui_app.py::test_the_embedded_interactor_renders_without_a_thread`
+pins the contract, and fails loudly if upstream drops its workaround (so the
+subclass can then be deleted rather than kept on faith).
+
+**CI cannot catch this**: every job, the GUI one included, runs
+`ubuntu-latest`, where the decorator is never applied.
+
+Related: the Preprocessor's `copy.deepcopy` runs on the GUI's worker thread and
+hit the same race.  `main_window._freeze_gc_once()` (a `gc.freeze()` before the
+handoff) is the stop-gap there; removing the deepcopy would remove the trigger.
+
 ## PySide6 item models - never call `internalPointer()`
 
 Verified against PySide6 / Qt 6.11 on 2026-09-23, while building the GUI's

@@ -774,6 +774,35 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-24 — the macOS GUI segfault: pyvistaqt threads every render)
+
+Intermittent segfaults (exit 139, no test summary) in the GUI suite were traced
+to `pyvistaqt`, which **on macOS only** wraps `QtInteractor.render` in a
+`threading.Thread` — a thread per render whose only job is to `emit()` the render
+signal, the render itself already running on the Qt thread from that signal.
+Creating a thread while the cyclic collector runs segfaults the process:
+shiboken/VTK objects are not safe to traverse from another thread.
+
+- `gui/render_backend.py::MainThreadQtInteractor` emits the signal on the calling
+  thread — pyvistaqt's own Linux path, `_closed` guard included — so no thread is
+  created, and `_create_viewport` builds it.  Rendering here is only ever driven
+  from the GUI thread in response to user actions, so the deferred emit is not
+  needed.
+- `tests/test_gui_app.py` pins the contract: ours is not the wrapper, and on
+  Darwin the stock pyvistaqt one still is — so the test tells us when upstream
+  drops the workaround and the subclass can be deleted rather than kept on faith.
+- Evidence and reasoning: `docs/dev_notes.md` → *The macOS GUI segfault*.
+  Measured: three consecutive pre-fix GUI-suite runs aborted with exit 139 and no
+  summary; eight of eight post-fix iterations ran clean, and the full suite passes
+  (2088, in 61 s — the per-render thread was real cost).
+
+**CI cannot catch this**: every job, the GUI one included, runs `ubuntu-latest`,
+where the decorator is never applied.
+
+Separate but related: the Preprocessor's `copy.deepcopy` runs on the GUI's worker
+thread and hits the same race; `main_window._freeze_gc_once()` remains the
+stop-gap until the deepcopy is replaced (copy-on-write).
+
 ## DONE (2026-09-24 — GUI Slice C: results archives open as views)
 
 **File ▸ Open results…** reads an `.npz` / `.h5` results archive and adds a view
