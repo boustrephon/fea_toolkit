@@ -495,9 +495,67 @@ subclass can then be deleted rather than kept on faith).
 **CI cannot catch this**: every job, the GUI one included, runs
 `ubuntu-latest`, where the decorator is never applied.
 
-Related: the Preprocessor's `copy.deepcopy` runs on the GUI's worker thread and
+Related: the Preprocessor's `copy.deepcopy` ran on the GUI's worker thread and
 hit the same race.  `main_window._freeze_gc_once()` (a `gc.freeze()` before the
-handoff) is the stop-gap there; removing the deepcopy would remove the trigger.
+handoff) is the stop-gap there; the deepcopy itself has since been replaced by
+copy-on-write — see the next section.
+
+## Copy-on-write replaces the model deepcopy (Preprocessor)
+
+`Preprocessor.run()` has always promised not to mutate the caller's
+`SAPModelData`.  It delivered that promise with `copy.deepcopy(model_data)`,
+which was both the peak-memory spike (original + full copy + `MeshModel` all
+alive at once) and the allocation burst behind the worker-thread GC crash
+above.  It was also almost entirely wasted work: the copy changed a handful of
+objects.
+
+The fence is now `_copy_for_preprocessing()`, which copies the **containers**
+(new dicts holding the *same* object references) and relies on every mutation
+site being copy-on-write.  Untouched nodes and elements are shared with the
+source model rather than duplicated.
+
+### The contract
+
+*   **Helpers may extend the dicts they are handed** — `split_elements()` adds
+    split nodes to `nodes`, the mesh helpers add children to `area_elements` —
+    but they must never write to the **objects** inside them.  A parent that is
+    split, meshed or offset is *replaced* (`dataclasses.replace(...)`) and the
+    replacement written back into the dict under the same key.
+*   `dataclasses.replace` is **shallow**: a field that will subsequently be
+    appended to must be passed a *fresh* list at the replacement
+    (`child_ids=[]`, `child_ids=list(elem.child_ids)`).  Otherwise the copy
+    aliases the caller's list and every append leaks through.
+*   Three collections are copied one level deeper, because something mutates
+    the objects they hold: `materials` (scalar fields only, filled by
+    `apply_material_defaults`), `groups` (meshing appends `"Area:<child>"` to
+    `Group.objects`), and the load-object lists.  `restraints`, `sections` and
+    the remaining load collections need only the container copy — the pipeline
+    adds new entries (restraints for mesh nodes, per-type section variants) but
+    never rewrites an existing restraint or section.
+*   **Consequence: the `MeshModel` shares element objects with the source
+    `SAPModelData`.**  Both are read-only to their consumers, which is what
+    makes the sharing safe — the `AnalysisBuilder` never mutates the
+    `MeshModel` (frozen-topology rule), and views are lenses.  The one builder
+    path that *does* need to mutate (`subdivide_elements` for brace buckling)
+    already deep-copies the dicts it works on into `_brace_canonical`.
+
+### What it buys — and what it does not
+
+*   Peak memory drops by roughly one whole model graph.  Most real models split
+    little or not at all, so the deepcopy was near-100 % waste.
+*   The worker thread no longer allocates a second copy of the model.  It still
+    allocates new children and mesh nodes, so `gc.freeze()`
+    (`main_window._freeze_gc_once()`) **stays** as the safety net: this removes
+    the largest allocation burst, not the whole class of race.  Do not retire
+    the freeze on the strength of this change.
+
+### Verified by
+
+`tests/test_preprocessor.py`: snapshot-equality of the source model after
+`run()` (frame splitting + end offsets, area meshing, group membership),
+object-identity checks proving untouched nodes/elements are *shared*, and a
+`copy.deepcopy` spy proving the model itself is never deep-copied.
+
 
 ## PySide6 item models - never call `internalPointer()`
 

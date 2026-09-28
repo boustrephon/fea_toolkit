@@ -774,6 +774,70 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-24 — copy-on-write replaces the Preprocessor's model deepcopy)
+
+`Preprocessor.run()` promised not to mutate the caller's `SAPModelData` and
+delivered that with `copy.deepcopy(model_data)` — duplicating the entire
+node/element graph in order to change a handful of objects.  It is now
+`_copy_for_preprocessing()`: the **containers** are copied (new dicts holding
+the *same* object references) and every mutation site *replaces* the object it
+changes (`dataclasses.replace`) instead of writing to it.
+
+**Measured** on a synthetic 20 000-frame model, comparing the two copy steps on
+the identical input (peak from `tracemalloc`; time best-of-3 *without*
+`tracemalloc`, which inflates the allocation-heavy side):
+
+| copy step | peak | time |
+|---|---|---|
+| `copy.deepcopy(model_data)` | 56.4 MB | 2724 ms |
+| `_copy_for_preprocessing()` | 1.8 MB | 3.2 ms |
+
+That is **96.9 % less peak allocation and ~850x faster** for the copy step —
+and note the deepcopy was also *seconds of the GUI worker thread* per
+preprocessing run, not merely memory.  Untouched objects are now shared with
+the source model (`mesh.nodes["1"] is source.nodes["1"]`).
+
+### The mutation sites converted
+
+- **FrameElement** (`geometry_frames.py`, `preprocessor.py`): `t_locations`
+  (×2, AtFrames accumulation), the split parent's
+  `inactive`/`t_locations`/`child_ids`, the `child_ids` append, brace
+  subdivision (`inactive`, `child_ids`), end offsets (`node_i`/`node_j`), and
+  the shell-node split (`child_ids`, `inactive`).
+- **AreaElement** (`geometry_mesh.py`, `preprocessor.py`): `node_ids` (node
+  merge), `inactive` + `child_ids` (area mesh, subdivide, split-at-frame-edges,
+  split-at-walls), `inactive` (wall elements).
+- **Material**: `apply_material_defaults` writes scalar fields in place, so
+  `materials` is copied per object.
+- **Group**: meshing appends to `Group.objects`, so `groups` gets its own
+  object lists.
+
+Two subtleties that will bite anyone extending this:
+
+* `dataclasses.replace` is **shallow** — a list field that is later appended to
+  must be passed fresh (`child_ids=[]`), or the copy aliases the caller's list.
+* The helpers may still **add entries to the dicts** they are handed; the rule
+  is only that they must never mutate the objects inside those dicts.
+
+### Consequence — a new invariant
+
+The `MeshModel` now **shares element objects** with the source `SAPModelData`.
+That is safe because both are read-only to their consumers (the
+`AnalysisBuilder` never mutates the `MeshModel`; views are lenses), and the one
+builder path that does mutate (`subdivide_elements` for brace buckling) already
+deep-copies into `_brace_canonical`.  Documented in `docs/dev_notes.md` →
+*Copy-on-write replaces the model deepcopy*.
+
+`gc.freeze()` (`main_window._freeze_gc_once()`) is **not** retired: the worker
+still allocates new children and mesh nodes, so the race class remains — this
+removed the largest allocation burst, not the mechanism.
+
+Tests: `tests/test_preprocessor.py` (new) — source-model snapshot equality,
+object-identity sharing, and a `copy.deepcopy` spy pinning that the model is
+never deep-copied again.  The `subdivide_elements` test in
+`tests/test_geometry_core_frames.py` now asserts on the returned dict, since the
+in-place behaviour it used to assert is exactly what this change removes.
+
 ## DONE (2026-09-24 — the macOS GUI segfault: pyvistaqt threads every render)
 
 Intermittent segfaults (exit 139, no test summary) in the GUI suite were traced
@@ -799,9 +863,10 @@ shiboken/VTK objects are not safe to traverse from another thread.
 **CI cannot catch this**: every job, the GUI one included, runs `ubuntu-latest`,
 where the decorator is never applied.
 
-Separate but related: the Preprocessor's `copy.deepcopy` runs on the GUI's worker
-thread and hits the same race; `main_window._freeze_gc_once()` remains the
-stop-gap until the deepcopy is replaced (copy-on-write).
+Separate but related: the Preprocessor's `copy.deepcopy` ran on the GUI's worker
+thread and hit the same race.  It has since been replaced by copy-on-write (see
+the next entry); `main_window._freeze_gc_once()` **stays**, because the worker
+still allocates new child elements and mesh nodes.
 
 ## DONE (2026-09-24 — GUI Slice C: results archives open as views)
 
