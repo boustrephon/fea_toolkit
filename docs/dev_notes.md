@@ -845,3 +845,48 @@ switching the VTK interactor style, so it is a larger change than a knob.  The
 preset table and the adapter are the places for it — recorded in
 `docs/_pending_work.md` P23.
 
+## Quads stay quads — area elements are not fan-triangulated
+
+Two shell-mesh builders disagreed.  The standalone viewers emitted true
+`[4, i, j, k, l]` quad faces (`npz_to_pyvista_shell_mesh`, `_build_deformed_mesh`,
+the pushover viewer), while the GUI's backend fan-split every polygon into
+triangles (`PyVistaRenderer.render_shells`, and the shell branch of
+`render_highlights`).  Because `show_edges=True` draws **every** cell edge, the
+fan's invented diagonal was drawn across every slab in the GUI — that was the
+visible symptom.
+
+Both GUI sites now share a module-level `_polygon_cells`: three vertices stay a
+triangle, four become **one** quad face, and only 5+ sided polygons are fanned
+(from vertex 0, so that diagonal is at least deterministic).  The per-cell colour
+arrays are built from the returned face counts, so a quad contributes one colour
+entry rather than two.
+
+### Why it matters beyond cosmetics — the deformed case
+
+- A quad whose corners are displaced by *different* vectors is generally
+  **non-planar**.  A non-planar quad has no unique surface (its bilinear patch is
+  a hyperbolic paraboloid), so VTK has to split it along a diagonal — and *which*
+  one is arbitrary, varying per cell and per camera angle, so neighbouring warped
+  quads can crease inconsistently.
+- The deformed-shape display multiplies the displacements by the scale factor, so
+  it multiplies the **warp** too: a quad that is imperceptibly warped at 1:1 can
+  visibly fold at 50–100×.
+
+Keeping quads does not make a warped element planar — nothing can — but it stops
+the renderer *inventing* geometry the element does not have, and leaves the split
+to VTK's single consistent choice per cell rather than a fan this code imposes on
+every element.
+
+Worth stating plainly, because it is easy to assume otherwise: the GUI's deformed
+overlay (`render_deformed`) draws **frames only** — area elements are not
+displaced there yet, so deformed shells are a *forward-looking* concern for the
+GUI.  The standalone deformed viewers already emit quads, so no change was needed
+there; only 5+ sided area elements are fanned anywhere.
+
+Pinned by `tests/test_renderers_pyvista.py::TestShellFaces`: one quad shell is one
+cell with four points, a triangle stays a triangle, a pentagon fans to three
+deterministic triangles, a mixed mesh keeps each cell's own shape, the colour
+array matches the cell count, a highlighted quad is a single face, and an
+end-to-end `ModelViewer` run over archive-shaped geometry agrees.
+
+

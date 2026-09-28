@@ -124,8 +124,9 @@ viewer.show_model(show_nodes=True, show_shells=True,
 ```
 
 Draws the structural model — frame elements as coloured lines, shell
-elements as triangulated surfaces, nodes as points.  Elements are
-coloured by section name by default.
+elements as polygon faces (**quads stay quads**, so no fan diagonal is drawn
+across a slab; triangles stay triangles and only 5+ sided elements are fanned),
+nodes as points.  Elements are coloured by section name by default.
 
 ### Results overlay
 

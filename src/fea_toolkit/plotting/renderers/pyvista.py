@@ -20,6 +20,52 @@ def _unit_vec(v: np.ndarray) -> np.ndarray:
     return v / n if n > 1e-12 else np.array([1.0, 0.0, 0.0])
 
 
+def _polygon_cells(polygons: list[np.ndarray]) -> tuple[np.ndarray, list[int]]:
+    """PyVista cell connectivity for area elements — **quads kept as quads**.
+
+    A 4-vertex element becomes one ``[4, i, j, k, l]`` face rather than the two
+    triangles a fan would produce.  Fanning a quad invents a diagonal the
+    element does not have, and ``show_edges=True`` draws every cell edge, so the
+    diagonal is *visible* on every slab in the viewport.
+
+    It also matters once a shape is deformed: a displaced quad's corners are
+    generally **non-coplanar**, and a non-planar quad has no unique surface —
+    VTK has to split it along a diagonal, and which one is arbitrary, so
+    neighbouring warped quads can crease inconsistently (``docs/dev_notes.md`` →
+    *Quads stay quads*).  Triangles stay triangles; only 5+ sided polygons are
+    fanned, and there the fan is deterministic.
+
+    Args:
+        polygons: Vertex arrays in element order, each of shape ``(N, 3)``.
+            A polygon with fewer than three vertices is skipped.
+
+    Returns:
+        ``(faces, face_counts)`` — the flat ``[count, i0, i1, …]`` array PyVista
+        expects, and how many faces each input polygon contributed (one for a
+        triangle or quad, ``N - 2`` for a fanned n-gon, zero when skipped), so
+        callers can map colours or scalars cell by cell.
+    """
+    faces: list[int] = []
+    counts: list[int] = []
+    offset = 0
+    for poly in polygons:
+        n = len(poly)
+        if n < 3:
+            counts.append(0)
+        elif n == 3:
+            faces.extend([3, offset, offset + 1, offset + 2])
+            counts.append(1)
+        elif n == 4:
+            faces.extend([4, offset, offset + 1, offset + 2, offset + 3])
+            counts.append(1)
+        else:
+            for i in range(1, n - 1):
+                faces.extend([3, offset, offset + i, offset + i + 1])
+            counts.append(n - 2)
+        offset += n
+    return np.array(faces, dtype=int), counts
+
+
 def _flag_direction(
     quantity: str,
     start: np.ndarray,
@@ -307,47 +353,30 @@ class PyVistaRenderer(RenderBackend):
         p = self.plotter
         import pyvista as pv
 
-        all_verts: list[np.ndarray] = []
-        all_faces: list[np.ndarray] = []
-        shell_colors: list[tuple] = []
-        offset = 0
+        verts = np.vstack([s.vertices for s in shells])
+        faces, face_counts = _polygon_cells([s.vertices for s in shells])
 
-        for s in shells:
-            nv = len(s.vertices)
-            # Fan triangulation for arbitrary polygon (tris, quads, 5+)
-            for i in range(1, nv - 1):
-                all_faces.append(np.array([3, offset, offset + i, offset + i + 1]))
-            all_verts.append(s.vertices)
-            shell_colors.append(colors.get(s.section, (0.7, 0.7, 0.7)))
-            offset += nv
-
-        if not all_verts:
+        # One colour per *face*: a quad is a single face and takes a single
+        # colour, and only a fanned n-gon contributes more than one.
+        cell_colors: list[tuple] = []
+        for s, n_faces in zip(shells, face_counts):
+            cell_colors.extend([colors.get(s.section, (0.7, 0.7, 0.7))] * n_faces)
+        if not cell_colors:
             return
 
-        verts = np.vstack(all_verts)
-        faces = np.hstack(all_faces) if len(all_faces) > 0 else np.array([], dtype=int)
         mesh = pv.PolyData(verts, faces=faces)
-        # Per-face colours — build cell-by-cell colour array matching
-        # the actual number of triangles produced per shell
-        cell_colors = []
-        for s in shells:
-            c = colors.get(s.section, (0.7, 0.7, 0.7))
-            n_tris = max(0, len(s.vertices) - 2)
-            for _ in range(n_tris):
-                cell_colors.append(c)
-        if cell_colors:
-            mesh.cell_data["rgb"] = np.array(cell_colors)
-            actor = p.add_mesh(
-                mesh,
-                scalars="rgb",
-                rgb=True,
-                opacity=opacity,
-                show_edges=True,
-                edge_color="grey",
-                lighting=True,
-                show_scalar_bar=False,
-            )
-            self._add_actor(actor, "shells")
+        mesh.cell_data["rgb"] = np.array(cell_colors)
+        actor = p.add_mesh(
+            mesh,
+            scalars="rgb",
+            rgb=True,
+            opacity=opacity,
+            show_edges=True,
+            edge_color="grey",
+            lighting=True,
+            show_scalar_bar=False,
+        )
+        self._add_actor(actor, "shells")
 
     # ── Nodes ────────────────────────────────────────────────────────
 
@@ -422,28 +451,12 @@ class PyVistaRenderer(RenderBackend):
 
             # ── Highlighted shells ──
             if h.shells:
-                all_verts = []
-                all_faces = []
-                offset = 0
-                for s in h.shells:
-                    nv = len(s.vertices)
-                    if nv < 3:
-                        offset += nv
-                        continue
-                    # Fan triangulation for arbitrary polygon
-                    for i in range(1, nv - 1):
-                        all_faces.append(np.array([3, offset, offset + i, offset + i + 1]))
-                    all_verts.append(s.vertices)
-                    offset += nv
-                if all_verts:
-                    verts = np.vstack(all_verts)
-                    faces = np.hstack(all_faces) if all_faces else np.array([], dtype=int)
+                verts = np.vstack([s.vertices for s in h.shells])
+                faces, face_counts = _polygon_cells([s.vertices for s in h.shells])
+                n_faces = sum(face_counts)
+                if n_faces > 0:
                     mesh = pv.PolyData(verts, faces=faces)
-                    n_tris = sum(
-                        max(0, len(s.vertices) - 2) for s in h.shells if len(s.vertices) >= 3
-                    )
-                    cell_colors = [h.color] * n_tris
-                    mesh.cell_data["rgb"] = np.array(cell_colors)
+                    mesh.cell_data["rgb"] = np.array([h.color] * n_faces)
                     actor = p.add_mesh(
                         mesh,
                         scalars="rgb",

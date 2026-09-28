@@ -774,6 +774,31 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-24 — area elements draw as quads, not fan triangles)
+
+Reported from the GUI: slabs showed a diagonal, i.e. every quad was drawn as two
+triangles.  The cause was two shell-mesh builders disagreeing — the standalone
+viewers emit true `[4, i, j, k, l]` faces, while the GUI backend
+(`render_shells`, and the shell branch of `render_highlights`) fan-split every
+polygon, and `show_edges=True` draws every cell edge, so the invented diagonal
+was drawn across every slab.
+
+Both GUI sites now share `_polygon_cells`: triangles stay triangles, quads become
+**one** quad face, and only 5+ sided polygons are fanned (deterministically, from
+vertex 0).  The colour arrays follow the returned face counts, so a quad
+contributes one entry instead of two.
+
+The deformed case is the reason to prefer quads rather than fan consistently: a
+displaced quad's corners are generally **non-coplanar**, a non-planar quad has no
+unique surface, so VTK's choice of diagonal is arbitrary — and the deformed-shape
+scale amplifies the warp along with the displacements.  Quads do not remove a
+warp, but they stop the renderer inventing a diagonal of its own.
+
+Note that the GUI's deformed overlay still draws **frames only**: deforming area
+elements in the GUI remains open (M7).  Full rationale: `docs/dev_notes.md` →
+*Quads stay quads*.  Seven new tests in
+`tests/test_renderers_pyvista.py::TestShellFaces`.
+
 ## DONE (2026-09-24 — GUI M7 part 1: a results case's deformed shape)
 
 Milestone 7 is under way; the first increment draws one thing well per case.

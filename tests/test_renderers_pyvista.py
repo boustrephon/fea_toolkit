@@ -348,3 +348,162 @@ class TestModelViewerSplitElements:
         finally:
             active._backend.plotter.close()
             collapsed._backend.plotter.close()
+
+
+def _shell(area_id="1", section="SLAB", n_vertices=4):
+    """Build a planar area element: a triangle, a quad or a pentagon."""
+    from fea_toolkit.plotting.renderers.base import ShellGeom
+
+    polygons = {
+        3: [[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [1.0, 2.0, 0.0]],
+        4: [[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [2.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
+        5: [
+            [0.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [3.0, 1.0, 0.0],
+            [1.0, 2.0, 0.0],
+            [-1.0, 1.0, 0.0],
+        ],
+    }
+    return ShellGeom(
+        area_id=area_id,
+        section=section,
+        vertices=np.array(polygons[n_vertices], dtype=float),
+    )
+
+
+class TestShellFaces:
+    """Area elements are drawn as their own polygon — no fan diagonal.
+
+    A fan split every quad into two triangles, and with ``show_edges`` on, the
+    **invented diagonal was drawn** across every slab.  It also mattered under
+    deformation, where a displaced quad is generally non-planar and VTK's choice
+    of diagonal is arbitrary (``docs/dev_notes.md`` → *Quads stay quads*).
+    """
+
+    def test_a_quad_shell_is_one_quad_face(self):
+        """One cell with four corners — the diagonal is not a cell edge."""
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_shells([_shell()], {"SLAB": (0.7, 0.7, 0.7)})
+            mesh = renderer.actors("shells")[0].mapper.dataset
+            assert mesh.n_cells == 1
+            assert mesh.get_cell(0).n_points == 4
+            assert mesh.faces.tolist() == [4, 0, 1, 2, 3]
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_a_triangle_shell_stays_a_triangle(self):
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_shells([_shell(n_vertices=3)], {"SLAB": (0.7, 0.7, 0.7)})
+            mesh = renderer.actors("shells")[0].mapper.dataset
+            assert mesh.n_cells == 1
+            assert mesh.faces.tolist() == [3, 0, 1, 2]
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_a_pentagon_is_fanned_deterministically(self):
+        """5+ sided elements have no quad to preserve, so they fan from vertex 0."""
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_shells([_shell(n_vertices=5)], {"SLAB": (0.7, 0.7, 0.7)})
+            mesh = renderer.actors("shells")[0].mapper.dataset
+            assert mesh.n_cells == 3
+            assert mesh.faces.tolist() == [3, 0, 1, 2, 3, 0, 2, 3, 3, 0, 3, 4]
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_mixed_polygons_keep_their_own_shapes(self):
+        """One mesh, three element shapes — each cell keeps its vertex count."""
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        shells = [_shell("1", n_vertices=3), _shell("2", n_vertices=4), _shell("3", n_vertices=5)]
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_shells(shells, {"SLAB": (0.7, 0.7, 0.7)})
+            mesh = renderer.actors("shells")[0].mapper.dataset
+            assert mesh.n_cells == 5
+            assert [mesh.get_cell(i).n_points for i in range(mesh.n_cells)] == [3, 4, 3, 3, 3]
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_the_colour_array_has_one_entry_per_face(self):
+        """Colours are per *cell*; a quad now contributes one, not two."""
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_shells(
+                [_shell("1"), _shell("2"), _shell("3", n_vertices=5)],
+                {"SLAB": (1.0, 0.0, 0.0)},
+            )
+            mesh = renderer.actors("shells")[0].mapper.dataset
+            assert mesh.n_cells == 5  # quad + quad + three pentagon triangles
+            assert mesh.cell_data["rgb"].shape == (5, 3)
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_a_highlighted_quad_is_also_a_single_face(self):
+        """The highlight overlay fanned quads the same way; it is fixed with it."""
+        from fea_toolkit.plotting.renderers.base import HighlightDef
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_highlights(
+                [HighlightDef(area_ids=["1"], shells=[_shell()], color=(1.0, 0.0, 0.0))]
+            )
+            mesh = renderer.actors("highlights")[0].mapper.dataset
+            assert mesh.n_cells == 1
+            assert mesh.get_cell(0).n_points == 4
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_a_modelviewer_shell_quad_has_no_diagonal(self):
+        """End to end through the viewer the GUI drives — one quad, one cell.
+
+        The geometry comes from an archive-shaped dict, so this is the path a
+        results view takes: ``mesh_model_from_geometry`` → ``ModelViewer`` →
+        ``render_shells``.
+        """
+        from fea_toolkit.io.results_repository import mesh_model_from_geometry
+        from fea_toolkit.plotting.viewer import ModelViewer
+
+        geometry = {
+            "node_tag": np.array([1, 2, 3, 4]),
+            "node_x": np.array([0.0, 2.0, 2.0, 0.0]),
+            "node_y": np.array([0.0, 0.0, 1.0, 1.0]),
+            "node_z": np.zeros(4),
+            "shell_eid": np.array([1]),
+            "shell_sap_id": np.array(["1"]),
+            "shell_sec_name": np.array(["SLAB"]),
+            "shell_node_1": np.array([1]),
+            "shell_node_2": np.array([2]),
+            "shell_node_3": np.array([3]),
+            "shell_node_4": np.array([4]),
+        }
+        viewer = ModelViewer(
+            mesh_model=mesh_model_from_geometry(geometry),
+            backend="pyvista",
+            off_screen=True,
+        )
+        try:
+            viewer.show_model(show_nodes=False, show_shells=True)
+            mesh = viewer._backend.actors("shells")[0].mapper.dataset
+            assert mesh.n_cells == 1
+            assert mesh.get_cell(0).n_points == 4
+        finally:
+            viewer._backend.plotter.close()
