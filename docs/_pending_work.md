@@ -527,6 +527,43 @@ The GUI's analysis actions would pick the external runner when OpenSeesPy is
 absent, or by user choice.  Deferred until a packaged app is actually wanted;
 the licensing position is recorded in `docs/licence.md`.
 
+#### P27 — Analysis ▸ Run (GUI milestone 5 slice): agreed scope, and two refinements
+Source: the 2026-09-28 planning session; `docs/load_cases_and_combinations.md`
+(the specification); `docs/gui_roadmap.md` §9.6 (milestone 5).
+
+**Agreed scope — four increments, each landing with its own tests.**
+
+1. **I1 — a public in-memory archive assembler.**  `io.npz_writer.results_arrays()`
+   returns the archive as a `{name: ndarray}` dict and `write_results_npz()` is now
+   *that plus a save*, so a result can be viewed without being written.
+   **Landed 2026-09-28** — see the DONE register.
+2. **I2 — a Qt-free listing helper**: the model's analysable cases with their
+   `{pattern: factor}` maps, the combinations with the cases they need, and the
+   custom-case dict form (`{"ULT": {"Dead": 1.4, "Live": 1.6}}`).
+3. **I3 — the dialog + worker + a result registered as a case view** through
+   `ResultsRepository` (never a file path), with progress, cancel and log.
+4. **I4 — `File ▸ Save results`**, writing the currently displayed result.
+
+**Static-linear only in this slice.**  Modal / spectrum / pushover stay greyed,
+each naming its milestone: pushover is minutes-long and would make the slice
+untestable in CI.
+
+**Refinement 1 — preprocessing is a prerequisite for the moment.**
+`run_linear_cases()` needs a preprocessed `MeshModel` *besides* the parsed
+`SAPModelData`, so `Analysis ▸ Run` uses the store's preprocessed model when one
+exists, and is otherwise greyed with a log line naming `Model ▸ Split` / `Mesh
+areas`.  **Deferred:** auto-preprocessing on Run — running the default
+Preprocessor when none exists, so the first analysis is one click rather than two
+menu steps.  Deliberately not done now because a Run that silently preprocessed
+would hide a topology change the user should see reported.
+
+**Refinement 2 — a run replaces, but every run stays writable.**
+Re-running a case **replaces** the previous result in the view (the
+preprocessing-view pattern: keyed by kind, so views never pile up).  The results
+must nevertheless be writable to a **chosen** NPZ after each run — a path prompt
+with a suggested file name, not one fixed output — so variants differing by a
+small change can be kept side by side as documentation.
+
 ### Tier 4 — Deferred / low-priority
 
 #### P8 — Tcl-exporter merge (deferred)

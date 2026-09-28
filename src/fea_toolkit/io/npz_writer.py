@@ -375,8 +375,7 @@ def _collect_shell_forces(shell_forces: dict[str, dict[str, Any]]) -> dict[str, 
     return arrays
 
 
-def write_results_npz(
-    path: str,
+def results_arrays(
     md: SAPModelData,
     static_results: Optional[dict[str, Any]] = None,
     modal_result: Optional[dict[str, Any]] = None,
@@ -388,11 +387,19 @@ def write_results_npz(
     forces_coordinate_system: str = "local",
     mesh_model: Optional["MeshModel"] = None,
     case_meta: Optional[dict[str, dict[str, str]]] = None,
-) -> str:
-    """Write a unified NPZ file with model geometry + analysis results.
+) -> dict[str, np.ndarray]:
+    """Assemble a results archive **in memory** — ``{array_name: np.ndarray}``.
+
+    The one place a results archive is assembled:
+    :func:`write_results_npz` saves exactly this dict, and
+    :func:`~fea_toolkit.io.npz_reader.read_results` reads exactly it back.  A
+    caller that wants to *view* results without persisting them — the GUI, a
+    notebook — hands the dict straight to
+    :class:`~fea_toolkit.io.results_repository.NpzResultsRepository`, which
+    serves cases, per-case arrays and the display geometry from it, so nothing
+    downstream needs to know whether an archive was ever written.
 
     Args:
-        path: Output ``.npz`` file path.
         md: Parsed ``SAPModelData``.
         static_results: Dict from ``run_static_analysis()`` keyed by case.
         modal_result: Dict from ``run_modal_analysis()``.
@@ -424,7 +431,10 @@ def write_results_npz(
             from the ``"#1"`` / ``"#2"`` label convention.  ``None`` omits them.
 
     Returns:
-        Absolute path to the saved file.
+        The archive's arrays, ready to be saved or served to a repository.
+
+    Raises:
+        ValueError: If *forces_coordinate_system* is not ``"local"``.
     """
     if forces_coordinate_system != "local":
         raise ValueError(
@@ -469,6 +479,62 @@ def write_results_npz(
     # results archive is self-describing.  Read back by
     # :func:`fea_toolkit.io.npz_reader.get_schema_version`.
     arrays["schema_version"] = np.array([SCHEMA_VERSION], dtype=int)
+
+    return arrays
+
+
+def write_results_npz(
+    path: str,
+    md: SAPModelData,
+    static_results: Optional[dict[str, Any]] = None,
+    modal_result: Optional[dict[str, Any]] = None,
+    mode_shapes: Optional[dict] = None,
+    rs_results: Optional[dict[str, Any]] = None,
+    shell_forces: Optional[dict[str, dict[str, Any]]] = None,
+    force_unit: Optional[str] = None,
+    length_unit: Optional[str] = None,
+    forces_coordinate_system: str = "local",
+    mesh_model: Optional["MeshModel"] = None,
+    case_meta: Optional[dict[str, dict[str, str]]] = None,
+) -> str:
+    """Write a unified NPZ file with model geometry + analysis results.
+
+    :func:`results_arrays` assembles the arrays; this saves them.  Splitting the
+    two is what lets a caller hold the same archive **in memory** — see
+    :class:`~fea_toolkit.io.results_repository.NpzResultsRepository` — instead of
+    writing a file only to read it straight back.
+
+    Args:
+        path: Output ``.npz`` file path.
+        md: Parsed ``SAPModelData``.
+        static_results: Dict from ``run_static_analysis()`` keyed by case.
+        modal_result: Dict from ``run_modal_analysis()``.
+        mode_shapes: Dict from ``extract_mode_shapes()``.
+        rs_results: Dict with keys ``'rs_x'``, ``'rs_y'`` from ``run_rs()``.
+        shell_forces: Dict from ``extract_static_shell_forces()``.
+        force_unit: Force-unit label for metadata (``None`` derives it).
+        length_unit: Length-unit label for metadata (``None`` derives it).
+        forces_coordinate_system: Coordinate system of the recorded frame
+            end-force arrays; ``"local"`` — see :func:`results_arrays`.
+        mesh_model: Optional post-processed ``MeshModel`` supplying the geometry.
+        case_meta: Optional ``{case: {"group", "kind", "family", "coords"}}``.
+
+    Returns:
+        Absolute path to the saved file.
+    """
+    arrays = results_arrays(
+        md,
+        static_results=static_results,
+        modal_result=modal_result,
+        mode_shapes=mode_shapes,
+        rs_results=rs_results,
+        shell_forces=shell_forces,
+        force_unit=force_unit,
+        length_unit=length_unit,
+        forces_coordinate_system=forces_coordinate_system,
+        mesh_model=mesh_model,
+        case_meta=case_meta,
+    )
 
     path = str(Path(path).resolve())
     # Pyright's numpy stub declares ``allow_pickle`` before ``**kwds``;
