@@ -98,13 +98,35 @@ python -m fea_toolkit.io.table_registry model.s2k --json   # machine-readable
 * every table present in the committed fixtures must be known — so a table the
   toolkit has never seen cannot creep into a fixture unnoticed.
 
+### The `* LOADS - *` family
+
+Load application lives in a family of tables named `<entity> LOADS - <type>`
+(`JOINT LOADS - FORCE`, `FRAME LOADS - DISTRIBUTED`, `AREA LOADS - UNIFORM`, …).
+The authoritative list of the members the toolkit knows is the generated
+registry below.  Three things about how they are matched:
+
+* **Members are matched individually**, by exact name — except `AREA LOADS - *`,
+  which is dispatched on its suffix and **warns** on an unrecognised member
+  (`SAP2000Parser._get_area_loads`).  A new member therefore surfaces either as a
+  warning or in the `unhandled` bucket; never silently.
+* **Absence is never an error.**  A model need not contain any given load table,
+  so the registry reports what is *present* and *unrecognised* — it never
+  requires a set to exist.  A model with no `FRAME LOADS - *` at all is normal
+  (and was the case for a model whose superimposed dead loads had simply not been
+  exported).
+* **Unknown names are not guessed into the registry.**  A `<entity> LOADS - <type>`
+  that cannot be evidenced is left to surface as `unhandled`, because a wrong
+  entry would *hide* a real table as "handled".  To complete the list for a load
+  type the toolkit has not seen, run the standalone command above on a model that
+  uses it — the report names the table.
+
 ### Registry
 
 <!-- BEGIN GENERATED: registry -->
 
 *Generated from `src/fea_toolkit/io/table_registry.py` — do not edit by hand.  Regenerate with `python docs/_generate_parser_tables.py`.*
 
-### Handled (47 exact names)
+### Handled (45 exact names)
 
 - `AREA AUTO MESH ASSIGNMENTS`
 - `AREA EDGE CONSTRAINT ASSIGNMENTS`
@@ -115,8 +137,6 @@ python -m fea_toolkit.io.table_registry model.s2k --json   # machine-readable
 - `AREA SECTION ASSIGNMENTS`
 - `AREA SECTION PROPERTIES`
 - `AREA SECTION PROPERTY DESIGN PARAMETERS`
-- `AUTO SEISMIC - LOAD PATTERN`
-- `AUTO WIND - CHINESE 2010`
 - `AUTO WIND EXPOSURE FOR HORIZONTAL DIAPHRAGMS`
 - `COMBINATION DEFINITIONS`
 - `CONNECTIVITY - AREA`
@@ -159,21 +179,27 @@ python -m fea_toolkit.io.table_registry model.s2k --json   # machine-readable
 - `MATERIAL PROPERTIES*`
 - `CONSTRAINT DEFINITIONS - *`
 - `CASE -*`
+- `AUTO SEISMIC - *`
+- `AUTO WIND - *`
 
-### Known gaps (2 exact names)
+### Known gaps (3 exact names)
 
+- `FRAME LOADS - POINT` — point loads on frames not parsed (see P14)
 - `JOINT PATTERN DEFINITIONS` — joint patterns (thickness / offset overwrites) not consumed
 - `SOLID PROPERTY DEFINITIONS` — solid (brick) elements not supported
 
 ### Known-gap prefix families
 
 - `SECTION DESIGNER PROPERTIES*` — SD section geometry not parsed
+- `LINK PROPERTY DEFINITIONS*` — link (connection / isolator) elements not supported
 
-### Ignored (12 exact names)
+### Ignored (14 exact names)
 
 - `ACTIVE DEGREES OF FREEDOM` — analysis DOF configuration
 - `ANALYSIS OPTIONS` — solver options
 - `AREA SECTION PROPERTY - TIME DEPENDENT` — creep / shrinkage (area sections)
+- `AUTO COMBINATION OPTION DATA 01 - GENERAL` — design auto-combination options
+- `AUTO COMBINATION OPTION DATA 02 - USER DATA` — design auto-combination options
 - `AUTO WAVE 3 - WAVE CHARACTERISTICS - GENERAL` — wave loading not supported
 - `COORDINATE SYSTEMS` — named coordinate systems (only GLOBAL is used)
 - `FRAME DESIGN PROCEDURES` — design configuration

@@ -129,13 +129,13 @@ HANDLED_TABLES: frozenset[str] = frozenset(
         "MASS SOURCE",
         "MASSES 1 - MASS SOURCE",
         # ── auto load-pattern generators ──
-        # The AUTO family is open-ended (its suffix names the design code), so
-        # the members the toolkit consumes are registered individually rather
-        # than matched by a broad ``AUTO`` prefix — that would swallow tables
-        # the toolkit does *not* read (e.g. ``AUTO WAVE 3 - ...``), hiding them
-        # from the coverage report.
-        "AUTO SEISMIC - LOAD PATTERN",
-        "AUTO WIND - CHINESE 2010",
+        # `_get_load_patterns()` consumes **any** `AUTO*` table carrying a
+        # `LoadPat` column, and the trailing token names the design code, so the
+        # two code-suffixed families are registered as PREFIXES
+        # (:data:`HANDLED_PREFIXES`) rather than by enumerating code names —
+        # a list of codes can never be complete, and each missing one was
+        # reported `unhandled` even though the parser had read it.  What is left
+        # here is the table that is *not* code-suffixed.
         "AUTO WIND EXPOSURE FOR HORIZONTAL DIAPHRAGMS",
     }
 )
@@ -145,13 +145,24 @@ HANDLED_TABLES: frozenset[str] = frozenset(
 #: treated as handled.
 #:
 #: Only families whose members are *all* consumed belong here.  ``AREA LOADS``
-#: and ``AUTO`` were deliberately removed: their members are mixed (``AUTO
-#: WAVE`` is not read) and are now registered individually in
+#: was deliberately removed: its members are mixed (``AREA LOADS - TEMPERATURE``
+#: is not read) and are now registered individually in
 #: :data:`HANDLED_TABLES`, so an unrecognised member surfaces as ``unhandled``.
 HANDLED_PREFIXES: tuple[str, ...] = (
     "MATERIAL PROPERTIES",  # 01/02/03A/03B/03E/03F/03J/06/09 merged in _get_all_materials()
     "CONSTRAINT DEFINITIONS - ",  # BODY / DIAPHRAGM / EQUAL / BEAM / ROD / PLATE / WELD / LOCAL
     "CASE -",  # every load-case table, merged into LoadCase.case_data
+    # The AUTO load-pattern generators, *by family*.  SAP2000 suffixes these
+    # with the design code — ``AUTO SEISMIC - CHINESE 2010``, ``… - IBC 2018``,
+    # ``AUTO WIND - USER``, ``… - ASCE 7-16`` … — and every member carrying a
+    # ``LoadPat`` column is consumed, so the family is the honest unit to
+    # register.  Enumerating suffixes instead reported each unlisted code as
+    # ``unhandled`` while the parser had in fact read it.
+    # ``AUTO WAVE 3 - …`` has no ``LoadPat`` column and stays in
+    # :data:`IGNORED_TABLES`; a *non-load* AUTO family would not match these
+    # prefixes and would still surface as ``unhandled``.
+    "AUTO SEISMIC - ",
+    "AUTO WIND - ",
 )
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -176,6 +187,12 @@ IGNORED_TABLES: dict[str, str] = {
     # explicitly so ``_get_load_patterns()`` can tell a deliberate skip from a
     # new, unhandled AUTO variant.
     "AUTO WAVE 3 - WAVE CHARACTERISTICS - GENERAL": "wave loading not supported",
+    # Auto-generated **design** combination options — no ``LoadPat`` column and
+    # no structural load data (they list `DesignType` / `LSType` / `LCName`), so
+    # they are not load-pattern generators.  Seen in models that let SAP2000
+    # build design combinations automatically.
+    "AUTO COMBINATION OPTION DATA 01 - GENERAL": "design auto-combination options",
+    "AUTO COMBINATION OPTION DATA 02 - USER DATA": "design auto-combination options",
 }
 
 #: Table-name prefixes deliberately skipped, mapped to a short reason.  These
@@ -199,11 +216,21 @@ IGNORED_PREFIXES: tuple[tuple[str, str], ...] = (
 KNOWN_GAP_TABLES: dict[str, str] = {
     "SOLID PROPERTY DEFINITIONS": "solid (brick) elements not supported",
     "JOINT PATTERN DEFINITIONS": "joint patterns (thickness / offset overwrites) not consumed",
+    # Recognised, structurally relevant, not parsed — P14 in the register tracks
+    # adding it (a new ``frame_point_loads`` field + OpenSees ``eleLoad`` point
+    # loads).  Registered here so a model that *has* point loads is reported as
+    # a known gap rather than as an unrecognised table.
+    "FRAME LOADS - POINT": "point loads on frames not parsed (see P14)",
 }
 
 #: Prefixes for known-gap families.
 KNOWN_GAP_PREFIXES: tuple[tuple[str, str], ...] = (
     ("SECTION DESIGNER PROPERTIES", "SD section geometry not parsed"),
+    # Link (connection / isolator / damper) property definitions.  The toolkit
+    # has no link-element support at all, so these are a recognised gap rather
+    # than an unknown table — the same treatment ``SOLID PROPERTY DEFINITIONS``
+    # gets.  ``01 - GENERAL`` / ``02 - LINEAR`` are the variants seen so far.
+    ("LINK PROPERTY DEFINITIONS", "link (connection / isolator) elements not supported"),
 )
 
 _KNOWN_GAP_PREFIX_KEYS = tuple(p for p, _ in KNOWN_GAP_PREFIXES)

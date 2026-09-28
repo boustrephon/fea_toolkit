@@ -410,6 +410,68 @@ def test_classify_unhandled():
 
 
 # ══════════════════════════════════════════════════════════════════════
+# The AUTO code-suffix naming gap (regression, 2026-09-28)
+# ══════════════════════════════════════════════════════════════════════
+
+
+def test_auto_load_generators_are_handled_whatever_the_design_code():
+    """The AUTO load generators are consumed by *family*, not by code name.
+
+    ``_get_load_patterns()`` reads **any** ``AUTO*`` table carrying a ``LoadPat``
+    column, but the registry listed code suffixes as exact names — so every
+    unlisted code was reported ``unhandled`` while the parser had in fact read
+    it.  Observed on a real model with ``AUTO SEISMIC - CHINESE 2010``.
+    """
+    assert classify("AUTO SEISMIC - CHINESE 2010") == "handled"
+    assert classify("AUTO SEISMIC - LOAD PATTERN") == "handled"
+    assert classify("AUTO SEISMIC - IBC 2018") == "handled"
+    assert classify("AUTO WIND - USER") == "handled"
+    assert classify("AUTO WIND - CHINESE 2010") == "handled"
+    assert classify("AUTO WIND EXPOSURE FOR HORIZONTAL DIAPHRAGMS") == "handled"
+
+
+def test_a_non_load_auto_table_is_not_swallowed_by_the_family_prefixes():
+    """Registering two AUTO families must not hide a genuinely new kind."""
+    assert classify("AUTO WAVE 3 - WAVE CHARACTERISTICS - GENERAL") == "ignored"
+    assert classify("AUTO COMBINATION OPTION DATA 01 - GENERAL") == "ignored"
+    assert classify("AUTO COMBINATION OPTION DATA 02 - USER DATA") == "ignored"
+    assert classify("AUTO THERMAL - SOMETHING NEW") == "unhandled"
+
+
+def test_load_tables_that_are_tracked_holes_read_as_gaps_not_surprises():
+    """A known gap must classify as a gap, so the report distinguishes them."""
+    assert classify("FRAME LOADS - POINT") == "known-gap"  # tracked by P14
+    assert classify("LINK PROPERTY DEFINITIONS 01 - GENERAL") == "known-gap"
+    assert classify("LINK PROPERTY DEFINITIONS 02 - LINEAR") == "known-gap"
+
+
+def test_the_real_model_table_set_reports_no_unrecognised_tables():
+    """The table set that exposed the gap must classify without surprises.
+
+    These are the tables a real SAP2000 export produced (the Admin Building):
+    every one is either consumed or a *tracked* hole — none is ``unhandled``.
+    """
+    names = [
+        "AUTO SEISMIC - CHINESE 2010",
+        "AUTO WAVE 3 - WAVE CHARACTERISTICS - GENERAL",
+        "AUTO COMBINATION OPTION DATA 01 - GENERAL",
+        "AUTO COMBINATION OPTION DATA 02 - USER DATA",
+        "JOINT PATTERN DEFINITIONS",
+        "SOLID PROPERTY DEFINITIONS",
+        "LINK PROPERTY DEFINITIONS 01 - GENERAL",
+        "LINK PROPERTY DEFINITIONS 02 - LINEAR",
+        "AREA LOADS - UNIFORM",
+        "AREA LOADS - GRAVITY",
+        "FRAME LOADS - DISTRIBUTED",
+        "JOINT LOADS - FORCE",
+        "LOAD PATTERN DEFINITIONS",
+        "LOAD CASE DEFINITIONS",
+        "MASS SOURCE",
+    ]
+    assert [n for n in names if classify(n) == "unhandled"] == []
+
+
+# ══════════════════════════════════════════════════════════════════════
 # Coverage result
 # ══════════════════════════════════════════════════════════════════════
 
