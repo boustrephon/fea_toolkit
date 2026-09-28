@@ -424,6 +424,38 @@ nothing else.
   million Python dataclasses; that is a *materialisation* problem, fixed by the
   store plus lazy loading, not by a different array format.
 
+### The concrete accessors, and the invariants they encode
+
+A backend answers `cases()` / `arrays_for()` / `display_geometry()` /
+`metadata()`; two accessors every backend then **inherits** turn that into the
+shape a view consumes — `nodal_displacements(case)` for a deformed shape and
+`element_forces(case)` for a flag diagram.  Writing them once on the ABC is what
+stops the GUI, the plotters and the Rhino export each re-deriving the same join,
+and it puts three invariants in one place:
+
+- **The ids are the display model's.**  `as_model()` names nodes `node_sap_id`
+  (falling back to `node_tag`) and frames `frame_sap_id` (falling back to the
+  `frame_eid` label); the accessors key the same way, taking the same fallback
+  as the model build — so a viewer keyed by those ids finds every entry.
+- **The join is positional.**  `static/<case>/mz_i[i]` belongs to frame `i` — the
+  index `frame_sap_id[i]` sits at — *not* to a tag, and never sorted by id.
+  Position is what the writers guarantee, and both readers in
+  `plotting/viz_forces.py` already assumed it; the accessor turns the shared
+  assumption into a tested contract.
+- **Absent is absent, never zero.**  A component the archive did not write, or
+  wrote for fewer elements than it draws, is left out of the entry: a fabricated
+  `0.0` draws a plausible zero-force diagram, which is the failure nobody spots.
+
+The switch from "the arrays are global" to "these are `*_local` keys" happens
+**at the seam** too, from the file-level `forces_coordinate_system` metadata:
+when it says local, the bare values are mirrored under the `_local` keys
+`overlay_forces(use_local=True)` reads first, so they are drawn verbatim instead
+of rotated a second time.  That metadata is the reason the interface grew a
+`metadata(name, default)` method — file-level arrays are not case-namespaced, so
+`arrays_for()` cannot reach them.  `viz_forces.py` synthesises the same aliases
+in two places of its own; those predate the accessor and can now be migrated onto
+it rather than extended.
+
 ## Selection: two resolutions, deliberately different
 
 `Selection` answers two different questions, and conflating them would be a bug:

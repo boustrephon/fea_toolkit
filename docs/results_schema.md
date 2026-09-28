@@ -165,8 +165,10 @@ use the element geometry to transform to global coordinates if needed.
 The 12 arrays above are the required payload.  A producer *may* additionally
 write `static/{case}/fx_i_local` … `mz_j_local` as explicit aliases of the
 same local-frame quantities.  These are **optional**: producers that rely on
-the ``forces_coordinate_system`` metadata do not write them, and visualisers
-(``_extract_npz_frame_forces``) synthesise the ``*_local`` keys on read.
+the ``forces_coordinate_system`` metadata do not write them, and consumers
+synthesise the ``*_local`` keys on read — ``ResultsRepository.element_forces()``
+at the storage seam, and the older plotting readers
+(``_extract_npz_frame_forces``, ``_load_npz_for_plotting``) that predate it.
 `validate_npz()` therefore only shape-checks them when present.
 
 > **Not yet computed by the model review.**  The review exports the 12

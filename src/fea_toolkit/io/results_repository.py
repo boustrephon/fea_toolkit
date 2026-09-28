@@ -27,9 +27,22 @@ from typing import Any, Optional
 
 import numpy as np
 
-from .results_schema import CASE_META_KEYS, GEOMETRY_ARRAYS, STATIC_NODAL_ARRAYS
+from .results_schema import (
+    CASE_META_KEYS,
+    GEOMETRY_ARRAYS,
+    STATIC_FORCE_ARRAYS,
+    STATIC_LOCAL_FORCE_ARRAYS,
+    STATIC_NODAL_ARRAYS,
+)
 
 __all__ = ["NpzResultsRepository", "ResultsRepository", "mesh_model_from_geometry"]
+
+#: Frame end-force components, in the schema's array spelling.  The archive
+#: writes each one per end — ``{component}_i`` / ``{component}_j`` — see
+#: :data:`~fea_toolkit.io.results_schema.STATIC_FORCE_ARRAYS`.  Spelled out
+#: rather than parsed out of the schema names, so the two lists fail loudly
+#: side by side instead of one silently deriving from the other.
+_FORCE_COMPONENTS = ("fx", "fy", "fz", "mx", "my", "mz")
 
 
 def _array_length(arrays: dict, name: str) -> int:
@@ -56,6 +69,19 @@ def _texts(values: Any) -> list:
 def _at(sequence: list, index: int, default: Any = 0) -> Any:
     """``sequence[index]``, or *default* when the array is shorter (or absent)."""
     return sequence[index] if index < len(sequence) else default
+
+
+def _at_float(values: Any, index: int) -> Optional[float]:
+    """``float(values[index])``, or ``None`` when the array is absent or short.
+
+    Absent and *shorter than the geometry* both mean **not covered**: an archive
+    may record a component for fewer elements than it draws, and that has to
+    leave the rest out rather than fabricate a zero — the same guard the
+    plotting readers apply component by component.
+    """
+    if values is None or index >= len(values):
+        return None
+    return float(values[index])
 
 
 def _children_by_parent(ids: list, parents: list) -> dict:
@@ -212,6 +238,19 @@ class ResultsRepository(ABC):
         holds without materialising it.
         """
 
+    @abstractmethod
+    def metadata(self, name: str, default: Any = None) -> Any:
+        """One **file-level** array by name, or *default* when absent.
+
+        The arrays in
+        :data:`~fea_toolkit.io.results_schema.META_ARRAYS` — the unit labels,
+        ``forces_coordinate_system``, ``created``, the schema version — are
+        written **once per archive**, not per case, so they are not part of
+        :meth:`arrays_for`.  A view needs them to know what it is showing: a
+        force diagram has to know whether the end forces it just read are
+        element-local or global before it can orient them.
+        """
+
     def as_model(self) -> Any:
         """A **displayable** ``MeshModel`` built from this archive's geometry.
 
@@ -271,6 +310,106 @@ class ResultsRepository(ABC):
                 [_at(component, index, 0.0) for component in components], dtype=float
             )
         return displacements
+
+    def has_forces(self, case: str) -> bool:
+        """Whether *case* carries frame end forces — the cheap pre-check.
+
+        The counterpart of :meth:`has_displacements` for force diagrams: force
+        recording is optional too, so a caller deciding whether to *offer* the
+        overlay asks here rather than building the dict.
+
+        Args:
+            case: Static load-case label, as in :meth:`cases`.
+
+        Returns:
+            ``True`` when any end-force array is present for *case* — the bare
+            schema payload, or the optional explicit local aliases.
+        """
+        arrays = self.arrays_for(case)
+        present = (*STATIC_FORCE_ARRAYS, *STATIC_LOCAL_FORCE_ARRAYS)
+        return any(name in arrays for name in present)
+
+    def element_forces(self, case: str) -> dict:
+        """``{elem_id: {component_key: value}}`` for *case* — a flag diagram's input.
+
+        Concrete for the same reason as :meth:`nodal_displacements`: assembled
+        from :meth:`display_geometry` and :meth:`arrays_for`, so every backend
+        has it.  The ids are the ones :meth:`as_model` names its frame elements
+        with, which is what the viewers are keyed by.
+
+        The per-case arrays are written **in geometry order** — index ``i`` of
+        ``static/<case>/mz_i`` belongs to frame ``i`` of ``frame_sap_id`` — so
+        the arrays are read index-wise, never joined on a tag.  That is the
+        same invariant :func:`~fea_toolkit.plotting.viz_forces._extract_npz_frame_forces`
+        relies on, so the two agree by construction rather than by luck.
+
+        Keys are the schema's own spelling (``"mz_i"`` / ``"mz_j"``, lower
+        case).  Each component is *also* exposed under
+        ``"{component}_{end}_local"`` when its values are element-local, which
+        is what tells :meth:`~fea_toolkit.plotting.viewer.ModelViewer.overlay_forces`
+        (with ``use_local=True``) that it can draw them verbatim instead of
+        rotating already-local values a second time.  Either the archive's
+        ``forces_coordinate_system`` metadata says local — and then the bare
+        arrays *are* the local values, so the aliases mirror them, exactly as
+        the plotting readers do — or the archive wrote the optional explicit
+        ``*_local`` arrays, and those are read.
+
+        Args:
+            case: Static load-case label, as in :meth:`cases`.
+
+        Returns:
+            ``{elem_id: {key: float}}`` in model units, one entry per element
+            the archive covers with at least one component.  Empty when the
+            archive recorded no forces for *case* — a normal state, not an
+            error, so callers report it rather than raising.
+        """
+        arrays = self.arrays_for(case)
+        if not any(name in arrays for name in (*STATIC_FORCE_ARRAYS, *STATIC_LOCAL_FORCE_ARRAYS)):
+            return {}
+
+        geometry = self.display_geometry()
+        frame_ids = _texts(geometry.get("frame_sap_id"))
+        frame_tags = _ints(geometry.get("frame_eid"))
+        is_local = self._forces_are_local()
+
+        forces: dict = {}
+        for index in range(_array_length(geometry, "frame_node_i")):
+            elem_id = _at(frame_ids, index) or str(_at(frame_tags, index, index + 1))
+            entry: dict = {}
+            for component in _FORCE_COMPONENTS:
+                for end in ("i", "j"):
+                    key = f"{component}_{end}"
+                    local_key = f"{key}_local"
+                    value = _at_float(arrays.get(key), index)
+                    if value is not None:
+                        entry[key] = value
+                    # A local archive's bare arrays *are* the local values, so
+                    # the alias mirrors them; otherwise read the producer's own
+                    # explicit alias array — and read it independently of the
+                    # bare one, since an archive may carry only the aliases.
+                    alias = value if is_local else _at_float(arrays.get(local_key), index)
+                    if alias is not None:
+                        entry[local_key] = alias
+            if entry:
+                forces[elem_id] = entry
+        return forces
+
+    def _forces_are_local(self) -> bool:
+        """Whether this archive declares its end forces element-local.
+
+        ``forces_coordinate_system`` is file-level, and ``"local"`` for
+        everything this toolkit writes — the recorders use OpenSees
+        ``localForces``.  An archive too old to carry the flag reads as *not*
+        local, the conservative answer: the values stay under their bare keys
+        and a consumer that needs local values has to rotate them itself.
+        """
+        value = self.metadata("forces_coordinate_system")
+        if value is None:
+            return False
+        try:
+            return str(np.asarray(value).ravel()[0]) == "local"
+        except (IndexError, TypeError, ValueError):
+            return False
 
     @abstractmethod
     def table(self, *columns: str) -> dict:
@@ -349,6 +488,15 @@ class NpzResultsRepository(ResultsRepository):
             "n_frames": n_frames,
             "n_shells": _array_length(geometry, "shell_node_1"),
         }
+
+    def metadata(self, name: str, default: Any = None) -> Any:
+        """One file-level array, e.g. ``"forces_coordinate_system"``.
+
+        Reads the archive's **root**, not the case-namespaced arrays that
+        :meth:`arrays_for` serves.
+        """
+        value = self._data.get(name)
+        return default if value is None else value
 
     def table(self, *columns: str) -> dict:
         """Named columns, e.g. ``table("node_x", "frame_sap_id")``.

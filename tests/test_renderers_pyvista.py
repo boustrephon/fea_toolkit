@@ -178,6 +178,36 @@ class TestEndForceValues:
 
         assert _end_force_values({"fx_i": 1.0}, "Mz", True) is None
 
+    def test_a_repository_entry_reads_with_the_plotting_convention(self):
+        """The seam and the overlay must agree, or a diagram silently draws none.
+
+        ``ResultsRepository.element_forces`` keys its entries in the schema's
+        spelling; ``overlay_forces(use_local=True)`` looks for the local
+        variants first.  Pin the agreement here, since neither side's own tests
+        would notice a renamed key — ``overlay_forces`` only prints a warning
+        and returns when no quantity is found.
+        """
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+        from fea_toolkit.plotting.viewer import _end_force_values
+
+        arrays = {
+            "node_tag": np.array([1, 2], dtype=int),
+            "node_x": np.zeros(2),
+            "node_y": np.zeros(2),
+            "node_z": np.array([0.0, 3.0]),
+            "frame_eid": np.array([1], dtype=int),
+            "frame_sap_id": np.array(["F1"], dtype=str),
+            "frame_node_i": np.array([1], dtype=int),
+            "frame_node_j": np.array([2], dtype=int),
+            "static_case_labels": np.array(["DEAD"], dtype=str),
+            "static/DEAD/mz_i": np.array([12.0]),
+            "static/DEAD/mz_j": np.array([-4.0]),
+            "forces_coordinate_system": np.array(["local"], dtype=str),
+        }
+        forces = NpzResultsRepository(arrays).element_forces("DEAD")
+
+        assert _end_force_values(forces["F1"], "Mz", True) == (12.0, -4.0)
+
 
 class TestOverlayForcesBuilderPath:
     """The documented ``ModelViewer(builder)`` usage works end-to-end."""

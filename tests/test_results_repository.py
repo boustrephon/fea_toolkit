@@ -294,3 +294,171 @@ class TestNodalDisplacements:
         repository = NpzResultsRepository(str(archive))
         assert repository.has_displacements("DEAD") is True
         assert repository.has_displacements("NOT_A_CASE") is False
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Element end forces — the flag-diagram input
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _forces_archive(*, local: bool = True, sap_ids=None) -> dict:
+    """Geometry plus a static case whose force arrays cover its four frames.
+
+    Every component carries a value that identifies it —
+    ``100 * component + (50 if J-end) + frame`` — so a mis-indexed component or
+    a mis-mapped element fails an equality instead of landing on a plausible
+    zero.
+    """
+    arrays = dict(_geometry())
+    if sap_ids is not None:
+        arrays["frame_sap_id"] = np.array(sap_ids, dtype=str)
+    arrays["static_case_labels"] = np.array(["COMB1"], dtype=str)
+    for number, component in enumerate(("fx", "fy", "fz", "mx", "my", "mz")):
+        for offset, end in ((0, "i"), (50, "j")):
+            arrays[f"static/COMB1/{component}_{end}"] = np.array(
+                [100.0 * number + offset + frame for frame in range(4)]
+            )
+    if local:
+        arrays["forces_coordinate_system"] = np.array(["local"], dtype=str)
+    return arrays
+
+
+class TestElementForces:
+    """The force diagram's input: frame-keyed, and read in geometry order."""
+
+    def test_the_ids_match_the_display_model(self):
+        """Ids must be ``as_model``'s — those are the frames a viewer draws."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        repository = NpzResultsRepository(_forces_archive())
+
+        assert set(repository.element_forces("COMB1")) == set(repository.as_model().frame_elements)
+
+    def test_the_values_come_from_the_case_arrays_by_index(self):
+        """``mz_i`` of the second frame is ``500 + 1``: component and frame both."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        forces = NpzResultsRepository(_forces_archive()).element_forces("COMB1")
+
+        assert forces["1-0"]["fx_i"] == 1.0
+        assert forces["1-0"]["mz_i"] == 501.0
+        assert forces["1-0"]["mz_j"] == 551.0
+        assert forces["2"]["my_j"] == 453.0
+
+    def test_the_arrays_are_read_in_geometry_order_not_sorted_by_id(self):
+        """The join is positional, so an unsorted id order must not be re-sorted."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        repository = NpzResultsRepository(_forces_archive(sap_ids=["B", "A", "D", "C"]))
+        forces = repository.element_forces("COMB1")
+
+        assert forces["B"]["mz_i"] == 500.0  # frame 0, as the geometry orders it
+        assert forces["D"]["mz_i"] == 502.0  # frame 2 — not the third row by id
+
+    def test_a_local_archive_mirrors_its_values_under_the_local_keys(self):
+        """``use_local=True`` readers take the verbatim path: nothing to rotate."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        forces = NpzResultsRepository(_forces_archive(local=True)).element_forces("COMB1")
+
+        assert forces["1-0"]["mz_i_local"] == forces["1-0"]["mz_i"] == 501.0
+        assert forces["1-0"]["mz_j_local"] == 551.0
+        assert forces["2"]["fy_i_local"] == 103.0
+
+    def test_a_global_archive_offers_no_local_keys(self):
+        """Without the flag and without aliases a reader must rotate for itself."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        forces = NpzResultsRepository(_forces_archive(local=False)).element_forces("COMB1")
+
+        assert [key for key in forces["1-0"] if key.endswith("_local")] == []
+        assert forces["1-0"]["mz_i"] == 501.0
+
+    def test_an_explicit_local_block_is_read_when_the_flag_is_absent(self):
+        """A producer's own local arrays win over anything this seam would derive."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        arrays = _forces_archive(local=False)
+        arrays["static/COMB1/mz_i_local"] = np.array([900.0, 901.0, 902.0, 903.0])
+
+        forces = NpzResultsRepository(arrays).element_forces("COMB1")
+
+        assert forces["1-0"]["mz_i_local"] == 901.0  # the alias, not the bare array
+        assert forces["1-0"]["mz_i"] == 501.0
+        assert "my_i_local" not in forces["1-0"]  # never written — absent, not zero
+
+    def test_a_component_the_archive_omits_is_absent_not_zero(self):
+        """A missing component must not read as a zero force."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        arrays = _forces_archive()
+        del arrays["static/COMB1/fy_i"]
+
+        forces = NpzResultsRepository(arrays).element_forces("COMB1")
+
+        assert "fy_i" not in forces["1-0"]
+        assert forces["1-0"]["fy_j"] == 151.0
+        assert forces["1-0"]["fx_i"] == 1.0
+
+    def test_a_short_component_array_drops_only_itself(self):
+        """A truncated array covers fewer frames; every other component survives."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        arrays = _forces_archive()
+        arrays["static/COMB1/mz_j"] = np.array([550.0, 551.0])  # two of four frames
+
+        forces = NpzResultsRepository(arrays).element_forces("COMB1")
+
+        assert forces["1-0"]["mz_j"] == 551.0
+        assert "mz_j" not in forces["1-1"]
+        assert forces["1-1"]["mz_i"] == 502.0
+
+    def test_an_archive_without_forces_returns_empty(self):
+        """Force recording is optional: absence is a state, not an error."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        assert NpzResultsRepository(_geometry()).element_forces("COMB1") == {}
+        assert NpzResultsRepository(_forces_archive()).element_forces("NOT_A_CASE") == {}
+
+    def test_has_forces_is_the_cheap_pre_check(self):
+        """What a caller consults before offering to draw a flag diagram."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        repository = NpzResultsRepository(_forces_archive())
+
+        assert repository.has_forces("COMB1") is True
+        assert repository.has_forces("NOT_A_CASE") is False
+
+    def test_has_forces_sees_an_archive_that_wrote_only_the_local_block(self):
+        """The optional aliases are still end forces — the check is not too narrow."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        arrays = dict(_geometry())
+        arrays["static/COMB1/mz_i_local"] = np.zeros(4)
+
+        repository = NpzResultsRepository(arrays)
+
+        assert repository.has_forces("COMB1") is True
+        assert repository.element_forces("COMB1")["1"]["mz_i_local"] == 0.0
+
+    def test_the_id_falls_back_to_the_frame_tag_without_sap_ids(self, archive):
+        """A hand-built archive may carry tags only — mirror the node accessor."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        forces = NpzResultsRepository(str(archive)).element_forces("DEAD")
+
+        assert sorted(forces) == ["1", "2"]
+        assert forces["2"] == {"fx_i": 0.0}
+
+
+def test_metadata_reads_a_file_level_array():
+    """Units and the coordinate system are written once, not per case."""
+    from fea_toolkit.io.results_repository import NpzResultsRepository
+
+    repository = NpzResultsRepository(
+        {"force_unit": np.array(["kN"], dtype=str), "static/DEAD/fx_i": np.zeros(1)}
+    )
+
+    assert repository.metadata("force_unit").tolist() == ["kN"]
+    assert repository.metadata("no_such_meta") is None
+    assert repository.metadata("no_such_meta", default="kN") == "kN"

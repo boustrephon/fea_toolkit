@@ -807,6 +807,65 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-28 — the results repository's force accessor: one join, at the seam)
+
+Force diagrams had every piece except the one that reads a case's end forces:
+`ModelViewer.overlay_forces()` (the in-viewport flags), `plot_force_diagram()`
+(the standalone plotter) and the schema's `fx_i … mz_j` arrays all existed — but
+nothing turned those arrays into the `{elem_id: {key: value}}` dict the overlay
+takes, so each consumer was left to re-derive the join.
+
+`ResultsRepository` now carries `has_forces(case)` — the cheap pre-check that
+decides whether to offer the action at all, the counterpart of
+`has_displacements` — and `element_forces(case)`.  Both are concrete on the ABC,
+so the GUI, the plotters and the Rhino export get the same answer from one
+implementation.
+
+Three things it decides once:
+
+- **The ids are the display model's** — `frame_sap_id`, falling back to the
+  frame's `frame_eid` label, exactly as `mesh_model_from_geometry()` builds them,
+  so what a results view draws and what the forces are keyed by cannot drift.
+- **The join is positional.**  `static/<case>/mz_i[i]` belongs to frame `i` of
+  the geometry — never joined on a tag, never sorted by id.  Both existing
+  readers in `plotting/viz_forces.py` already assumed this; the accessor makes it
+  a tested contract instead of a shared assumption.
+- **Absent stays absent.**  A component the archive omits, or writes for fewer
+  elements than it draws, is left out rather than read as `0.0` — a fabricated
+  zero draws a plausible-looking zero-force diagram, the failure nobody notices.
+
+The local/global question is settled at the seam as well, from the file-level
+`forces_coordinate_system` metadata: a local archive's bare arrays *are* the
+local values, so they are mirrored under the `*_local` keys that
+`overlay_forces(use_local=True)` reads first — drawn verbatim rather than rotated
+a second time.  Reaching that metadata needed a small addition to the interface,
+`ResultsRepository.metadata(name, default)`: the file-level arrays (unit labels,
+coordinate system, schema version) are written once per archive and are not
+case-namespaced, so `arrays_for()` cannot see them.
+
+Tests: 13 in `tests/test_results_repository.py` — the ids against `as_model()`,
+values from the case arrays by index, a deliberately unsorted id order that a
+sort would fail, the local mirroring, a global archive offering no local keys, an
+explicit local block read when the flag is absent, an omitted component staying
+absent (and a *truncated* array dropping only itself), the empty case, both
+`has_forces` paths, the tag fallback, and `metadata()` against the root.  Plus one
+cross-layer test in `tests/test_renderers_pyvista.py`: an accessor entry must read
+back through `_end_force_values(…, use_local=True)` — the agreement
+`overlay_forces` depends on, which neither side's own tests would catch, because a
+key mismatch there only prints a warning before returning.
+
+One of those tests earned its keep immediately: the explicit-`*_local`-only case
+failed against the first implementation, whose bare-array `continue` also skipped
+the alias read, so an archive carrying only the optional local block produced an
+empty dict.
+
+Still to come in M7: the GUI wiring (`Results ▸ Force diagrams` is still a
+placeholder, and the quantity selector is not written), storey response, pushover
+curve and `write_results_npz`.  Separately, `viz_forces.py`'s two
+alias-synthesising readers now duplicate what the accessor does and can be
+migrated onto it rather than extended.
+
+
 ## DONE (2026-09-24 — selecting an area element: the cue, and the mapping bug behind it)
 
 Reported as "shell selection does not seem to be working — I can't see anything".
