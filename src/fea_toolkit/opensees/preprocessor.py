@@ -8,7 +8,7 @@ already applied.  No OpenSees domain objects are created.
 
 import copy
 import warnings
-from dataclasses import fields
+from dataclasses import fields, replace
 from typing import Any, Optional
 
 from ..model.geometry import (
@@ -154,6 +154,61 @@ def _body_dof_flags(con) -> list[bool]:
     return [_flag(key) for key in _BODY_DOF_KEYS]
 
 
+def _copy_for_preprocessing(md: SAPModelData) -> SAPModelData:
+    """Shallow-copy *md* for preprocessing, sharing its element objects.
+
+    :meth:`Preprocessor.run` must leave the caller's ``SAPModelData``
+    untouched.  It used to guarantee that with ``copy.deepcopy`` of the whole
+    model, which duplicated the entire node/element graph — a large peak
+    memory spike, and the allocation burst behind the GC-on-worker-thread
+    crash described in ``docs/dev_notes.md`` (*The macOS GUI segfault*) —
+    only to change a handful of objects.
+
+    Instead this copies the **containers** (new dicts/lists holding the
+    *same* object references) and relies on the geometry helpers being
+    copy-on-write: a helper that marks a split parent inactive *replaces*
+    that element (``dataclasses.replace``) rather than writing to it, so the
+    caller's object is never touched.  Untouched nodes and elements are
+    therefore shared with the source model instead of being duplicated.
+
+    Three collections are copied a level deeper, because something mutates
+    the *objects* they hold rather than the container:
+
+    * ``materials`` — :func:`~fea_toolkit.model.sap_data.apply_material_defaults`
+      fills missing properties in place.  It only assigns scalar fields, so
+      a shallow per-material :func:`~dataclasses.replace` is sufficient.
+    * ``groups`` — area meshing appends the new ``"Area:<child>"`` references
+      to ``Group.objects``, so each group needs its own object list.
+    * ``restraints``, ``sections`` and the load collections need only the
+      container copy: the pipeline adds new entries
+      (``restraints[nid] = Restraint(...)``, per-type section variants) but
+      never mutates an existing restraint, section or load object.
+
+    Args:
+        md: The caller's model data.
+
+    Returns:
+        A copy that owns all of *md*'s containers while sharing every node,
+        element, section, restraint and load object with it.
+    """
+    clone = copy.copy(md)
+    for f in fields(md):
+        value = getattr(md, f.name)
+        if f.name == "materials":
+            setattr(clone, f.name, {k: replace(mat) for k, mat in value.items()})
+        elif f.name == "groups":
+            setattr(
+                clone,
+                f.name,
+                {k: replace(g, objects=list(g.objects)) for k, g in value.items()},
+            )
+        elif isinstance(value, dict):
+            setattr(clone, f.name, dict(value))
+        elif isinstance(value, list):
+            setattr(clone, f.name, list(value))
+    return clone
+
+
 class Preprocessor:
     """Prepare model topology for OpenSees analysis.
 
@@ -210,8 +265,11 @@ class Preprocessor:
         Returns:
             A fully prepared :class:`~fea_toolkit.model.mesh_model.MeshModel`.
         """
-        # Work on a copy so the original SAPModelData is not mutated
-        md = copy.deepcopy(model_data)
+        # Work on a copy that *shares* its node/element objects: every
+        # mutation site below replaces the object it changes instead of
+        # writing to it, so the original SAPModelData is never touched while
+        # the untouched graph is not duplicated (see the helper).
+        md = _copy_for_preprocessing(model_data)
 
         # Apply material defaults (SI → model units) so the MeshModel always
         # carries fully-populated materials.  Idempotent — the parser may
@@ -869,9 +927,13 @@ class Preprocessor:
         if not remap:
             return
 
-        # Remap area element node references
-        for ae in md.area_elements.values():
-            ae.node_ids = [remap.get(nid, nid) for nid in ae.node_ids]
+        # Remap area element node references.  ``replace`` rather than
+        # ``ae.node_ids = ...`` keeps this copy-on-write: the area object
+        # may be shared with the caller's SAPModelData.
+        for ae_id, ae in md.area_elements.items():
+            md.area_elements[ae_id] = replace(
+                ae, node_ids=[remap.get(nid, nid) for nid in ae.node_ids]
+            )
 
         # Remove duplicate nodes
         for dup in remap:
@@ -1114,8 +1176,11 @@ class Preprocessor:
 
             # Record the immediate children on the parent so tree traversal
             # (``collect_descendants()``) can reach the active leaves after
-            # the parent is marked inactive below.
-            elem.child_ids = child_ids
+            # the parent is marked inactive below.  ``replace`` keeps the
+            # original element (which may be shared with the caller's model)
+            # untouched; writing it back keeps the dict coherent.
+            parent = replace(elem, child_ids=child_ids)
+            frame_elements[eid] = parent
 
             # Compute per-child parametric boundaries from split-node positions
             boundaries = [0.0] + [t for t, _ in t_values] + [1.0]
@@ -1166,8 +1231,9 @@ class Preprocessor:
                     )
                     new_edge_loads.append(new_el)
 
-            # Mark original as inactive
-            elem.inactive = True
+            # Mark original as inactive (copy-on-write — see above).
+            parent = replace(parent, inactive=True)
+            frame_elements[eid] = parent
             _split_frame_ids.add(eid)
 
         # Include every frame — active elements, parents newly deactivated by
@@ -1750,8 +1816,10 @@ class Preprocessor:
             next_tag += 1
             wall_idx += 1
 
-            # Mark the area inactive so shell creation skips it.
-            area.inactive = True
+            # Mark the area inactive so shell creation skips it — on a copy,
+            # because ``mesh_model.area_elements`` shares its AreaElement
+            # objects with the caller's SAPModelData.
+            mesh_model.area_elements[aid] = replace(area, inactive=True)
 
             if self.config.get("verbose", False):
                 print(

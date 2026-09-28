@@ -2,7 +2,17 @@
 
 Area meshing, frame-overlap detection, constraint-edge discovery, and
 wall/slab intersection handling.  Re-exported by
-:mod:`fea_toolkit.model.geometry`."""
+:mod:`fea_toolkit.model.geometry`.
+
+The public helpers are **copy-on-write**: they may add entries to the dicts
+they are handed (interior nodes in ``nodes``, sub-areas in ``area_elements``)
+and they write a *replacement* back under an existing key when a parent is
+meshed, but they never mutate the ``AreaElement`` / ``Node`` **objects** they
+are given.  That is what lets
+:class:`~fea_toolkit.opensees.preprocessor.Preprocessor` share the caller's
+objects instead of deep-copying the whole model — see ``docs/dev_notes.md``
+→ *Copy-on-write replaces the model deepcopy*.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +20,7 @@ import math
 import warnings
 from collections import defaultdict
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import Any, Optional
 
 import numpy as np
@@ -550,8 +561,11 @@ def mesh_area_elements(
                 _coord_to_id[ck] = new_id
                 node_grid[j][i] = new_id
 
-        # Mark original area as inactive
-        elem.inactive = True
+        # Mark the original area inactive — on a copy, so the caller's
+        # AreaElement is never mutated (copy-on-write).  ``child_ids`` is a
+        # fresh list for the append below.
+        elem = replace(elem, inactive=True, child_ids=list(elem.child_ids))
+        area_elements[aid] = elem
 
         # Determine which groups contain the parent area
         parent_groups: list[str] = []
@@ -744,8 +758,11 @@ def subdivide_area_mesh(
                 if ref in g.objects:
                     parent_groups.append(gname)
 
-        # Mark parent inactive
-        elem.inactive = True
+        # Mark the parent inactive on a copy (copy-on-write — the caller's
+        # AreaElement must not be mutated); ``child_ids`` is a fresh list for
+        # the append below.
+        parent = replace(elem, inactive=True, child_ids=list(elem.child_ids))
+        area_elements[aid] = parent
 
         # Create n² sub-elements
         sec_name = area_assignments.get(aid, "")
@@ -762,10 +779,10 @@ def subdivide_area_mesh(
                     area_id=sub_id,
                     area_tag=sub_tag,
                     node_ids=[n0, n1, n2, n3],
-                    thickness=elem.thickness,
+                    thickness=parent.thickness,
                     parent_id=aid,
                 )
-                elem.child_ids.append(sub_id)
+                parent.child_ids.append(sub_id)
                 if sec_name:
                     area_assignments[sub_id] = sec_name
                 # Propagate group membership
@@ -1071,9 +1088,10 @@ def split_areas_at_frame_edges(
                 )
                 node_grid[j][i] = new_id
 
-        # Mark original as inactive and record parent-child
-        elem.inactive = True
-        elem.child_ids = []
+        # Mark the original inactive and start a fresh child list — on a
+        # copy, so the caller's AreaElement is never mutated.
+        parent = replace(elem, inactive=True, child_ids=[])
+        area_elements[aid] = parent
 
         # Determine parent groups
         parent_groups: list[str] = []
@@ -1104,11 +1122,11 @@ def split_areas_at_frame_edges(
                     area_id=sub_id,
                     area_tag=sub_tag,
                     node_ids=deduped,
-                    thickness=getattr(elem, "thickness", 0.0),
+                    thickness=getattr(parent, "thickness", 0.0),
                     inactive=False,
                     parent_id=aid,
                 )
-                elem.child_ids.append(sub_id)
+                parent.child_ids.append(sub_id)
                 if sec_name:
                     area_assignments[sub_id] = sec_name
                 if parent_groups:
@@ -1991,8 +2009,10 @@ def split_slabs_at_wall_intersections(
                 )
                 node_grid[j][i] = new_id
 
-        # Mark original slab inactive
-        elem.inactive = True
+        # Mark the original slab inactive on a copy (copy-on-write — the
+        # caller's AreaElement must not be mutated).
+        elem = replace(elem, inactive=True, child_ids=list(elem.child_ids))
+        area_elements[sid] = elem
 
         # Determine parent groups
         parent_groups: list[str] = []

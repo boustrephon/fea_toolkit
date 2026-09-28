@@ -1,13 +1,24 @@
 """Frame-element geometry helpers.
 
 Element splitting, load redistribution to nodes/edges, rigid end offsets,
-and their private helpers.  Re-exported by :mod:`fea_toolkit.model.geometry`."""
+and their private helpers.  Re-exported by :mod:`fea_toolkit.model.geometry`.
+
+The public helpers are **copy-on-write**: they may add entries to the dicts
+they are handed (split nodes in ``nodes``, children in the element dict) and
+they write a *replacement* back under an existing key when an element changes,
+but they never mutate the ``FrameElement`` / ``Node`` **objects** they are
+given.  That is what lets
+:class:`~fea_toolkit.opensees.preprocessor.Preprocessor` share the caller's
+objects instead of deep-copying the whole model — see ``docs/dev_notes.md``
+→ *Copy-on-write replaces the model deepcopy*.
+"""
 
 from __future__ import annotations
 
 import math
 import warnings
 from collections import defaultdict
+from dataclasses import replace
 from typing import Any, Optional
 
 import numpy as np
@@ -382,7 +393,13 @@ def split_elements(
                         if prev is None or abs(val - prev) > tol:
                             deduped.append(val)
                         prev = val
-                    el_a.t_locations = deduped
+                    # Copy-on-write: replace instead of assigning, so the
+                    # caller's element is never mutated.  The local snapshot
+                    # list is updated too, so a later (i, j) pair accumulates
+                    # its split location on the new object.
+                    el_a = replace(el_a, t_locations=deduped)
+                    elements[eid_a] = el_a
+                    at_frames_elems[i] = (eid_a, el_a)
                 if split_b:
                     merged = [*list(el_b.t_locations), t]
                     merged.sort()
@@ -392,7 +409,10 @@ def split_elements(
                         if prev is None or abs(val - prev) > tol:
                             deduped.append(val)
                         prev = val
-                    el_b.t_locations = deduped
+                    # Copy-on-write: replace instead of assigning (see above).
+                    el_b = replace(el_b, t_locations=deduped)
+                    elements[eid_b] = el_b
+                    at_frames_elems[j] = (eid_b, el_b)
 
     new_elements = {}
     new_assignments = {}
@@ -463,11 +483,12 @@ def split_elements(
         t_locs = [t for _, t in intermediate]
         node_list = [el.node_i] + [nid for nid, _ in intermediate] + [el.node_j]
 
-        # Mark original as inactive
-        el.inactive = True
-        el.t_locations = t_locs
-        el.child_ids = []
-        new_elements[eid] = el
+        # Mark the original inactive — on a *copy*: ``replace`` gives the
+        # marked parent fresh ``t_locations`` / ``child_ids`` lists, so the
+        # caller's element (possibly the user's SAPModelData) stays untouched
+        # while the loop below can still append its children to ``parent``.
+        parent = replace(el, inactive=True, t_locations=t_locs, child_ids=[])
+        new_elements[eid] = parent
         # Keep assignment on parent (for possible later use)
         if eid in assignments:
             new_assignments[eid] = assignments[eid]
@@ -483,13 +504,13 @@ def split_elements(
                 elem_tag=child_tag,
                 node_i=node_list[k],
                 node_j=node_list[k + 1],
-                angle=el.angle,
+                angle=parent.angle,
                 parent_id=eid,
                 inactive=False,
             )
             new_elements[child_id] = child
             new_assignments[child_id] = assignments.get(eid)
-            el.child_ids.append(child_id)
+            parent.child_ids.append(child_id)
             child_elements.append(child)
 
         # Now split distributed loads on this element
@@ -1001,9 +1022,10 @@ def subdivide_elements(
     working points and the offset brace ends.
 
     Args:
-        elements: ``{elem_id: FrameElement}`` of **all** frame elements
-            (modified in place).
-        assignments: ``{elem_id: section_name}`` (modified in place).
+        elements: ``{elem_id: FrameElement}`` of **all** frame elements —
+            inactive parents are *replaced* under the same key (copy-on-write);
+            the objects the caller passed in are never mutated.
+        assignments: ``{elem_id: section_name}`` (updated in place).
         nodes: ``{node_id: Node}`` — new nodes are added here.
         n_segments: Number of sub‑elements to create (default 4).
         imperfection_ratio: Lateral offset as a fraction of element length
@@ -1115,8 +1137,11 @@ def subdivide_elements(
         perp = perp / np.linalg.norm(perp)
         imperfection = effective_len * imperfection_ratio
 
-        # Mark original element as inactive
-        elem.inactive = True
+        # Mark the original inactive on a copy (copy-on-write — the caller's
+        # element must not be mutated); ``child_ids`` is attached after the
+        # segment loop below.
+        elem = replace(elem, inactive=True)
+        elements[eid] = elem
 
         prev_node_id = brace_start_id
         seg_tags = []
@@ -1161,8 +1186,9 @@ def subdivide_elements(
                 assignments[sub_elem_id] = assignments[eid]
             prev_node_id = j_node_id
 
-        # Track child elements on the original brace
-        elem.child_ids = seg_tags
+        # Track child elements on the original brace — on a copy, with a
+        # fresh list, written back into the dict the caller owns.
+        elements[eid] = replace(elem, child_ids=seg_tags)
 
     return elements, assignments, nodes, next_tag, rigid_links
 
@@ -1181,8 +1207,10 @@ def apply_frame_end_offsets(
     node and the offset elastic end.
 
     Args:
-        elements: ``{elem_id: FrameElement}`` (modified in place).
-        assignments: ``{elem_id: section_name}`` (modified in place).
+        elements: ``{elem_id: FrameElement}`` — shortened elements are
+            *replaced* under the same key (copy-on-write); the objects the
+            caller passed in are never mutated.
+        assignments: ``{elem_id: section_name}`` (updated in place).
         nodes: ``{node_id: Node}`` — new offset nodes are added here.
         offsets: ``{elem_id: FrameEndOffset}`` from parsed s2k data.
         next_tag: Next available numeric tag for new nodes and elements.
@@ -1261,9 +1289,9 @@ def apply_frame_end_offsets(
         else:
             offset_j_id = elem.node_j  # keep original node
 
-        # Shorten the original element to the offset length
-        elem.node_i = offset_i_id
-        elem.node_j = offset_j_id
+        # Shorten the original element to the offset length — on a copy, so
+        # the caller's element is never mutated (copy-on-write).
+        elements[eid] = replace(elem, node_i=offset_i_id, node_j=offset_j_id)
 
     return elements, assignments, nodes, next_tag, rigid_links
 

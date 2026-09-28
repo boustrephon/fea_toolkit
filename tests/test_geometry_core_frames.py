@@ -810,7 +810,7 @@ class TestSubdivideElements:
     """Tests for :func:`fea_toolkit.model.geometry.subdivide_elements`."""
 
     def test_subdivide_creates_sub_elements(self):
-        """4 segments → 4 child elements, original marked inactive."""
+        """4 segments → 4 child elements, parent inactive in the output dict."""
         from fea_toolkit.model.geometry import subdivide_elements
 
         nodes = {
@@ -828,7 +828,12 @@ class TestSubdivideElements:
             brace_ids={"B1"},
             next_tag=100,
         )
-        assert elem.inactive is True, "Original should be inactive"
+        # The parent is marked inactive in the *output*.  The helper is
+        # copy-on-write, so the caller's own object is left untouched.
+        assert result_elems["B1"].inactive is True, "Parent should be inactive in the output"
+        assert elem.inactive is False, "the caller's element must not be mutated"
+        assert elem.child_ids == []
+        assert len(result_elems["B1"].child_ids) == 4
         assert len(result_elems) == 5  # 1 original + 4 subs
         sub_ids = [eid for eid in result_elems if eid.startswith("B1_sub")]
         assert len(sub_ids) == 4

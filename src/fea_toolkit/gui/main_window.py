@@ -57,17 +57,24 @@ _GC_FROZEN: list = []
 def _freeze_gc_once() -> None:
     """Put this process's live objects beyond the collector's reach, once.
 
-    The Preprocessor deep-copies the model, and the GUI does that on a **worker
-    thread**.  A collection triggered inside that copy walks the whole heap --
-    including the PySide6/VTK objects the main thread owns -- and shiboken's
-    objects are not built to be traversed from another thread: on macOS it shows
-    up as an intermittent segfault inside ``copy.deepcopy``, reproducible in
-    ``tests/test_gui_views.py`` before this call existed.
+    The Preprocessor runs on a **worker thread**, and a collection triggered
+    there walks the whole heap -- including the PySide6/VTK objects the main
+    thread owns.  Shiboken's objects are not built to be traversed from another
+    thread: on macOS that surfaced as an intermittent segfault, reproducible in
+    ``tests/test_gui_views.py`` before this call existed, with the traceback
+    landing inside ``copy.deepcopy`` -- at the time the preprocessor's model
+    copy, and the largest allocation burst on that thread.
+
+    That deepcopy is gone (the Preprocessor is copy-on-write now, see
+    ``docs/dev_notes.md`` → *Copy-on-write replaces the model deepcopy*), but
+    the freeze stays: the worker still allocates new child elements and mesh
+    nodes, so a collection can still run there.  Removing the burst removes the
+    biggest trigger, not the mechanism.
 
     ``gc.freeze()`` moves everything alive *now* -- Qt, VTK, the window, the
     renderer -- into the permanent generation, so no later collection looks at
-    it.  Objects created afterwards (the copy, the ``MeshModel``) stay
-    collectable, which is what stops models from leaking.
+    it.  Objects created afterwards (the preprocessed topology and its
+    ``MeshModel``) stay collectable, which is what stops models from leaking.
     """
     if _GC_FROZEN:
         return
