@@ -472,14 +472,15 @@ The GUI must respect the existing architectural contracts:
 10. **Tests.**  Headless `QApplication` with the `offscreen` platform plugin
     (`QT_QPA_PLATFORM=offscreen`), `ops.wipe()` hygiene, a `needs_gui` marker
     alongside the existing `needs_pyvista` marker.
-11. **Workflow authoring (P29–P31, added 2026-09-29).**  The `workflow` package
+11. **Workflow authoring (P29–P32, added 2026-09-29).**  The `workflow` package
     (verbs, steps, recipes as data), the **Recipe dock**, the `&Recipe` menu,
     and the Model-menu items re-cast as **presets over the recipe** — landed as
     **P29** (phases A–B).  Remaining, as independent items: **P30** (phase C —
     `check` / `chart` verbs with the GUI's first figure view and a check table,
-    `combine`'s view, and the `generate_report` reconciliation) and **P31**
-    (phase D — the command palette and script interop).  See
-    [`workflow_authoring.md`](workflow_authoring.md) and
+    `combine`'s view, a recipe's cases as views), **P31** (phase D — the command
+    palette and script interop) and **P32** (phase E — the modal / response-
+    spectrum / pushover verbs, and `generate_report` composing the registry).
+    See [`workflow_authoring.md`](workflow_authoring.md) and
     [`_pending_work.md`](_pending_work.md).
 
 ---
@@ -668,7 +669,7 @@ class QtRenderBackend(RenderBackend):
 | 8 | Persistence | geometry + dock state round-trip through `QSettings` |
 | 9 | Tests | headless `QT_QPA_PLATFORM=offscreen` suite green; `needs_gui` marker; `ops.wipe()` hygiene |
 | 10 | Quad-view + polish | central `QWidget` container hosts iso/front/top/side `QtInteractor`s with shared camera toggles |
-| 11 | ⚠️ Partial — workflow authoring (P29–P31) | ✅ **P29** (Phases A–B): the `workflow` package (verbs, steps, recipes as data), the **Recipe dock**, the `&Recipe` menu and the Model-menu presets.  **P30** (Phase C) — `check` / `chart` verbs with the GUI's first figure view and a check table, `combine`'s view, and the `generate_report` reconciliation — and **P31** (Phase D, the command palette) remain — `docs/workflow_authoring.md` |
+| 11 | ⚠️ Partial — workflow authoring (P29–P32) | ✅ **P29** (Phases A–B): the `workflow` package (verbs, steps, recipes as data), the **Recipe dock**, the `&Recipe` menu and the Model-menu presets.  **P30** (Phase C) — `check` / `chart` verbs with the GUI's first figure view and a check table, `combine`'s view, a recipe's cases as views — **P31** (Phase D, the command palette) and **P32** (Phase E, the modal/RS/pushover verbs and the `generate_report` reconciliation) remain — `docs/workflow_authoring.md` |
 
 ### 9.7 Testing strategy
 

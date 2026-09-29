@@ -622,10 +622,12 @@ their mass must be injected explicitly). `scale_sections`' default
 real SAP model usually has `A/I/J` left at zero, where a frame-shaped attribute
 list silently changes nothing.
 
-**Remaining — split into their own register items.**  Phases C and D are tracked
-**separately**, because they are independent: either can be scheduled, reviewed
-and delivered without the other.  **P30** covers the result verbs and their
-views; **P31** covers authoring ergonomics.
+**Remaining — split into their own register items.**  Phases C, D and E are
+tracked **separately**, because they are independent: each can be scheduled,
+reviewed and delivered without the others.  **P30** covers the result verbs and
+their views, **P31** covers authoring ergonomics, and **P32** reconciles
+`generate_report` with `Recipe` (which needs the analysis verbs the report uses,
+and is why it is not part of P30).
 
 **Supersedes.** The `actions/` directory sketched in `docs/gui_roadmap.md` §6 —
 one `QAction` handler per operation, which grows a menu per feature — is
@@ -660,10 +662,15 @@ the **computed results** visible in the same way.  Three things:
    are new widget work, which is why this is its own item.
 3. **Closing the two gaps Phase B left.**  `combine` gains a view, and a
    recipe's solved *cases* register as result views rather than only being
-   reported in the log (`docs/gui.md` records the limitation).
-4. **Reconciling `generate_report(config)` with `Recipe`** — as an *adapter* over
-   a recipe, or by exposing the report's stages as *verbs*.  Deciding which is
-   the first task; see `docs/workflow_authoring.md`.
+   reported in the log (`docs/gui.md` records the limitation).  With the review's
+   fix to `run_case_set`, the semantics to honour are: a **cancelled** case is
+   neither a result nor a failure; a **failed** case is one that was attempted
+   and did not solve.
+
+**Not in this item.** Reconciling `generate_report(config)` with `Recipe` is
+**P32**, not P30 — the overlap turns out to be the *analysis* verbs (modal,
+response spectrum, pushover) that the report uses and P30 does not add; see
+`docs/workflow_authoring.md` → *Resolving the `generate_report` duality*.
 
 **Why it is separate from P29.**  P29 delivered the authoring surface for
 operations whose output the GUI already knew how to draw (a model, a case view).
@@ -694,6 +701,43 @@ Source: `docs/workflow_authoring.md` § *Roadmap*.
 
 **Why it is separate from P30.** P30 is about *output*; P31 is about *input*.
 Neither blocks the other, and a user gains from either alone.
+
+#### P32 — The report pipeline joins the vocabulary (modal / RS / pushover verbs)
+Source: `docs/workflow_authoring.md` → *Resolving the `generate_report`
+duality*; `docs/report_generation.md`.
+
+**Status: 🚧 Not started.**
+
+**What.** `generate_report(config)` is already a fixed, declarative pipeline, and
+a `Recipe` is the same idea made editable.  They currently coexist, deliberately.
+Reconciling them needs the verbs the report actually uses but the workflow layer
+does not yet have:
+
+1. **`modal`, `response_spectrum`, `pushover` verbs** — thin wrappers over
+   `analysis.modal.run_modal_analysis`, `analysis.rs.run_response_spectrum_analysis`
+   and `analysis.pushover.run_pushover_analysis`.  These also close a live gap in
+   the GUI, where `Analysis ▸ Modal / Response spectrum / Pushover` are still
+   greyed (milestone 5's remainder).
+2. **`generate_report` composing the registry** rather than calling the analysis
+   functions directly — so the report script and the GUI run the same verbs —
+   while it keeps its own **storage** (the NPZ/HDF5 write) and **presentation**
+   (the HTML/Quarto report) stages, which are *not* model operations and must not
+   become verbs.
+3. **`generate_report`'s public signature stays unchanged throughout.**
+
+**Why it is its own item, not part of P30.**  The report overlaps the recipe in
+the *analysis* verbs, not in P30's `check`/`chart`.  It also changes a stable
+public entry point, which is a different risk profile from "draw a result".
+
+**Why the recipe alone is not the answer.**  The report's last three stages —
+combination reduction, archive write, HTML render — are not model operations. An
+adapter that forced them into step form would be a category error, which is why
+the survey in `docs/workflow_authoring.md` points at a *blend*: verbs for the
+analysis, report-only code for the storage and presentation.
+
+**Touches (anticipated).** `workflow/verbs/{modal,response_spectrum,pushover}.py`,
+`workflow/registry.py`, `report.py`, and the GUI's greyed analysis actions once
+the verbs exist.
 
 ### Tier 4 — Deferred / low-priority
 

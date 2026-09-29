@@ -97,10 +97,24 @@ reduce.
 
 | Verb | Kind | What it wraps | Needs |
 |---|---|---|---|
+| `check_connectivity` | `table` | `model.checks.check_model_connectivity` | — |
+| `check_self_weight` | `table` | `model.checks.check_self_weight_consistency` | — |
+| `check_brace_buckling` | `table` | `model.checks.check_brace_buckling` | — |
 | `scale_sections` | `model` | edits the matched sections' stiffness properties in place | — |
 | `mesh` | `geometry` | `Preprocessor.run(md, load_shell_selection=…)` | — |
 | `run_static` | `cases` | `analysis.linear.run_case_set` | a topology |
 | `combine` | `cases` | `analysis.combinations.build_combination_results` | solved cases |
+
+The three checks are **model-only**: they run on the parsed model with no
+OpenSees domain and no results, which is why they come first and why they are the
+first `table` steps. A `chart` verb is *not* in the same position — every
+`plotting.report.*` function needs results (a DataFrame, a result dict), so the
+figure verb follows the results plumbing rather than preceding it.
+
+There is **one verb per check**, not one `check` verb with a "which check"
+parameter: the checks take different arguments, so a single verb would have to
+declare every check's parameters and leave most of them inapplicable — a
+parameter surface that lies.
 
 A verb's parameter surface is **exactly** what its `ParamSpec` list declares; an
 undeclared key is rejected rather than ignored, so a typo cannot silently change
@@ -202,15 +216,24 @@ rather than mutating it; the recipe object stays the single source of truth.
 |---|---|---|---|
 | **A** | [P29](_pending_work.md) | the `workflow` package: steps, recipes, registry, and the four verbs | ✅ landed |
 | **B** | [P29](_pending_work.md) | the Recipe panel, the `&Recipe` menu, the Model-menu presets | ✅ landed |
-| **C** | **[P30](_pending_work.md)** | **computed results become visible** — `check` (`capacity.*`, `model.checks`, `mesh.checks`) and `chart` (`plotting.report.*`) as steps, with the GUI's **first figure view** and a check table; `combine` gains its view; a recipe's solved cases register as result views (closing the gap noted in *The GUI surface*); and the `generate_report` ↔ `Recipe` reconciliation below | 🚧 planned |
+| **C** | **[P30](_pending_work.md)** | **computed results become visible** — `check` (`capacity.*`, `model.checks`, `mesh.checks`) and `chart` (`plotting.report.*`) as steps, with the GUI's **first figure view** and a check table; `combine` gains its view; a recipe's solved cases register as result views (closing the gap noted in *The GUI surface*) | 🚧 planned |
 | **D** | **[P31](_pending_work.md)** | **authoring ergonomics** — the command palette (`Ctrl+K`) compiling a command string into a step, a command-echo log recording every action as its equivalent step, and importing a Python script back into a recipe | 🚧 planned |
+| **E** | **[P32](_pending_work.md)** | **the report pipeline joins the vocabulary** — the *analysis* verbs the reconciliation needs (modal, response spectrum, pushover), and `generate_report` composing the same registry; see *Resolving the `generate_report` duality* below | 🚧 planned |
 
-**C and D are deliberately separate register items** (P30, P31): C makes computed
-results *visible*, D makes authoring *fast*.  Neither depends on the other, so
-either can land first — they are split so they can be scheduled, reviewed and
-delivered independently.
+**C, D and E are deliberately separate register items** (P30, P31, P32): C makes
+computed results *visible*, D makes authoring *fast*, and E reconciles an
+existing public pipeline with the new vocabulary.  None depends on another, so
+they can be scheduled, reviewed and delivered independently.
 
-### Resolving the `generate_report` duality — a Phase C deliverable (P30)
+**Why E is not part of C.**  C's verbs (`check`, `chart`) are ones the report
+pipeline barely uses.  The *real* overlap between `Recipe` and
+`generate_report` is the **modal / response-spectrum / pushover** analyses — which
+are not verbs yet — together with the report's storage and HTML-rendering
+stages, which are not model operations at all and should not become verbs.  That
+is three new verbs plus a change to a stable public entry point: a different
+scope and a different risk from "draw a result", so it is its own item.
+
+### Resolving the `generate_report` duality — its own item (P32)
 
 `generate_report(config)` is a fixed, complete pipeline with a stable public
 signature; a recipe is the same idea, editable.  The two currently coexist
@@ -224,9 +247,23 @@ Reconciling them means one of:
 * **verbs for the stages** — the report's stages are exposed as verbs, and both
   the report script and the GUI compose them the same way.
 
-Either is acceptable; deciding between them is the first task of P30.  What must
+Surveying the report's stages makes the choice much narrower than it looks.  Its
+stages are *modal → response spectrum → pushover → combination reduction → chart
+rendering → archive write → HTML report*.  The first three are model operations
+and belong in the vocabulary; the last three are storage and presentation and do
+**not** — forcing a Quarto render into a verb would be a category error.  So the
+practical reconciliation is:
+
+1. add the missing analysis verbs (`modal`, `response_spectrum`, `pushover`);
+2. have `generate_report` compose those same verbs rather than calling the
+   analysis functions directly, keeping its own storage and rendering stages;
+3. leave the report's public signature untouched throughout.
+
+Deciding formally between the adapter and the verb route is the first task of
+**P32**, though the survey above already points at a blend of the two.  What must
 **not** happen is a piecemeal merge: `generate_report` is a public entry point, so
 a half-migrated pipeline is worse than two clearly-separated ones.
+
 
 
 Phase C also introduces the GUI's first **figure view** — nothing in the

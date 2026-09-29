@@ -33,8 +33,8 @@ approach.
 > the sequence is editable, inspectable and saveable rather than baked into one
 > function.  The two are **not merged yet, deliberately**: `generate_report` is a
 > stable public entry point, so the workflow layer was built beside it.  Their
-> reconciliation is an owned deliverable of **[P30](_pending_work.md)** (workflow
-> Phase C), which will settle whether the report becomes an *adapter* over a
+> reconciliation is an owned deliverable of **[P32](_pending_work.md)** (workflow
+> Phase E), which will settle whether the report becomes an *adapter* over a
 > recipe or its stages become *verbs*; see `docs/workflow_authoring.md` →
 > *Resolving the `generate_report` duality*.  Until then a report config and a
 > recipe are two spellings of one intent — the former fixed and complete, the
