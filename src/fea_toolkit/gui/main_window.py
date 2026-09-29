@@ -121,10 +121,12 @@ def _case_view_name(case: str, meta: dict) -> str:
 #: Prefix of a results view's key; the load-case label follows it.
 _RESULTS_KEY_PREFIX = "results:"
 
-#: Default amplification for the deformed-shape overlay.  A real transverse
-#: displacement is a small fraction of the model's size, so the shape is
-#: invisible 1:1 — the same reason SAP2000 offers a scale box.
-_DEFAULT_DEFORMED_SCALE = 50.0
+#: Default size for a results overlay, as a **percentage of the model diagonal**.
+#: Both the deformed shape and the force-diagram flags auto-scale to this fraction
+#: of the model's size, so a millimetre model and a metre model read the same way
+#: and neither a large displacement nor a large force overwhelms the scene (a raw
+#: "amplification ×N" cannot do that — see ``ModelViewer.overlay_forces``).
+_DEFAULT_OVERLAY_PCT = 10.0
 
 #: Which end-force component a flag diagram opens on.  This is the **label**,
 #: not the schema key: ``"M3"`` is SAP's local-DOF name for the moment about
@@ -609,18 +611,33 @@ class MainWindow(QMainWindow):
     def _build_toolbars(self) -> None:
         a = self._actions
 
-        # The deformed-shape scale sits on the toolbar rather than in a dialog:
-        # it is adjusted *while* looking at the shape, and re-drawing on every
-        # change is what makes finding a readable amplification quick.
+        # The overlay scales sit on the toolbar rather than in a dialog: they are
+        # adjusted *while* looking at the shape/diagram, and re-drawing on every
+        # change is what makes finding a readable size quick.  Each is a
+        # **percentage of the model diagonal** — the auto-scale's own target —
+        # so the knob is unit-agnostic and never exposes a raw length-per-force
+        # factor, which is what made a whole-building flag diagram enormous.
         self._deformed_scale = QDoubleSpinBox(self)
         self._deformed_scale.setObjectName("deformed_scale")
-        self._deformed_scale.setRange(1.0, 10000.0)
+        self._deformed_scale.setRange(0.1, 1000.0)
         self._deformed_scale.setDecimals(1)
-        self._deformed_scale.setSingleStep(10.0)
-        self._deformed_scale.setValue(_DEFAULT_DEFORMED_SCALE)
-        self._deformed_scale.setToolTip("Results-overlay scale factor")
-        self._deformed_scale.setStatusTip("Results-overlay scale factor")
+        self._deformed_scale.setSingleStep(5.0)
+        self._deformed_scale.setValue(_DEFAULT_OVERLAY_PCT)
+        self._deformed_scale.setSuffix("%")
+        self._deformed_scale.setToolTip("Deformed-shape size (% of model diagonal)")
+        self._deformed_scale.setStatusTip("Deformed-shape size (% of model diagonal)")
         self._deformed_scale.valueChanged.connect(self._on_deformed_scale_changed)
+
+        self._force_scale = QDoubleSpinBox(self)
+        self._force_scale.setObjectName("force_scale")
+        self._force_scale.setRange(0.1, 1000.0)
+        self._force_scale.setDecimals(1)
+        self._force_scale.setSingleStep(5.0)
+        self._force_scale.setValue(_DEFAULT_OVERLAY_PCT)
+        self._force_scale.setSuffix("%")
+        self._force_scale.setToolTip("Force-diagram size (% of model diagonal)")
+        self._force_scale.setStatusTip("Force-diagram size (% of model diagonal)")
+        self._force_scale.valueChanged.connect(self._on_force_scale_changed)
 
         # Which end-force component a flag diagram shows.  The SAP local-DOF
         # names read better than the schema's x/y/z keys and are the same six
@@ -664,7 +681,8 @@ class MainWindow(QMainWindow):
         def _put(bar: QToolBar, key: Any) -> None:
             """Add one entry: ``None`` is a separator, ``"@name"`` a widget."""
             widgets = {
-                "@deformed_scale": ("Scale", self._deformed_scale),
+                "@deformed_scale": ("Deform %", self._deformed_scale),
+                "@force_scale": ("Flags %", self._force_scale),
                 "@force_quantity": ("Force", self._force_quantity),
                 "@shell_opacity": ("Shells", self._shell_opacity),
                 "@shrink": ("Shrink", self._shrink),
@@ -694,6 +712,7 @@ class MainWindow(QMainWindow):
             "results.deformed",
             "@deformed_scale",
             "results.forces",
+            "@force_scale",
             "@force_quantity",
             None,
             "model.units",
@@ -1238,21 +1257,30 @@ class MainWindow(QMainWindow):
             self._set_toggle_checked("results.deformed", False)
             return
 
-        self._viewer.overlay_deformed(displacements, scale=float(self._deformed_scale.value()))
+        self._viewer.overlay_deformed(
+            displacements,
+            scale=None,
+            auto_fraction=self._deformed_scale.value() / 100.0,
+        )
         self._viewer.show()
-        self.log(f"Deformed shape: scale {self._deformed_scale.value():g}.")
+        self.log(f"Deformed shape: {self._deformed_scale.value():g}% of model.")
 
     def _on_deformed_scale_changed(self, _value: float) -> None:
-        """Re-draw the results overlays after the scale changed.
+        """Re-draw the deformed overlay after its size changed.
 
-        Only the overlays already on — changing the scale must not *start*
-        drawing, which would make the spin box a second way to trigger an
-        action.  The scale is shared: a deformed shape and a flag diagram are
-        both drawn in model units, so the same factor reads them both.
+        Only when it is already on — changing the knob must not *start*
+        drawing, which would make the spin box a second way to trigger the
+        action.  The deformed shape and the flag diagram now have **separate**
+        knobs, because an amplification and a length-per-force factor are not
+        the same number; both are expressed as a percentage of the model
+        diagonal so neither needs to know the model's units.
         """
         if self._actions["results.deformed"].isChecked():
             self._clear_deformed()
             self._on_deformed_toggled(True)
+
+    def _on_force_scale_changed(self, _value: float) -> None:
+        """Re-draw the flag diagram after its size changed (same rule: no start)."""
         if self._actions["results.forces"].isChecked():
             self._clear_forces()
             self._on_forces_toggled(True)
@@ -1319,10 +1347,11 @@ class MainWindow(QMainWindow):
             forces,
             quantity=FORCE_QUANTITY_LABELS.get(label, label),
             use_local=self._active_forces_are_local(),
-            scale_factor=float(self._deformed_scale.value()),
+            scale_factor=None,
+            auto_fraction=self._force_scale.value() / 100.0,
         )
         self._viewer.show()
-        self.log(f"Force diagram: {label} at scale {self._deformed_scale.value():g}.")
+        self.log(f"Force diagram: {label} at {self._force_scale.value():g}% of model.")
 
     def _on_force_quantity_changed(self, _index: int) -> None:
         """Re-draw the flag diagram after the quantity changed.

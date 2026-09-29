@@ -189,23 +189,37 @@ class TestDeformedShape:
         window.open_results_path(str(_write_archive(tmp_path, with_displacement=True)))
         assert window._actions["results.deformed"].isEnabled() is True
 
-    def test_it_draws_the_shape_at_the_toolbar_scale(self, window, tmp_path):
+    def test_it_draws_the_shape_autoscaled_to_ten_percent_of_the_model(self, window, tmp_path):
         window.open_results_path(str(_write_archive(tmp_path, with_displacement=True)))
-        window._deformed_scale.setValue(50.0)
         window._actions["results.deformed"].trigger()
 
         points = _deformed_points(window)
         assert points is not None, "no deformed overlay was drawn"
-        assert points[0] == pytest.approx([1.0, 0.0, 0.0])  # base: 0.02 * 50
-        assert points[1] == pytest.approx([5.0, 0.0, 10.0])  # tip: 0.10 * 50, at z = 10
+        # Auto-scale: max displacement 0.10 m → 10 % of the 10 m model → ×10.
+        assert points[0] == pytest.approx([0.2, 0.0, 0.0])  # base: 0.02 × 10
+        assert points[1] == pytest.approx([1.0, 0.0, 10.0])  # tip: 0.10 × 10
 
-    def test_changing_the_scale_redraws_at_the_new_factor(self, window, tmp_path):
+    def test_changing_the_size_redraws_at_the_new_percentage(self, window, tmp_path):
         window.open_results_path(str(_write_archive(tmp_path, with_displacement=True)))
         window._actions["results.deformed"].trigger()
-        window._deformed_scale.setValue(100.0)
+        window._deformed_scale.setValue(20.0)
 
         points = _deformed_points(window)
-        assert points[0] == pytest.approx([2.0, 0.0, 0.0])  # 0.02 * 100
+        assert points[1] == pytest.approx([2.0, 0.0, 10.0])  # 20 % → ×20
+
+    def test_a_large_displacement_stays_bounded_by_the_model(self, window, tmp_path):
+        """Auto-scale is unit-agnostic: a 5 m sway still reads as 10 % of the model."""
+        path = _write_archive(tmp_path, with_displacement=True)
+        data = dict(np.load(path, allow_pickle=False))
+        for case in ("DEAD", "COMB1"):
+            data[f"static/{case}/node_dx"] = np.array([0.02, 5.0])
+        np.savez_compressed(path, **data)
+
+        window.open_results_path(str(path))
+        window._actions["results.deformed"].trigger()
+
+        points = _deformed_points(window)
+        assert points[1] == pytest.approx([1.0, 0.0, 10.0])  # 5 m × (0.1 × 10 / 5)
 
     def test_the_scale_alone_never_starts_drawing(self, window, tmp_path):
         """Turning the knob must not be a second way to trigger the action."""
@@ -296,24 +310,38 @@ class TestForceDiagrams:
 
         assert window._force_quantity.currentText() == "M3"
 
-    def test_it_draws_the_diagram_at_the_toolbar_scale(self, window, tmp_path):
-        window.open_results_path(str(_write_archive(tmp_path, with_forces=True)))
-        window._deformed_scale.setValue(50.0)
-        window._actions["results.forces"].trigger()
-
-        assert _flag_offset(window) == pytest.approx(4.0 * 50.0)  # mz = 4
-
-    def test_changing_the_scale_redraws_at_the_new_factor(self, window, tmp_path):
+    def test_it_draws_the_diagram_autoscaled_to_ten_percent_of_the_model(self, window, tmp_path):
         window.open_results_path(str(_write_archive(tmp_path, with_forces=True)))
         window._actions["results.forces"].trigger()
-        window._deformed_scale.setValue(100.0)
 
-        assert _flag_offset(window) == pytest.approx(4.0 * 100.0)
+        # Auto-scale: the largest flag (mz = 4) is 10 % of the 10 m model.
+        assert _flag_offset(window) == pytest.approx(1.0)
+
+    def test_changing_the_size_redraws_at_the_new_percentage(self, window, tmp_path):
+        window.open_results_path(str(_write_archive(tmp_path, with_forces=True)))
+        window._actions["results.forces"].trigger()
+        window._force_scale.setValue(50.0)
+
+        assert _flag_offset(window) == pytest.approx(5.0)  # 50 % of the 10 m model
+
+    def test_a_huge_force_stays_bounded_by_the_model(self, window, tmp_path):
+        """Auto-scale is unit-agnostic: a million-unit moment still fits the model."""
+        path = _write_archive(tmp_path, with_forces=True)
+        data = dict(np.load(path, allow_pickle=False))
+        for case in ("DEAD", "COMB1"):
+            data[f"static/{case}/mz_i"] = np.array([4.0e6])
+            data[f"static/{case}/mz_j"] = np.array([-4.0e6])
+        np.savez_compressed(path, **data)
+
+        window.open_results_path(str(path))
+        window._actions["results.forces"].trigger()
+
+        assert _flag_offset(window) == pytest.approx(1.0)  # still 10 % of the model
 
     def test_the_scale_alone_never_starts_drawing(self, window, tmp_path):
         """Turning the knob must not be a second way to trigger the action."""
         window.open_results_path(str(_write_archive(tmp_path, with_forces=True)))
-        window._deformed_scale.setValue(200.0)
+        window._force_scale.setValue(200.0)
 
         assert _flag_offset(window) is None
 
@@ -324,7 +352,7 @@ class TestForceDiagrams:
 
         window._force_quantity.setCurrentText("P")
 
-        assert _flag_offset(window) == pytest.approx(1.0 * 50.0)  # fx = 1
+        assert _flag_offset(window) == pytest.approx(1.0)  # fx = 1 → 10 % of model
 
     def test_the_selector_reads_the_local_dof_it_names(self, window, tmp_path):
         """V2 is the local-2 shear — ``fy`` (2), not ``my`` (3) and not ``mz``."""
@@ -333,7 +361,7 @@ class TestForceDiagrams:
 
         window._force_quantity.setCurrentText("V2")
 
-        assert _flag_offset(window) == pytest.approx(2.0 * 50.0)
+        assert _flag_offset(window) == pytest.approx(1.0)  # fy = 2 → 10 % of model
 
     def test_the_selector_alone_never_starts_drawing(self, window, tmp_path):
         """Choosing a component must not be a second way to trigger the action."""
@@ -362,7 +390,7 @@ class TestForceDiagrams:
         with pytest.warns(UserWarning):
             window._actions["results.forces"].trigger()
 
-        assert _flag_offset(window) == pytest.approx(4.0 * 50.0)  # still mz = 4
+        assert _flag_offset(window) == pytest.approx(1.0)  # still mz = 4 → 10 % of model
 
     def test_switching_cases_drops_the_overlay(self, window, tmp_path):
         window.open_results_path(str(_write_archive(tmp_path, with_forces=True)))

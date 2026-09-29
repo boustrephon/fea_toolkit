@@ -438,7 +438,8 @@ class ModelViewer:
     def overlay_deformed(
         self,
         displacements: Optional[dict[str, np.ndarray]] = None,
-        scale: float = 1.0,
+        scale: Optional[float] = None,
+        auto_fraction: float = 0.1,
         color: tuple[float, float, float] = (0.3, 0.6, 1.0),
     ) -> "ModelViewer":
         """Overlay deformed shape on the model.
@@ -446,7 +447,10 @@ class ModelViewer:
         Args:
             displacements: ``{node_id: (dx, dy, dz)}``.  If ``None``,
                 reads from the builder's last static results.
-            scale: Amplification factor.
+            scale: Amplification factor.  ``None`` (default) auto-scales so the
+                largest displacement is ``auto_fraction`` of the model diagonal.
+            auto_fraction: Target shape size as a fraction of the model diagonal,
+                used only when *scale* is ``None``.
             color: Deformed shape colour (RGB 0..1).
 
         Returns:
@@ -471,6 +475,9 @@ class ModelViewer:
             print("Warning: no displacement data available for deformed overlay.")
             return self
 
+        if scale is None:
+            scale = self._auto_amplification(displacements, auto_fraction)
+
         self._backend.render_deformed(
             self._frames,
             displacements,
@@ -479,12 +486,34 @@ class ModelViewer:
         )
         return self
 
+    def _auto_amplification(self, displacements: dict[str, np.ndarray], fraction: float) -> float:
+        """Amplification making the largest displacement ``fraction`` of the model.
+
+        A displacement is a small fraction of the model's size, so it is
+        invisible 1:1 — the same reason SAP2000 offers a scale box.  The
+        amplification is unit-agnostic: it targets a fraction of the model
+        diagonal, so a millimetre model and a metre model both read the same
+        way.
+        """
+        if not self._frames:
+            return 1.0
+        all_pts = np.vstack([f.start for f in self._frames] + [f.end for f in self._frames])
+        model_size = max(float(np.linalg.norm(np.ptp(all_pts, axis=0))), 1.0)
+        max_disp = max(
+            (float(np.linalg.norm(np.asarray(d, dtype=float)[:3])) for d in displacements.values()),
+            default=0.0,
+        )
+        if max_disp < 1e-12:
+            return 1.0
+        return fraction * model_size / max_disp
+
     def overlay_forces(
         self,
         elem_forces: Optional[dict[str, dict]] = None,
         quantity: str = "Mz",
         use_local: bool = True,
         scale_factor: Optional[float] = None,
+        auto_fraction: float = 0.1,
     ) -> "ModelViewer":
         """Overlay force/moment flag diagram.
 
@@ -508,7 +537,11 @@ class ModelViewer:
                 flag plane is local, so ``False`` (global components) is only
                 geometrically consistent when the global and local axes
                 coincide (e.g. planar frames); a warning is emitted.
-            scale_factor: Flag size scaling.  Auto-computed if ``None``.
+            scale_factor: Flag size scaling — length per force/moment unit.
+                ``None`` (default) auto-scales so the largest flag is
+                ``auto_fraction`` of the model diagonal.
+            auto_fraction: Target flag size as a fraction of the model diagonal,
+                used only when *scale_factor* is ``None``.
 
         Returns:
             ``self`` for chaining.
@@ -565,7 +598,7 @@ class ModelViewer:
                 stacklevel=2,
             )
 
-        # Auto-scale: target flag height ≈ 10% of model diagonal
+        # Auto-scale: target flag height ≈ auto_fraction of the model diagonal.
         if scale_factor is None:
             max_val = max(vals) if vals else 1.0
             if max_val < 1e-12:
@@ -573,7 +606,7 @@ class ModelViewer:
             all_pts = np.vstack([f.start for f in self._frames] + [f.end for f in self._frames])
             diag = np.ptp(all_pts, axis=0)
             model_size = max(np.linalg.norm(diag), 1.0)
-            scale_factor = 0.1 * model_size / max_val
+            scale_factor = auto_fraction * model_size / max_val
 
         self._backend.render_force_flags(
             self._frames,
