@@ -51,6 +51,21 @@ class SelectionDialog(QDialog):
         self._keys.setEnabled(False)
         layout.addWidget(self._keys)
 
+        examples = QLabel(
+            "Combine keys to narrow (AND); list values to widen (OR):\n"
+            "\n"
+            "  type=Frame                    frame elements only\n"
+            "  section=COL,BEAM              section COL or BEAM\n"
+            "  type=Area section=Roof slab   areas with that section\n"
+            "  z=0:3                         nodes between z 0 and 3\n"
+            "  group=Core                    elements in group Core\n"
+            "  constraint=Fix                nodes with a Fix joint constraint\n"
+            "  id=1,5,9                      those SAP ids",
+            self,
+        )
+        examples.setEnabled(False)
+        layout.addWidget(examples)
+
         self._error = QLabel("", self)
         layout.addWidget(self._error)
 
