@@ -291,3 +291,18 @@ class TestTableAndFigureViews:
         assert window._views.figure("figure:storey-displacements") is figure
         assert window._stack.currentWidget() is window._figure_page
         assert window._figure_layout.count() == 1
+
+
+def test_the_config_editor_emits_only_the_keys_a_user_changes(qapp):
+    """The structured config editor writes back a minimal override dict."""
+    from fea_toolkit.gui.views.config_editor import ConfigEditor
+    from fea_toolkit.workflow import BUILDER_CONFIG_KEYS
+
+    editor = ConfigEditor(BUILDER_CONFIG_KEYS, {})
+    assert editor.value() == {}
+
+    editor._widgets["verbose"].setChecked(True)
+    assert editor.value() == {"verbose": True}
+
+    editor._widgets["element_type"].setCurrentText("dispBeamColumn")
+    assert editor.value() == {"verbose": True, "element_type": "dispBeamColumn"}

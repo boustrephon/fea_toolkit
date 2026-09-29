@@ -2019,9 +2019,11 @@ class MainWindow(QMainWindow):
 
         cases = request.cases
         combos = {name: dict(specs[name].leaves) for name in request.combinations if name in specs}
-        self.run_analysis(cases, combos)
+        self.run_analysis(cases, combos, config=request.config)
 
-    def run_analysis(self, cases: dict, combinations: Optional[dict] = None) -> bool:
+    def run_analysis(
+        self, cases: dict, combinations: Optional[dict] = None, config: Optional[dict] = None
+    ) -> bool:
         """Solve *cases* (and reduce *combinations*) on a worker — dialog-free.
 
         The entry point the dialog defers to, and that tests drive directly,
@@ -2030,6 +2032,7 @@ class MainWindow(QMainWindow):
         Args:
             cases: ``{case: {pattern: factor}}`` to solve.
             combinations: ``{combination: {leaf_case: factor}}`` to reduce.
+            config: Optional ``AnalysisBuilder`` config overrides.
 
         Returns:
             ``True`` when the run started; ``False`` when it cannot yet (no
@@ -2047,7 +2050,9 @@ class MainWindow(QMainWindow):
         if self._worker is not None and self._worker.isRunning():
             self.log("An analysis is already running.", "warn")
             return False
-        self._start_analysis(store.raw(), mesh, dict(cases), dict(combinations or {}))
+        self._start_analysis(
+            store.raw(), mesh, dict(cases), dict(combinations or {}), dict(config or {})
+        )
         return True
 
     def _on_analysis_stop(self) -> None:
@@ -2063,7 +2068,7 @@ class MainWindow(QMainWindow):
         self._actions["analysis.stop"].setEnabled(False)
         self.log("Stop requested \u2014 the run ends at the next case boundary.", "warn")
 
-    def _start_analysis(self, md: Any, mesh: Any, cases: dict, combos: dict) -> None:
+    def _start_analysis(self, md: Any, mesh: Any, cases: dict, combos: dict, config: dict) -> None:
         """Solve *cases* (and reduce *combos*) on a worker.
 
         Args:
@@ -2071,6 +2076,7 @@ class MainWindow(QMainWindow):
             mesh: The preprocessed model the cases are built from.
             cases: ``{case: {pattern: factor}}`` to solve, in run order.
             combos: ``{combination: {leaf_case: factor}}`` to reduce afterwards.
+            config: Optional ``AnalysisBuilder`` config overrides.
         """
         self.log(f"Running {len(cases)} case(s) and {len(combos)} combination(s) \u2026")
         self._progress.setRange(0, 0)  # busy until the first case reports
@@ -2092,6 +2098,7 @@ class MainWindow(QMainWindow):
                 mesh,
                 cases,
                 combinations=combos,
+                config=config or None,
                 should_cancel=should_cancel,
                 on_progress=lambda index, name, total: reporter[0](index, total, name),
             )

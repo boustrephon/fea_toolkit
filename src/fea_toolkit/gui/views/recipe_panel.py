@@ -41,6 +41,7 @@ from qtpy.QtWidgets import (
 
 from ...model.selection import Selection
 from ...workflow import STEP_SPECS, Recipe
+from .config_editor import ConfigEditor
 from .selection_dialog import SelectionDialog
 
 
@@ -241,7 +242,13 @@ class RecipePanel(QWidget):
             self._loading = False
 
     def _make_editor(self, name: str, parameter: Any, value: Any) -> QWidget:
-        """A widget for one parameter, writing its value back to the step.
+        """A widget for one parameter — the editor plus its inline help.
+
+        A ``dict`` parameter whose spec declares a ``manifest`` renders a
+        structured :class:`~fea_toolkit.gui.views.config_editor.ConfigEditor`
+        instead of a raw literal, so the dict's keys are discoverable and
+        type-checked.  Every parameter's help text is shown **inline** beneath
+        the editor, not only as a hover tooltip.
 
         Args:
             name: Parameter name, for the write-back.
@@ -249,13 +256,33 @@ class RecipePanel(QWidget):
             value: The step's current value (or the spec default).
 
         Returns:
-            The editor widget, already connected to the recipe.
+            A container widget, already connected to the recipe.
         """
 
         def write(new_value: Any) -> None:
             if not self._loading:
                 self._set_param(name, new_value)
 
+        if parameter.manifest is not None:
+            editor = ConfigEditor(parameter.manifest, value, self._detail)
+            editor.changed.connect(lambda: write(editor.value()))
+        else:
+            editor = self._scalar_editor(parameter, value, write)
+
+        container = QWidget(self._detail)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        layout.addWidget(editor)
+        if parameter.help:
+            help_label = QLabel(parameter.help)
+            help_label.setWordWrap(True)
+            help_label.setStyleSheet("color: #6a6a6a;")
+            layout.addWidget(help_label)
+        return container
+
+    def _scalar_editor(self, parameter: Any, value: Any, write: Any) -> QWidget:
+        """The editor for a scalar or free-form literal parameter."""
         kind = parameter.type
         if kind is bool:
             widget = QCheckBox(self._detail)

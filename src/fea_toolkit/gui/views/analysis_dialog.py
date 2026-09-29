@@ -40,6 +40,9 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from ...workflow.config_keys import BUILDER_CONFIG_KEYS
+from .config_editor import ConfigEditor
+
 __all__ = ["AnalysisDialog"]
 
 #: The widest a factor may be set.  Negative factors are allowed — reversing a
@@ -84,10 +87,13 @@ class _Request:
             ticked model case (its patterns scaled by the row factor), the
             leaves of any ticked combination, and the custom case if authored.
         combinations: Combination names to reduce from those case results.
+        config: OpenSees builder overrides (a partial ``AnalysisBuilder`` config
+            dict), empty when the user left the Configuration group untouched.
     """
 
     cases: dict[str, dict[str, float]] = field(default_factory=dict)
     combinations: list[str] = field(default_factory=list)
+    config: dict[str, Any] = field(default_factory=dict)
 
 
 class AnalysisDialog(QDialog):
@@ -132,6 +138,7 @@ class AnalysisDialog(QDialog):
         body_layout.addWidget(self._build_case_group())
         body_layout.addWidget(self._build_combo_group())
         body_layout.addWidget(self._build_custom_group())
+        body_layout.addWidget(self._build_config_group())
         body_layout.addStretch(1)
 
         scroll = QScrollArea(self)
@@ -204,7 +211,7 @@ class AnalysisDialog(QDialog):
         if custom_name and custom:
             run[custom_name] = custom
 
-        return _Request(cases=run, combinations=combos)
+        return _Request(cases=run, combinations=combos, config=self._config_editor.value())
 
     # ── Buttons ──────────────────────────────────────────────────────
 
@@ -301,6 +308,14 @@ class AnalysisDialog(QDialog):
         if not self._patterns:
             grid.addWidget(QLabel("The model defines no load pattern."), 1, 0)
         grid.setColumnStretch(2, 1)
+        return group
+
+    def _build_config_group(self) -> QGroupBox:
+        """Optional OpenSees builder overrides, each key shown with its own help."""
+        group = QGroupBox("Configuration (optional)", self)
+        layout = QVBoxLayout(group)
+        self._config_editor = ConfigEditor(BUILDER_CONFIG_KEYS, {}, group)
+        layout.addWidget(self._config_editor)
         return group
 
     # ── Entry point ──────────────────────────────────────────────────

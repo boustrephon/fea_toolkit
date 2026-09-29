@@ -304,3 +304,16 @@ def test_run_is_gated_on_something_being_ticked(qapp):
 
     dialog._case_rows[0].check.setChecked(True)
     assert ok.isEnabled() is True
+
+
+def test_the_dialog_returns_the_edited_config(qapp):
+    """The Configuration group's edits reach the run request."""
+    from fea_toolkit.gui.views.analysis_dialog import AnalysisDialog
+
+    dialog = AnalysisDialog({"DEAD": {"DEAD": 1.0}}, [], ["DEAD"])
+    assert dialog.request().config == {}
+
+    dialog._config_editor._widgets["verbose"].setChecked(True)
+    dialog._config_editor._widgets["element_type"].setCurrentText("dispBeamColumn")
+
+    assert dialog.request().config == {"verbose": True, "element_type": "dispBeamColumn"}
