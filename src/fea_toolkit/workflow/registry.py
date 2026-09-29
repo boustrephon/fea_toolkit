@@ -12,15 +12,17 @@ prepare properties, prepare topology, solve, reduce — and is the order a menu
 should offer them.
 """
 
-from .steps import CASES, GEOMETRY, MODEL, TABLE, StepSpec
+from .steps import CASES, FIGURE, GEOMETRY, MODEL, TABLE, StepSpec
 from .verbs import (
     BRACE_BUCKLING_PARAMS,
+    CHART_PARAMS,
     COMBINE_PARAMS,
     CONNECTIVITY_PARAMS,
     MESH_PARAMS,
     RUN_STATIC_PARAMS,
     SCALE_SECTIONS_PARAMS,
     SELF_WEIGHT_PARAMS,
+    run_chart,
     run_check_brace_buckling,
     run_check_connectivity,
     run_check_self_weight,
@@ -90,6 +92,14 @@ STEP_SPECS: dict[str, StepSpec] = {
         kind=CASES,
         needs=("cases",),
         help="Reduce the solved cases into load combinations.",
+    ),
+    "chart": StepSpec(
+        verb="chart",
+        run=run_chart,
+        params=CHART_PARAMS,
+        kind=FIGURE,
+        needs=("cases",),
+        help="Plot the solved cases' storey displacement and drift profiles.",
     ),
 }
 

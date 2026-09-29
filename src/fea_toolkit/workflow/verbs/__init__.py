@@ -12,6 +12,7 @@ this package — and therefore the manifest — does not load OpenSees.  That is
 what lets the GUI render a verb's parameter form before a model is open.
 """
 
+from .chart import CHART_PARAMS, run_chart
 from .checks import (
     BRACE_BUCKLING_PARAMS,
     CONNECTIVITY_PARAMS,
@@ -27,12 +28,14 @@ from .scale_sections import SCALE_SECTIONS_PARAMS, run_scale_sections
 
 __all__ = [
     "BRACE_BUCKLING_PARAMS",
+    "CHART_PARAMS",
     "COMBINE_PARAMS",
     "CONNECTIVITY_PARAMS",
     "MESH_PARAMS",
     "RUN_STATIC_PARAMS",
     "SCALE_SECTIONS_PARAMS",
     "SELF_WEIGHT_PARAMS",
+    "run_chart",
     "run_check_brace_buckling",
     "run_check_connectivity",
     "run_check_self_weight",

@@ -142,6 +142,7 @@ class TestManifest:
             "mesh",
             "run_static",
             "combine",
+            "chart",
         ]
 
     def test_every_spec_is_self_consistent(self):
@@ -537,3 +538,28 @@ class TestEndToEnd:
         repository = NpzResultsRepository(arrays)
         assert repository.cases() == ["GRAV"]
         assert repository.case_meta("GRAV").get("group") == "GRAV"
+
+    def test_a_chart_step_renders_the_storey_profile_from_solved_cases(self):
+        """A ``chart`` step turns a solved lateral case into a figure, no re-solve."""
+        from matplotlib.figure import Figure
+
+        from examples.sample_model import make_sample_model
+
+        recipe = Recipe(
+            steps=[
+                Step("mesh"),
+                Step("run_static", params={"cases": {"WIND": {"WIND": 1.0}}}),
+                Step("chart"),
+            ]
+        )
+        run = run_recipe(recipe, make_sample_model())
+
+        assert [result.kind for result in run.results] == ["geometry", "cases", "figure"]
+        figure = run.results[-1].payload
+        assert figure is not None, "a lateral case should yield a storey profile"
+        assert isinstance(figure, Figure)
+
+    def test_a_chart_step_without_solved_cases_fails_clearly(self):
+        with pytest.raises(StepError) as info:
+            run_recipe(Recipe(steps=[Step("chart")]), _slab_model())
+        assert "run_static" in str(info.value.cause)

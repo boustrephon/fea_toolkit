@@ -177,10 +177,12 @@ class StepResult:
     """What one step produced, for display and for a later step to consume.
 
     Attributes:
-        kind: :data:`GEOMETRY`, :data:`MODEL` or :data:`CASES`.
+        kind: :data:`GEOMETRY`, :data:`MODEL`, :data:`CASES`, :data:`TABLE` or
+            :data:`FIGURE`.
         label: Display name for the output, e.g. ``"Meshed"``.
-        payload: The output itself — a ``MeshModel``, a ``SAPModelData``, or
-            ``{case_name: result_dict}``.
+        payload: The output itself — a ``MeshModel``, a ``SAPModelData``,
+            ``{case_name: result_dict}``, a :class:`Table`, or a matplotlib
+            ``Figure``.
     """
 
     kind: str
