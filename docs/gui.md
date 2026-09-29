@@ -399,18 +399,19 @@ verb accepts.  Tick **Optional** when a step's failure should be logged and the
 run continue instead of stopping.
 
 **Recipe ▸ Run recipe** (`Ctrl+Shift+R`) runs the steps in order on a worker
-thread, registering a prepared model as a geometry view and reporting each step
-in the Message Log.  (Registering a *recipe's* solved cases as result views is
-[P30](_pending_work.md); until then a recipe's case output is reported in the log
-and `Analysis ▸ Run…` is the route that turns cases into views.)
+thread, registering a prepared model as a geometry view, reporting each step in
+the Message Log, and registering each solved case — a static case or a load
+combination — as a **result view**.  Nothing is written to disk: the views read
+the run's in-memory archive through the same `ResultsRepository` an opened `.npz`
+is served from.
 
 > **Which one to use.**  **Analysis ▸ Run…** solves a case set against the model
 > as currently displayed, and is the quicker route once the model's *preparation*
-> is settled — it is also, today, the one that registers each case as a result
-> view.  Use a **recipe** when the preparation is itself part of the answer: it
-> records the mesh, the loads-only selection and the section changes *beside* the
-> solve, so the whole workflow is visible, saveable and replayable rather than
-> living in your memory of which menu items you clicked.
+> is settled.  Use a **recipe** when the preparation is itself part of the answer:
+> it records the mesh, the loads-only selection and the section changes *beside*
+> the solve, so the whole workflow is visible, saveable and replayable rather
+> than living in your memory of which menu items you clicked.  Both register
+> their cases as views.
 
 **Two masonry options, both available and independent.**  `scale_sections`
 *keeps* the wall elements and reduces their stiffness, so their weight stays with
@@ -467,7 +468,7 @@ drives a *separately installed* OpenSees is the recorded route
 | Element labels, the Property Tree tab, explicit interaction modes ([P23](_pending_work.md)) | The corresponding menu item and tab are greyed |
 | Window-layout persistence (milestone 8) | Docks and window geometry are not remembered between sessions |
 | Quad view (milestone 10) | A single viewport; use the Camera menu and the view cube |
-| `check` and `chart` verbs, and the command palette ([P29](_pending_work.md) phases C–D) | The Recipe panel runs the four verbs that exist (`scale_sections`, `mesh`, `run_static`, `combine`).  A recipe's case results are reported in the log, but are registered as views only through **Analysis ▸ Run…**; code checks and charts have no step yet |
+| `check` and `chart` verbs, and the command palette ([P30](_pending_work.md) phase C, [P31](_pending_work.md)) | The Recipe panel runs the verbs that exist (`scale_sections`, `mesh`, `run_static`, `combine`, and the three model checks).  A recipe's solved cases and combinations **are** registered as result views; the `capacity.*` / `mesh.checks` verbs, the `chart` verb and its figure view, and a check-table view have no step yet |
 
 ## Troubleshooting
 

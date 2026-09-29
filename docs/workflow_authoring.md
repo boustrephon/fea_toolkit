@@ -111,6 +111,14 @@ first `table` steps. A `chart` verb is *not* in the same position — every
 `plotting.report.*` function needs results (a DataFrame, a result dict), so the
 figure verb follows the results plumbing rather than preceding it.
 
+That plumbing has since landed: a recipe's solved cases **and** its combinations
+reach the GUI as result views.  The enabling change is that **both `cases` verbs
+now return the same object** — the in-memory results archive
+`io.npz_writer.results_arrays()` assembles — so one registration path serves a
+solve and a reduction alike, and a viewer, a save or an NPZ write needs no
+per-verb branch (§3.7).  What the `chart` verb still needs is a *different*
+result kind: a figure, not an array.
+
 There is **one verb per check**, not one `check` verb with a "which check"
 parameter: the checks take different arguments, so a single verb would have to
 declare every check's parameters and leave most of them inapplicable — a
@@ -216,7 +224,7 @@ rather than mutating it; the recipe object stays the single source of truth.
 |---|---|---|---|
 | **A** | [P29](_pending_work.md) | the `workflow` package: steps, recipes, registry, and the four verbs | ✅ landed |
 | **B** | [P29](_pending_work.md) | the Recipe panel, the `&Recipe` menu, the Model-menu presets | ✅ landed |
-| **C** | **[P30](_pending_work.md)** | **computed results become visible** — the three model-check verbs (`check_connectivity`, `check_self_weight`, `check_brace_buckling`) ✅ complete; the rest 🚧 planned — the `chart` verb (`plotting.report.*`), the remaining `check` verbs (`capacity.*`, `mesh.checks`), the GUI's **first figure view** and a check table, `combine`'s view, and a recipe's solved cases registering as result views (closing the gap noted in *The GUI surface*) | ⚠️ Partial |
+| **C** | **[P30](_pending_work.md)** | **computed results become visible** — the three model-check verbs (`check_connectivity`, `check_self_weight`, `check_brace_buckling`) ✅ complete, and a recipe's solved cases and combinations ✅ register as result views (`combine` returns the same in-memory archive `run_static` does, so one registration path serves both); the rest 🚧 planned — the `chart` verb (`plotting.report.*`), the remaining `check` verbs (`capacity.*`, `mesh.checks`), and the GUI's **first figure view** and a check table | ⚠️ Partial |
 | **D** | **[P31](_pending_work.md)** | **authoring ergonomics** — the command palette (`Ctrl+K`) compiling a command string into a step, a command-echo log recording every action as its equivalent step, and importing a Python script back into a recipe | 🚧 planned |
 | **E** | **[P32](_pending_work.md)** | **the report pipeline joins the vocabulary** — the *analysis* verbs the reconciliation needs (modal, response spectrum, pushover), and `generate_report` composing the same registry; see *Resolving the `generate_report` duality* below | 🚧 planned |
 

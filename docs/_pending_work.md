@@ -645,9 +645,11 @@ Source: `docs/workflow_authoring.md` § *Roadmap* and § *Resolving the
 `generate_report` duality*.
 
 **Status: ⚠️ Partial** — the three model-check verbs (`check_connectivity`,
-`check_self_weight`, `check_brace_buckling`) landed as `table` steps; the
-`chart` verb, the remaining `check` verbs (`capacity.*`, `mesh.checks`), and the
-figure / check-table / `combine` / solved-case result views remain planned.
+`check_self_weight`, `check_brace_buckling`) landed as `table` steps, and a
+recipe's solved cases and combinations now **register as result views** (both
+`cases` verbs return the same in-memory archive, so one registration path serves
+a solve and a reduction alike); the `chart` verb, the remaining `check` verbs
+(`capacity.*`, `mesh.checks`), and the figure / check-table views remain planned.
 
 **What.** Phase A/B made the *model preparation* workflow explicit; Phase C makes
 the **computed results** visible in the same way.  Three things:
@@ -663,12 +665,14 @@ the **computed results** visible in the same way.  Three things:
 2. **The views those need.**  The GUI's **first figure view** (nothing renders a
    chart today — an embedded Matplotlib canvas) and a **check table view**.  Both
    are new widget work, which is why this is its own item.
-3. **Closing the two gaps Phase B left.**  `combine` gains a view, and a
+3. **Closing the two gaps Phase B left.**  ✅ `combine` gains a view, and a
    recipe's solved *cases* register as result views rather than only being
-   reported in the log (`docs/gui.md` records the limitation).  With the review's
-   fix to `run_case_set`, the semantics to honour are: a **cancelled** case is
-   neither a result nor a failure; a **failed** case is one that was attempted
-   and did not solve.
+   reported in the log (`docs/gui.md` records the limitation).  Both fall out of
+   one change: `combine` now returns the same in-memory archive `run_static`
+   does, so the GUI's single registration path serves a solve and a reduction
+   alike.  With the review's fix to `run_case_set`, the semantics honoured are:
+   a **cancelled** case is neither a result nor a failure; a **failed** case is
+   one that was attempted and did not solve.
 
 **Not in this item.** Reconciling `generate_report(config)` with `Recipe` is
 **P32**, not P30 — the overlap turns out to be the *analysis* verbs (modal,
