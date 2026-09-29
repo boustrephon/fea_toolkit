@@ -33,7 +33,6 @@ from qtpy.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QPushButton,
-    QSizePolicy,
     QSpinBox,
     QToolButton,
     QVBoxLayout,
@@ -310,10 +309,11 @@ class RecipePanel(QWidget):
         if parameter.help:
             help_label = QLabel(parameter.help)
             help_label.setWordWrap(True)
-            # A word-wrapped label reports a single-line height to the form
-            # layout, which clips multi-line text; a Minimum vertical policy
-            # makes its sizeHint the wrapped height instead.
-            help_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+            # A word-wrapped label reports a single-line height at its preferred
+            # width, so a narrower form column clips multi-line text.  Capping
+            # the width makes it wrap at a known width, so its sizeHint is the
+            # wrapped height and the form reserves the full text.
+            help_label.setMaximumWidth(260)
             help_label.setStyleSheet("color: #6a6a6a;")
             layout.addWidget(help_label)
         return container
