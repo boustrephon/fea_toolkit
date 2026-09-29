@@ -124,20 +124,21 @@ re-analyse (`File ▸ Open`), and the results views are replaced by that model's
 own views.
 
 **Results ▸ Deformed shape** draws the active case's **deformed shape** over that
-geometry, amplified by the **Scale** box on the main toolbar (default 50×,
-because a real deflection is a fraction of the model's size).  The action is
-enabled only for a case view whose archive actually carries nodal
-displacement — an archive written without it leaves the button greyed — and the
-amplification is a *display* factor: the displacements are read in model units
-and never modified.
+geometry, auto-scaled so the largest displacement is **10 % of the model's
+size** — the **Deform %** box on the main toolbar overrides that (the value is a
+percentage of the model diagonal, so a millimetre model and a metre model read
+the same way).  The action is enabled only for a case view whose archive
+actually carries nodal displacement — an archive written without it leaves the
+button greyed — and the scale is a *display* factor: the displacements are read
+in model units and never modified.
 
 Switching views clears the overlay and unchecks the action, because a deformed
 shape belongs to **one** case's geometry: drawing case A's shape over case B's
 members would be a lie.  **Results ▸ Clear results** does the same on demand.
 
 **Results ▸ Force diagrams** draws the active case's **member end forces** as
-flag diagrams, in whichever component the **Force** selector beside the Scale
-box names.  The selector offers SAP2000's local-DOF vocabulary — `P` (axial),
+flag diagrams, in whichever component the **Force** selector names.  The
+selector offers SAP2000's local-DOF vocabulary — `P` (axial),
 `V2` / `V3` (the local-2 / local-3 shears), `T` (torsion), `M2` / `M3` (the
 local-2 / local-3 moments) — and opens on `M3`.  Those are the same six local
 DOFs a member-end release frees, and they map onto the schema's `Fx … Mz` result
@@ -147,11 +148,14 @@ a component acts along or about; the values remain the recorded OpenSees
 `localForces`, and so do not adopt SAP2000's output sign convention.
 
 The diagram follows the shape's rules: enabled only for a case view whose archive
-carries end forces, with the selector greyed alongside it, and the **Scale** box
-shared between the two overlays — both are drawn in model units, so one factor
-reads them both.  Switching views and **Results ▸ Clear results** drop it.  The
-two overlays are independent, so turning off the shape leaves the diagram drawn
-and vice versa.
+carries end forces, with the selector greyed alongside it.  Its size is
+**auto-scaled to 10 % of the model** — the **Flags %** box (a percentage of the
+model diagonal, like the deformed shape's) overrides it.  The two overlays have
+**separate** knobs, because a displacement amplification and a
+length-per-force factor are different quantities; both are unit-agnostic, so a
+whole-building flag diagram no longer overwhelms the scene.  Switching views and
+**Results ▸ Clear results** drop it.  The two overlays are independent, so
+turning off the shape leaves the diagram drawn and vice versa.
 
 ### Running an analysis
 
@@ -441,7 +445,7 @@ jarring than a greyed-out one.
 | **Model** | Split elements, Mesh areas (presets: each writes a recipe step and runs it) | Selections, Units |
 | **Analysis** | Run… (`Ctrl+R`), Stop | Modal analysis, Response spectrum, Pushover |
 | **Recipe** | Run recipe (`Ctrl+Shift+R`), Open recipe…, Save recipe…, Export as Python…, Clear recipe | — |
-| **Results** | Deformed shape, Force diagrams (+ Force selector), Clear results | Storey response, Pushover curve |
+| **Results** | Deformed shape (+ Deform %), Force diagrams (+ Force selector + Flags %), Clear results | Storey response, Pushover curve |
 | **Help** | Documentation, About | — |
 | Toolbars | Open; camera views; display toggles; Split / Mesh; Run / Stop; Deformed shape + Scale; Force diagrams + Force selector | Save results (until a result is shown), Export Tcl / screenshot |
 | View toolbar | Zoom/camera; display toggles; **Shells** opacity and **Shrink** | Show labels, Show loads, Show force diagrams |
