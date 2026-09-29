@@ -375,10 +375,16 @@ class TestEurocode8:
         sa2 = _eurocode8_spectrum(0.30, ag_r=0.14, ground_type="A", q=2.0)
         assert sa2 == pytest.approx(sa1 / 2.0)
 
-    def test_damping_correction_eta(self):
-        """2% damping scales ordinates by η = √(10/7) > 1."""
+    def test_design_spectrum_ignores_damping(self):
+        """The design spectrum carries no η: 2 % and 5 % damping coincide."""
         sa5 = _eurocode8_spectrum(0.30, ag_r=0.14, ground_type="A", zeta=0.05)
         sa2 = _eurocode8_spectrum(0.30, ag_r=0.14, ground_type="A", zeta=0.02)
+        assert sa2 == pytest.approx(sa5)
+
+    def test_damping_correction_eta_applies_to_the_elastic_spectrum(self):
+        """2 % damping scales the *elastic* ordinates by η = √(10/7) > 1."""
+        sa5 = _eurocode8_spectrum(0.30, ag_r=0.14, ground_type="A", zeta=0.05, elastic=True)
+        sa2 = _eurocode8_spectrum(0.30, ag_r=0.14, ground_type="A", zeta=0.02, elastic=True)
         eta = math.sqrt(10.0 / (5.0 + 100.0 * 0.02))
         assert sa2 == pytest.approx(sa5 * eta)
 
@@ -389,10 +395,10 @@ class TestEurocode8:
             sa = _eurocode8_spectrum(0.30, ag_r=0.10, ground_type=gt, spectrum_type=1)
             assert sa == pytest.approx(0.10 * soil * 2.5), gt
 
-    def test_vertical_uses_avg_and_amplification_3(self):
-        """Vertical: a_vg = 0.9·a_g, S = 1.0, amplification 3.0."""
+    def test_vertical_design_uses_avg_and_plateau_2_5(self):
+        """Vertical design: a_vg = 0.9·a_g, S = 1.0, plateau 2.5/q (no η)."""
         sa = _eurocode8_spectrum(0.10, ag_r=0.14, vertical=True)
-        assert sa == pytest.approx(0.9 * 0.14 * 1.0 * 3.0)
+        assert sa == pytest.approx(0.9 * 0.14 * 1.0 * 2.5)
 
     def test_vertical_ignores_ground_type(self):
         """The vertical soil factor is always 1.0."""
@@ -412,8 +418,22 @@ class TestEurocode8:
         )
         assert s.code == "EC8-Type2"
         assert len(s.T) == len(s.Sa)
+        # Plateau (0.05-0.25 s) = a_g·S·2.5/q = 0.14·1.0·2.5; the design
+        # spectrum carries no damping correction η.
+        assert s.interpolate([0.15])[0] == pytest.approx(0.14 * 2.5)
+
+    def test_from_factory_elastic_applies_damping_correction(self):
+        """The elastic factory expectation carries η = √(10/7) at 2 % damping."""
+        s = ResponseSpectrum.from_eurocode8(
+            ag_r=0.10,
+            gamma_i=1.4,
+            ground_type="A",
+            spectrum_type=2,
+            q=1.0,
+            zeta=0.02,
+            elastic=True,
+        )
         eta = math.sqrt(10.0 / 7.0)
-        # Plateau (0.05-0.25 s) = a_g·S·η·2.5/q = 0.14·1.0·η·2.5.
         assert s.interpolate([0.15])[0] == pytest.approx(0.14 * 2.5 * eta)
 
     def test_factory_sampled_at_branch_periods(self):

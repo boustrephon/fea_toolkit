@@ -271,8 +271,9 @@ class ResponseSpectrum:
             non-dissipative case.  Ignored when *elastic* is True.
             Defaults to 1.0.
         zeta : float
-            Damping ratio (default 0.05).  The damping correction
-            ``η = √(10 / (5 + 100·ζ)) ≥ 0.55`` of §3.2.2.2(3) is applied.
+            Damping ratio (default 0.05).  Applied through the damping
+            correction ``η = √(10 / (5 + 100·ζ)) ≥ 0.55`` of §3.2.2.2(3),
+            which enters the **elastic** spectrum only.
         vertical : bool
             When ``True``, build the vertical spectrum: ``a_vg = 0.9 * a_g``,
             ``S = 1.0``, ``T_B/T_C/T_D = 0.05/0.15/1.0`` s, amplification
@@ -281,7 +282,7 @@ class ResponseSpectrum:
             When ``True``, build the *elastic* spectrum (§3.2.2.2
             horizontal, §3.2.2.3 vertical) instead of the *design*
             spectrum (§3.2.2.5): rising-branch intercept ``1`` (vs
-            ``2/3``), plateau ``η·a`` (vs ``η·a/q``), and no ``β·a_g``
+            ``2/3``), plateau ``η·a`` (vs ``2.5/q``), and no ``β·a_g``
             lower bound.  Defaults to ``False``.
         T_max : float
             Upper period bound (s, default 4.0).
@@ -745,21 +746,23 @@ def _eurocode8_spectrum(
     Returns the **design** spectrum (§3.2.2.5, Eqs 3.13-3.16) by default,
     or — when *elastic* is True — the **elastic** spectrum (§3.2.2.2
     horizontal, §3.2.2.3 vertical, Eqs 3.2-3.5).  Both are piecewise in
-    the period ``T``, with plateau coefficient ``η · a / q`` (design) or
-    ``η · a`` (elastic), where *a* is the elastic amplification (2.5
-    horizontal, 3.0 vertical) and ``η`` is the damping correction of
-    §3.2.2.2(3):
+    the period ``T``.  The **elastic** plateau coefficient is ``η · a``,
+    where *a* is the elastic amplification (2.5 horizontal, 3.0 vertical)
+    and ``η`` is the damping correction of §3.2.2.2(3).  The **design**
+    plateau coefficient is the fixed ``2.5 / q`` of §3.2.2.5 — the damping
+    correction ``η`` applies only to the elastic spectrum, and the design
+    spectrum does not use the vertical 3.0 amplification:
 
-    * ``0 <= T <= T_B`` — rising: ``a_g·S·(i + (T/T_B)·(η·a/q − i))``
-    * ``T_B <= T <= T_C`` — plateau: ``a_g·S·(η·a/q)``
-    * ``T_C <= T <= T_D`` — falling (1/T): ``a_g·S·(η·a/q)·(T_C/T)``
-    * ``T_D <= T`` — falling (1/T²): ``a_g·S·(η·a/q)·(T_C·T_D/T²)``
+    * ``0 <= T <= T_B`` — rising: ``a_g·S·(i + (T/T_B)·(κ − i))``
+    * ``T_B <= T <= T_C`` — plateau: ``a_g·S·κ``
+    * ``T_C <= T <= T_D`` — falling (1/T): ``a_g·S·κ·(T_C/T)``
+    * ``T_D <= T`` — falling (1/T²): ``a_g·S·κ·(T_C·T_D/T²)``
 
-    where the rising-branch intercept ``i`` is ``2/3`` for the design
-    spectrum and ``1`` for the elastic spectrum, and the ``/q`` factor is
-    present only for the design spectrum.  The design spectrum has a
-    lower bound of ``β·a_g`` (``β = 0.2``); the elastic spectrum has none.
-    The design ground acceleration is ``a_g = gamma_i · ag_r``
+    where ``κ`` is ``η · a`` (elastic) or ``2.5 / q`` (design), and the
+    rising-branch intercept ``i`` is ``1`` for the elastic spectrum and
+    ``2/3`` for the design spectrum.  The design spectrum has a lower
+    bound of ``β·a_g`` (``β = 0.2``); the elastic spectrum has none.  The
+    design ground acceleration is ``a_g = gamma_i · ag_r``
     (EN 1998-1 §2.1(4)).
 
     *ag_r* carries the caller's unit system — the returned acceleration
@@ -811,10 +814,13 @@ def _eurocode8_spectrum(
     ag = gamma_i * ag_r
     accel = accel_ratio * ag
     eta = max(_EC8_ETA_MIN, float(np.sqrt(10.0 / (5.0 + 100.0 * zeta))))
-    # Elastic spectrum: plateau η·a, rising intercept 1.  Design spectrum:
-    # plateau η·a/q, rising intercept 2/3 (EN 1998-1 §3.2.2.2 vs §3.2.2.5).
+    # Elastic spectrum: plateau η·a (a = 2.5 horizontal, 3.0 vertical), rising
+    # intercept 1.  Design spectrum: plateau 2.5/q — the damping correction η
+    # belongs to the elastic spectrum (§3.2.2.2(3)) and does not enter the
+    # design spectrum, whose §3.2.2.5 plateau is the fixed 2.5/q (so the
+    # vertical 3.0 amplification does not apply either); rising intercept 2/3.
     intercept = 1.0 if elastic else 2.0 / 3.0
-    a_plat = eta * ampl / (1.0 if elastic else q)  # plateau (× accel·soil)
+    a_plat = eta * ampl if elastic else _EC8_HORIZONTAL_AMPLIFICATION / q
     base = accel * soil
 
     T_arr = np.asarray(T, dtype=float)
