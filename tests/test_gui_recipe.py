@@ -38,8 +38,18 @@ def window(qapp, monkeypatch, tmp_path):
     win = MainWindow(model=_model())
     win.resize(900, 700)
     win.show()
-    yield win
-    win.close()
+    try:
+        yield win
+    finally:
+        # A ``run_static`` recipe step builds an OpenSees domain, so the global
+        # state must be cleared even if the window fails to close (guardrails
+        # §5.6) — a leaked domain would show up as a failure in an unrelated test.
+        try:
+            win.close()
+        finally:
+            import openseespy.opensees as ops
+
+            ops.wipe()
 
 
 def _await(window, timeout=60.0):
@@ -160,3 +170,80 @@ class TestRunOrder:
     def test_an_empty_recipe_warns_rather_than_running(self, window):
         window._on_recipe_run()
         assert "The recipe has no steps" in window._message_log.toPlainText()
+
+
+class TestResultViews:
+    """A recipe's results reach the viewport, not just the log (P30 phase C).
+
+    Both ``cases`` verbs return the same in-memory archive the **Analysis ▸ Run**
+    path serves, so one registration path covers a solve and a combination
+    reduction alike — and nothing is written to disk to view either.
+    """
+
+    def test_a_solved_case_registers_a_results_view(self, window):
+        panel = window._recipe_panel
+        panel.add_step("mesh", params={"create_shells": False})
+        panel.add_step("run_static", params={"cases": {"DEAD": {"DEAD": 1.0}}})
+        window._actions["recipe.run"].trigger()
+        _await(window)
+
+        view = window._views.get("results:DEAD")
+        assert view is not None, "the solved case registered no view"
+        assert view.kind == "results"
+        assert window._views.results("results:DEAD") is not None
+        assert view.source == "Recipe: Static cases \u00b7 DEAD"
+        assert "Static cases: 1 case(s) added as views." in window._message_log.toPlainText()
+
+    def test_a_combination_registers_its_own_view(self, window):
+        """``combine`` returns a case's archive shape, so it registers the same way."""
+        from fea_toolkit.model.sap_data import LoadCombination, LoadCombinationEntry
+
+        window._model.load_combinations = {
+            "GRAV": LoadCombination(
+                name="GRAV",
+                combo_type="Linear Add",
+                entries=[LoadCombinationEntry(name="DEAD", factor=1.0, kind="case")],
+            )
+        }
+        panel = window._recipe_panel
+        panel.add_step("mesh", params={"create_shells": False})
+        panel.add_step("run_static", params={"cases": {"DEAD": {"DEAD": 1.0}}})
+        panel.add_step("combine", params={"combinations": ["GRAV"]})
+        window._actions["recipe.run"].trigger()
+        _await(window)
+
+        keys = [view.key for view in window._views.views()]
+        assert "results:DEAD" in keys
+        assert "results:GRAV" in keys
+
+    def test_an_empty_archive_registers_no_view(self, window):
+        """An archive with no case in it adds nothing — it does not invent a view."""
+        assert window._show_results_result("Static cases", {}) == []
+        assert window._views.get("results:") is None
+
+    def test_a_cancelled_run_that_solved_nothing_is_not_a_failure(self, window):
+        """A cancelled run's empty result is explained by cancelling, not as an error.
+
+        The two are genuinely different: a case that ran and threw is a *failure*,
+        while one the cancellation stopped from ever being attempted is not — the
+        distinction ``run_case_set`` draws.  Here the same empty archive is
+        reported on one run and passed over on the other.
+        """
+        from fea_toolkit.workflow import CASES, RecipeRun, StepResult
+
+        def empty_result() -> RecipeRun:
+            run = RecipeRun()
+            run.results.append(StepResult(kind=CASES, label="Static cases", payload={}))
+            return run
+
+        window._recipe_finished((empty_result(), []))
+        assert "the run produced no results" in window._message_log.toPlainText()
+
+        window._message_log.clear()
+        cancelled = empty_result()
+        cancelled.cancelled = True
+        window._recipe_finished((cancelled, []))
+
+        log = window._message_log.toPlainText()
+        assert "The recipe was cancelled." in log
+        assert "produced no results" not in log

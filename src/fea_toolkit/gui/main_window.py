@@ -1436,6 +1436,14 @@ class MainWindow(QMainWindow):
     def _recipe_finished(self, payload: Any) -> None:
         """Report what the recipe produced and register each result as a view.
 
+        A ``cases`` result carries the same in-memory archive the **Analysis ▸
+        Run** path serves, so it becomes one view per case, exactly as there —
+        a recipe's results are no longer merely a line in the log.  Cancellation
+        and failure stay distinct: a *cancelled* run legitimately holds only the
+        cases it solved before stopping, so no result is reported as failed, and
+        an empty one is left to the cancellation line rather than called out as
+        missing data.
+
         Args:
             payload: ``(RecipeRun, [log lines])`` from the worker.
         """
@@ -1448,12 +1456,62 @@ class MainWindow(QMainWindow):
             if result.kind == "geometry":
                 self._show_geometry_result(result.label, result.payload)
             elif result.kind == CASES:
-                self.log(f"{result.label}: {len(result.payload)} result arrays.")
+                added = self._show_results_result(result.label, result.payload)
+                if not added and not run.cancelled:
+                    self.log(f"{result.label}: the run produced no results.", "warn")
         for index, verb, message in run.failures:
             self.log(f"Step {index} ({verb}) failed and is optional \u2014 {message}", "warn")
         if run.cancelled:
             self.log("The recipe was cancelled.", "warn")
         self._set_analysis_actions_enabled()
+
+    def _show_results_result(self, label: str, arrays: Any) -> list:
+        """Register each case in a recipe's results as a view, and show the first.
+
+        Both ``cases`` verbs — a solve and a combination reduction — hand back
+        an in-memory results archive, so this is the same path the **Analysis ▸
+        Run** results take: a
+        :class:`~fea_toolkit.io.results_repository.NpzResultsRepository` over
+        the array dict, one view per case, nothing written to disk.  Cases
+        replace by key, so re-running a recipe refreshes its views instead of
+        piling them up.
+
+        Args:
+            label: The step's result label, e.g. ``"Static cases"`` — recorded
+                as the view's provenance.
+            arrays: The archive arrays the step produced.
+
+        Returns:
+            The case labels registered, in archive order — empty when the
+            archive holds no case.
+        """
+        from ..io.results_repository import NpzResultsRepository
+
+        repository = NpzResultsRepository(arrays or {})
+        cases = list(repository.cases())
+        if not cases:
+            return []
+
+        # The mesh the run was prepared from is what the results are keyed to,
+        # so prefer it; an archive also carries its own display geometry, which
+        # is what makes the view drawable with nothing else loaded.
+        mesh = self._store.preprocessed() if self._store is not None else None
+        model = mesh if mesh is not None else repository.as_model()
+        for case in cases:
+            self._views.add_results(
+                f"{_RESULTS_KEY_PREFIX}{case}",
+                _case_view_name(case, repository.case_meta(case)),
+                repository,
+                source=f"Recipe: {label} \u00b7 {case}",
+                model=model,
+                activate=False,
+            )
+        self.log(f"{label}: {len(cases)} case(s) added as views.")
+
+        first = self._views.get(f"{_RESULTS_KEY_PREFIX}{cases[0]}")
+        if first is not None:
+            self._show_view(first, rebuild_tree=True)
+        return cases
 
     def _show_geometry_result(self, label: str, mesh_model: Any) -> None:
         """Report a geometry result, register it as a view and display it.
