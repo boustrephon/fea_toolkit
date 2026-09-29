@@ -126,8 +126,9 @@ class Recipe:
             The rebuilt recipe.
 
         Raises:
-            ValueError: If *data* is not a mapping, a verb is unknown, a
-                parameter is undeclared, or a value has the wrong type.
+            ValueError: If *data* is not a mapping, a step is not a mapping, a
+                verb is unknown, a parameter is undeclared, or a value has the
+                wrong type.
         """
         from .registry import STEP_SPECS
         from .steps import Step
@@ -136,6 +137,10 @@ class Recipe:
             raise ValueError(f"a recipe must be a mapping, got {type(data).__name__}")
         steps = []
         for index, raw in enumerate(data.get("steps") or []):
+            if not isinstance(raw, dict):
+                raise ValueError(
+                    f"recipe step {index}: expected a mapping, got {type(raw).__name__}"
+                )
             verb = raw.get("verb")
             if verb not in STEP_SPECS:
                 raise ValueError(
@@ -263,7 +268,10 @@ def run_recipe(
     what a later analysis step solves, and an analysis step's cases are what a
     later reduction step reads.  ``cancel()`` is polled **between** steps — a
     step already running is never interrupted mid-way, matching the GUI worker's
-    cooperative cancellation.
+    cooperative cancellation.  A step that stops *itself* mid-way (a solve
+    cancelled between cases) records it on ``context.cancelled``, which is read
+    after every step — including the last — so the run is still reported
+    cancelled.
 
     Args:
         recipe: The steps to run.
@@ -314,4 +322,10 @@ def run_recipe(
             context.log(
                 f"recipe: step {index} ({step.verb}) failed and is optional — continuing: {message}"
             )
+        if context.cancelled:
+            # A step that stopped mid-way (a solve cancelled between cases)
+            # reports it on the context, so the run is marked cancelled even
+            # when that step was the last one.
+            run.cancelled = True
+            break
     return run

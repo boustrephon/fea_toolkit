@@ -81,4 +81,7 @@ def run_static(context: StepContext, step: Step) -> list[StepResult]:
     )
     if result["cancelled"]:
         context.log("Static cases: run cancelled")
+        # Propagate the in-step cancellation so run_recipe marks the run
+        # cancelled even when run_static is the final step.
+        context.cancelled = True
     return [StepResult(kind=CASES, label="Static cases", payload=result["arrays"])]

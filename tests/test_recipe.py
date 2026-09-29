@@ -134,6 +134,13 @@ class TestManifest:
         )
         assert done.stdout.strip() == "False"
 
+    def test_defaults_are_independent_copies(self):
+        """A mutable default is copied per call, as ``validate_params`` does."""
+        spec = STEP_SPECS["run_static"]
+        first = spec.defaults()
+        first["cases"]["DEAD"] = {"DEAD": 1.0}
+        assert spec.defaults()["cases"] == {}
+
 
 # ── Recipes as data ───────────────────────────────────────────────────
 
@@ -175,6 +182,10 @@ class TestRecipeSerialisation:
     def test_an_unknown_verb_is_rejected_by_name(self):
         with pytest.raises(ValueError, match="unknown verb 'squeeze'"):
             Recipe.from_dict({"steps": [{"verb": "squeeze"}]})
+
+    def test_a_step_that_is_not_a_mapping_is_rejected(self):
+        with pytest.raises(ValueError, match="recipe step 0: expected a mapping, got str"):
+            Recipe.from_dict({"steps": ["mesh"]})
 
     def test_an_unknown_parameter_is_rejected_rather_than_ignored(self):
         data = {"steps": [{"verb": "mesh", "params": {"split_wals": True}}]}
@@ -394,3 +405,31 @@ class TestEndToEnd:
         with pytest.raises(StepError) as info:
             run_recipe(Recipe(steps=[Step("combine")]), _slab_model())
         assert "run_static" in str(info.value.cause)
+
+    def test_a_cancelled_solve_marks_the_run_cancelled(self):
+        """A run_static stopped mid-case marks the run cancelled, final step or not."""
+        from examples.sample_model import make_sample_model
+
+        calls = {"n": 0}
+
+        def cancel() -> bool:
+            calls["n"] += 1
+            # False before 'mesh', False before 'run_static', False before the
+            # first case, True before the second — so DEAD solves, WIND is skipped.
+            return calls["n"] > 3
+
+        recipe = Recipe(
+            steps=[
+                Step("mesh"),
+                Step(
+                    "run_static",
+                    params={"cases": {"DEAD": {"DEAD": 1.0}, "WIND": {"WIND": 1.0}}},
+                ),
+            ]
+        )
+        run = run_recipe(recipe, make_sample_model(), cancel=cancel)
+
+        assert run.cancelled is True
+        # The case solved before the cancellation is kept in the partial result.
+        arrays = run.results[-1].payload
+        assert any(name.startswith("static/DEAD") for name in arrays)

@@ -209,6 +209,10 @@ class StepContext:
         cancel: Zero-argument predicate — ``True`` asks the run to stop at the
             next step boundary.  Wired to the GUI worker's flag.
         log: One-line sink for progress, wired to the GUI message log.
+        cancelled: Set by a step that observed its **own** cooperative
+            cancellation (e.g. a solve stopped between cases).  ``run_recipe``
+            reads it after each step, so a cancellation inside the *last* step
+            still marks the run cancelled.
     """
 
     model_data: SAPModelData
@@ -216,6 +220,7 @@ class StepContext:
     case_results: dict = field(default_factory=dict)
     cancel: Callable[[], bool] = _never_cancel
     log: Callable[[str], None] = _discard
+    cancelled: bool = False
 
 
 @dataclass(frozen=True)
@@ -241,8 +246,13 @@ class StepSpec:
     needs: tuple = ()
 
     def defaults(self) -> dict[str, Any]:
-        """Every parameter's default — the form of a freshly added step."""
-        return {name: spec.default for name, spec in self.params.items()}
+        """Every parameter's default — the form of a freshly added step.
+
+        Each default is **deep-copied**, so a mutable default (a ``dict`` or a
+        ``list``) is independent for every step — the same guarantee
+        :func:`validate_params` gives a run.
+        """
+        return {name: copy.deepcopy(spec.default) for name, spec in self.params.items()}
 
     def validate(self, params: dict[str, Any]) -> dict[str, Any]:
         """Fill *params* with defaults, rejecting an undeclared key.
