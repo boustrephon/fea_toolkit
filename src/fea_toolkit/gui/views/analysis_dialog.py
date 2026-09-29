@@ -165,8 +165,15 @@ class AnalysisDialog(QDialog):
         a combination reduces the solved cases through the *model's* factors, so
         folding a scaled solve under the model name would silently apply the
         scale twice.  The un-scaled leaf a combination needs is added below.
+        A generated name that would collide with a model case — or with another
+        scaled case — gains a `` (2)``, `` (3)`` … suffix via
+        :func:`_unique_scaled_name`.
         """
         run: dict[str, dict[str, float]] = {}
+        # Every model case name is claimed up front: a scaled solve that reused
+        # one would shadow that case for the reduction below, which resolves its
+        # leaves by *model* name.
+        taken: set[str] = set(self._cases)
         for row in self._case_rows:
             if not row.check.isChecked():
                 continue
@@ -174,7 +181,9 @@ class AnalysisDialog(QDialog):
             if scale == 1.0:
                 run[row.name] = dict(row.patterns)
             else:
-                run[f"{row.name} \u00d7{scale:g}"] = {p: f * scale for p, f in row.patterns.items()}
+                name = _unique_scaled_name(f"{row.name} \u00d7{scale:g}", taken)
+                taken.add(name)
+                run[name] = {p: f * scale for p, f in row.patterns.items()}
 
         combos: list[str] = []
         for row in self._combo_rows:
@@ -323,3 +332,27 @@ class AnalysisDialog(QDialog):
 def _patterns_text(patterns: dict[str, float]) -> str:
     """``"DEAD × 1.2, LIVE × 1.5"`` for a ``{pattern: factor}`` map."""
     return ", ".join(f"{name} \u00d7 {factor:g}" for name, factor in patterns.items())
+
+
+def _unique_scaled_name(base: str, taken: set[str]) -> str:
+    """A name for a scaled case that no model case or requested case already has.
+
+    A model may already hold a case spelled like the generated name — e.g. a case
+    literally named ``DEAD ×2``.  Reusing that spelling would shadow the model
+    case for a combination reduction, which resolves its leaves by *model* name,
+    so the name gains a `` (2)``, `` (3)`` … suffix until it is free.
+
+    Args:
+        base: The preferred name, e.g. ``"DEAD ×2"``.
+        taken: Names already claimed — every model case name, plus every name
+            requested so far.
+
+    Returns:
+        *base*, or *base* followed by the smallest free `` (n)`` suffix.
+    """
+    name = base
+    suffix = 2
+    while name in taken:
+        name = f"{base} ({suffix})"
+        suffix += 1
+    return name

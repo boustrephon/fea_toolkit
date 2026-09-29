@@ -66,8 +66,12 @@ def window(qapp, monkeypatch, tmp_path):
     try:
         yield win
     finally:
-        win.close()
-        ops.wipe()
+        # ``ops.wipe()`` must run even if ``win.close()`` raises, so a failing
+        # close cannot leak OpenSees global state into the next test.
+        try:
+            win.close()
+        finally:
+            ops.wipe()
 
 
 def _spin(window, timeout=60.0):
@@ -220,6 +224,27 @@ def test_a_scaled_leaf_keeps_the_unscaled_case_for_its_combination(qapp):
     # Both the user's scaled solve and the model's un-scaled case are present.
     assert request.cases["DEAD \u00d72"] == {"DEAD": 2.0}
     assert request.cases["DEAD"] == {"DEAD": 1.0}
+
+
+def test_a_scaled_name_cannot_shadow_a_model_case_of_the_same_spelling(qapp):
+    """``DEAD`` ×2 must not overwrite a model case literally named ``DEAD ×2``."""
+    from fea_toolkit.gui.views.analysis_dialog import AnalysisDialog
+
+    dialog = AnalysisDialog(
+        {"DEAD": {"DEAD": 1.0}, "DEAD \u00d72": {"SDL": 1.0}},
+        [],
+        ["DEAD", "SDL"],
+    )
+    dialog._case_rows[0].check.setChecked(True)  # DEAD …
+    dialog._case_rows[0].factor.setValue(2.0)  # … scaled ×2 would be "DEAD ×2"
+    dialog._case_rows[1].check.setChecked(True)  # the model's own "DEAD ×2"
+
+    request = dialog.request()
+    # The model case keeps its name and its own patterns…
+    assert request.cases["DEAD \u00d72"] == {"SDL": 1.0}
+    # …and the scaled DEAD lands under a distinct, non-colliding name.
+    assert request.cases["DEAD \u00d72 (2)"] == {"DEAD": 2.0}
+    assert set(request.cases) == {"DEAD \u00d72", "DEAD \u00d72 (2)"}
 
 
 def test_an_unticked_case_is_not_run(qapp):
