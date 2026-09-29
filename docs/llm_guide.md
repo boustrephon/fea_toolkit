@@ -41,6 +41,7 @@ builder = AnalysisBuilder(mesh, {}).build_domain()
 | Plotting | `from fea_toolkit.plotting import ...` | 3D views, deformed shapes, force diagrams |
 | Analysis | `from fea_toolkit.analysis import ...` | Analysis functions returning typed `AnalysisResult` (modal, static, RS, pushover, NLD) |
 | Capacity | `from fea_toolkit.capacity import ...` | Code-specified member capacities (GB 50010, ASCE 41) + DCR |
+| Workflow | `from fea_toolkit.workflow import Recipe, Step, run_recipe` | Declarative recipes — verbs (`mesh`, `scale_sections`, `run_static`, `combine`) applied to a `Selection`, saved as JSON and exportable to Python. See `docs/workflow_authoring.md` |
 | Model | `from fea_toolkit.model import ...` | Geometry, stories, checks, CSM |
 | Utilities | `from fea_toolkit.utils import ...` | Facade over `_unit_scaling`, `_loads_infer`, `_flags`, `_cqc` — units, load inference, CQC |
 

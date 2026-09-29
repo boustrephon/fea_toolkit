@@ -23,7 +23,8 @@ Each subpackage has a clear domain. Do not cross-contaminate:
 | `model/` | Data models, dataclass hierarchies, geometry utilities. No OpenSees imports. |
 | `io/` | File I/O: parsing (`.s2k`, JSON), NPZ read/write, reporting. Shared NPZ/H5 serialisation lives in `io/_serial.py`. |
 | `opensees/` | OpenSees domain construction and analysis execution. Imports `ops`. |
-| `analysis/` | Analysis orchestration (`manager.py`) and type-specific runners. |
+| `analysis/` | Type-specific analysis functions (`linear`, `static`, `modal`, `rs`, `pushover`, `nonlinear_dynamic`), the case listing, and combination reduction. Orchestration of a whole run lives at the root in `report.py` — there is no `manager.py`. |
+| `workflow/` | Declarative workflow authoring: `steps.py` (the vocabulary), `registry.py` (the `STEP_SPECS` manifest), `recipe.py` (recipes as data), `verbs/` (one module per verb, holding its implementation and its declared parameters). Qt-free, and imports no `ops` at module level. |
 | `mesh/` | Mesh quality checks and Gmsh remeshing. Optional dependency. |
 | `plotting/` | PyVista/Matplotlib visualization. Backend-agnostic viewer via `renderers/`. |
 | `rhino/` | Rhino 8 geometry export, layers, colouring. |
@@ -194,6 +195,33 @@ New analysis code must follow this pattern. Do NOT add analysis methods to the p
   ``ndm=2`` hand-check benchmarks that reuse the model-layer section/material
   code — never as part of the production workflow.  Do not add a 2D
   element-creation branch to the builder.
+
+### 3.12 Workflow layer (recipes and steps)
+Operations are authored as **steps** in a **recipe**, not wired into entry
+points.  See `docs/workflow_authoring.md` for the design record.
+
+- A **step** is `(verb, Selection, params, optional)`; a **recipe** is an
+  ordered list of them.  Steps run in the order written — there is **no
+  dependency graph**, exactly as in `analysis/`.
+- A **verb**'s implementation and its declared parameters live **together** in
+  one module under `workflow/verbs/`, so a parameter an implementation reads but
+  does not declare cannot exist.  `workflow/registry.py` is the manifest, pure
+  data.
+- **Keep the heavy import inside the verb function.**  Importing the manifest
+  must not load OpenSees, so a GUI can render a verb's parameter form before a
+  model is open; `tests/test_recipe.py` asserts this in a subprocess.
+- **A verb delegates; it never reimplements.**  Every verb is a thin wrapper over
+  the existing two-stage pipeline.  No analysis logic, no topology logic of its
+  own.
+- **`Selection` is the scoping primitive.**  It is resolved against the model the
+  step operates on — the working `SAPModelData` for a preparation step, the
+  topology a previous step produced for an analysis step.
+- **Recipes are data.**  `to_dict` / `to_json` are the editable form and
+  round-trip losslessly; `to_python()` exports a runnable script.  Defaults are
+  applied at run time, not written into the file.
+- **One operation, one spelling.**  A GUI action, a CLI verb or a report script
+  must not grow a private code path for something a verb can express — at most
+  it *presets* a step and runs the recipe (see anti-pattern 17).
 
 
 ## 4. Naming & Style Rules
@@ -543,6 +571,20 @@ cleared between attempts.
     refspec, `git bundle --all`, or share/archive the repo folder including `.git`
     — these publish the local-only `refs/cline/checkpoints/*` snapshots, which
     contain client data (see §6.4).
+17. **Do not** give an entry point (the GUI, a CLI verb, a report script) its own
+    code path for an operation that could be a **verb** (`.clinerules` §3.12).
+    An operation the application performs is a step in a
+    `fea_toolkit.workflow` recipe — a verb, a `Selection` and parameters — so a
+    menu action at most *presets* a step and runs the recipe. Two spellings of
+    one operation is how `Model > Mesh areas` came to hide a preprocessing
+    difference behind a handler, and how a script's model preparation came to
+    exist only inside that script. When a GUI action cannot be expressed as a
+    step, add a verb — never a second path in the window.
+18. **Do not** publish a workflow's behaviour in a docstring without checking it
+    against the code (see §12). The `scale_sections` report exists because a
+    silent no-op was *believed* to work: a shell section's `A/I/J` are inherited
+    zeros, so a frame-shaped attribute list changes nothing. Report what a step
+    actually changed; do not imply success.
 
 ## 10. Tool-Call Hygiene (prevent malformed tool-call XML)
 

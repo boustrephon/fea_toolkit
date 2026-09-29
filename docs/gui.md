@@ -74,7 +74,7 @@ produced it.
 ```
 name             Processed
 kind             geometry
-source           Preprocessor: split_elements
+source           Recipe: Split
 units            N · m · T
 n_nodes          128
 n_frames         96
@@ -456,6 +456,7 @@ drives a *separately installed* OpenSees is the recorded route
 | Element labels, the Property Tree tab, explicit interaction modes ([P23](_pending_work.md)) | The corresponding menu item and tab are greyed |
 | Window-layout persistence (milestone 8) | Docks and window geometry are not remembered between sessions |
 | Quad view (milestone 10) | A single viewport; use the Camera menu and the view cube |
+| `check` and `chart` verbs, and the command palette ([P29](_pending_work.md) phases C–D) | The Recipe panel runs the four verbs that exist (`scale_sections`, `mesh`, `run_static`, `combine`).  A recipe's case results are reported in the log, but are registered as views only through **Analysis ▸ Run…**; code checks and charts have no step yet |
 
 ## Troubleshooting
 

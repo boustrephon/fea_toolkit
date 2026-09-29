@@ -8,7 +8,7 @@ related: [viewer.md, workflow.md, results_schema.md, rhino_export.md, report_gen
 ---
 # Desktop GUI Roadmap
 
-## Status: 🚧 In progress — Milestones 1–4 landed (viewport spike, chrome, model tree + inspector, bidirectional selection + display toggles), the mouse-interaction policy is configurable, the Model Tree carries a **Views** group (geometry views over the storage seam, derived views filtered by a `Selection`, results archives opened as a view per load case), and **Milestones 5 and 7 are under way**: **Analysis ▸ Run…** solves the model's static cases and combinations in the application and shows each as a case view (no archive needed), a results case's deformed shape draws in the viewport, 2026-09-28
+## Status: ⚠️ Partial — the chrome and the workflow-modelling path are built.  Milestones 1–4 landed (viewport spike, chrome, model tree + inspector, bidirectional selection + display toggles), the mouse-interaction policy is configurable, and the Model Tree carries a **Views** group (geometry views over the storage seam, derived views filtered by a `Selection`, results archives opened as a view per load case).  Mile**stone 5** landed for **static** cases and combinations (**Analysis ▸ Run…** solves them in the application and shows each as a case view, no archive needed), as did **Milestone 6** (load rendering) and **Milestone 7** (deformed shape *and* member force diagrams).  **Milestone 11 (P29, workflow authoring) landed its Phases A and B on 2026-09-29** — the `workflow` package, the Recipe dock and the Model-menu presets.  Remaining: modal / spectrum / pushover runs, storey response and the pushover curve, layout persistence (M8) and the quad view (M10), plus P29's Phases C and D.
 
 > **User-facing guide:** [`docs/gui.md`](gui.md) — what the application does
 > today, how to select, the camera and display controls, and the settings file.
@@ -17,9 +17,17 @@ related: [viewer.md, workflow.md, results_schema.md, rhino_export.md, report_gen
 
 This document records the **framework decision** and the **proposed
 architecture** for a native desktop GUI that wraps the workflow already
-implemented in the package.  Milestone 1 (the viewport spike) has landed;
-the remaining milestones are tracked as **P22** in
-[Pending Work Register](_pending_work.md).
+implemented in the package.  Ten of its milestones have landed and an eleventh
+(**workflow authoring**, P29) has begun; the remainder are tracked as **P22**
+and **P29** in [Pending Work Register](_pending_work.md), and the workflow
+layer itself is specified in [`workflow_authoring.md`](workflow_authoring.md).
+
+> **Where this sketch has diverged from the code.** The §6 tree below is the
+> original proposal; two entries no longer match.  `actions/` was never built
+> and is superseded by the workflow layer (see the note under §6, and P29).
+> `panels/` was likewise not used: the widgets live in `gui/views/` (dialogs and
+> the inspector alongside `recipe_panel.py`) with the Qt item models in
+> `gui/models/` and the Qt-free state in `gui/controllers/`.
 
 ---
 
@@ -439,6 +447,12 @@ The GUI must respect the existing architectural contracts:
 10. **Tests.**  Headless `QApplication` with the `offscreen` platform plugin
     (`QT_QPA_PLATFORM=offscreen`), `ops.wipe()` hygiene, a `needs_gui` marker
     alongside the existing `needs_pyvista` marker.
+11. **Workflow authoring (P29, added 2026-09-29).**  The `workflow` package
+    (verbs, steps, recipes as data), the **Recipe dock**, the `&Recipe` menu,
+    and the Model-menu items re-cast as **presets over the recipe**.  Phases A
+    and B have landed; Phases C (`check` / `chart` verbs with table and figure
+    views) and D (the command palette) remain — see
+    [`workflow_authoring.md`](workflow_authoring.md).
 
 ---
 
