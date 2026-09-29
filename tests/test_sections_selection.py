@@ -1093,6 +1093,16 @@ class TestSelectionFromString:
         with pytest.raises(ValueError, match="has no values"):
             Selection.from_string("section=")
 
+    def test_an_unclosed_quote_raises(self):
+        """An unterminated quoted value is malformed input, not a lost quote."""
+        with pytest.raises(ValueError, match="unterminated quote"):
+            Selection.from_string('section="S, 200')
+
+    def test_text_after_a_quoted_value_raises(self):
+        """``"foo"bar`` is a typo — the trailing text is rejected, not dropped."""
+        with pytest.raises(ValueError, match="unexpected text after quoted value"):
+            Selection.from_string('section="S, 200"bar')
+
 
 # ============================================================================
 # Selection filter_model tests

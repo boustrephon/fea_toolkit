@@ -107,6 +107,9 @@ def _scan_clauses(expr: str) -> tuple[list[tuple[str, str]], str]:
         ``(clauses, leftover)`` — the parsed ``(key, raw value)`` pairs, and any
         text the scanner could not read as a clause (``""`` when it consumed
         everything).
+
+    Raises:
+        ValueError: If a quoted value is left unclosed at the end of *expr*.
     """
     clauses: list[tuple[str, str]] = []
     i, n = 0, len(expr)
@@ -149,6 +152,11 @@ def _scan_clauses(expr: str) -> tuple[list[tuple[str, str]], str]:
                 if ahead is not None and ahead.end() < n and expr[ahead.end()] == "=":
                     break
             i += 1
+        if quote:
+            raise ValueError(
+                f"unterminated quote in selection expression {expr!r} "
+                "(missing closing double-quote)"
+            )
         clauses.append((key, expr[value_start:i]))
     return clauses, ""
 
@@ -165,6 +173,10 @@ def _split_values(raw: str) -> list[str]:
 
     Returns:
         The item values, in order, with empty items dropped.
+
+    Raises:
+        ValueError: If a quoted item is followed by anything other than
+            whitespace, a comma or the end of *raw*.
     """
     values: list[str] = []
     i, n = 0, len(raw)
@@ -183,6 +195,14 @@ def _split_values(raw: str) -> list[str]:
                 i += 1
             i += 1  # closing quote
             values.append("".join(buf))
+            # Only whitespace may follow a quoted item before the next comma or
+            # the end of the value.  Anything else (``"foo"bar``) is malformed
+            # input and is rejected rather than silently discarded.
+            j = i
+            while j < n and raw[j].isspace():
+                j += 1
+            if j < n and raw[j] != ",":
+                raise ValueError(f"unexpected text after quoted value in {raw!r}")
         else:
             start = i
             while i < n and raw[i] != ",":
@@ -439,8 +459,9 @@ class Selection:
 
         Raises:
             ValueError: If a clause has no ``=``, names an unknown key, gives a
-                ``z`` value that is not a pair of numbers, or names an unknown
-                element type.
+                ``z`` value that is not a pair of numbers, names an unknown
+                element type, leaves a quoted value unclosed, or appends text to
+                a quoted value.
         """
         kwargs: dict = {}
         clauses, leftovers = _scan_clauses(expr)
