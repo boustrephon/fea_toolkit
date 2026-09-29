@@ -17,12 +17,16 @@ from typing import Any, Optional
 from ...io.model_store import ModelHeader, ModelStore, model_header
 from ...model.selection import Selection
 
-__all__ = ["GEOMETRY", "RESULTS", "View", "ViewRegistry"]
+__all__ = ["FIGURE", "GEOMETRY", "RESULTS", "TABLE", "View", "ViewRegistry"]
 
 #: A rendering of a model's topology (raw, split, meshed).
 GEOMETRY = "geometry"
 #: A model plus a result dataset (deformed shapes, force diagrams).
 RESULTS = "results"
+#: A check's findings, rendered as a read-only grid.
+TABLE = "table"
+#: A chart (a matplotlib figure), rendered on an embedded canvas.
+FIGURE = "figure"
 
 
 @dataclass(frozen=True)
@@ -38,7 +42,7 @@ class View:
         key: Stable identifier, e.g. ``"unprocessed"`` or ``"meshed"``.
         name: Display name — what the Model Tree lists and the Inspector titles
             the selection with.
-        kind: :data:`GEOMETRY` or :data:`RESULTS`.
+        kind: :data:`GEOMETRY`, :data:`RESULTS`, :data:`TABLE` or :data:`FIGURE`.
         source: Human-readable provenance, e.g. ``"model.s2k"`` or
             ``"Preprocessor: split_elements"``.  The geometry itself lives in
             the registry, keyed by :attr:`key`, so a view never carries a model.
@@ -84,7 +88,7 @@ class View:
         Args:
             key: Stable identifier.
             name: Display name.
-            kind: :data:`GEOMETRY` or :data:`RESULTS`.
+            kind: :data:`GEOMETRY`, :data:`RESULTS`, :data:`TABLE` or :data:`FIGURE`.
             source: Human-readable provenance.
             header: The counts to unpack.
             **extra: Further :class:`View` fields (``parent``, ``selection``).
@@ -122,6 +126,8 @@ class ViewRegistry:
         self._views: dict[str, View] = {}
         self._sources: dict[str, Any] = {}
         self._results: dict[str, Any] = {}
+        self._tables: dict[str, Any] = {}
+        self._figures: dict[str, Any] = {}
         self._active: Optional[str] = None
 
     # ── Registration ─────────────────────────────────────────────────
@@ -277,15 +283,88 @@ class ViewRegistry:
             self._active = key
         return self.get(key)
 
+    def add_table(
+        self,
+        key: str,
+        name: str,
+        table: Any,
+        source: str = "",
+        *,
+        activate: bool = True,
+    ) -> View:
+        """Register a check's :class:`~fea_toolkit.workflow.steps.Table` as a view.
+
+        A table has no model geometry — its counts are all zero — so it is
+        registered directly rather than through a header.  The payload is the
+        verb's own :class:`~fea_toolkit.workflow.steps.Table`, cells
+        pre-formatted; the view is a renderer only.
+
+        Args:
+            key: Stable identifier.
+            name: Display name (the table's title, usually).
+            table: The :class:`~fea_toolkit.workflow.steps.Table` to show.
+            source: Human-readable provenance.
+            activate: Make this the displayed view.
+
+        Returns:
+            The registered view.
+        """
+        self._views[key] = View(key=key, name=name, kind=TABLE, source=source)
+        self._tables[key] = table
+        if activate or self._active is None:
+            self._active = key
+        return self.get(key)
+
+    def add_figure(
+        self,
+        key: str,
+        name: str,
+        figure: Any,
+        source: str = "",
+        *,
+        activate: bool = True,
+    ) -> View:
+        """Register a chart's matplotlib figure as a view.
+
+        A figure has no model geometry, so its counts are all zero.  The payload
+        is a ``matplotlib.figure.Figure``; the view renders it on an embedded
+        canvas.
+
+        Args:
+            key: Stable identifier.
+            name: Display name.
+            figure: The ``matplotlib.figure.Figure`` to show.
+            source: Human-readable provenance.
+            activate: Make this the displayed view.
+
+        Returns:
+            The registered view.
+        """
+        self._views[key] = View(key=key, name=name, kind=FIGURE, source=source)
+        self._figures[key] = figure
+        if activate or self._active is None:
+            self._active = key
+        return self.get(key)
+
     def results(self, key: str) -> Any:
         """The repository a results view reads (``None`` for a geometry view)."""
         return self._results.get(key)
 
+    def table(self, key: str) -> Any:
+        """The :class:`~fea_toolkit.workflow.steps.Table` a table view renders."""
+        return self._tables.get(key)
+
+    def figure(self, key: str) -> Any:
+        """The ``matplotlib.figure.Figure`` a figure view renders."""
+        return self._figures.get(key)
+
     def reset(self) -> None:
-        """Drop every view and its geometry."""
+        """Drop every view and its geometry, tables and figures."""
         self._views.clear()
         self._sources.clear()
         self._results.clear()
+        self._tables.clear()
+        self._figures.clear()
         self._active = None
 
     # ── Lookup ───────────────────────────────────────────────────────

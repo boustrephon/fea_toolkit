@@ -28,6 +28,7 @@ from qtpy.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QProgressBar,
+    QStackedWidget,
     QTabWidget,
     QToolBar,
     QTreeView,
@@ -38,7 +39,7 @@ from qtpy.QtWidgets import (
 from .app import APP_NAME
 from .controllers.interaction import load_policy
 from .controllers.selection import CATEGORY_NOUNS, SelectionIndex
-from .controllers.view_registry import View, ViewRegistry
+from .controllers.view_registry import FIGURE, GEOMETRY, RESULTS, TABLE, View, ViewRegistry
 from .controllers.worker import TaskWorker
 from .models.tree_model import ModelTreeModel
 from .render_backend import QtRenderBackend
@@ -177,6 +178,9 @@ class MainWindow(QMainWindow):
         self._cursor_timer: Optional[QTimer] = None
         self._interaction_enabled = False
         self._actions: dict = {}
+        self._stack: Any = None
+        self._table_page: Any = None
+        self._figure_page: Any = None
 
         self._create_viewport()
         self._create_actions()
@@ -228,7 +232,14 @@ class MainWindow(QMainWindow):
     # ── Viewport ────────────────────────────────────────────────────
 
     def _create_viewport(self) -> None:
-        """Create the embedded PyVistaQt interactor and its render backend."""
+        """Create the embedded PyVistaQt interactor and its render backend.
+
+        The central area is a stacked widget: page 0 is the 3-D viewport, and
+        pages 1 and 2 are created lazily for a table view and a figure view
+        (P30 phase C) — a model view draws geometry, but a ``check`` step
+        produces a table and a ``chart`` step a figure, neither of which belongs
+        in the viewport.
+        """
         from .render_backend import MainThreadQtInteractor
 
         # Quad-view-ready container: holds a single viewport today, a grid of
@@ -236,7 +247,10 @@ class MainWindow(QMainWindow):
         self._viewport_container = QWidget(self)
         self._viewport_layout = QVBoxLayout(self._viewport_container)
         self._viewport_layout.setContentsMargins(0, 0, 0, 0)
-        self.setCentralWidget(self._viewport_container)
+
+        self._stack = QStackedWidget(self)
+        self._stack.addWidget(self._viewport_container)  # page 0: the viewport
+        self.setCentralWidget(self._stack)
 
         self._interactor = MainThreadQtInteractor(self._viewport_container)
         self._viewport_layout.addWidget(self._interactor)
@@ -1010,6 +1024,10 @@ class MainWindow(QMainWindow):
     def _show_view(self, view: View, *, rebuild_tree: bool = False) -> None:
         """Render *view* — its source, through its selection — and report it.
 
+        A geometry or results view draws the model into the viewport; a table or
+        figure view raises its own central page instead, because those payloads
+        are not model geometry.
+
         Args:
             view: The view to display.
             rebuild_tree: Rebuild the Model Tree.  Needed when the view's *name*
@@ -1017,18 +1035,88 @@ class MainWindow(QMainWindow):
                 current index, so it is skipped for a plain switch — otherwise Qt
                 reports an empty selection and the Inspector is cleared again.
         """
-        source = self._views.source(view.key)
-        if source is None:
-            return
         self._views.set_active(view.key)
-        self.show_model(
-            source,
-            reset_view=False,
-            rebuild_tree=rebuild_tree,
-            selection=view.selection,
-        )
+        if view.kind in (GEOMETRY, RESULTS):
+            source = self._views.source(view.key)
+            if source is None:
+                return
+            self._stack.setCurrentWidget(self._viewport_container)
+            self.show_model(
+                source,
+                reset_view=False,
+                rebuild_tree=rebuild_tree,
+                selection=view.selection,
+            )
+        elif view.kind == TABLE:
+            self._show_table_view(view)
+        elif view.kind == FIGURE:
+            self._show_figure_view(view)
+        else:
+            return
         self._inspector.show_object(self._views.get(view.key))
         self.log(f"Showing view: {view.name}.")
+
+    def _show_table_view(self, view: View) -> None:
+        """Render a ``table`` view — a check's findings as a read-only grid.
+
+        The cells are pre-formatted by the verb that produced the
+        :class:`~fea_toolkit.workflow.steps.Table`, so this is a renderer: it
+        lays the payload out verbatim and never reformats a value.
+        """
+        from qtpy.QtWidgets import QAbstractItemView, QHeaderView, QTableWidget, QTableWidgetItem
+
+        table = self._views.table(view.key)
+        if table is None:
+            return
+        if self._table_page is None:
+            self._table_page = QWidget(self)
+            layout = QVBoxLayout(self._table_page)
+            layout.setContentsMargins(6, 6, 6, 6)
+            self._table_widget = QTableWidget(self._table_page)
+            self._table_widget.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+            self._table_widget.horizontalHeader().setSectionResizeMode(
+                QHeaderView.ResizeMode.Stretch
+            )
+            layout.addWidget(self._table_widget)
+            self._stack.addWidget(self._table_page)
+
+        self._table_widget.clear()
+        self._table_widget.setColumnCount(len(table.columns))
+        self._table_widget.setRowCount(len(table.rows))
+        self._table_widget.setHorizontalHeaderLabels([str(c) for c in table.columns])
+        self._table_widget.setVerticalHeaderLabels([str(i + 1) for i in range(len(table.rows))])
+        for row, cells in enumerate(table.rows):
+            for column, cell in enumerate(cells):
+                self._table_widget.setItem(row, column, QTableWidgetItem(str(cell)))
+        self._stack.setCurrentWidget(self._table_page)
+
+    def _show_figure_view(self, view: View) -> None:
+        """Render a ``figure`` view — a chart's Matplotlib figure on a canvas.
+
+        The page is created once and re-used; the canvas is rebuilt per view
+        because a figure belongs to one result, not to the window.
+        """
+        figure = self._views.figure(view.key)
+        if figure is None:
+            return
+        if self._figure_page is None:
+            self._figure_page = QWidget(self)
+            self._figure_layout = QVBoxLayout(self._figure_page)
+            self._figure_layout.setContentsMargins(0, 0, 0, 0)
+            self._stack.addWidget(self._figure_page)
+
+        while self._figure_layout.count():
+            item = self._figure_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+        canvas = FigureCanvasQTAgg(figure)
+        self._figure_layout.addWidget(canvas)
+        canvas.draw()
+        self._stack.setCurrentWidget(self._figure_page)
 
     # ── Derived views (Edit menu) ────────────────────────────────────
 
@@ -1447,7 +1535,7 @@ class MainWindow(QMainWindow):
         Args:
             payload: ``(RecipeRun, [log lines])`` from the worker.
         """
-        from ..workflow import CASES
+        from ..workflow import CASES, FIGURE, TABLE
 
         run, messages = payload
         for message in messages:
@@ -1459,11 +1547,40 @@ class MainWindow(QMainWindow):
                 added = self._show_results_result(result.label, result.payload)
                 if not added and not run.cancelled:
                     self.log(f"{result.label}: the run produced no results.", "warn")
+            elif result.kind == TABLE:
+                self._show_table_result(result.label, result.payload)
+            elif result.kind == FIGURE:
+                self._show_figure_result(result.label, result.payload)
         for index, verb, message in run.failures:
             self.log(f"Step {index} ({verb}) failed and is optional \u2014 {message}", "warn")
         if run.cancelled:
             self.log("The recipe was cancelled.", "warn")
         self._set_analysis_actions_enabled()
+
+    def _show_table_result(self, label: str, table: Any) -> None:
+        """Register a check's ``table`` result as a view and show it.
+
+        The view key is derived from the step's label, so re-running the same
+        check replaces its view rather than piling one up per run.
+        """
+        if table is None:
+            self.log(f"{label}: nothing to show.", "warn")
+            return
+        key = f"table:{label.lower().replace(' ', '-')}"
+        name = getattr(table, "title", None) or label
+        view = self._views.add_table(key, name, table, source=f"Recipe: {label}")
+        self._show_view(view, rebuild_tree=True)
+        self.log(f"Added table view: {name}.")
+
+    def _show_figure_result(self, label: str, figure: Any) -> None:
+        """Register a chart's ``figure`` result as a view and show it."""
+        if figure is None:
+            self.log(f"{label}: the chart produced no figure.", "warn")
+            return
+        key = f"figure:{label.lower().replace(' ', '-')}"
+        view = self._views.add_figure(key, label, figure, source=f"Recipe: {label}")
+        self._show_view(view, rebuild_tree=True)
+        self.log(f"Added figure view: {label}.")
 
     def _show_results_result(self, label: str, arrays: Any) -> list:
         """Register each case in a recipe's results as a view, and show the first.

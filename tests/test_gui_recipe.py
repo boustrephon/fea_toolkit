@@ -247,3 +247,47 @@ class TestResultViews:
         log = window._message_log.toPlainText()
         assert "The recipe was cancelled." in log
         assert "produced no results" not in log
+
+
+class TestTableAndFigureViews:
+    """P30 phase C: a check's table and a chart's figure reach the viewport."""
+
+    def test_a_check_registers_a_table_view(self, window):
+        panel = window._recipe_panel
+        panel.add_step("check_connectivity")
+        window._actions["recipe.run"].trigger()
+        _await(window)
+
+        view = window._views.get("table:connectivity")
+        assert view is not None, "the check registered no table view"
+        assert view.kind == "table"
+        assert window._views.table("table:connectivity") is not None
+        assert window._stack.currentWidget() is window._table_page
+
+    def test_a_table_result_renders_its_cells(self, window):
+        """The cells are the verb's own strings — the view never reformats them."""
+        from fea_toolkit.workflow import Table
+
+        table = Table(title="Probe", columns=("a", "b"), rows=(("1", "2"), ("3", "4")))
+        window._show_table_result("Probe", table)
+
+        view = window._views.get("table:probe")
+        assert view is not None and view.kind == "table"
+        assert window._views.table("table:probe") is table
+        assert window._table_widget.rowCount() == 2
+        assert window._table_widget.columnCount() == 2
+        assert window._table_widget.item(0, 1).text() == "2"
+        assert window._stack.currentWidget() is window._table_page
+
+    def test_a_figure_result_renders_on_a_canvas(self, window):
+        from matplotlib.figure import Figure
+
+        figure = Figure()
+        figure.gca().plot([0.0, 1.0], [0.0, 1.0])
+        window._show_figure_result("Storey displacements", figure)
+
+        view = window._views.get("figure:storey-displacements")
+        assert view is not None and view.kind == "figure"
+        assert window._views.figure("figure:storey-displacements") is figure
+        assert window._stack.currentWidget() is window._figure_page
+        assert window._figure_layout.count() == 1
