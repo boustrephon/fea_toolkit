@@ -13,7 +13,7 @@ thread kill would leave shared OpenSees state inconsistent.
 """
 
 import gc
-from threading import Event
+from threading import Event, Lock
 from typing import Any, Callable
 
 from qtpy.QtCore import QThread, Signal
@@ -40,6 +40,14 @@ class TaskWorker(QThread):
     #: Emitted *from the worker thread*; Qt queues it onto the GUI thread, which
     #: is what makes it safe to drive a progress bar from it.
     progress = Signal(int, int, str)
+
+    # ── Shared collector state (overlapping workers coordinate through it) ──
+    #: Guard for the two counters below.
+    _collector_lock = Lock()
+    #: Number of protected workers currently running.
+    _collector_active = 0
+    #: Whether the collector was on before the first of them started.
+    _collector_was_on = False
 
     def __init__(self, task: Callable[[Callable[[], bool]], Any], parent: Any = None) -> None:
         super().__init__(parent)
@@ -70,19 +78,27 @@ class TaskWorker(QThread):
     def run(self) -> None:
         """QThread entry point: run the task, emit the outcome.
 
-        The **cyclic collector is held off for the task's duration**.  A
+        The **cyclic collector is held off while a protected task runs**.  A
         collection triggered here walks the whole heap — including the
         PySide6/VTK objects the GUI thread owns — and shiboken's objects are not
         built to be traversed from another thread.  On macOS that is an
         intermittent segfault: ``docs/dev_notes.md`` → *The macOS GUI segfault*.
 
+        Overlapping workers **share** that state: the collector stays off while
+        *any* protected worker is active, and the state it had before the first
+        of them started is restored only when the last one finishes.  A
+        per-worker snapshot would let one finishing early re-enable collection
+        underneath another still running.
+
         Reference counting still frees as usual, so only *cycles* wait, and the
         GUI thread reclaims them when the task reports in
-        (``MainWindow._preprocess_ended``).  ``gc.freeze()`` covers the objects
-        that existed before the task started; this covers the window itself.
+        (``MainWindow._preprocess_ended``).
         """
-        collector_was_on = gc.isenabled()
-        gc.disable()
+        with self._collector_lock:
+            if self._collector_active == 0:
+                self._collector_was_on = gc.isenabled()
+                gc.disable()
+            self._collector_active += 1
         try:
             result = self._task(self.should_cancel)
         except Exception as exc:
@@ -91,6 +107,8 @@ class TaskWorker(QThread):
             self.failed.emit(f"{type(exc).__name__}: {exc}")
             return
         finally:
-            if collector_was_on:
-                gc.enable()
+            with self._collector_lock:
+                self._collector_active -= 1
+                if self._collector_active == 0 and self._collector_was_on:
+                    gc.enable()
         self.succeeded.emit(result)

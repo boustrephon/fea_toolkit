@@ -17,6 +17,25 @@ def qapp():
     yield QApplication.instance() or QApplication(["pytest-fea-gui"])
 
 
+@pytest.fixture
+def gc_enabled():
+    """Run with the cyclic collector on, restoring its prior state afterwards.
+
+    The worker's contract is that it *restores* the collector state, so these
+    tests are only meaningful when it started on — otherwise the final assertion
+    depends on whatever a previous test left behind.
+    """
+    import gc
+
+    was_on = gc.isenabled()
+    gc.enable()
+    try:
+        yield
+    finally:
+        if not was_on:
+            gc.disable()
+
+
 def _run(worker, qapp):
     """Start *worker*, wait for it and deliver its queued signals."""
     from qtpy.QtCore import QCoreApplication
@@ -88,7 +107,7 @@ def test_the_worker_is_not_cancelled_by_default(qapp):
     assert worker.should_cancel() is False
 
 
-def test_the_collector_is_held_off_while_the_task_runs(qapp):
+def test_the_collector_is_held_off_while_the_task_runs(qapp, gc_enabled):
     """A collection on the worker thread can walk the GUI thread's Qt objects.
 
     shiboken's objects are not built to be traversed from another thread, so the
@@ -111,7 +130,7 @@ def test_the_collector_is_held_off_while_the_task_runs(qapp):
     assert gc.isenabled() is True, "the collector must be restored when the task ends"
 
 
-def test_a_failing_task_still_restores_the_collector(qapp):
+def test_a_failing_task_still_restores_the_collector(qapp, gc_enabled):
     """The error path restores it too — otherwise the process keeps it off."""
     import gc
 

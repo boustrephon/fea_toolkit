@@ -15,6 +15,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Optional
 
 from ...io.model_store import ModelHeader, ModelStore, model_header
+from ...model.selection import Selection
 
 __all__ = ["GEOMETRY", "RESULTS", "View", "ViewRegistry"]
 
@@ -190,8 +191,13 @@ class ViewRegistry:
             return None
         source = self._sources.get(parent_key)
         header = self._header_for(source)
-        if selection is not None and source is not None:
-            frames, areas, nodes = selection.resolve_connected(source)
+        if source is not None:
+            # A missing selection ("act on everything") and an explicit empty
+            # one ("matches everything") are the same lens over the model, so
+            # both resolve through resolve_connected — the counts the Inspector
+            # reports are then the filtered ones in either case.
+            resolved = selection if selection is not None else Selection()
+            frames, areas, nodes = resolved.resolve_connected(source)
             header = replace(
                 header,
                 n_nodes=len(nodes),
