@@ -146,8 +146,9 @@ HANDLED_TABLES: frozenset[str] = frozenset(
 #:
 #: Only families whose members are *all* consumed belong here.  ``AREA LOADS``
 #: was deliberately removed: its members are mixed (``AREA LOADS - TEMPERATURE``
-#: is not read) and are now registered individually in
-#: :data:`HANDLED_TABLES`, so an unrecognised member surfaces as ``unhandled``.
+#: is not read).  Its consumed members are registered individually in
+#: :data:`HANDLED_TABLES`, so an unrecognised ``AREA LOADS`` member remains
+#: ``unhandled``.
 HANDLED_PREFIXES: tuple[str, ...] = (
     "MATERIAL PROPERTIES",  # 01/02/03A/03B/03E/03F/03J/06/09 merged in _get_all_materials()
     "CONSTRAINT DEFINITIONS - ",  # BODY / DIAPHRAGM / EQUAL / BEAM / ROD / PLATE / WELD / LOCAL

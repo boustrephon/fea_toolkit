@@ -880,13 +880,15 @@ class SAP2000Parser:
     # otherwise create spurious near-zero offset records for cardinal point 10.
     _LATERAL_OFFSET_TOL = 1e-9
     # ── Table-name prefixes scanned by family ──────────────────────
-    # The concrete member names are registered individually in
-    # :mod:`fea_toolkit.io.table_registry`, so an unrecognised member surfaces
-    # as ``unhandled`` instead of being swallowed by a broad prefix.  The
-    # ``tests/test_table_registry.py`` AST drift guard resolves these class
-    # constants, checks every member the suffix dispatch selects, and treats
-    # the bare prefix as a family (``extract_parser_family_prefixes``) rather
-    # than as a table name.
+    # Neither bare prefix is registered in :mod:`fea_toolkit.io.table_registry`
+    # as a whole.  ``AREA LOADS - `` members are registered individually, so an
+    # unrecognised member surfaces as ``unhandled``; ``AUTO`` is registered by
+    # sub-family — ``AUTO SEISMIC - `` / ``AUTO WIND - `` as handled prefixes and
+    # the non-load members individually — so a genuinely new variant is not
+    # swallowed by a broad prefix.  The ``tests/test_table_registry.py`` AST
+    # drift guard resolves these class constants, checks every member the suffix
+    # dispatch selects, and treats the bare prefix as a family
+    # (``extract_parser_family_prefixes``) rather than as a table name.
     _AREA_LOADS_PREFIX = "AREA LOADS - "
     _AUTO_PREFIX = "AUTO"
 

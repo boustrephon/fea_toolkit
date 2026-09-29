@@ -491,7 +491,10 @@ class PyVistaRenderer(RenderBackend):
             render_points_as_spheres=True,
             show_scalar_bar=False,
         )
-        self._add_actor(actor, "nodes") if pickable else self._add_overlay(actor, "nodes")
+        if pickable:
+            self._add_actor(actor, "nodes")
+        else:
+            self._add_overlay(actor, "nodes")
 
     # ── Supports ─────────────────────────────────────────────────────
 

@@ -196,11 +196,15 @@ def extract_parser_table_names() -> set[str]:
 def extract_parser_family_prefixes() -> set[str]:
     """Return the ``.startswith(...)`` prefixes — families, not table names.
 
-    ``AREA LOADS - `` / ``AUTO`` are deliberately not registered as handled
-    *prefix families* in :mod:`fea_toolkit.io.table_registry` — their members
-    are mixed, so registration is per-member and an unrecognised member must
-    surface as ``unhandled``.  The guard therefore checks these prefixes
-    against the registered members rather than through ``classify()``.
+    ``AREA LOADS - `` is deliberately not a handled *prefix family* in
+    :mod:`fea_toolkit.io.table_registry`: its members are mixed, so registration
+    is per-member and an unrecognised member must surface as ``unhandled``.
+    ``AUTO`` is likewise not a *bare* prefix — the load generators are the
+    ``AUTO SEISMIC - `` / ``AUTO WIND - `` prefix families and the non-load
+    members are listed individually — so a genuinely new AUTO variant still
+    surfaces as ``unhandled``.  The guard therefore checks these prefixes
+    against the registered members / sub-families rather than through
+    ``classify()``.
     """
     _, prefixes = _extract_parser_references()
     return prefixes
@@ -338,9 +342,11 @@ def test_parser_table_names_are_registered():
 def test_family_prefixes_have_registered_members():
     """A scanned family prefix must match at least one registered member.
 
-    ``AREA LOADS - `` / ``AUTO`` are families, not table names: the registry
-    registers their members individually so an unrecognised member surfaces as
-    ``unhandled`` instead of being swallowed by a broad prefix (see
+    ``AREA LOADS - `` / ``AUTO`` are families, not table names.  ``AREA LOADS - ``
+    members are registered individually so an unrecognised member surfaces as
+    ``unhandled``; ``AUTO``'s load generators are the ``AUTO SEISMIC - `` /
+    ``AUTO WIND - `` prefix families, with non-load AUTO tables listed
+    individually — so neither bare prefix is itself registered (see
     :mod:`fea_toolkit.io.table_registry`).  A prefix is therefore covered when
     it is a registered prefix family, when at least one handled member is
     registered, or when it is a *narrower* scan of a registered family
