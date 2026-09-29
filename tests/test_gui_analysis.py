@@ -54,6 +54,8 @@ def _model_with_cases():
 @pytest.fixture()
 def window(qapp, monkeypatch, tmp_path):
     """A ``MainWindow`` showing the cantilever, with no interaction config."""
+    import openseespy.opensees as ops
+
     from fea_toolkit.gui.controllers.interaction import CONFIG_ENV_VAR
     from fea_toolkit.gui.main_window import MainWindow
 
@@ -61,8 +63,11 @@ def window(qapp, monkeypatch, tmp_path):
     win = MainWindow(model=_model_with_cases())
     win.resize(900, 700)
     win.show()
-    yield win
-    win.close()
+    try:
+        yield win
+    finally:
+        win.close()
+        ops.wipe()
 
 
 def _spin(window, timeout=60.0):
@@ -177,7 +182,7 @@ def test_save_results_writes_a_round_trippable_archive(window, tmp_path, monkeyp
 
 
 def test_the_case_factor_multiplies_the_stored_pattern_factors(qapp):
-    """A ticked case's factor scales its patterns — a LOAD multiplier."""
+    """A ticked, scaled case gets a distinct key and scaled patterns."""
     from fea_toolkit.gui.views.analysis_dialog import AnalysisDialog
 
     dialog = AnalysisDialog({"DEAD": {"DEAD": 1.0, "SDL": 0.5}}, [], ["DEAD", "SDL"])
@@ -185,7 +190,36 @@ def test_the_case_factor_multiplies_the_stored_pattern_factors(qapp):
     row.check.setChecked(True)
     row.factor.setValue(2.0)
 
-    assert dialog.request().cases == {"DEAD": {"DEAD": 2.0, "SDL": 1.0}}
+    # A scaled solve is stored under its own name, so a combination reduction
+    # cannot mistake it for the model's own (un-scaled) case.
+    assert dialog.request().cases == {"DEAD \u00d72": {"DEAD": 2.0, "SDL": 1.0}}
+
+
+def test_an_unscaled_case_keeps_its_model_name(qapp):
+    from fea_toolkit.gui.views.analysis_dialog import AnalysisDialog
+
+    dialog = AnalysisDialog({"DEAD": {"DEAD": 1.0}}, [], ["DEAD"])
+    dialog._case_rows[0].check.setChecked(True)
+
+    assert dialog.request().cases == {"DEAD": {"DEAD": 1.0}}
+
+
+def test_a_scaled_leaf_keeps_the_unscaled_case_for_its_combination(qapp):
+    """The reduction reads the model's factors, so it needs the un-scaled case."""
+    from fea_toolkit.analysis.case_listing import CombinationSpec
+    from fea_toolkit.gui.views.analysis_dialog import AnalysisDialog
+
+    spec = CombinationSpec(name="GRAV", combo_type="Linear Add", leaves={"DEAD": 1.2})
+    dialog = AnalysisDialog({"DEAD": {"DEAD": 1.0}}, [spec], ["DEAD"])
+    dialog._case_rows[0].check.setChecked(True)
+    dialog._case_rows[0].factor.setValue(2.0)
+    dialog._combo_rows[0].check.setChecked(True)
+
+    request = dialog.request()
+    assert request.combinations == ["GRAV"]
+    # Both the user's scaled solve and the model's un-scaled case are present.
+    assert request.cases["DEAD \u00d72"] == {"DEAD": 2.0}
+    assert request.cases["DEAD"] == {"DEAD": 1.0}
 
 
 def test_an_unticked_case_is_not_run(qapp):

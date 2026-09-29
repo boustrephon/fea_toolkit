@@ -147,6 +147,26 @@ def test_cancelling_before_the_first_case_produces_nothing(model, mesh):
     assert result["failed"] == []
 
 
+def test_cancelling_after_one_case_keeps_it_and_reports_no_failure(model, mesh):
+    """A skipped case is not a failure: cancellation is reported separately."""
+    from fea_toolkit.analysis.linear import run_case_set
+
+    calls = {"n": 0}
+
+    def cancel() -> bool:
+        calls["n"] += 1
+        return calls["n"] > 1  # False before DEAD, True before WIND
+
+    result = run_case_set(
+        model, mesh, {"DEAD": {"DEAD": 1.0}, "WIND": {"WIND": 1.0}}, should_cancel=cancel
+    )
+
+    assert result["cases"] == ["DEAD"]
+    assert result["cancelled"] is True
+    # WIND was never attempted, so it is not reported as a failure.
+    assert result["failed"] == []
+
+
 # ── The builder's config follows the mesh ──────────────────────────────
 
 

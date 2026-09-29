@@ -312,6 +312,7 @@ def run_static_cases(
     raw_out: Optional[dict] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
     on_progress: Optional[Callable[[int, str, int], None]] = None,
+    attempted: Optional[list[str]] = None,
 ) -> list[dict]:
     """Run each ``{case: {pattern: factor}}`` entry as one static solve.
 
@@ -340,13 +341,18 @@ def run_static_cases(
             ``raw_out[case] = {"nodal_displacements": ..., "element_forces": {...}}``
             — the shape :func:`~fea_toolkit.io.npz_writer.results_arrays` accepts
             as ``static_results``.  A case that **fails** contributes no entry,
-            so ``set(cases) - set(raw_out)`` is the set that did not converge.
+            so ``set(attempted) - set(raw_out)`` is the set that did not
+            converge (see *attempted*).
         should_cancel: Optional zero-argument callable polled between cases; when
             it returns ``True`` the run stops and the rows collected so far are
             returned.
         on_progress: Optional ``(index, case_name, total)`` callback, called
             **before** each case is solved (``index`` is 1-based) — the hook a
             GUI worker turns into a progress signal.
+        attempted: Optional list filled with the name of each case the loop
+            reached, in run order.  A case skipped by cancellation never
+            appears, so a caller can tell a case that **failed** from one that
+            was never run.
 
     Returns:
         One summary row per solved case, in :func:`dict` form — the rows
@@ -369,6 +375,8 @@ def run_static_cases(
     for index, (case_name, patterns) in enumerate(cases.items(), start=1):
         if should_cancel is not None and should_cancel():
             break
+        if attempted is not None:
+            attempted.append(case_name)
         if on_progress is not None:
             on_progress(index, case_name, total)
 
@@ -475,14 +483,16 @@ def run_case_set(
 
     Returns:
         ``{"arrays": {name: ndarray}, "cases": [name, ...], "failed": [...],
-        "unreduced": [...], "cancelled": bool}`` — ``"failed"`` are the cases
-        that did not converge, ``"unreduced"`` the combinations that could not
-        be formed from what did.
+        "unreduced": [...], "cancelled": bool}`` — ``"failed"`` are the
+        *attempted* cases that did not solve, ``"unreduced"`` the combinations
+        that could not be formed from what did, and a case skipped by
+        cancellation is reported only through ``"cancelled"``.
     """
     from ..io.npz_writer import results_arrays
     from .combinations import build_combination_results
 
     raw: dict = {} if raw_out is None else raw_out
+    attempted: list[str] = []
     run_static_cases(
         mesh_model,
         cases,
@@ -490,6 +500,7 @@ def run_case_set(
         raw_out=raw,
         should_cancel=should_cancel,
         on_progress=on_progress,
+        attempted=attempted,
     )
 
     static_results: dict = dict(raw)
@@ -507,13 +518,14 @@ def run_case_set(
     arrays = results_arrays(
         md, static_results=static_results, mesh_model=mesh_model, case_meta=case_meta
     )
-    cancelled = bool(should_cancel()) if should_cancel is not None else False
+    # A cancelled case was never *attempted*, so it is neither a result nor a
+    # failure — deriving cancellation from "not every case was attempted" keeps
+    # the two apart (a case that ran and threw is still reported as failed).
+    cancelled = len(attempted) < len(cases)
     return {
         "arrays": arrays,
         "cases": list(static_results),
-        # A cancelled case did not *fail* — it was never run — so the two are
-        # reported apart and the caller can say which happened.
-        "failed": [] if cancelled else sorted(set(cases) - set(raw)),
+        "failed": sorted(set(attempted) - set(raw)),
         "unreduced": unreduced,
         "cancelled": cancelled,
     }

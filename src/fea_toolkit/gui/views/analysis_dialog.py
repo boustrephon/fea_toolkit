@@ -158,14 +158,23 @@ class AnalysisDialog(QDialog):
 
         Model cases contribute their patterns scaled by the row factor; a ticked
         combination adds its leaf cases (at the model's own factors) so they can
-        be reduced; a named custom case adds one more entry.  A leaf already
-        ticked as a case keeps the user's factor — an explicit choice wins.
+        be reduced; a named custom case adds one more entry.
+
+        A case left at ``1.0`` keeps its model name.  A **scaled** case is stored
+        under a distinct name, so the model's own case stays available unscaled:
+        a combination reduces the solved cases through the *model's* factors, so
+        folding a scaled solve under the model name would silently apply the
+        scale twice.  The un-scaled leaf a combination needs is added below.
         """
         run: dict[str, dict[str, float]] = {}
         for row in self._case_rows:
-            if row.check.isChecked():
-                scale = float(row.factor.value())
-                run[row.name] = {p: f * scale for p, f in row.patterns.items()}
+            if not row.check.isChecked():
+                continue
+            scale = float(row.factor.value())
+            if scale == 1.0:
+                run[row.name] = dict(row.patterns)
+            else:
+                run[f"{row.name} \u00d7{scale:g}"] = {p: f * scale for p, f in row.patterns.items()}
 
         combos: list[str] = []
         for row in self._combo_rows:
@@ -173,6 +182,8 @@ class AnalysisDialog(QDialog):
                 continue
             combos.append(row.name)
             for leaf in row.leaves:
+                # The reduction reads the *model's* factors, so the leaf must be
+                # the un-scaled model definition, never a scaled solve.
                 run.setdefault(leaf, dict(self._cases.get(leaf, {})))
 
         custom_name = self._custom_name.text().strip()
