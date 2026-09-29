@@ -377,16 +377,22 @@ class TestCheckVerbs:
         assert set(rows) == {"expected", "applied", "discrepancy", "tolerance", "passed"}
 
     def test_brace_buckling_is_scoped_by_the_steps_selection(self):
-        from examples.sample_model import make_sample_model
+        """The checked elements are exactly the selected frames — no more, no fewer."""
+        from examples.sample_model import make_rc_frame_model
 
-        model = make_sample_model()
-        step = Step("check_brace_buckling", Selection(element_types=["Frame"]))
+        model = make_rc_frame_model()
+        selection = Selection(sections=["COL"])  # the columns only; beams are excluded
+        step = Step("check_brace_buckling", selection)
         run = run_recipe(Recipe(steps=[step]), model)
 
         table = run.results[0].payload
         assert table.title == "Brace buckling"
         assert table.columns[0] == "element"
-        assert len(table.rows) == len(model.frame_elements)
+
+        selected = selection.get_frame_ids(model)
+        assert selected, "the selection must match a frame for this test to mean anything"
+        assert len(selected) < len(model.frame_elements), "the selection must exclude a frame"
+        assert {row[0] for row in table.rows} == set(selected)
 
     def test_a_check_names_its_own_parameters_only(self):
         """An undeclared parameter is rejected, exactly as for every other verb."""
