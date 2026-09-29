@@ -188,12 +188,36 @@ rather than mutating it; the recipe object stays the single source of truth.
 
 ## Roadmap
 
-| Phase | Content | Status |
-|---|---|---|
-| **A** | the `workflow` package: steps, recipes, registry, and the four verbs | ✅ landed |
-| **B** | the Recipe panel, the `&Recipe` menu, the Model-menu presets | ✅ landed |
-| **C** | `check` and `chart` verbs with their views — `capacity.*`, `model.checks` and `mesh.checks` as steps shown as tables; `plotting.report.*` as figure views. `combine` gains a *view* in this phase | 🚧 planned |
-| **D** | the command palette (`Ctrl+K`) compiling a command string into a step, a command-echo log, and importing a Python script back into a recipe | 🚧 planned |
+| Phase | Register item | Content | Status |
+|---|---|---|---|
+| **A** | [P29](_pending_work.md) | the `workflow` package: steps, recipes, registry, and the four verbs | ✅ landed |
+| **B** | [P29](_pending_work.md) | the Recipe panel, the `&Recipe` menu, the Model-menu presets | ✅ landed |
+| **C** | **[P30](_pending_work.md)** | **computed results become visible** — `check` (`capacity.*`, `model.checks`, `mesh.checks`) and `chart` (`plotting.report.*`) as steps, with the GUI's **first figure view** and a check table; `combine` gains its view; a recipe's solved cases register as result views (closing the gap noted in *The GUI surface*); and the `generate_report` ↔ `Recipe` reconciliation below | 🚧 planned |
+| **D** | **[P31](_pending_work.md)** | **authoring ergonomics** — the command palette (`Ctrl+K`) compiling a command string into a step, a command-echo log recording every action as its equivalent step, and importing a Python script back into a recipe | 🚧 planned |
+
+**C and D are deliberately separate register items** (P30, P31): C makes computed
+results *visible*, D makes authoring *fast*.  Neither depends on the other, so
+either can land first — they are split so they can be scheduled, reviewed and
+delivered independently.
+
+### Resolving the `generate_report` duality — a Phase C deliverable (P30)
+
+`generate_report(config)` is a fixed, complete pipeline with a stable public
+signature; a recipe is the same idea, editable.  The two currently coexist
+(`docs/report_generation.md` records the position from its side), and that
+coexistence is **deliberate and temporary**.
+
+Reconciling them means one of:
+
+* **an adapter** — `generate_report` stays exactly as it is, and internally
+  builds and runs a `Recipe`, so the report config becomes a shorthand for one;
+* **verbs for the stages** — the report's stages are exposed as verbs, and both
+  the report script and the GUI compose them the same way.
+
+Either is acceptable; deciding between them is the first task of P30.  What must
+**not** happen is a piecemeal merge: `generate_report` is a public entry point, so
+a half-migrated pipeline is worse than two clearly-separated ones.
+
 
 Phase C also introduces the GUI's first **figure view** — nothing in the
 application renders a chart today — which is what makes `chart` a step like any

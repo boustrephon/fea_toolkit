@@ -582,7 +582,7 @@ must nevertheless be writable to a **chosen** NPZ after each run — a path prom
 with a suggested file name, not one fixed output — so variants differing by a
 small change can be kept side by side as documentation.
 
-#### P29 — Workflow authoring: steps, recipes, and the GUI Recipe panel
+#### P29 — Workflow authoring (Phases A–B): steps, recipes, and the GUI Recipe panel
 Source: `docs/workflow_authoring.md` (the design record); the 2026-09-29
 planning session; `docs/gui_roadmap.md` §6 (the architecture it modifies).
 
@@ -622,14 +622,10 @@ their mass must be injected explicitly). `scale_sections`' default
 real SAP model usually has `A/I/J` left at zero, where a frame-shaped attribute
 list silently changes nothing.
 
-**Remaining — Phase C.** `check` and `chart` verbs with their views:
-`capacity.*` (`wall_shear_check`, `member_shear_capacity`), `model.checks` and
-`mesh.checks` as steps rendered as tables; `plotting.report.*` as figure views
-(this is the GUI's **first figure view** — nothing renders a chart today).
-`combine` gains its view in this phase. **Remaining — Phase D.** The command
-palette (`Ctrl+K`) compiling a command string into a step, a command-echo log
-recording every action as its equivalent step, and importing a Python script
-back into a recipe.
+**Remaining — split into their own register items.**  Phases C and D are tracked
+**separately**, because they are independent: either can be scheduled, reviewed
+and delivered without the other.  **P30** covers the result verbs and their
+views; **P31** covers authoring ergonomics.
 
 **Supersedes.** The `actions/` directory sketched in `docs/gui_roadmap.md` §6 —
 one `QAction` handler per operation, which grows a menu per feature — is
@@ -641,6 +637,63 @@ rule 11 is **this item**: a selection-scoped step is exactly that mechanism.
 behaviour changes, so `admin_linear_v3.py` runs unchanged. The only edits outside
 the new package are in `gui/` (the panel, the menu, the preset wiring) and the
 GUI tests that document the menu bar and a view's provenance.
+
+#### P30 — Workflow Phase C: result verbs, and their views
+Source: `docs/workflow_authoring.md` § *Roadmap* and § *Resolving the
+`generate_report` duality*.
+
+**Status: 🚧 Not started.**
+
+**What.** Phase A/B made the *model preparation* workflow explicit; Phase C makes
+the **computed results** visible in the same way.  Three things:
+
+1. **Result verbs.**  `check` — wrapping `capacity.*` (`wall_shear_check`,
+   `member_shear_capacity`, `hinge_length`), `model.checks`
+   (`check_model_connectivity`, `check_brace_buckling`,
+   `check_self_weight_consistency`) and `mesh.checks` — and `chart` — wrapping
+   `plotting.report.*` (`plot_storey_forces`, `plot_storey_displacements`,
+   `plot_pushover_curves`, `plot_modal_participation`, `plot_csm_4panel`).  Each
+   declares a `kind` the run loop already understands, plus two new ones:
+   `table` and `figure`.
+2. **The views those need.**  The GUI's **first figure view** (nothing renders a
+   chart today — an embedded Matplotlib canvas) and a **check table view**.  Both
+   are new widget work, which is why this is its own item.
+3. **Closing the two gaps Phase B left.**  `combine` gains a view, and a
+   recipe's solved *cases* register as result views rather than only being
+   reported in the log (`docs/gui.md` records the limitation).
+4. **Reconciling `generate_report(config)` with `Recipe`** — as an *adapter* over
+   a recipe, or by exposing the report's stages as *verbs*.  Deciding which is
+   the first task; see `docs/workflow_authoring.md`.
+
+**Why it is separate from P29.**  P29 delivered the authoring surface for
+operations whose output the GUI already knew how to draw (a model, a case view).
+P30 is what makes *new kinds* of output drawable, and is independently
+reviewable.
+
+**Touches (anticipated).** `workflow/verbs/{check,chart}.py`,
+`workflow/steps.py` (the new `TABLE`/`FIGURE` kinds),
+`workflow/registry.py`, `gui/views/` (a figure panel and a table panel),
+`report.py` and `tests/test_recipe.py` / `tests/test_gui_recipe.py`.
+
+#### P31 — Workflow Phase D: the command palette and script interop
+Source: `docs/workflow_authoring.md` § *Roadmap*.
+
+**Status: 🚧 Not started.**
+
+**What.** Authoring ergonomics, independent of P30:
+
+1. **A command palette** (`Ctrl+K`): a command string compiles into a `Step` —
+   reusing the existing `Selection.from_string` grammar for the scope, so there
+   is **no second selection language** — and is inserted into the recipe.
+2. **A command echo.**  Every mouse action appends its equivalent step (the
+   Model-menu presets already do this), and the log shows the recipe's JSON
+   form, so a session is always replayable and a workflow built by clicking can
+   be handed on as data.
+3. **Importing a Python script back into a recipe**, where the script's steps are
+   expressible as verbs — the inverse of `Recipe.to_python()`.
+
+**Why it is separate from P30.** P30 is about *output*; P31 is about *input*.
+Neither blocks the other, and a user gains from either alone.
 
 ### Tier 4 — Deferred / low-priority
 
@@ -952,6 +1005,39 @@ an implementation detail.
 
 **Trigger.** Revisit when a run is dominated by extraction rather than solving, or
 when a time-history model's per-step results no longer fit comfortably in memory.
+## DONE (2026-09-29 — Eurocode 8 spectra: EN 1998-1 acceleration and displacement)
+
+`ResponseSpectrum` gains the project's third code path for seismic demand,
+alongside GB 50011 and IEC 62271-207:
+
+* **`from_eurocode8()`** — the EC8 acceleration spectrum from a reference peak
+  ground acceleration `a_gR` and a ground type (`a_g = γ_I · a_gR`, EN 1998-1
+  §2.1(4)).  It returns the **design** spectrum by default (§3.2.2.5, Eqs
+  3.13–3.16, with the behaviour factor `q`) and the **elastic** spectrum with
+  `elastic=True` (§3.2.2.2 horizontal, §3.2.2.3 vertical); Type 1 or Type 2,
+  damping correction `η`, and the vertical component.
+* **`from_eurocode8_displacement()`** — the elastic displacement spectrum
+  `S_De(T) = S_e(T)·(T/2π)²` (§3.2.2.4, Eq. 3.6), in which `q` does not enter.
+  Its ordinates are displacements, kept on the `Sa` field with a `code` ending
+  `-Displacement`, so unit consistency remains the caller's responsibility
+  (`.clinerules` §4.6).
+
+The parameter sets (`_ec8_params`) carry both spectrum types plus the vertical
+set, and `_ec8_sample_grid` places a sample at each branch period (`T_B`, `T_C`,
+`T_D`) so a sampled spectrum reproduces the code's breakpoints rather than
+straddling them.
+
+README §6 is now **Seismic Spectra** and names all four builders (`from_gb50011`,
+`from_eurocode8`, `from_eurocode8_displacement`, `from_iec62271`) plus
+`from_arrays` for a user-supplied table.
+
+**Tests.** 19 new cases in `TestEurocode8` — both spectrum types, the ground-type
+parameter tables and the vertical set, each branch, the 2/3 intercept and β's
+lower bound, γ_I / q / η scaling, the vertical component's
+average-parameters-plus-3.0 rule and its independence from `ground_type`, the
+factories' sampling and code labels, and invalid-input rejection.
+`tests/test_spectrum.py`: 66 passed.
+
 ## DONE (2026-09-28 — P28: the self-weight audit counts vertical shells)
 
 `model/checks.py::check_self_weight_consistency()` computed the *expected* shell

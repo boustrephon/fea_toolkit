@@ -8,7 +8,7 @@ related: [viewer.md, workflow.md, results_schema.md, rhino_export.md, report_gen
 ---
 # Desktop GUI Roadmap
 
-## Status: ⚠️ Partial — the chrome and the workflow-modelling path are built.  Milestones 1–4 landed (viewport spike, chrome, model tree + inspector, bidirectional selection + display toggles), the mouse-interaction policy is configurable, and the Model Tree carries a **Views** group (geometry views over the storage seam, derived views filtered by a `Selection`, results archives opened as a view per load case).  Mile**stone 5** landed for **static** cases and combinations (**Analysis ▸ Run…** solves them in the application and shows each as a case view, no archive needed), as did **Milestone 6** (load rendering) and **Milestone 7** (deformed shape *and* member force diagrams).  **Milestone 11 (P29, workflow authoring) landed its Phases A and B on 2026-09-29** — the `workflow` package, the Recipe dock and the Model-menu presets.  Remaining: modal / spectrum / pushover runs, storey response and the pushover curve, layout persistence (M8) and the quad view (M10), plus P29's Phases C and D.
+## Status: ⚠️ Partial — the chrome and the workflow-modelling path are built.  Milestones 1–4 landed (viewport spike, chrome, model tree + inspector, bidirectional selection + display toggles), the mouse-interaction policy is configurable, and the Model Tree carries a **Views** group (geometry views over the storage seam, derived views filtered by a `Selection`, results archives opened as a view per load case).  **Milestone 5** landed for **static** cases and combinations (**Analysis ▸ Run…** solves them in the application and shows each as a case view, no archive needed), as did **Milestone 6** (load rendering) and **Milestone 7** (deformed shape *and* member force diagrams).  **Milestone 11 (workflow authoring) landed its Phases A and B on 2026-09-29** — the `workflow` package, the Recipe dock and the Model-menu presets ([P29](_pending_work.md)).  Remaining: modal / spectrum / pushover runs, storey response and the pushover curve, layout persistence (M8) and the quad view (M10), plus the workflow layer's Phases C and D — now their own items, **[P30](_pending_work.md)** (result verbs and their views) and **[P31](_pending_work.md)** (the command palette).
 
 > **User-facing guide:** [`docs/gui.md`](gui.md) — what the application does
 > today, how to select, the camera and display controls, and the settings file.
@@ -18,8 +18,8 @@ related: [viewer.md, workflow.md, results_schema.md, rhino_export.md, report_gen
 This document records the **framework decision** and the **proposed
 architecture** for a native desktop GUI that wraps the workflow already
 implemented in the package.  Ten of its milestones have landed and an eleventh
-(**workflow authoring**, P29) has begun; the remainder are tracked as **P22**
-and **P29** in [Pending Work Register](_pending_work.md), and the workflow
+(**workflow authoring**, P29–P31) has begun; the remainder are tracked as **P22**
+and **P29**–**P31** in [Pending Work Register](_pending_work.md), and the workflow
 layer itself is specified in [`workflow_authoring.md`](workflow_authoring.md).
 
 > **Where this sketch has diverged from the code.** The §6 tree below is the
@@ -275,43 +275,68 @@ everything else is wiring against existing APIs.
 
 ---
 
-## 6. Proposed architecture
+## 6. Architecture, as built
 
-A new optional subpackage, imported lazily so the core never depends on Qt:
+The subpackage is optional and lazily imported, so the core never depends on Qt.
+This is the layout **as built**.  The original sketch named a `panels/`
+directory, an `actions/` one, and a `viewport/` one; the panels exist but as
+`views/` + `models/`, and the other two were resolved differently — the note
+after the tree says how.
 
 ```
-src/fea_toolkit/gui/                 # new subpackage (optional [gui] extra)
+src/fea_toolkit/gui/                 # optional [gui] extra; imported lazily
 ├── __init__.py                      # lazy re-exports; guards the Qt import
+├── __main__.py                      # `python -m fea_toolkit.gui`
 ├── app.py                           # QApplication bootstrap + run_gui() entry
-├── main_window.py                   # QMainWindow: menubar, top + vertical toolbars,
-│                                    #   docks (left: trees + inspector, bottom: log), statusbar
-├── controllers/
-│   ├── session.py                   # MVC state: SAPModelData → MeshModel → AnalysisBuilder → results
-│   ├── selection.py                 # bidirectional tree ↔ viewport selection sync
-│   └── persistence.py               # QSettings: save/restore window geometry + dock state
-├── panels/
-│   ├── model_tree.py                # QTreeView + QAbstractItemModel (lazy) over SAPModelData
-│   ├── property_tree.py             # QTreeView grouped by object kind (sections/materials/loads/cases)
-│   ├── property_inspector.py        # selected object's dataclass → editable form
-│   └── message_log.py               # bottom dock: read-only QPlainTextEdit, severity-coloured
-├── actions/                         # SUPERSEDED by the workflow layer (see below)
-│   ├── import_model.py              # → SAP2000Parser
-│   ├── run_analysis.py              # → AnalysisBuilder (on a worker thread)
-│   └── export_results.py            # → write_results_npz
-└── viewport/
-    ├── container.py                 # central QWidget holding 1..n QtInteractor viewports
-    └── qt_renderer.py               # QtRenderBackend → pyvistaqt.QtInteractor (MultiBlock, render-once)
+├── main_window.py                   # QMainWindow: menubar, toolbars, docks, status
+│                                    #   bar — and the wiring between them
+├── render_backend.py                # QtRenderBackend → pyvistaqt.QtInteractor
+├── controllers/                     # Qt-free state and threads: unit-tested
+│   │                                #   without the [gui] extra
+│   ├── interaction.py               # the mouse-interaction policy (configurable)
+│   ├── selection.py                 # the tree ↔ viewport identity index
+│   ├── view_registry.py             # the Views group: named lenses over the models
+│   └── worker.py                    # TaskWorker — progress, cancel, GC hand-off
+├── models/                          # Qt item models (no widgets)
+│   ├── model_index.py               # the flat index that identity resolution uses
+│   └── tree_model.py                # lazy QAbstractItemModel over the model
+└── views/                           # the panels — every widget, one module each
+    ├── interactor.py                # pick results, viewport interaction
+    ├── qt_mouse.py                  # the Qt event filter behind the mouse policy
+    ├── property_inspector.py        # the selected object's dataclass as a form
+    ├── message_log.py               # bottom dock: severity-coloured, read-only
+    ├── analysis_dialog.py           # Analysis ▸ Run… — cases, multipliers, combinations
+    ├── selection_dialog.py          # the selection-expression editor
+    └── recipe_panel.py              # the Recipe dock — steps, params, selection
 ```
 
-> **`actions/` was never built, and P29 supersedes it.** The sketch above assumed
-> one `QAction` handler module per operation — a shape that adds a menu entry per
-> feature and hides the workflow inside handlers. The **workflow layer**
-> (`src/fea_toolkit/workflow/`, documented in `docs/workflow_authoring.md`)
-> replaces it: operations are **verbs** in a registry, a workflow is a **recipe**
-> of steps, and the authoring surface is the **Recipe panel**
-> (`gui/views/recipe_panel.py`) in a dock. `Model ▸ Split elements` /
-> `Mesh areas` are now **presets** that write a step and run the recipe. See
-> **P29** in `docs/_pending_work.md`.
+> **What became of the sketch's directories.** The panels exist, but not as
+> `panels/`:
+>
+> * `panels/model_tree.py` → the tree is `models/tree_model.py` (the lazy item
+>   model) driven by a `QTreeView` built in `main_window.py`; the Qt-free
+>   identity index it leans on is `models/model_index.py`.
+> * `panels/property_inspector.py`, `panels/message_log.py` → `views/`, beside the
+>   dialogs (`analysis_dialog.py`, `selection_dialog.py`) and the workflow's
+>   `recipe_panel.py`.  The **Recipe dock is a panel too**, and the newest one.
+> * `panels/property_tree.py` → **not built**; the tab is a greyed placeholder
+>   ([P23](_pending_work.md)).
+> * `controllers/session.py` → became the **`ModelStore` seam** in
+>   `io/model_store.py`, deliberately *outside* the GUI so "a view is a lens" and
+>   the NumPy-typed storage contract hold without Qt (design rule 11).
+> * `controllers/persistence.py` → **not built**; dock/geometry persistence is
+>   milestone 8.
+> * `controllers/` grew `interaction.py`, `view_registry.py` and `worker.py`
+>   instead — all Qt-free, so they are unit-tested without the `[gui]` extra.
+> * `viewport/` → the `QWidget` container is built in `main_window.py` and the
+>   renderer is `render_backend.py`; there was no need for a subpackage.
+> * `actions/` → **superseded by the workflow layer**
+>   (`src/fea_toolkit/workflow/`, `docs/workflow_authoring.md`).  One `QAction`
+>   handler module per operation grows a menu entry per feature and hides the
+>   workflow inside handlers: operations are now **verbs** in a registry, a
+>   workflow is a **recipe** of steps, and the authoring surface is the Recipe
+>   panel.  `Model ▸ Split elements` / `Mesh areas` are **presets** that write a
+>   step and run the recipe ([P29](_pending_work.md)).
 
 ### 6.1 Design rules
 
@@ -447,12 +472,15 @@ The GUI must respect the existing architectural contracts:
 10. **Tests.**  Headless `QApplication` with the `offscreen` platform plugin
     (`QT_QPA_PLATFORM=offscreen`), `ops.wipe()` hygiene, a `needs_gui` marker
     alongside the existing `needs_pyvista` marker.
-11. **Workflow authoring (P29, added 2026-09-29).**  The `workflow` package
+11. **Workflow authoring (P29–P31, added 2026-09-29).**  The `workflow` package
     (verbs, steps, recipes as data), the **Recipe dock**, the `&Recipe` menu,
-    and the Model-menu items re-cast as **presets over the recipe**.  Phases A
-    and B have landed; Phases C (`check` / `chart` verbs with table and figure
-    views) and D (the command palette) remain — see
-    [`workflow_authoring.md`](workflow_authoring.md).
+    and the Model-menu items re-cast as **presets over the recipe** — landed as
+    **P29** (phases A–B).  Remaining, as independent items: **P30** (phase C —
+    `check` / `chart` verbs with the GUI's first figure view and a check table,
+    `combine`'s view, and the `generate_report` reconciliation) and **P31**
+    (phase D — the command palette and script interop).  See
+    [`workflow_authoring.md`](workflow_authoring.md) and
+    [`_pending_work.md`](_pending_work.md).
 
 ---
 
@@ -636,11 +664,11 @@ class QtRenderBackend(RenderBackend):
 | 4 | ✅ Selection sync | both directions work.  **Tree→viewport**: `ModelViewer.highlight_elements` / `highlight_nodes`, redrawn (replacing the old highlight) on every click.  **Viewport→tree**: a right-click resolves the picked batch + cell index through the Qt-free `SelectionIndex`, expands the lazy group, selects the row and scrolls to it — which then drives the inspector and the highlight through the ordinary tree wiring.  Verified end-to-end against real pyvista picks (`tests/test_picking.py`, `tests/test_gui_pick.py`) |
 | 5 | ⚠️ Partial — static-linear runs | ✅ Open runs `SAP2000Parser` on a worker; **Analysis ▸ Run…** lists the model's static cases and combinations (with a per-case load multiplier), solves them via `run_case_set` on a worker with progress + log, registers each result as a **view** through `ResultsRepository` — **no archive written** — and `File ▸ Save results…` writes one when wanted. Modal / spectrum / pushover are still to come. Stop cancels cooperatively at a case boundary |
 | 6 | Load rendering | `render_loads()` + `extract_load_glyphs()` draw joint/line/area/gravity glyphs scaled to model units |
-| 7 | ⚠️ Partial — deformed shape | ✅ a results case's **deformed shape** draws from its own archive (`Results ▸ Deformed shape`, amplified by the toolbar `Scale` box); `Results ▸ Clear results` removes it.  Force diagrams, storey response, pushover curve and `write_results_npz` still to come |
+| 7 | ✅ Deformed shape + force diagrams (storey response outstanding) | ✅ a results case's **deformed shape** draws from its own archive (`Results ▸ Deformed shape`, amplified by the toolbar `Scale` box) and its **member force diagrams** draw with the SAP local-DOF vocabulary (`Results ▸ Force diagrams` + the Force selector); `File ▸ Save results…` writes the displayed result to an NPZ.  **Still to come:** storey response — the storey profiles need member-interior force stations ([P19](_pending_work.md)) — and the pushover curve |
 | 8 | Persistence | geometry + dock state round-trip through `QSettings` |
 | 9 | Tests | headless `QT_QPA_PLATFORM=offscreen` suite green; `needs_gui` marker; `ops.wipe()` hygiene |
 | 10 | Quad-view + polish | central `QWidget` container hosts iso/front/top/side `QtInteractor`s with shared camera toggles |
-| 11 | ⚠️ Partial — workflow authoring (P29) | ✅ the `workflow` package (verbs, steps, recipes as data), the **Recipe dock**, the `&Recipe` menu and the Model-menu presets.  `check` and `chart` verbs with their table/figure views, and the command palette, remain — `docs/workflow_authoring.md` |
+| 11 | ⚠️ Partial — workflow authoring (P29–P31) | ✅ **P29** (Phases A–B): the `workflow` package (verbs, steps, recipes as data), the **Recipe dock**, the `&Recipe` menu and the Model-menu presets.  **P30** (Phase C) — `check` / `chart` verbs with the GUI's first figure view and a check table, `combine`'s view, and the `generate_report` reconciliation — and **P31** (Phase D, the command palette) remain — `docs/workflow_authoring.md` |
 
 ### 9.7 Testing strategy
 

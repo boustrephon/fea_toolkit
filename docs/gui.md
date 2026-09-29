@@ -398,8 +398,18 @@ verb accepts.  Tick **Optional** when a step's failure should be logged and the
 run continue instead of stopping.
 
 **Recipe ▸ Run recipe** (`Ctrl+Shift+R`) runs the steps in order on a worker
-thread and registers what they produce as views — a prepared model as a geometry
-view, case results as result views — while the Message Log narrates each step.
+thread, registering a prepared model as a geometry view and reporting each step
+in the Message Log.  (Registering a *recipe's* solved cases as result views is
+[P30](_pending_work.md); until then a recipe's case output is reported in the log
+and `Analysis ▸ Run…` is the route that turns cases into views.)
+
+> **Which one to use.**  **Analysis ▸ Run…** solves a case set against the model
+> as currently displayed, and is the quicker route once the model's *preparation*
+> is settled — it is also, today, the one that registers each case as a result
+> view.  Use a **recipe** when the preparation is itself part of the answer: it
+> records the mesh, the loads-only selection and the section changes *beside* the
+> solve, so the whole workflow is visible, saveable and replayable rather than
+> living in your memory of which menu items you clicked.
 
 **Two masonry options, both available and independent.**  `scale_sections`
 *keeps* the wall elements and reduces their stiffness, so their weight stays with

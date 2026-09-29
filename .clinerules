@@ -1,7 +1,11 @@
-# fea_toolkit — Project Guardrails (Auto-generated from codebase audit)
+# fea_toolkit — Project Guardrails (Curated)
 
-> Generated 2026-07-24 from a full audit of `src/`, `tests/`, `examples/`,
-> `docs/`, `pyproject.toml`, and `.gitignore`.
+> **Curated, not generated.**  These guardrails are maintained **by hand**.  They
+> began as a full audit of `src/`, `tests/`, `examples/`, `docs/`,
+> `pyproject.toml` and `.gitignore` on 2026-07-24; every rule added since then
+> was added deliberately, so an edit here is a lasting one — do not regenerate or
+> overwrite this file, and do not prune a rule because it looks stale without
+> checking the dated "observed <date>" note that explains why it exists.
 >
 > **LLM assistants**: Read `docs/llm_guide.md` first — it distills the rules
 > below into a shorter, task-oriented format. Then return here for detail
