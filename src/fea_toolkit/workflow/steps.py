@@ -26,14 +26,17 @@ from ..model.selection import Selection
 
 __all__ = [
     "CASES",
+    "FIGURE",
     "GEOMETRY",
     "MODEL",
+    "TABLE",
     "ParamSpec",
     "Step",
     "StepContext",
     "StepError",
     "StepResult",
     "StepSpec",
+    "Table",
     "validate_params",
 ]
 
@@ -44,6 +47,29 @@ GEOMETRY = "geometry"
 MODEL = "model"
 #: A step's output is solved case results (``{case: result}``).
 CASES = "cases"
+#: A step's output is a table of findings — a check's result, rendered as a grid.
+TABLE = "table"
+#: A step's output is a figure — a chart, rendered as an image.
+FIGURE = "figure"
+
+
+@dataclass(frozen=True)
+class Table:
+    """A step's tabular result — what a :data:`TABLE` view renders.
+
+    Cells are **pre-formatted by the verb** that produced them, so a view is a
+    renderer and never a formatter: the verb knows what its numbers mean, and a
+    view that reformatted them would have to know too.
+
+    Attributes:
+        title: What the table is, e.g. ``"Connectivity"``.
+        columns: The column headings.
+        rows: One tuple of cell strings per row.
+    """
+
+    title: str
+    columns: tuple
+    rows: tuple
 
 
 def _never_cancel() -> bool:

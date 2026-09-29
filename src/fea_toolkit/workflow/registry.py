@@ -12,12 +12,18 @@ prepare properties, prepare topology, solve, reduce — and is the order a menu
 should offer them.
 """
 
-from .steps import CASES, GEOMETRY, MODEL, StepSpec
+from .steps import CASES, GEOMETRY, MODEL, TABLE, StepSpec
 from .verbs import (
+    BRACE_BUCKLING_PARAMS,
     COMBINE_PARAMS,
+    CONNECTIVITY_PARAMS,
     MESH_PARAMS,
     RUN_STATIC_PARAMS,
     SCALE_SECTIONS_PARAMS,
+    SELF_WEIGHT_PARAMS,
+    run_check_brace_buckling,
+    run_check_connectivity,
+    run_check_self_weight,
     run_combine,
     run_mesh,
     run_scale_sections,
@@ -31,6 +37,27 @@ __all__ = ["STEP_SPECS", "list_verbs"]
 #: surface is exactly what is declared here, so a recipe cannot reach an
 #: undocumented option.
 STEP_SPECS: dict[str, StepSpec] = {
+    "check_connectivity": StepSpec(
+        verb="check_connectivity",
+        run=run_check_connectivity,
+        params=CONNECTIVITY_PARAMS,
+        kind=TABLE,
+        help="Check for orphan nodes, duplicated coordinates and zero-area sections.",
+    ),
+    "check_self_weight": StepSpec(
+        verb="check_self_weight",
+        run=run_check_self_weight,
+        params=SELF_WEIGHT_PARAMS,
+        kind=TABLE,
+        help="Compare the model's self-weight against the weight its geometry implies.",
+    ),
+    "check_brace_buckling": StepSpec(
+        verb="check_brace_buckling",
+        run=run_check_brace_buckling,
+        params=BRACE_BUCKLING_PARAMS,
+        kind=TABLE,
+        help="Check the selected braces against Euler buckling.",
+    ),
     "scale_sections": StepSpec(
         verb="scale_sections",
         run=run_scale_sections,

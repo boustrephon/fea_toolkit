@@ -113,14 +113,22 @@ class TestManifest:
     """The verb manifest is pure data, and truthful about its verbs."""
 
     def test_verbs_are_listed_in_the_order_they_are_meant_to_run(self):
-        assert list_verbs() == ["scale_sections", "mesh", "run_static", "combine"]
+        assert list_verbs() == [
+            "check_connectivity",
+            "check_self_weight",
+            "check_brace_buckling",
+            "scale_sections",
+            "mesh",
+            "run_static",
+            "combine",
+        ]
 
     def test_every_spec_is_self_consistent(self):
         """A spec's key, its verb name and its parameter types must agree."""
         for verb, spec in STEP_SPECS.items():
             assert spec.verb == verb
             assert callable(spec.run)
-            assert spec.kind in ("geometry", "model", "cases")
+            assert spec.kind in ("geometry", "model", "cases", "table", "figure")
             assert spec.help, f"{verb} has no help text"
             for name, param in spec.params.items():
                 assert isinstance(param, ParamSpec), f"{verb}.{name}"
@@ -338,6 +346,52 @@ class TestScaleSectionsVerb:
         section = scaled.sections["SLAB"]
         got = {name: getattr(section, name) for name in ("A", "J")}
         assert got == pytest.approx({"A": 2.5, "J": 0.5})  # J was not named
+
+
+class TestCheckVerbs:
+    """The model checks, as ``table`` steps (P30 phase C, increment 1).
+
+    A check runs on the parsed model alone — no OpenSees domain, no results —
+    which is why these are the first ``table`` steps and why this file can test
+    them without a solve.
+    """
+
+    def test_connectivity_returns_a_table_of_preformatted_cells(self):
+        run = run_recipe(Recipe(steps=[Step("check_connectivity")]), _slab_model())
+        (result,) = run.results
+        assert result.kind == "table"
+        assert result.payload.title == "Connectivity"
+        assert result.payload.columns == ("check", "value")
+        assert all(isinstance(cell, str) for row in result.payload.rows for cell in row)
+
+    def test_an_unreferenced_node_is_counted_as_orphan(self):
+        model = _slab_model()
+        model.nodes["99"] = Node("99", 99, 8.0, 8.0, 0.0)  # referenced by nothing
+        run = run_recipe(Recipe(steps=[Step("check_connectivity")]), model)
+        rows = dict(run.results[0].payload.rows)
+        assert int(rows["orphan nodes"]) == 1
+
+    def test_self_weight_reports_its_verdict(self):
+        run = run_recipe(Recipe(steps=[Step("check_self_weight")]), _slab_model())
+        rows = dict(run.results[0].payload.rows)
+        assert set(rows) == {"expected", "applied", "discrepancy", "tolerance", "passed"}
+
+    def test_brace_buckling_is_scoped_by_the_steps_selection(self):
+        from examples.sample_model import make_sample_model
+
+        model = make_sample_model()
+        step = Step("check_brace_buckling", Selection(element_types=["Frame"]))
+        run = run_recipe(Recipe(steps=[step]), model)
+
+        table = run.results[0].payload
+        assert table.title == "Brace buckling"
+        assert table.columns[0] == "element"
+        assert len(table.rows) == len(model.frame_elements)
+
+    def test_a_check_names_its_own_parameters_only(self):
+        """An undeclared parameter is rejected, exactly as for every other verb."""
+        with pytest.raises(ValueError, match=r"unknown parameter\(s\) \['tol'\]"):
+            Recipe().add("check_self_weight", params={"tol": 1e-3})
 
 
 class TestFailuresAndCancellation:

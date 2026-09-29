@@ -40,22 +40,27 @@ from .recipe import Recipe, RecipeRun, run_recipe
 from .registry import STEP_SPECS, list_verbs
 from .steps import (
     CASES,
+    FIGURE,
     GEOMETRY,
     MODEL,
+    TABLE,
     ParamSpec,
     Step,
     StepContext,
     StepError,
     StepResult,
     StepSpec,
+    Table,
     validate_params,
 )
 
 __all__ = [
     "CASES",
+    "FIGURE",
     "GEOMETRY",
     "MODEL",
     "STEP_SPECS",
+    "TABLE",
     "ParamSpec",
     "Recipe",
     "RecipeRun",
@@ -64,6 +69,7 @@ __all__ = [
     "StepError",
     "StepResult",
     "StepSpec",
+    "Table",
     "list_verbs",
     "run_recipe",
     "validate_params",
