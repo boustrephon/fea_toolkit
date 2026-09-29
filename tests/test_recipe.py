@@ -72,6 +72,27 @@ def _slab_model() -> SAPModelData:
     )
 
 
+def _model_with_a_combination() -> SAPModelData:
+    """The sample cantilever plus one linear combination of its ``DEAD`` case.
+
+    ``make_sample_model`` defines load cases but no combinations, so a reduction
+    step has nothing to reduce on it.  This adds the smallest combination that
+    still exercises the path: a single-leaf ``Linear Add``.
+    """
+    from examples.sample_model import make_sample_model
+    from fea_toolkit.model.sap_data import LoadCombination, LoadCombinationEntry
+
+    model = make_sample_model()
+    model.load_combinations = {
+        "GRAV": LoadCombination(
+            name="GRAV",
+            combo_type="Linear Add",
+            entries=[LoadCombinationEntry(name="DEAD", factor=1.0, kind="case")],
+        )
+    }
+    return model
+
+
 def _wall_over_slab_model() -> SAPModelData:
     """A slab plus a vertical wall whose base nodes pass through the slab.
 
@@ -493,3 +514,26 @@ class TestEndToEnd:
         # The case solved before the cancellation is kept in the partial result.
         arrays = run.results[-1].payload
         assert any(name.startswith("static/DEAD") for name in arrays)
+
+    def test_combine_returns_the_archive_a_solve_returns(self):
+        """Both ``cases`` verbs hand a viewer one shape, so neither is a special case."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        recipe = Recipe(
+            steps=[
+                Step("mesh"),
+                Step("run_static", params={"cases": {"DEAD": {"DEAD": 1.0}}}),
+                Step("combine", params={"combinations": ["GRAV"]}),
+            ]
+        )
+        run = run_recipe(recipe, _model_with_a_combination())
+
+        assert [result.kind for result in run.results] == ["geometry", "cases", "cases"]
+        arrays = run.results[-1].payload
+
+        # The composite is keyed exactly like a solved case, so one repository
+        # serves both and a view needs no per-verb branch.
+        assert any(name.startswith("static/GRAV/") for name in arrays)
+        repository = NpzResultsRepository(arrays)
+        assert repository.cases() == ["GRAV"]
+        assert repository.case_meta("GRAV").get("group") == "GRAV"
