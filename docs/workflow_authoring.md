@@ -216,7 +216,7 @@ rather than mutating it; the recipe object stays the single source of truth.
 |---|---|---|---|
 | **A** | [P29](_pending_work.md) | the `workflow` package: steps, recipes, registry, and the four verbs | ✅ landed |
 | **B** | [P29](_pending_work.md) | the Recipe panel, the `&Recipe` menu, the Model-menu presets | ✅ landed |
-| **C** | **[P30](_pending_work.md)** | **computed results become visible** — `check` (`capacity.*`, `model.checks`, `mesh.checks`) and `chart` (`plotting.report.*`) as steps, with the GUI's **first figure view** and a check table; `combine` gains its view; a recipe's solved cases register as result views (closing the gap noted in *The GUI surface*) | 🚧 planned |
+| **C** | **[P30](_pending_work.md)** | **computed results become visible** — the three model-check verbs (`check_connectivity`, `check_self_weight`, `check_brace_buckling`) ✅ complete; the rest 🚧 planned — the `chart` verb (`plotting.report.*`), the remaining `check` verbs (`capacity.*`, `mesh.checks`), the GUI's **first figure view** and a check table, `combine`'s view, and a recipe's solved cases registering as result views (closing the gap noted in *The GUI surface*) | ⚠️ Partial |
 | **D** | **[P31](_pending_work.md)** | **authoring ergonomics** — the command palette (`Ctrl+K`) compiling a command string into a step, a command-echo log recording every action as its equivalent step, and importing a Python script back into a recipe | 🚧 planned |
 | **E** | **[P32](_pending_work.md)** | **the report pipeline joins the vocabulary** — the *analysis* verbs the reconciliation needs (modal, response spectrum, pushover), and `generate_report` composing the same registry; see *Resolving the `generate_report` duality* below | 🚧 planned |
 

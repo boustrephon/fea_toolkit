@@ -644,7 +644,10 @@ GUI tests that document the menu bar and a view's provenance.
 Source: `docs/workflow_authoring.md` § *Roadmap* and § *Resolving the
 `generate_report` duality*.
 
-**Status: 🚧 Not started.**
+**Status: ⚠️ Partial** — the three model-check verbs (`check_connectivity`,
+`check_self_weight`, `check_brace_buckling`) landed as `table` steps; the
+`chart` verb, the remaining `check` verbs (`capacity.*`, `mesh.checks`), and the
+figure / check-table / `combine` / solved-case result views remain planned.
 
 **What.** Phase A/B made the *model preparation* workflow explicit; Phase C makes
 the **computed results** visible in the same way.  Three things:

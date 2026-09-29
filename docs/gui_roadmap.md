@@ -8,7 +8,7 @@ related: [viewer.md, workflow.md, results_schema.md, rhino_export.md, report_gen
 ---
 # Desktop GUI Roadmap
 
-## Status: ⚠️ Partial — the chrome and the workflow-modelling path are built.  Milestones 1–4 landed (viewport spike, chrome, model tree + inspector, bidirectional selection + display toggles), the mouse-interaction policy is configurable, and the Model Tree carries a **Views** group (geometry views over the storage seam, derived views filtered by a `Selection`, results archives opened as a view per load case).  **Milestone 5** landed for **static** cases and combinations (**Analysis ▸ Run…** solves them in the application and shows each as a case view, no archive needed), as did **Milestone 6** (load rendering) and **Milestone 7** (deformed shape *and* member force diagrams).  **Milestone 11 (workflow authoring) landed its Phases A and B on 2026-09-29** — the `workflow` package, the Recipe dock and the Model-menu presets ([P29](_pending_work.md)).  Remaining: modal / spectrum / pushover runs, storey response and the pushover curve, layout persistence (M8) and the quad view (M10), plus the workflow layer's Phases C and D — now their own items, **[P30](_pending_work.md)** (result verbs and their views) and **[P31](_pending_work.md)** (the command palette).
+## Status: ⚠️ Partial — the chrome and the workflow-modelling path are built.  Milestones 1–4 landed (viewport spike, chrome, model tree + inspector, bidirectional selection + display toggles), the mouse-interaction policy is configurable, and the Model Tree carries a **Views** group (geometry views over the storage seam, derived views filtered by a `Selection`, results archives opened as a view per load case).  **Milestone 5** landed for **static** cases and combinations (**Analysis ▸ Run…** solves them in the application and shows each as a case view, no archive needed), as did **Milestone 6** (load rendering) and **Milestone 7** (deformed shape *and* member force diagrams).  **Milestone 11 (workflow authoring) landed its Phases A and B on 2026-09-29** — the `workflow` package, the Recipe dock and the Model-menu presets ([P29](_pending_work.md)).  Remaining: modal / spectrum / pushover runs, storey response and the pushover curve, layout persistence (M8) and the quad view (M10), plus the workflow layer's Phases C and D — now their own items, **[P30](_pending_work.md)** (result verbs and their views — its three model-check verbs have landed) and **[P31](_pending_work.md)** (the command palette).
 
 > **User-facing guide:** [`docs/gui.md`](gui.md) — what the application does
 > today, how to select, the camera and display controls, and the settings file.
@@ -475,11 +475,14 @@ The GUI must respect the existing architectural contracts:
 11. **Workflow authoring (P29–P32, added 2026-09-29).**  The `workflow` package
     (verbs, steps, recipes as data), the **Recipe dock**, the `&Recipe` menu,
     and the Model-menu items re-cast as **presets over the recipe** — landed as
-    **P29** (phases A–B).  Remaining, as independent items: **P30** (phase C —
-    `check` / `chart` verbs with the GUI's first figure view and a check table,
-    `combine`'s view, a recipe's cases as views), **P31** (phase D — the command
-    palette and script interop) and **P32** (phase E — the modal / response-
-    spectrum / pushover verbs, and `generate_report` composing the registry).
+    **P29** (phases A–B).  **P30** (phase C) is **⚠️ partial**: the three
+    model-check verbs (`check_connectivity`, `check_self_weight`,
+    `check_brace_buckling`) landed, while the `chart` verb, the GUI's first
+    figure view and a check table, `combine`'s view, and a recipe's cases as
+    views remain.  Also remaining, as independent items: **P31** (phase D — the
+    command palette and script interop) and **P32** (phase E — the modal /
+    response-spectrum / pushover verbs, and `generate_report` composing the
+    registry).
     See [`workflow_authoring.md`](workflow_authoring.md) and
     [`_pending_work.md`](_pending_work.md).
 
@@ -669,7 +672,7 @@ class QtRenderBackend(RenderBackend):
 | 8 | Persistence | geometry + dock state round-trip through `QSettings` |
 | 9 | Tests | headless `QT_QPA_PLATFORM=offscreen` suite green; `needs_gui` marker; `ops.wipe()` hygiene |
 | 10 | Quad-view + polish | central `QWidget` container hosts iso/front/top/side `QtInteractor`s with shared camera toggles |
-| 11 | ⚠️ Partial — workflow authoring (P29–P32) | ✅ **P29** (Phases A–B): the `workflow` package (verbs, steps, recipes as data), the **Recipe dock**, the `&Recipe` menu and the Model-menu presets.  **P30** (Phase C) — `check` / `chart` verbs with the GUI's first figure view and a check table, `combine`'s view, a recipe's cases as views — **P31** (Phase D, the command palette) and **P32** (Phase E, the modal/RS/pushover verbs and the `generate_report` reconciliation) remain — `docs/workflow_authoring.md` |
+| 11 | ⚠️ Partial — workflow authoring (P29–P32) | ✅ **P29** (Phases A–B): the `workflow` package (verbs, steps, recipes as data), the **Recipe dock**, the `&Recipe` menu and the Model-menu presets.  **P30** (Phase C) — the three model-check verbs (`check_connectivity`, `check_self_weight`, `check_brace_buckling`) ✅ landed; the `chart` verb, the GUI's first figure view and a check table, `combine`'s view, and a recipe's cases as views remain 🚧 — **P31** (Phase D, the command palette) and **P32** (Phase E, the modal/RS/pushover verbs and the `generate_report` reconciliation) remain — `docs/workflow_authoring.md` |
 
 ### 9.7 Testing strategy
 
