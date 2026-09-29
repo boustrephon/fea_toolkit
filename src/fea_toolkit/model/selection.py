@@ -58,13 +58,144 @@ SELECT_FIELD_KEYS: dict[str, str] = {
     "elevation_range": "z",
 }
 
-#: One ``KEY=VALUE`` clause.  The value runs until the next ``KEY=`` (which
-#: may be separated by whitespace or a semicolon) or the end of the
-#: expression, so values may contain spaces (``section=Slab 200mm``).
-_SELECT_CLAUSE_RE = re.compile(
-    r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)(?=\s+[A-Za-z_][A-Za-z0-9_]*\s*=|\s*;|$)",
-    re.DOTALL,
-)
+#: A clause key: an ASCII word starting with a letter or underscore.
+_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+#: A ``KEY=`` fragment — what would open a new clause if written plainly.
+_CLAUSE_FRAGMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\s*=")
+
+
+def _needs_quoting(value: str) -> bool:
+    """Whether *value* must be quoted to survive a round-trip through parsing.
+
+    A comma or semicolon would be read as a delimiter, a ``KEY=`` fragment would
+    open a new clause, a quote or backslash would be read as an escape, and
+    leading or trailing whitespace would be trimmed.  An empty value is quoted
+    too, so it is not silently dropped.
+    """
+    if not value or value != value.strip():
+        return True
+    if any(ch in value for ch in (",", ";", '"', "\\")):
+        return True
+    return _CLAUSE_FRAGMENT_RE.search(value) is not None
+
+
+def _quote(value: str) -> str:
+    """Wrap *value* in double quotes, escaping ``\\`` and ``"``."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _render_value(value: str) -> str:
+    """A value as it appears in an expression — quoted only when it must be."""
+    text = str(value)
+    return _quote(text) if _needs_quoting(text) else text
+
+
+def _scan_clauses(expr: str) -> tuple[list[tuple[str, str]], str]:
+    """Split *expr* into ``(key, raw value)`` clauses plus any leftover text.
+
+    Quote-aware: a ``;``, ``,`` or `` word=`` inside a double-quoted value is
+    data, not a delimiter, so a value written by :meth:`Selection.to_string`
+    survives the round-trip.  The first run of text that is not part of a
+    ``KEY=VALUE`` clause is returned as the *leftover*, for the caller to report
+    rather than silently ignore.
+
+    Args:
+        expr: The expression to scan.
+
+    Returns:
+        ``(clauses, leftover)`` — the parsed ``(key, raw value)`` pairs, and any
+        text the scanner could not read as a clause (``""`` when it consumed
+        everything).
+    """
+    clauses: list[tuple[str, str]] = []
+    i, n = 0, len(expr)
+    while i < n:
+        while i < n and (expr[i].isspace() or expr[i] == ";"):
+            i += 1
+        if i >= n:
+            break
+        match = _KEY_RE.match(expr, i)
+        if match is None or match.end() >= n or expr[match.end()] != "=":
+            start = i if match is None else match.start()
+            return clauses, expr[start:].strip().strip(";").strip()
+        key = match.group(0)
+        i = match.end() + 1  # past the '='
+
+        value_start = i
+        quote = False
+        while i < n:
+            ch = expr[i]
+            if quote:
+                if ch == "\\":
+                    i += 2
+                    continue
+                if ch == '"':
+                    quote = False
+                i += 1
+                continue
+            if ch == '"':
+                quote = True
+                i += 1
+                continue
+            if ch == ";":
+                break
+            if ch.isspace():
+                # A `` word=`` ahead means the current clause ends here.
+                j = i
+                while j < n and expr[j].isspace():
+                    j += 1
+                ahead = _KEY_RE.match(expr, j)
+                if ahead is not None and ahead.end() < n and expr[ahead.end()] == "=":
+                    break
+            i += 1
+        clauses.append((key, expr[value_start:i]))
+    return clauses, ""
+
+
+def _split_values(raw: str) -> list[str]:
+    """Split a clause's raw value on unquoted commas and unquote each item.
+
+    A quoted item keeps its content verbatim (``\\`` and ``"`` unescaped); an
+    unquoted item is trimmed, matching the grammar's tolerance for
+    ``section=Slab 200mm``.
+
+    Args:
+        raw: The text after ``KEY=`` up to the clause boundary.
+
+    Returns:
+        The item values, in order, with empty items dropped.
+    """
+    values: list[str] = []
+    i, n = 0, len(raw)
+    while i < n:
+        # Skip the padding around an item (``", "`` between items).
+        while i < n and raw[i].isspace():
+            i += 1
+        if i < n and raw[i] == '"':
+            # Quoted item: content verbatim, ``\`` and ``"`` unescaped.
+            i += 1
+            buf: list[str] = []
+            while i < n and raw[i] != '"':
+                if raw[i] == "\\" and i + 1 < n:
+                    i += 1
+                buf.append(raw[i])
+                i += 1
+            i += 1  # closing quote
+            values.append("".join(buf))
+        else:
+            start = i
+            while i < n and raw[i] != ",":
+                i += 1
+            item = raw[start:i].strip()
+            if item:
+                values.append(item)
+        # Skip to the next comma.
+        while i < n and raw[i] != ",":
+            i += 1
+        if i < n:
+            i += 1  # consume the comma
+    return values
 
 
 def _canonical_element_type(value: str) -> str:
@@ -277,6 +408,10 @@ class Selection:
 
             KEY=VALUE[,VALUE ...][; KEY=VALUE ...]
 
+        A value may be double-quoted (with ``\\`` and ``"`` escaped) when it
+        itself contains a comma, a semicolon or a ``KEY=`` fragment, so a section
+        name like ``"S, 200"`` round-trips through :meth:`to_string` unchanged.
+
         Recognised keys (case-insensitive; the plural and the
         :class:`Selection` field name are accepted aliases):
 
@@ -308,15 +443,13 @@ class Selection:
                 element type.
         """
         kwargs: dict = {}
-        clauses = list(_SELECT_CLAUSE_RE.finditer(expr))
-        # Anything the clause pattern did not consume is malformed input — most
-        # often a bare value with no ``KEY=``.
-        leftovers = _SELECT_CLAUSE_RE.sub("", expr).strip().strip(";").strip()
+        clauses, leftovers = _scan_clauses(expr)
+        # Anything the scanner could not read as a clause is malformed input —
+        # most often a bare value with no ``KEY=``.
         if leftovers:
             raise ValueError(f"expected KEY=VALUE in {leftovers!r} (keys: {SELECT_KEYS_HELP})")
 
-        for clause in clauses:
-            key, value = clause.group(1), clause.group(2).strip()
+        for key, value in clauses:
             field = SELECT_KEYS.get(key.lower())
             if field is None:
                 raise ValueError(f"unknown selection key {key!r} (keys: {SELECT_KEYS_HELP})")
@@ -325,16 +458,16 @@ class Selection:
                 if len(bounds) != 2:
                     raise ValueError(
                         "selection key 'z' takes exactly two numbers, e.g. "
-                        f"z=3.4:4.5 — got {value!r}"
+                        f"z=3.4:4.5 — got {value.strip()!r}"
                     )
                 try:
                     kwargs[field] = (float(bounds[0]), float(bounds[1]))
                 except ValueError as exc:
                     raise ValueError(
-                        f"selection key 'z' takes two numbers — got {value!r}"
+                        f"selection key 'z' takes two numbers — got {value.strip()!r}"
                     ) from exc
             else:
-                values = [v.strip() for v in value.split(",") if v.strip()]
+                values = _split_values(value)
                 if not values:
                     raise ValueError(f"selection key {key!r} has no values")
                 if field == "element_types":
@@ -349,7 +482,11 @@ class Selection:
         selection can be displayed, edited and re-parsed without loss::
 
             >>> Selection(sections=["Roof slab"], elevation_range=(3.0, 6.0)).to_string()
-            'section=Roof slab z=3:6'
+            'section=Roof slab z=3.0:6.0'
+
+        A value that itself contains a comma, a semicolon or a ``KEY=`` fragment
+        is double-quoted (with ``\\`` and ``"`` escaped) so it survives the
+        re-parse, and the elevation bounds are written in full precision.
 
         Returns:
             The expression (``""`` for an empty selection).
@@ -360,9 +497,12 @@ class Selection:
             if not values:
                 continue
             if field_name == "elevation_range":
-                clauses.append(f"{key}={values[0]:g}:{values[1]:g}")
+                # ``str`` (not ``:g``) keeps the bound exact: ``:g`` rounds to
+                # six significant figures, so ``3.0000001`` would come back as
+                # ``3`` and the round-trip would not be lossless.
+                clauses.append(f"{key}={values[0]}:{values[1]}")
             else:
-                clauses.append(f"{key}={', '.join(str(value) for value in values)}")
+                clauses.append(f"{key}={', '.join(_render_value(v) for v in values)}")
         return " ".join(clauses)
 
     # ── helpers ──────────────────────────────────────────────────────────────

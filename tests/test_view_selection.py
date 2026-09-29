@@ -67,7 +67,31 @@ class TestSelectionExpression:
 
         selection = Selection(sections=["Roof slab"], elevation_range=(3.0, 6.0))
 
-        assert selection.to_string() == "section=Roof slab z=3:6"
+        assert selection.to_string() == "section=Roof slab z=3.0:6.0"
+
+    def test_values_with_delimiters_round_trip(self):
+        """A comma, semicolon, quote or ``KEY=`` fragment in a value survives."""
+        from fea_toolkit.model.selection import Selection
+
+        cases = [
+            Selection(sections=["S, 200"]),
+            Selection(sections=["A; B"]),
+            Selection(sections=["z=3"]),
+            Selection(sections=['has "quotes" and \\ a slash']),
+            Selection(sections=["S, 200", "plain"]),
+            Selection(element_ids=["1 2", "3"]),
+        ]
+        for selection in cases:
+            assert Selection.from_string(selection.to_string()) == selection
+
+    def test_elevation_bounds_keep_their_precision(self):
+        """:g would round the bound; the written form has to be exact."""
+        from fea_toolkit.model.selection import Selection
+
+        selection = Selection(elevation_range=(3.0000001, 6.0))
+
+        assert selection.to_string() == "z=3.0000001:6.0"
+        assert Selection.from_string(selection.to_string()).elevation_range == (3.0000001, 6.0)
 
     def test_an_empty_selection_has_an_empty_expression(self):
         from fea_toolkit.model.selection import Selection
