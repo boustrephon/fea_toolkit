@@ -14,6 +14,7 @@ reduction against a different combination set without re-solving.
 
 from typing import Any
 
+from ..config_keys import BUILDER_CONFIG_KEYS
 from ..steps import CASES, ParamSpec, Step, StepContext, StepResult, validate_params
 
 __all__ = ["RUN_STATIC_PARAMS", "run_static"]
@@ -31,7 +32,11 @@ RUN_STATIC_PARAMS: dict[str, ParamSpec] = {
     "config": ParamSpec(
         default={},
         type=dict,
-        help="AnalysisBuilder configuration, e.g. {'element_type': 'elasticBeamColumn'}.",
+        help=(
+            "OpenSees builder overrides — element type, releases, solver settings, "
+            "…  Leave a key at its default to let the builder choose."
+        ),
+        manifest=BUILDER_CONFIG_KEYS,
     ),
 }
 

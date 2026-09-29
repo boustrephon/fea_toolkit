@@ -98,12 +98,18 @@ class ParamSpec:
         help: One-line description, shown beside the field.
         choices: Accepted values when the parameter is an enumeration;
             ``None`` means any value of :attr:`type`.
+        manifest: For a ``dict``-typed parameter, an optional mapping of
+            ``{key: ParamSpec}`` describing the keys that dict may hold.  The GUI
+            renders a structured editor from it instead of a raw literal, so the
+            parameter's sub-options are discoverable and type-checked.  ``None``
+            means the dict is edited as a free-form literal.
     """
 
     default: Any
     type: type
     help: str = ""
     choices: Optional[tuple] = None
+    manifest: Optional[dict] = None
 
     def coerce(self, value: Any, *, verb: str, name: str) -> Any:
         """Return *value* as :attr:`type`, rejecting a wrong value.

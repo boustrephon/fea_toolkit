@@ -171,6 +171,23 @@ class TestManifest:
         first["cases"]["DEAD"] = {"DEAD": 1.0}
         assert spec.defaults()["cases"] == {}
 
+    def test_the_builder_config_keys_are_a_valid_manifest(self):
+        """The config editor's manifest is data the editor can render."""
+        from fea_toolkit.workflow import BUILDER_CONFIG_KEYS
+
+        assert BUILDER_CONFIG_KEYS
+        assert all(isinstance(spec, ParamSpec) for spec in BUILDER_CONFIG_KEYS.values())
+        assert {spec.type for spec in BUILDER_CONFIG_KEYS.values()} <= {bool, int, float, str}
+        assert all(spec.help for spec in BUILDER_CONFIG_KEYS.values())
+
+    def test_run_static_declares_its_config_manifest(self):
+        """The ``config`` dict param carries the manifest the editor renders from."""
+        from fea_toolkit.workflow import BUILDER_CONFIG_KEYS, STEP_SPECS
+
+        config = STEP_SPECS["run_static"].params["config"]
+        assert config.type is dict
+        assert config.manifest is BUILDER_CONFIG_KEYS
+
 
 # ── Recipes as data ───────────────────────────────────────────────────
 

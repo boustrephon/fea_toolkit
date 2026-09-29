@@ -36,6 +36,7 @@ every verb delegates to the existing two-stage pipeline.  A recipe is a
 *description* of work, never a second implementation of it.
 """
 
+from .config_keys import BUILDER_CONFIG_KEYS
 from .recipe import Recipe, RecipeRun, run_recipe
 from .registry import STEP_SPECS, list_verbs
 from .steps import (
@@ -55,6 +56,7 @@ from .steps import (
 )
 
 __all__ = [
+    "BUILDER_CONFIG_KEYS",
     "CASES",
     "FIGURE",
     "GEOMETRY",
