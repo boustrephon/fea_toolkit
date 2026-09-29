@@ -301,8 +301,46 @@ def test_the_config_editor_emits_only_the_keys_a_user_changes(qapp):
     editor = ConfigEditor(BUILDER_CONFIG_KEYS, {})
     assert editor.value() == {}
 
+    # Collapsible: closed by default, so a long manifest never crowds its dialog.
+    assert editor.isCheckable() is True
+    assert editor.isChecked() is False
+    assert editor._scroll.isHidden() is True
+
+    # Each key's help is a tooltip (hover), not an inline label.
+    assert editor._widgets["verbose"].toolTip() == BUILDER_CONFIG_KEYS["verbose"].help
+
     editor._widgets["verbose"].setChecked(True)
     assert editor.value() == {"verbose": True}
 
     editor._widgets["element_type"].setCurrentText("dispBeamColumn")
     assert editor.value() == {"verbose": True, "element_type": "dispBeamColumn"}
+
+    # Expanding the group reveals the (height-capped) scroll area.
+    editor.setChecked(True)
+    assert editor._scroll.isHidden() is False
+    assert editor._scroll.maximumHeight() > 0
+
+
+def test_the_step_list_has_a_help_context_menu(window):
+    """Right-click help is wired to the recipe step list."""
+    from qtpy.QtCore import Qt
+
+    assert window._recipe_panel._list.contextMenuPolicy() == Qt.ContextMenuPolicy.CustomContextMenu
+
+
+def test_the_verb_help_dialog_shows_the_verbs_surface(qapp):
+    """The per-verb help dialog is rendered straight from the StepSpec."""
+    from qtpy.QtWidgets import QTableWidget
+
+    from fea_toolkit.gui.views.verb_help_dialog import VerbHelpDialog
+    from fea_toolkit.workflow import STEP_SPECS
+
+    spec = STEP_SPECS["run_static"]
+    dialog = VerbHelpDialog("run_static", spec)
+
+    table = dialog.findChild(QTableWidget)
+    assert table is not None
+    assert table.rowCount() == len(spec.params)
+    assert table.columnCount() == 4
+    assert table.item(0, 0).text() == "cases"
+    assert "run_static" in dialog.windowTitle()

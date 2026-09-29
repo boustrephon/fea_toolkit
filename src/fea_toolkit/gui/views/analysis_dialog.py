@@ -311,12 +311,11 @@ class AnalysisDialog(QDialog):
         return group
 
     def _build_config_group(self) -> QGroupBox:
-        """Optional OpenSees builder overrides, each key shown with its own help."""
-        group = QGroupBox("Configuration (optional)", self)
-        layout = QVBoxLayout(group)
-        self._config_editor = ConfigEditor(BUILDER_CONFIG_KEYS, {}, group)
-        layout.addWidget(self._config_editor)
-        return group
+        """Optional OpenSees builder overrides, in a collapsible group."""
+        self._config_editor = ConfigEditor(
+            BUILDER_CONFIG_KEYS, {}, self, title="Configuration (optional)"
+        )
+        return self._config_editor
 
     # ── Entry point ──────────────────────────────────────────────────
 

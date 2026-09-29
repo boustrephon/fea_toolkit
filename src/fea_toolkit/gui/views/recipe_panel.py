@@ -19,7 +19,7 @@ import ast
 from dataclasses import replace
 from typing import Any, Optional
 
-from qtpy.QtCore import Signal
+from qtpy.QtCore import Qt, Signal
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -33,6 +33,7 @@ from qtpy.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QToolButton,
     QVBoxLayout,
@@ -43,6 +44,7 @@ from ...model.selection import Selection
 from ...workflow import STEP_SPECS, Recipe
 from .config_editor import ConfigEditor
 from .selection_dialog import SelectionDialog
+from .verb_help_dialog import VerbHelpDialog
 
 
 class RecipePanel(QWidget):
@@ -74,6 +76,8 @@ class RecipePanel(QWidget):
         self._list = QListWidget(self)
         self._list.setObjectName("list_recipe_steps")
         self._list.currentRowChanged.connect(self._on_row_changed)
+        self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._list.customContextMenuRequested.connect(self._on_step_context_menu)
         row.addWidget(self._list, 1)
 
         buttons = QVBoxLayout()
@@ -215,6 +219,26 @@ class RecipePanel(QWidget):
             self._list.setCurrentRow(self._selected)
         self._build_form()
 
+    def _on_step_context_menu(self, pos) -> None:
+        """Right-click a step: offer per-verb help for the step under the cursor."""
+        item = self._list.itemAt(pos)
+        if item is None:
+            return
+        self._list.setCurrentItem(item)
+        index = self._list.row(item)
+        if not (0 <= index < len(self._recipe)):
+            return
+        menu = QMenu(self._list)
+        help_action = menu.addAction("Help\u2026")
+        chosen = menu.exec(self._list.viewport().mapToGlobal(pos))
+        if chosen is help_action:
+            self._show_verb_help(index)
+
+    def _show_verb_help(self, index: int) -> None:
+        """Open the read-only help dialog for the step's verb."""
+        verb = self._recipe.steps[index].verb
+        VerbHelpDialog(verb, STEP_SPECS[verb], self).exec()
+
     def _build_form(self) -> None:
         """Render the selected step's selection, parameters and optional flag.
 
@@ -236,7 +260,14 @@ class RecipePanel(QWidget):
             self._selection_label.setText(f"Selection: {described}")
             for name, parameter in STEP_SPECS[step.verb].params.items():
                 value = step.params.get(name, parameter.default)
-                self._form.addRow(name, self._make_editor(name, parameter, value))
+                editor = self._make_editor(name, parameter, value)
+                if parameter.manifest is not None:
+                    # A structured dict editor is a self-contained collapsible
+                    # group, so it spans the row rather than sitting under a
+                    # redundant "config" label.
+                    self._form.addRow(editor)
+                else:
+                    self._form.addRow(name, editor)
             self._optional.setChecked(step.optional)
         finally:
             self._loading = False
@@ -246,9 +277,9 @@ class RecipePanel(QWidget):
 
         A ``dict`` parameter whose spec declares a ``manifest`` renders a
         structured :class:`~fea_toolkit.gui.views.config_editor.ConfigEditor`
-        instead of a raw literal, so the dict's keys are discoverable and
-        type-checked.  Every parameter's help text is shown **inline** beneath
-        the editor, not only as a hover tooltip.
+        (a collapsible group) instead of a raw literal, so the dict's keys are
+        discoverable and type-checked.  Every other parameter's help text is
+        shown **inline** beneath the editor, not only as a hover tooltip.
 
         Args:
             name: Parameter name, for the write-back.
@@ -256,7 +287,7 @@ class RecipePanel(QWidget):
             value: The step's current value (or the spec default).
 
         Returns:
-            A container widget, already connected to the recipe.
+            The editor, already connected to the recipe.
         """
 
         def write(new_value: Any) -> None:
@@ -264,10 +295,12 @@ class RecipePanel(QWidget):
                 self._set_param(name, new_value)
 
         if parameter.manifest is not None:
-            editor = ConfigEditor(parameter.manifest, value, self._detail)
+            editor = ConfigEditor(parameter.manifest, value, self._detail, title="Configuration")
+            editor.setToolTip(parameter.help)
             editor.changed.connect(lambda: write(editor.value()))
-        else:
-            editor = self._scalar_editor(parameter, value, write)
+            return editor
+
+        editor = self._scalar_editor(parameter, value, write)
 
         container = QWidget(self._detail)
         layout = QVBoxLayout(container)
@@ -277,6 +310,10 @@ class RecipePanel(QWidget):
         if parameter.help:
             help_label = QLabel(parameter.help)
             help_label.setWordWrap(True)
+            # A word-wrapped label reports a single-line height to the form
+            # layout, which clips multi-line text; a Minimum vertical policy
+            # makes its sizeHint the wrapped height instead.
+            help_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
             help_label.setStyleSheet("color: #6a6a6a;")
             layout.addWidget(help_label)
         return container

@@ -3,9 +3,12 @@
 The ``run_static`` verb's ``config`` is a flat dict of OpenSees builder options.
 A raw literal is honest but opaque; this widget renders a curated manifest of
 those keys (:data:`~fea_toolkit.workflow.config_keys.BUILDER_CONFIG_KEYS`) as one
-editor per key, with each key's help shown inline, and writes back a dict holding
-**only the keys the user changed from their declared default** — so an untouched
-key is omitted and the builder applies its own default.
+editor per key.  It is a **collapsible** group: it starts collapsed, so a long
+manifest never crowds the dialog it sits in, and its contents scroll once
+expanded.  Each key's help is shown as a **tooltip** on its widget.  It writes
+back a dict holding **only the keys the user changed from their declared
+default** — so an untouched key is omitted and the builder applies its own
+default.
 
 Qt-only; the manifest itself is Qt-free.
 """
@@ -18,8 +21,9 @@ from qtpy.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
-    QLabel,
+    QGroupBox,
     QLineEdit,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -28,7 +32,7 @@ from qtpy.QtWidgets import (
 __all__ = ["ConfigEditor"]
 
 
-class ConfigEditor(QWidget):
+class ConfigEditor(QGroupBox):
     """One editor per manifest key, emitting a minimal override dict.
 
     Args:
@@ -36,6 +40,7 @@ class ConfigEditor(QWidget):
         value: The current ``config`` dict (keys absent from it fall back to
             the manifest default).
         parent: Optional Qt parent.
+        title: The group's title, e.g. ``"Configuration"``.
     """
 
     changed = Signal()
@@ -45,29 +50,40 @@ class ConfigEditor(QWidget):
         manifest: dict,
         value: Optional[dict] = None,
         parent: Optional[QWidget] = None,
+        title: str = "Configuration",
     ) -> None:
-        super().__init__(parent)
+        super().__init__(title, parent)
         self._manifest = manifest
         self._current = dict(value or {})
         self._widgets: dict[str, Any] = {}
-        self._build()
 
-    # ── Construction ─────────────────────────────────────────────────
+        # Collapsed by default: a long manifest must not stretch the dialog it
+        # sits in.  Unchecking hides the form (a plain checkable group only
+        # greys it out), and a capped scroll area keeps it bounded once open.
+        self.setCheckable(True)
+        self.setChecked(False)
 
-    def _build(self) -> None:
-        layout = QFormLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form = QWidget(self)
+        form_layout = QFormLayout(form)
+        form_layout.setContentsMargins(0, 0, 0, 0)
+        form_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         for key, spec in self._manifest.items():
             editor = self._editor_for(spec, self._current.get(key, spec.default))
             self._widgets[key] = editor
-            field: Any = editor
-            if spec.help:
-                field = self._with_help(editor, spec.help)
-            layout.addRow(key, field)
+            form_layout.addRow(key, editor)
+
+        self._scroll = QScrollArea(self)
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setMaximumHeight(260)
+        self._scroll.setWidget(form)
+        self._scroll.setVisible(False)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(self._scroll)
+        self.toggled.connect(self._scroll.setVisible)
 
     def _editor_for(self, spec: Any, current: Any) -> QWidget:
-        """A widget for one key, wired to emit :attr:`changed` on commit."""
+        """A widget for one key, with its help as a tooltip, emitting ``changed``."""
         kind = spec.type
         if kind is bool:
             widget = QCheckBox(self)
@@ -93,21 +109,9 @@ class ConfigEditor(QWidget):
             widget = QLineEdit(self)
             widget.setText(str(current))
             widget.editingFinished.connect(self.changed.emit)
+        if spec.help:
+            widget.setToolTip(spec.help)
         return widget
-
-    @staticmethod
-    def _with_help(editor: QWidget, help_text: str) -> QWidget:
-        """The editor with its help text shown inline beneath it."""
-        container = QWidget(editor.parentWidget())
-        box = QVBoxLayout(container)
-        box.setContentsMargins(0, 0, 0, 0)
-        box.setSpacing(2)
-        box.addWidget(editor)
-        label = QLabel(help_text)
-        label.setWordWrap(True)
-        label.setStyleSheet("color: #6a6a6a;")
-        box.addWidget(label)
-        return container
 
     # ── Query ────────────────────────────────────────────────────────
 
