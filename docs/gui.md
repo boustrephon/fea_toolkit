@@ -399,8 +399,23 @@ The panel offers **Add** (a menu of verbs), **Remove**, **Up / Down** to reorder
 and for the selected step a **selection field** — the same expression language as
 a derived view, e.g. `section=brick wall type=Area` — plus a **parameter form
 built from the verb's own declaration**, so the form cannot drift from what the
-verb accepts.  Tick **Optional** when a step's failure should be logged and the
-run continue instead of stopping.
+verb accepts.  Each field shows its help text **inline** beneath it.  A
+`dict`-typed parameter whose verb declares a *manifest* — today `run_static`'s
+**config**, the OpenSees builder overrides — renders as a **structured editor**
+(one widget per option, each with its own help), not a raw literal; leaving an
+option at its default omits it, so the builder applies its own.  Tick
+**Optional** when a step's failure should be logged and the run continue instead
+of stopping.
+
+> **Future option — a per-verb "?" help dialog.**  The inline help above covers
+> each *field*, but not the step as a whole.  A "?" button per row (or a **Help**
+> button beside **Add**) could open a dialog for the selected step's verb showing
+> its `StepSpec.help`, every parameter's name / type / default / choices / help,
+> and its `needs` prerequisites.  This is purely presentational work: everything
+> it would show already exists, Qt-free, on ``STEP_SPECS`` (the ``ParamSpec``
+> carries `default`, `type`, `help`, `choices` and now `manifest`), so it needs
+> only a small ``VerbHelpDialog(QDialog)`` rendered from that data and a button to
+> open it — no new dependencies and no change to the verbs themselves.
 
 **Recipe ▸ Run recipe** (`Ctrl+Shift+R`) runs the steps in order on a worker
 thread, registering a prepared model as a geometry view, reporting each step in
