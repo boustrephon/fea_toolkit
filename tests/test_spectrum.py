@@ -11,8 +11,13 @@ import numpy as np
 import pytest
 
 from fea_toolkit.spectrum import (
+    _EC8_TYPE1_PARAMS,
+    _EC8_TYPE2_PARAMS,
     ResponseSpectrum,
     _build_spectrum,
+    _ec8_params,
+    _eurocode8_displacement_spectrum,
+    _eurocode8_spectrum,
     _gb50011_spectrum,
     _iec_spectrum,
     _interp_sa,
@@ -315,3 +320,229 @@ class TestIec62271:
             _iec_spectrum(0.5, pga=-0.1)
         with pytest.raises(ValueError):
             ResponseSpectrum.from_iec62271(pga=-0.4)
+
+
+# ── EN 1998-1 (Eurocode 8) tests ──────────────────────────────────────
+
+
+class TestEurocode8:
+    """EN 1998-1 design-spectrum builder (horizontal and vertical)."""
+
+    def test_type1_ground_a_plateau(self):
+        """Type 1, ground A, q=1, 5% damping → plateau a_g·S·2.5."""
+        sa = _eurocode8_spectrum(0.30, ag_r=0.14, ground_type="A", spectrum_type=1)
+        assert sa == pytest.approx(0.14 * 1.0 * 2.5)
+
+    def test_type2_ground_a_importance_factor(self):
+        """a_g = γI·a_gR; Type 2 ground A plateau = 0.14·2.5 = 0.35."""
+        sa = _eurocode8_spectrum(0.10, ag_r=0.10, gamma_i=1.4, ground_type="A", spectrum_type=2)
+        assert sa == pytest.approx(0.14 * 1.0 * 2.5)
+
+    def test_importance_factor_scales_linearly(self):
+        sa1 = _eurocode8_spectrum(0.30, ag_r=0.10, gamma_i=1.0, ground_type="A")
+        sa14 = _eurocode8_spectrum(0.30, ag_r=0.10, gamma_i=1.4, ground_type="A")
+        assert sa14 == pytest.approx(1.4 * sa1)
+
+    def test_zero_period_intercept_is_two_thirds(self):
+        """The design spectrum rises from (2/3)·a_g·S at T=0."""
+        sa = _eurocode8_spectrum(0.0, ag_r=0.14, ground_type="A", spectrum_type=1)
+        assert sa == pytest.approx(0.14 * 1.0 * (2.0 / 3.0))
+
+    def test_rising_branch(self):
+        """Rising branch: 2/3 + (T/T_B)·(2.5/q − 2/3)."""
+        sa = _eurocode8_spectrum(0.025, ag_r=0.14, ground_type="A", spectrum_type=2)
+        expected = 0.14 * (2.0 / 3.0 + (0.025 / 0.05) * (2.5 - 2.0 / 3.0))
+        assert sa == pytest.approx(expected)
+
+    def test_falling_branch(self):
+        """T_C ≤ T ≤ T_D: plateau·(T_C/T)."""
+        sa = _eurocode8_spectrum(0.50, ag_r=0.14, ground_type="A", spectrum_type=2)
+        assert sa == pytest.approx(0.14 * 2.5 * (0.25 / 0.50))
+
+    def test_long_period_branch(self):
+        """T > T_D: plateau·(T_C·T_D/T²)."""
+        sa = _eurocode8_spectrum(1.50, ag_r=0.14, ground_type="A", spectrum_type=2)
+        assert sa == pytest.approx(0.14 * 2.5 * (0.25 * 1.2 / 1.5**2))
+
+    def test_beta_lower_bound(self):
+        """Very long periods clamp at β·a_g (β = 0.2)."""
+        sa = _eurocode8_spectrum(100.0, ag_r=0.14, ground_type="A", spectrum_type=2)
+        assert sa == pytest.approx(0.2 * 0.14)
+
+    def test_q_reduces_plateau(self):
+        """The behaviour factor scales the plateau by 1/q."""
+        sa1 = _eurocode8_spectrum(0.30, ag_r=0.14, ground_type="A", q=1.0)
+        sa2 = _eurocode8_spectrum(0.30, ag_r=0.14, ground_type="A", q=2.0)
+        assert sa2 == pytest.approx(sa1 / 2.0)
+
+    def test_damping_correction_eta(self):
+        """2% damping scales ordinates by η = √(10/7) > 1."""
+        sa5 = _eurocode8_spectrum(0.30, ag_r=0.14, ground_type="A", zeta=0.05)
+        sa2 = _eurocode8_spectrum(0.30, ag_r=0.14, ground_type="A", zeta=0.02)
+        eta = math.sqrt(10.0 / (5.0 + 100.0 * 0.02))
+        assert sa2 == pytest.approx(sa5 * eta)
+
+    def test_ground_type_soil_factors(self):
+        """Type 1 soil factors S enter the plateau ordinate."""
+        for gt, params in _EC8_TYPE1_PARAMS.items():
+            soil = params[0]
+            sa = _eurocode8_spectrum(0.30, ag_r=0.10, ground_type=gt, spectrum_type=1)
+            assert sa == pytest.approx(0.10 * soil * 2.5), gt
+
+    def test_vertical_uses_avg_and_amplification_3(self):
+        """Vertical: a_vg = 0.9·a_g, S = 1.0, amplification 3.0."""
+        sa = _eurocode8_spectrum(0.10, ag_r=0.14, vertical=True)
+        assert sa == pytest.approx(0.9 * 0.14 * 1.0 * 3.0)
+
+    def test_vertical_ignores_ground_type(self):
+        """The vertical soil factor is always 1.0."""
+        sa_a = _eurocode8_spectrum(0.10, ag_r=0.14, ground_type="A", vertical=True)
+        sa_d = _eurocode8_spectrum(0.10, ag_r=0.14, ground_type="D", vertical=True)
+        assert sa_a == pytest.approx(sa_d)
+
+    def test_from_factory(self):
+        """from_eurocode8 builds a canonical ResponseSpectrum."""
+        s = ResponseSpectrum.from_eurocode8(
+            ag_r=0.10,
+            gamma_i=1.4,
+            ground_type="A",
+            spectrum_type=2,
+            q=1.0,
+            zeta=0.02,
+        )
+        assert s.code == "EC8-Type2"
+        assert len(s.T) == len(s.Sa)
+        eta = math.sqrt(10.0 / 7.0)
+        # Plateau (0.05-0.25 s) = a_g·S·η·2.5/q = 0.14·1.0·η·2.5.
+        assert s.interpolate([0.15])[0] == pytest.approx(0.14 * 2.5 * eta)
+
+    def test_factory_sampled_at_branch_periods(self):
+        """The branch corners T_B, T_C, T_D appear as explicit ordinates."""
+        s = ResponseSpectrum.from_eurocode8(ag_r=0.1, ground_type="B", spectrum_type=1)
+        for branch_period in _EC8_TYPE1_PARAMS["B"][1:]:
+            assert branch_period in s.T
+
+    def test_factory_vertical_code_label(self):
+        s = ResponseSpectrum.from_eurocode8(ag_r=0.14, vertical=True)
+        assert s.code == "EC8-Vertical"
+
+    def test_type2_parameter_table(self):
+        """Type 2 ground A periods are 0.05/0.25/1.20 s (EN 1998-1 Table 3.3)."""
+        assert _EC8_TYPE2_PARAMS["A"] == (1.00, 0.05, 0.25, 1.20)
+
+    def test_ec8_params_vertical_set(self):
+        """Vertical parameters are the fixed S/period/ratio/amplification set."""
+        soil, tb, tc, td, ratio, ampl = _ec8_params("A", 1, vertical=True)
+        assert soil == 1.0
+        assert (tb, tc, td) == (0.05, 0.15, 1.0)
+        assert ratio == pytest.approx(0.9)
+        assert ampl == pytest.approx(3.0)
+
+    def test_invalid_ground_type(self):
+        with pytest.raises(ValueError):
+            _eurocode8_spectrum(0.3, ag_r=0.1, ground_type="Z")
+        with pytest.raises(ValueError):
+            ResponseSpectrum.from_eurocode8(ag_r=0.1, ground_type="Z")
+
+    def test_invalid_spectrum_type(self):
+        with pytest.raises(ValueError):
+            _eurocode8_spectrum(0.3, ag_r=0.1, spectrum_type=3)
+
+    def test_invalid_q_rejected(self):
+        with pytest.raises(ValueError):
+            _eurocode8_spectrum(0.3, ag_r=0.1, q=0.5)
+
+    def test_invalid_gamma_i_rejected(self):
+        with pytest.raises(ValueError):
+            _eurocode8_spectrum(0.3, ag_r=0.1, gamma_i=0.0)
+
+    def test_invalid_zeta_rejected(self):
+        with pytest.raises(ValueError):
+            _eurocode8_spectrum(0.3, ag_r=0.1, zeta=0.0)
+
+    def test_negative_agr_rejected(self):
+        with pytest.raises(ValueError):
+            _eurocode8_spectrum(0.3, ag_r=-0.1)
+
+    def test_vectorized(self):
+        """Array input returns a per-point array of spectral accelerations."""
+        T = np.array([0.0, 0.10, 0.50, 2.0])
+        Sa = _eurocode8_spectrum(T, ag_r=0.14, ground_type="A", spectrum_type=2)
+        assert isinstance(Sa, np.ndarray)
+        assert Sa.shape == (4,)
+        assert Sa[1] == pytest.approx(0.14 * 2.5)
+
+    def test_elastic_rising_intercept_is_one(self):
+        """Elastic spectrum starts at a_g·S at T=0 (design at 2/3·a_g·S)."""
+        se = _eurocode8_spectrum(0.0, ag_r=0.14, ground_type="A", elastic=True)
+        sd = _eurocode8_spectrum(0.0, ag_r=0.14, ground_type="A")
+        assert se == pytest.approx(0.14 * 1.0)
+        assert sd == pytest.approx(0.14 * 1.0 * (2.0 / 3.0))
+
+    def test_elastic_and_design_plateau_equal_at_q1(self):
+        """At q=1 with 5% damping the elastic and design plateaus coincide."""
+        se = _eurocode8_spectrum(0.30, ag_r=0.14, ground_type="A", elastic=True)
+        sd = _eurocode8_spectrum(0.30, ag_r=0.14, ground_type="A", q=1.0)
+        assert se == pytest.approx(sd)
+        assert se == pytest.approx(0.14 * 2.5)
+
+    def test_elastic_has_no_beta_lower_bound(self):
+        """The elastic spectrum has no β·a_g clamp; the design spectrum does."""
+        se = _eurocode8_spectrum(100.0, ag_r=0.14, ground_type="A", spectrum_type=2, elastic=True)
+        sd = _eurocode8_spectrum(100.0, ag_r=0.14, ground_type="A", spectrum_type=2)
+        assert se < 0.2 * 0.14
+        assert sd == pytest.approx(0.2 * 0.14)
+
+    def test_elastic_rejects_q_not_one(self):
+        """q has no meaning for the elastic spectrum."""
+        with pytest.raises(ValueError):
+            _eurocode8_spectrum(0.3, ag_r=0.1, elastic=True, q=2.0)
+
+    def test_vertical_elastic_plateau(self):
+        """Vertical elastic plateau = a_vg·η·3.0 = 0.9·a_g·3.0."""
+        se = _eurocode8_spectrum(0.10, ag_r=0.14, vertical=True, elastic=True)
+        assert se == pytest.approx(0.9 * 0.14 * 3.0)
+
+    def test_elastic_factory_code_labels(self):
+        s = ResponseSpectrum.from_eurocode8(
+            ag_r=0.10, ground_type="A", spectrum_type=2, elastic=True
+        )
+        assert s.code == "EC8-Type2-Elastic"
+        s_v = ResponseSpectrum.from_eurocode8(ag_r=0.14, vertical=True, elastic=True)
+        assert s_v.code == "EC8-Vertical-Elastic"
+
+    def test_displacement_is_se_times_period_squared(self):
+        """S_De(T) = S_e(T)·(T/2π)² (EN 1998-1 §3.2.2.4, Eq. 3.6)."""
+        T = 1.0
+        se = _eurocode8_spectrum(
+            T, ag_r=0.10, gamma_i=1.4, ground_type="A", spectrum_type=2, elastic=True
+        )
+        sde = _eurocode8_displacement_spectrum(
+            T, ag_r=0.10, gamma_i=1.4, ground_type="A", spectrum_type=2
+        )
+        assert sde == pytest.approx(se * (T / (2.0 * math.pi)) ** 2)
+
+    def test_displacement_vectorized_and_scalar(self):
+        T = np.array([0.5, 1.0, 2.0])
+        Sde = _eurocode8_displacement_spectrum(T, ag_r=0.14, ground_type="A")
+        assert isinstance(Sde, np.ndarray)
+        assert Sde.shape == (3,)
+        assert np.all(Sde > 0)
+        assert isinstance(_eurocode8_displacement_spectrum(0.5, ag_r=0.14), float)
+
+    def test_displacement_factory(self):
+        s = ResponseSpectrum.from_eurocode8_displacement(
+            ag_r=0.10, gamma_i=1.4, ground_type="A", spectrum_type=2
+        )
+        assert s.code == "EC8-Type2-Displacement"
+        se = ResponseSpectrum.from_eurocode8(
+            ag_r=0.10, gamma_i=1.4, ground_type="A", spectrum_type=2, elastic=True
+        )
+        # Same period grid; S_De = S_e·(T/2π)² pointwise (Eq. 3.6).
+        assert s.T == se.T
+        for T, sde, sa in zip(s.T, s.Sa, se.Sa):
+            assert sde == pytest.approx(sa * (T / (2.0 * math.pi)) ** 2)
+
+    def test_displacement_factory_vertical(self):
+        s = ResponseSpectrum.from_eurocode8_displacement(ag_r=0.14, vertical=True)
+        assert s.code == "EC8-Vertical-Displacement"

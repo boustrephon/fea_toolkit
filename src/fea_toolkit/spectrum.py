@@ -223,6 +223,225 @@ class ResponseSpectrum:
         )
 
     @classmethod
+    def from_eurocode8(
+        cls,
+        ag_r: float,
+        gamma_i: float = 1.0,
+        ground_type: str = "A",
+        spectrum_type: int = 1,
+        q: float = 1.0,
+        zeta: float = 0.05,
+        vertical: bool = False,
+        elastic: bool = False,
+        T_max: float = 4.0,
+        n_pts: int = 200,
+        description: str = "",
+    ) -> "ResponseSpectrum":
+        """Build an EN 1998-1 (Eurocode 8) acceleration spectrum.
+
+        By default returns the **design spectrum** of EN 1998-1 §3.2.2.5
+        (Eqs 3.13-3.16) with the behaviour factor *q*; when *elastic* is
+        ``True`` it returns the **elastic spectrum** (§3.2.2.2 horizontal,
+        §3.2.2.3 vertical), in which ``q`` does not enter.  The design
+        ground acceleration is ``a_g = gamma_i * ag_r`` (EN 1998-1
+        §2.1(4)).  For the elastic displacement spectrum S_De(T) use
+        :meth:`from_eurocode8_displacement`.
+
+        Parameters
+        ----------
+        ag_r : float
+            Reference peak ground acceleration on rock (type A ground),
+            in the caller's acceleration units (e.g. ``0.10`` for 0.10 g,
+            or ``0.981`` for m/s²).  The returned ordinates use the same
+            units.
+        gamma_i : float
+            Importance factor γI (EN 1998-1 §4.2.5, Table 4.3); the
+            design ground acceleration is ``a_g = gamma_i * ag_r``.
+            Defaults to 1.0.
+        ground_type : str
+            Ground type ``"A"``-``"E"`` (EN 1998-1 Table 3.1).  Ignored
+            for the vertical spectrum (``S = 1.0`` always).  Defaults to
+            ``"A"``.
+        spectrum_type : int
+            ``1`` (high seismicity, *M_s* > 5.5) or ``2`` (low
+            seismicity, *M_s* ≤ 5.5), selecting the parameter table
+            (EN 1998-1 Tables 3.2 / 3.3).  Defaults to 1.
+        q : float
+            Behaviour factor (EN 1998-1 §3.2.2.5); ``q = 1`` is the
+            non-dissipative case.  Ignored when *elastic* is True.
+            Defaults to 1.0.
+        zeta : float
+            Damping ratio (default 0.05).  The damping correction
+            ``η = √(10 / (5 + 100·ζ)) ≥ 0.55`` of §3.2.2.2(3) is applied.
+        vertical : bool
+            When ``True``, build the vertical spectrum: ``a_vg = 0.9 * a_g``,
+            ``S = 1.0``, ``T_B/T_C/T_D = 0.05/0.15/1.0`` s, amplification
+            ``3.0``.  Defaults to ``False`` (horizontal).
+        elastic : bool
+            When ``True``, build the *elastic* spectrum (§3.2.2.2
+            horizontal, §3.2.2.3 vertical) instead of the *design*
+            spectrum (§3.2.2.5): rising-branch intercept ``1`` (vs
+            ``2/3``), plateau ``η·a`` (vs ``η·a/q``), and no ``β·a_g``
+            lower bound.  Defaults to ``False``.
+        T_max : float
+            Upper period bound (s, default 4.0).
+        n_pts : int
+            Number of ordinates on the uniform grid (default 200).  The
+            branch corner periods *T_B*, *T_C*, *T_D* are sampled
+            explicitly.
+        description : str
+            Optional label stored on the instance.
+
+        Returns
+        -------
+        ResponseSpectrum
+            The spectrum ordinates, in the same acceleration units as
+            *ag_r*.
+
+        Raises
+        ------
+        ValueError
+            If *ag_r* is negative or non-finite, *gamma_i* is not
+            positive, *ground_type* is not ``"A"``-``"E"``,
+            *spectrum_type* is not 1 or 2, *q* < 1, or *zeta* is outside
+            ``(0, 0.20]``.
+
+        Examples
+        --------
+        Build the EN 1998-1 Type 2, ground A, γI = 1.4 spectrum and
+        compare its 0.35 g plateau with the IEC 62271-207 RRS:
+
+        >>> s = ResponseSpectrum.from_eurocode8(
+        ...     ag_r=0.10, gamma_i=1.4, ground_type="A", spectrum_type=2, q=1.0
+        ... )
+        >>> s.code
+        'EC8-Type2'
+        """
+        _, tb, tc, td, _, _ = _ec8_params(ground_type, spectrum_type, vertical)
+
+        T_spec = _ec8_sample_grid(tb, tc, td, T_max, n_pts)
+        Sa_spec = _eurocode8_spectrum(
+            T_spec,
+            ag_r,
+            gamma_i=gamma_i,
+            ground_type=ground_type,
+            spectrum_type=spectrum_type,
+            q=q,
+            zeta=zeta,
+            vertical=vertical,
+            elastic=elastic,
+        )
+        if vertical:
+            code, label = "EC8-Vertical", "EN 1998-1 vertical"
+        else:
+            gt = str(ground_type).upper()
+            code = f"EC8-Type{spectrum_type}"
+            label = f"EN 1998-1 Type {spectrum_type} ground {gt}"
+        if elastic:
+            code += "-Elastic"
+            label += " elastic"
+        else:
+            label += f" design, q={q}"
+        label += f", agR={ag_r}, gammaI={gamma_i}, zeta={zeta}"
+        return cls(
+            T=T_spec.tolist(),
+            Sa=Sa_spec.tolist(),
+            code=code,
+            description=description or label,
+        )
+
+    @classmethod
+    def from_eurocode8_displacement(
+        cls,
+        ag_r: float,
+        gamma_i: float = 1.0,
+        ground_type: str = "A",
+        spectrum_type: int = 1,
+        zeta: float = 0.05,
+        vertical: bool = False,
+        T_max: float = 4.0,
+        n_pts: int = 200,
+        description: str = "",
+    ) -> "ResponseSpectrum":
+        """Build the EN 1998-1 elastic displacement spectrum S_De(T).
+
+        The displacement spectrum is ``S_De(T) = S_e(T)·(T/2π)²``
+        (EN 1998-1 §3.2.2.4, Eq. 3.6), where S_e is the *elastic*
+        acceleration spectrum (§3.2.2.2 horizontal, §3.2.2.3 vertical).
+        The behaviour factor ``q`` does not enter.
+
+        The ordinates are **displacements**, stored on the ``Sa`` field
+        with a ``code`` ending in ``-Displacement``.  For a consistent
+        unit system (e.g. m/s², s) they are lengths (m); the caller is
+        responsible for unit consistency (see .clinerules §4.6).
+
+        Parameters
+        ----------
+        ag_r : float
+            Reference peak ground acceleration on rock, in the caller's
+            acceleration units.
+        gamma_i : float
+            Importance factor γI; ``a_g = gamma_i * ag_r``.  Default 1.0.
+        ground_type : str
+            Ground type ``"A"``-``"E"`` (ignored when *vertical*).
+        spectrum_type : int
+            1 (high seismicity) or 2 (low seismicity).
+        zeta : float
+            Damping ratio (default 0.05).
+        vertical : bool
+            When ``True``, use the vertical elastic spectrum (§3.2.2.3).
+        T_max : float
+            Upper period bound (s, default 4.0).
+        n_pts : int
+            Number of ordinates on the uniform grid (default 200); the
+            branch corners T_B, T_C, T_D are sampled explicitly.
+        description : str
+            Optional label stored on the instance.
+
+        Returns
+        -------
+        ResponseSpectrum
+            The spectral-displacement ordinates (``Sa`` holds S_De).
+
+        Raises
+        ------
+        ValueError
+            Propagated from :func:`_eurocode8_spectrum`.
+
+        Examples
+        --------
+        >>> s = ResponseSpectrum.from_eurocode8_displacement(
+        ...     ag_r=0.10, gamma_i=1.4, ground_type="A", spectrum_type=2
+        ... )
+        >>> s.code
+        'EC8-Type2-Displacement'
+        """
+        _, tb, tc, td, _, _ = _ec8_params(ground_type, spectrum_type, vertical)
+        T_spec = _ec8_sample_grid(tb, tc, td, T_max, n_pts)
+        Sd_spec = _eurocode8_displacement_spectrum(
+            T_spec,
+            ag_r,
+            gamma_i=gamma_i,
+            ground_type=ground_type,
+            spectrum_type=spectrum_type,
+            zeta=zeta,
+            vertical=vertical,
+        )
+        if vertical:
+            code, label = "EC8-Vertical-Displacement", "EN 1998-1 vertical"
+        else:
+            gt = str(ground_type).upper()
+            code = f"EC8-Type{spectrum_type}-Displacement"
+            label = f"EN 1998-1 Type {spectrum_type} ground {gt}"
+        label += f" elastic displacement, agR={ag_r}, gammaI={gamma_i}, zeta={zeta}"
+        return cls(
+            T=T_spec.tolist(),
+            Sa=Sd_spec.tolist(),
+            code=code,
+            description=description or label,
+        )
+
+    @classmethod
     def from_arrays(
         cls,
         T: list[float],
@@ -430,6 +649,278 @@ def _iec_spectrum(T, pga, zeta: float = 0.05):
     Sa[high_freq] = pga
 
     return float(Sa[0]) if scalar_in else Sa
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Eurocode 8 (EN 1998-1) design spectrum
+# ═══════════════════════════════════════════════════════════════════════
+# Ground-type parameters (S, T_B, T_C, T_D) per EN 1998-1 Tables 3.2
+# (Type 1, high seismicity) and 3.3 (Type 2, low seismicity), using the
+# recommended (CEN default) values.  National Annexes may prescribe
+# different values for these NDPs.
+
+_EC8_TYPE1_PARAMS: dict[str, tuple[float, float, float, float]] = {
+    "A": (1.00, 0.15, 0.40, 2.00),
+    "B": (1.20, 0.15, 0.50, 2.00),
+    "C": (1.15, 0.20, 0.60, 2.00),
+    "D": (1.35, 0.20, 0.80, 2.00),
+    "E": (1.40, 0.15, 0.50, 2.00),
+}
+
+_EC8_TYPE2_PARAMS: dict[str, tuple[float, float, float, float]] = {
+    "A": (1.00, 0.05, 0.25, 1.20),
+    "B": (1.35, 0.05, 0.25, 1.20),
+    "C": (1.50, 0.10, 0.25, 1.20),
+    "D": (1.80, 0.10, 0.30, 1.20),
+    "E": (1.60, 0.05, 0.25, 1.20),
+}
+
+# Vertical spectrum (EN 1998-1 §3.2.2.3): fixed shape, S is always 1.0.
+_EC8_VERTICAL_S = 1.0
+_EC8_VERTICAL_TB = 0.05
+_EC8_VERTICAL_TC = 0.15
+_EC8_VERTICAL_TD = 1.00
+_EC8_VERTICAL_AVG_RATIO = 0.9  # a_vg = 0.9 * a_g (recommended value)
+_EC8_VERTICAL_AMPLIFICATION = 3.0  # elastic vertical amplification
+_EC8_HORIZONTAL_AMPLIFICATION = 2.5  # elastic horizontal amplification
+_EC8_BETA_LOWER_BOUND = 0.2  # β, EN 1998-1 §3.2.2.5(4)
+_EC8_ETA_MIN = 0.55  # minimum damping correction (§3.2.2.2(3))
+
+
+def _ec8_params(
+    ground_type: str,
+    spectrum_type: int,
+    vertical: bool,
+) -> tuple[float, float, float, float, float, float]:
+    """Resolve the EN 1998-1 spectrum parameters for a ground type.
+
+    Args:
+        ground_type: Ground type ``"A"``-``"E"`` (ignored when *vertical*).
+        spectrum_type: 1 (high seismicity) or 2 (low seismicity).
+        vertical: When True, return the fixed vertical-spectrum parameters.
+
+    Returns:
+        Tuple ``(S, T_B, T_C, T_D, accel_ratio, amplification)``, where
+        *accel_ratio* scales the design ground acceleration (1.0
+        horizontal, 0.9 vertical) and *amplification* is the elastic
+        spectral amplification (2.5 horizontal, 3.0 vertical).
+
+    Raises:
+        ValueError: If *spectrum_type* is not 1 or 2, or *ground_type* is
+            not one of ``"A"``-``"E"``.
+    """
+    if vertical:
+        return (
+            _EC8_VERTICAL_S,
+            _EC8_VERTICAL_TB,
+            _EC8_VERTICAL_TC,
+            _EC8_VERTICAL_TD,
+            _EC8_VERTICAL_AVG_RATIO,
+            _EC8_VERTICAL_AMPLIFICATION,
+        )
+    if spectrum_type not in (1, 2):
+        raise ValueError(f"spectrum_type must be 1 or 2, got {spectrum_type!r}")
+    table = _EC8_TYPE1_PARAMS if spectrum_type == 1 else _EC8_TYPE2_PARAMS
+    gt = str(ground_type).upper()
+    if gt not in table:
+        raise ValueError(f"ground_type must be one of A-E, got {ground_type!r}")
+    soil, tb, tc, td = table[gt]
+    return soil, tb, tc, td, 1.0, _EC8_HORIZONTAL_AMPLIFICATION
+
+
+def _eurocode8_spectrum(
+    T,
+    ag_r: float,
+    *,
+    gamma_i: float = 1.0,
+    ground_type: str = "A",
+    spectrum_type: int = 1,
+    q: float = 1.0,
+    zeta: float = 0.05,
+    vertical: bool = False,
+    elastic: bool = False,
+):
+    """Evaluate the EN 1998-1 (Eurocode 8) acceleration spectrum.
+
+    Returns the **design** spectrum (§3.2.2.5, Eqs 3.13-3.16) by default,
+    or — when *elastic* is True — the **elastic** spectrum (§3.2.2.2
+    horizontal, §3.2.2.3 vertical, Eqs 3.2-3.5).  Both are piecewise in
+    the period ``T``, with plateau coefficient ``η · a / q`` (design) or
+    ``η · a`` (elastic), where *a* is the elastic amplification (2.5
+    horizontal, 3.0 vertical) and ``η`` is the damping correction of
+    §3.2.2.2(3):
+
+    * ``0 <= T <= T_B`` — rising: ``a_g·S·(i + (T/T_B)·(η·a/q − i))``
+    * ``T_B <= T <= T_C`` — plateau: ``a_g·S·(η·a/q)``
+    * ``T_C <= T <= T_D`` — falling (1/T): ``a_g·S·(η·a/q)·(T_C/T)``
+    * ``T_D <= T`` — falling (1/T²): ``a_g·S·(η·a/q)·(T_C·T_D/T²)``
+
+    where the rising-branch intercept ``i`` is ``2/3`` for the design
+    spectrum and ``1`` for the elastic spectrum, and the ``/q`` factor is
+    present only for the design spectrum.  The design spectrum has a
+    lower bound of ``β·a_g`` (``β = 0.2``); the elastic spectrum has none.
+    The design ground acceleration is ``a_g = gamma_i · ag_r``
+    (EN 1998-1 §2.1(4)).
+
+    *ag_r* carries the caller's unit system — the returned acceleration
+    has the same units (e.g. m/s² or g), so no gravity constant is
+    hardcoded (see .clinerules §4.6).
+
+    Args:
+        T: Period value(s) (s) at which to evaluate the spectrum.
+        ag_r: Reference peak ground acceleration on rock, in the model's
+            acceleration units.
+        gamma_i: Importance factor γI; ``a_g = gamma_i * ag_r``.
+        ground_type: Ground type ``"A"``-``"E"`` (ignored when *vertical*).
+        spectrum_type: 1 (high seismicity) or 2 (low seismicity).
+        q: Behaviour factor (≥ 1; ignored when *elastic*, which must then
+            be left at its default ``1.0``).
+        zeta: Damping ratio (fraction of critical).
+        vertical: When True, evaluate the vertical spectrum (§3.2.2.3).
+        elastic: When True, evaluate the elastic spectrum (§3.2.2.2 /
+            §3.2.2.3) instead of the design spectrum (§3.2.2.5).
+
+    Returns:
+        float or np.ndarray: Spectral acceleration(s) in the same units as
+        *ag_r* — a float for scalar *T*, otherwise an array.
+
+    Raises:
+        ValueError: If *ag_r* is non-finite or negative, *gamma_i* is not
+            finite and positive, *q* is less than 1, *zeta* is outside
+            ``(0, 0.20]``, *spectrum_type* is not 1 or 2, *ground_type* is
+            not ``"A"``-``"E"``, *T* is negative or not finite, or
+            *elastic* is True together with ``q != 1``.
+    """
+    if not np.isfinite(ag_r):
+        raise ValueError("ag_r must be finite")
+    if ag_r < 0:
+        raise ValueError("ag_r must be non-negative")
+    if not np.isfinite(gamma_i) or gamma_i <= 0:
+        raise ValueError("gamma_i must be finite and positive")
+    if not np.isfinite(q) or q < 1.0:
+        raise ValueError("q must be finite and >= 1.0")
+    if elastic and q != 1.0:
+        raise ValueError("q has no effect for the elastic spectrum (elastic=True); pass q=1.0")
+    if zeta <= 0 or zeta > 0.20:
+        raise ValueError("zeta must be in (0, 0.20]")
+    if spectrum_type not in (1, 2):
+        raise ValueError(f"spectrum_type must be 1 or 2, got {spectrum_type!r}")
+
+    soil, tb, tc, td, accel_ratio, ampl = _ec8_params(ground_type, spectrum_type, vertical)
+
+    ag = gamma_i * ag_r
+    accel = accel_ratio * ag
+    eta = max(_EC8_ETA_MIN, float(np.sqrt(10.0 / (5.0 + 100.0 * zeta))))
+    # Elastic spectrum: plateau η·a, rising intercept 1.  Design spectrum:
+    # plateau η·a/q, rising intercept 2/3 (EN 1998-1 §3.2.2.2 vs §3.2.2.5).
+    intercept = 1.0 if elastic else 2.0 / 3.0
+    a_plat = eta * ampl / (1.0 if elastic else q)  # plateau (× accel·soil)
+    base = accel * soil
+
+    T_arr = np.asarray(T, dtype=float)
+    if np.any(~np.isfinite(T_arr)):
+        raise ValueError("T values must be finite")
+    if np.any(T_arr < 0):
+        raise ValueError("T values must be non-negative")
+
+    scalar_in = T_arr.ndim == 0
+    T_arr = np.atleast_1d(T_arr)
+
+    Sa = np.empty_like(T_arr)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rising = T_arr < tb
+        Sa[rising] = base * (intercept + (T_arr[rising] / tb) * (a_plat - intercept))
+
+        plateau = (T_arr >= tb) & (T_arr <= tc)
+        Sa[plateau] = base * a_plat
+
+        falling = (T_arr > tc) & (T_arr <= td)
+        Sa[falling] = base * a_plat * (tc / T_arr[falling])
+
+        long_period = T_arr > td
+        Sa[long_period] = base * a_plat * (tc * td / T_arr[long_period] ** 2)
+
+    if not elastic:
+        # The design spectrum shall not be taken less than β·a_g.
+        Sa = np.maximum(Sa, _EC8_BETA_LOWER_BOUND * accel)
+
+    return float(Sa[0]) if scalar_in else Sa
+
+
+def _eurocode8_displacement_spectrum(
+    T,
+    ag_r: float,
+    *,
+    gamma_i: float = 1.0,
+    ground_type: str = "A",
+    spectrum_type: int = 1,
+    zeta: float = 0.05,
+    vertical: bool = False,
+):
+    """Evaluate the EN 1998-1 elastic displacement spectrum S_De(T).
+
+    The displacement spectrum is obtained from the *elastic* acceleration
+    spectrum by ``S_De(T) = S_e(T)·(T/2π)²`` (EN 1998-1 §3.2.2.4, Eq. 3.6).
+    The behaviour factor q does not enter.
+
+    The ordinates are **displacements** — ``acceleration-unit · s²`` —
+    which for a consistent unit system (e.g. m/s², s) are lengths (m).
+
+    Args:
+        T: Period value(s) (s).
+        ag_r: Reference peak ground acceleration on rock, in the model's
+            acceleration units.
+        gamma_i: Importance factor γI; ``a_g = gamma_i * ag_r``.
+        ground_type: Ground type ``"A"``-``"E"`` (ignored when *vertical*).
+        spectrum_type: 1 (high seismicity) or 2 (low seismicity).
+        zeta: Damping ratio (fraction of critical).
+        vertical: When True, use the vertical elastic spectrum (§3.2.2.3).
+
+    Returns:
+        float or np.ndarray: Spectral displacement(s) — a float for scalar
+        *T*, otherwise an array.
+
+    Raises:
+        ValueError: Propagated from :func:`_eurocode8_spectrum`.
+    """
+    T_arr = np.asarray(T, dtype=float)
+    scalar_in = T_arr.ndim == 0
+    Se = _eurocode8_spectrum(
+        T,
+        ag_r,
+        gamma_i=gamma_i,
+        ground_type=ground_type,
+        spectrum_type=spectrum_type,
+        zeta=zeta,
+        vertical=vertical,
+        elastic=True,
+    )
+    Sde = np.asarray(Se) * (np.atleast_1d(T_arr) / (2.0 * np.pi)) ** 2
+    return float(Sde[0]) if scalar_in else Sde
+
+
+def _ec8_sample_grid(
+    tb: float,
+    tc: float,
+    td: float,
+    T_max: float,
+    n_pts: int,
+) -> np.ndarray:
+    """Return the EC8 period grid, sampling T_B, T_C and T_D explicitly.
+
+    Args:
+        tb: Start of the constant-acceleration plateau (s).
+        tc: Start of the constant-velocity branch (s).
+        td: Start of the constant-displacement branch (s).
+        T_max: Upper period bound (s).
+        n_pts: Number of ordinates on the uniform grid.
+
+    Returns:
+        Ascending period ordinates (s) ≤ *T_max*, including the branch
+        corners where they fall within range.
+    """
+    T_spec = np.unique(np.concatenate([np.linspace(0.0, T_max, n_pts), [tb, tc, td]]))
+    return T_spec[T_spec <= T_max]
 
 
 def _build_spectrum(

@@ -359,12 +359,14 @@ parsing through analysis to visualisation and reporting.
 | **Interactive 3D viewer** | `plot_interactive_viewer()` | Radio buttons, sliders, click-to-inspect in browser |
 | **Backend-agnostic HTML export** | `ModelViewer.export_html()` | Self-contained HTML with 3D scene |
 
-### 6. GB 50011 Seismic Spectrum
+### 6. Seismic Spectra
 
 | Workflow | Entry point | What it does |
 |---|---|---|
-| **Design spectrum** | `plot_seismic_spectrum()` | GB 50011 elastic spectrum from intensity, site class, level (returns periods, accelerations, and a Matplotlib figure) |
-| **3-level plot** | `plot_seismic_spectrum()` | Frequent / fortification / rare spectra overlay |
+| **GB 50011 design spectrum** | `plot_seismic_spectrum()`, `ResponseSpectrum.from_gb50011()` | GB 50011 elastic spectrum from intensity, site class, level (returns periods, accelerations, and a Matplotlib figure) |
+| **GB 50011 3-level plot** | `plot_seismic_spectrum()` | Frequent / fortification / rare spectra overlay |
+| **Eurocode 8 (EN 1998-1) spectrum** | `ResponseSpectrum.from_eurocode8()` | EC8 acceleration spectrum from ground type and `a_g` (`= γ_I · a_gR`), Type 1 or 2: the **design** spectrum (§3.2.2.5, with the behaviour factor `q`) by default, or the **elastic** spectrum (§3.2.2.2/3) with `elastic=True`; damping correction `η` and the vertical component included |
+| **Eurocode 8 displacement spectrum** | `ResponseSpectrum.from_eurocode8_displacement()` | EC8 elastic displacement spectrum `S_De(T) = S_e(T)·(T/2π)²` (§3.2.2.4, Eq. 3.6); `q` does not enter |
 
 ### 7. Reporting
 
