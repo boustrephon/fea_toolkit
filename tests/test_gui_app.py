@@ -11,7 +11,7 @@ import pytest
 pytestmark = pytest.mark.needs_gui
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "sample.s2k"
-_MENUS = ["File", "Edit", "View", "Model", "Analysis", "Results", "Help"]
+_MENUS = ["File", "Edit", "View", "Model", "Analysis", "Recipe", "Results", "Help"]
 
 
 @pytest.fixture(scope="module")
@@ -56,16 +56,16 @@ def test_the_embedded_interactor_renders_without_a_thread(window):
 
 
 def test_menubar_has_the_full_menu_set(window):
-    """All seven roadmap menus exist (the full-but-greyed decision)."""
+    """All eight roadmap menus exist (the full-but-greyed decision)."""
     titles = [a.text().replace("&", "") for a in window.menuBar().actions()]
     assert titles == _MENUS
 
 
 def test_docks_are_present(window):
-    """The left trees/inspector and the bottom message log docks exist."""
+    """The left trees/inspector and the bottom message log + recipe docks exist."""
     from qtpy.QtWidgets import QDockWidget
 
-    for name in ("dock_trees", "dock_inspector", "dock_messages"):
+    for name in ("dock_trees", "dock_inspector", "dock_messages", "dock_recipe"):
         assert window.findChild(QDockWidget, name) is not None
 
 

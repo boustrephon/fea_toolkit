@@ -448,6 +448,33 @@ class MainWindow(QMainWindow):
         )
         a["model.selections"] = self._placeholder("Selections", "a future release")
         a["model.units"] = self._placeholder("Units", "a future release")
+        # ── Recipe: the workflow as an ordered list of steps ──
+        a["recipe.run"] = self._real_action(
+            "Run recipe",
+            self._on_recipe_run,
+            shortcut="Ctrl+Shift+R",
+            tip="Run the recipe's steps in order, on a worker",
+        )
+        a["recipe.clear"] = self._real_action(
+            "Clear recipe", self._on_recipe_clear, tip="Empty the Recipe panel"
+        )
+        a["recipe.open"] = self._real_action(
+            "Open recipe\u2026",
+            self._on_recipe_open,
+            tip="Read a recipe from a JSON file and show it in the panel",
+        )
+        a["recipe.save"] = self._real_action(
+            "Save recipe\u2026",
+            self._on_recipe_save,
+            tip="Write the Recipe panel's steps to a JSON file",
+        )
+        a["recipe.export"] = self._real_action(
+            "Export as Python\u2026",
+            self._on_recipe_export,
+            tip="Write the recipe as a runnable Python script",
+        )
+        for key in ("recipe.run", "recipe.clear", "recipe.save", "recipe.export"):
+            a[key].setEnabled(False)
         a["analysis.run"] = self._real_action(
             "Run\u2026",
             self._on_analysis_run,
@@ -539,6 +566,15 @@ class MainWindow(QMainWindow):
             m.addAction(a[key])
         m.addSeparator()
         m.addAction(a["analysis.stop"])
+
+        m = bar.addMenu("&Recipe")
+        m.addAction(a["recipe.run"])
+        m.addSeparator()
+        m.addAction(a["recipe.open"])
+        m.addAction(a["recipe.save"])
+        m.addAction(a["recipe.export"])
+        m.addSeparator()
+        m.addAction(a["recipe.clear"])
 
         m = bar.addMenu("&Results")
         for key in (
@@ -724,6 +760,23 @@ class MainWindow(QMainWindow):
         self._log_dock.setObjectName("dock_messages")
         self._log_dock.setWidget(self._message_log)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._log_dock)
+        self._build_recipe_dock()
+
+    def _build_recipe_dock(self) -> None:
+        """Build the Recipe dock — the workflow as an ordered list of steps.
+
+        It sits in the bottom area beside the Message Log, because running a
+        recipe is precisely what the log narrates.  ``RecipePanel`` needs Qt, so
+        it is imported here rather than at module scope (lazy-import policy).
+        """
+        from .views.recipe_panel import RecipePanel
+
+        self._recipe_panel = RecipePanel(self)
+        self._recipe_panel.changed.connect(self._set_recipe_actions_enabled)
+        self._recipe_dock = QDockWidget("Recipe", self)
+        self._recipe_dock.setObjectName("dock_recipe")
+        self._recipe_dock.setWidget(self._recipe_panel)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._recipe_dock)
 
     # ── Status bar ──────────────────────────────────────────────────
 
@@ -1292,74 +1345,118 @@ class MainWindow(QMainWindow):
     # ── Preprocessing (Model menu) ───────────────────────────────────
 
     def _on_split_elements(self) -> None:
-        """**Model ▸ Split elements**: preprocess, splitting frames at joints."""
-        self._start_preprocess(
-            {"split_elements": True},
+        """**Model ▸ Split elements**: append a split-only ``mesh`` step and run it.
+
+        The Model-menu entries are **presets over the recipe**: each appends the
+        step it stands for and runs the recipe, so one click still does what it
+        always did — while the work it performed is now visible, editable and
+        saveable in the Recipe panel instead of hidden in a handler.
+        """
+        self._add_preset(
+            {"split_elements": True, "create_shells": False},
             "Splitting elements at joints",
-            key="processed",
-            name="Processed",
-            source="Preprocessor: split_elements",
         )
 
     def _on_mesh_areas(self) -> None:
-        """**Model ▸ Mesh areas**: preprocess with shells (area meshing)."""
-        self._start_preprocess(
+        """**Model ▸ Mesh areas**: append a meshing ``mesh`` step and run it."""
+        self._add_preset(
             {"split_elements": True, "create_shells": True},
             "Splitting elements at joints and meshing areas",
-            key="meshed",
-            name="Meshed",
-            source="Preprocessor: split_elements + create_shells",
         )
 
-    def _start_preprocess(
-        self,
-        config: dict,
-        label: str,
-        *,
-        key: str,
-        name: str,
-        source: str,
-    ) -> None:
-        """Run the Preprocessor on a worker and register the result as a view.
-
-        The Preprocessor is pure topology — it never calls OpenSees — but it
-        still runs off the GUI thread: splitting and area meshing a large model
-        is not instant (``docs/gui_roadmap.md`` → *Threading model*).
+    def _add_preset(self, config: dict, label: str) -> None:
+        """Append a ``mesh`` step for *config* and run the recipe.
 
         Args:
-            config: Preprocessor configuration, e.g. ``{"split_elements": True}``.
-            label: What is happening, for the message log.
-            key: View key to register the result under — replacing any earlier
-                run of the same kind, so views do not pile up.
-            name: Display name for that view.
-            source: Provenance recorded on the view.
+            config: The Preprocessor configuration the preset stands for.
+            label: What the Message Log should say is happening.
         """
         if self._store is None:
             self.log("Open a SAP2000 model before preprocessing.", "warn")
             return
-        if self._worker is not None and self._worker.isRunning():
-            self.log("Preprocessing is already running.", "warn")
-            return
+        self._recipe_panel.add_step("mesh", params=config)
+        self._pending_label = label
+        self._on_recipe_run()
+
+    def _on_recipe_run(self) -> None:
+        """**Recipe ▸ Run recipe**: run the panel's steps on a worker.
+
+        The recipe is snapshotted before the worker starts (through its own
+        serialisation), so editing the panel mid-run cannot change what is being
+        run.  The steps' log lines are collected and flushed on the GUI thread
+        once the run ends — a worker must not touch widgets.
+        """
+        from ..workflow import Recipe, run_recipe
 
         store = self._store
-        settings = dict(config)
+        if store is None:
+            self.log("Open a SAP2000 model before running a recipe.", "warn")
+            return
+        if not len(self._recipe_panel.recipe):
+            self.log(
+                "The recipe has no steps \u2014 use Model \u25b8 Split elements / "
+                "Mesh areas, or add one from the Recipe menu.",
+                "warn",
+            )
+            return
+        if self._worker is not None and self._worker.isRunning():
+            self.log("A run is already in progress.", "warn")
+            return
+
+        recipe = Recipe.from_dict(self._recipe_panel.recipe.to_dict())
+        model_data = store.raw()
+        starting_mesh = store.preprocessed()
+        messages: list = []
+        label = getattr(self, "_pending_label", None) or f"Running recipe ({len(recipe)} steps)"
+        self._pending_label = None
+
         self._set_model_actions_enabled(False)
-        self._progress.setRange(0, 0)  # busy: the preprocessor reports no progress
+        self._progress.setRange(0, 0)  # busy: a recipe reports no fine-grained progress
         self._progress.setVisible(True)
         self.log(f"{label} \u2026")
 
+        def task(should_cancel):
+            run = run_recipe(
+                recipe,
+                model_data,
+                model=starting_mesh,
+                cancel=should_cancel,
+                log=messages.append,
+            )
+            return run, messages
+
         _freeze_gc_once()
-        worker = TaskWorker(lambda _should_cancel: store.mesh(settings), parent=self)
-        worker.succeeded.connect(
-            lambda mesh_model: self._preprocess_finished(mesh_model, key, name, source)
-        )
+        worker = TaskWorker(task, parent=self)
+        worker.succeeded.connect(self._recipe_finished)
         worker.failed.connect(self._preprocess_failed)
         worker.finished.connect(self._preprocess_ended)
         self._worker = worker
         worker.start()
 
-    def _preprocess_finished(self, mesh_model: Any, key: str, name: str, source: str) -> None:
-        """Report what changed, register the result as a view and display it.
+    def _recipe_finished(self, payload: Any) -> None:
+        """Report what the recipe produced and register each result as a view.
+
+        Args:
+            payload: ``(RecipeRun, [log lines])`` from the worker.
+        """
+        from ..workflow import CASES
+
+        run, messages = payload
+        for message in messages:
+            self.log(message)
+        for result in run.results:
+            if result.kind == "geometry":
+                self._show_geometry_result(result.label, result.payload)
+            elif result.kind == CASES:
+                self.log(f"{result.label}: {len(result.payload)} result arrays.")
+        for index, verb, message in run.failures:
+            self.log(f"Step {index} ({verb}) failed and is optional \u2014 {message}", "warn")
+        if run.cancelled:
+            self.log("The recipe was cancelled.", "warn")
+        self._set_analysis_actions_enabled()
+
+    def _show_geometry_result(self, label: str, mesh_model: Any) -> None:
+        """Report a geometry result, register it as a view and display it.
 
         Splitting is *opt-in per element* in the model itself (SAP2000's
         auto-mesh flags: ``AtJoints`` / ``AtFrames``), so a model that asks for
@@ -1367,10 +1464,8 @@ class MainWindow(QMainWindow):
         failure.
 
         Args:
-            mesh_model: The ``MeshModel`` produced on the worker.
-            key: View key to register it under.
-            name: Display name for the view.
-            source: Provenance recorded on the view.
+            label: The result's display name, e.g. ``"Meshed"``.
+            mesh_model: The ``MeshModel`` the step produced.
         """
         elements = mesh_model.frame_elements.values()
         children = sum(1 for elem in elements if getattr(elem, "parent_id", None))
@@ -1388,10 +1483,16 @@ class MainWindow(QMainWindow):
         # refinement 1: preprocessing is a user action, never silent).
         if self._store is not None:
             self._store.set_preprocessed(mesh_model)
-        self._views.add_geometry(key, name, mesh_model, source=source)
+        # The view *names* are the GUI's own convention: a split-only run is
+        # still "Processed" and a meshing run "Meshed", whatever the verb
+        # labelled its result.
+        if label == "Meshed":
+            key, name = "meshed", "Meshed"
+        else:
+            key, name = "processed", "Processed"
+        self._views.add_geometry(key, name, mesh_model, source=f"Recipe: {label}")
         self.show_model(mesh_model, reset_view=False)
         self.log(f"Added view: {name}.")
-        self._set_analysis_actions_enabled()
 
     def _preprocess_failed(self, message: str) -> None:
         """Report a preprocessing failure, leaving the display alone."""
@@ -1442,6 +1543,70 @@ class MainWindow(QMainWindow):
             )
         else:
             action.setToolTip("Choose static cases or combinations to solve")
+
+    def _set_recipe_actions_enabled(self) -> None:
+        """Enable the recipe actions that the panel's contents allow.
+
+        Everything except *Run* is meaningful only with a step to act on, so an
+        empty recipe leaves them greyed rather than letting a click do nothing.
+        """
+        if not hasattr(self, "_recipe_panel"):
+            return
+        has_steps = len(self._recipe_panel.recipe) > 0
+        for key in ("recipe.run", "recipe.clear", "recipe.save", "recipe.export"):
+            self._actions[key].setEnabled(has_steps)
+
+    # ── Recipe files ────────────────────────────────────────────────
+
+    def _on_recipe_clear(self) -> None:
+        """**Recipe ▸ Clear recipe**: empty the panel."""
+        self._recipe_panel.clear()
+        self.log("Recipe cleared.")
+
+    def _on_recipe_save(self) -> None:
+        """**Recipe ▸ Save recipe…**: write the panel's steps to a JSON file."""
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save recipe", "recipe.json", "Recipe JSON (*.json)"
+        )
+        if not path:
+            return
+        try:
+            self._recipe_panel.recipe.to_json(path)
+        except OSError as exc:
+            self.log(f"Could not write {path}: {exc}", "error")
+            return
+        self.log(f"Saved recipe: {path}")
+
+    def _on_recipe_open(self) -> None:
+        """**Recipe ▸ Open recipe…**: read a recipe and show it in the panel."""
+        from ..workflow import Recipe
+
+        path, _ = QFileDialog.getOpenFileName(self, "Open recipe", "", "Recipe JSON (*.json)")
+        if not path:
+            return
+        try:
+            recipe = Recipe.from_json(path)
+        except (OSError, ValueError) as exc:
+            self.log(f"Could not read {path}: {exc}", "error")
+            return
+        self._recipe_panel.set_recipe(recipe)
+        self.log(f"Opened recipe: {path} ({len(recipe)} steps)")
+
+    def _on_recipe_export(self) -> None:
+        """**Recipe ▸ Export as Python…**: write the recipe as a runnable script."""
+        from pathlib import Path
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export recipe as Python", "recipe.py", "Python (*.py)"
+        )
+        if not path:
+            return
+        try:
+            Path(path).write_text(self._recipe_panel.recipe.to_python(), encoding="utf-8")
+        except OSError as exc:
+            self.log(f"Could not write {path}: {exc}", "error")
+            return
+        self.log(f"Exported recipe: {path}")
 
     # ── Handlers ────────────────────────────────────────────────────
 

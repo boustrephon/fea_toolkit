@@ -339,7 +339,11 @@ always matches what is on screen.
 ## Preprocessing (split and mesh)
 
 Opening a file shows the model as it was drawn.  Two Model-menu actions run the
-package's Preprocessor over it and swap the display for the prepared topology:
+package's Preprocessor over it and swap the display for the prepared topology.
+They are **presets over a recipe**: each writes the step it stands for into the
+Recipe dock and then runs the recipe, so one click still prepares the model while
+the work it performed becomes visible and editable — see
+[Workflows (recipes)](#workflows-recipes).
 
 | Action | What it does |
 |---|---|
@@ -370,6 +374,47 @@ The actions are enabled only while a **parsed** model is loaded.  The
 Preprocessor consumes a `SAPModelData` and returns a `MeshModel`, so every run
 starts again from the file's own model rather than from an already-split one.
 
+## Workflows (recipes)
+
+A **recipe** is the sequence of operations a model is put through — mesh it,
+soften a section, solve the cases, reduce the combinations — held as data rather
+than buried in a handler.  The **Recipe** dock at the bottom of the window shows
+it as an ordered list of **steps**.
+
+Each step is a *verb* applied to a *selection*, with its own parameters:
+
+| Verb | What it does |
+|---|---|
+| `scale_sections` | Scales a selection's section stiffness **in place** — the masonry "soften the wall" option, keeping the elements, their loads and their mass |
+| `mesh` | Splits frames and meshes areas into shells.  Areas matching the step's selection are held back as **loads-only**: no shell element is created, and their loads become edge loads on the supporting frames |
+| `run_static` | Solves the model's static load cases |
+| `combine` | Reduces the solved cases into load combinations |
+
+The panel offers **Add** (a menu of verbs), **Remove**, **Up / Down** to reorder,
+and for the selected step a **selection field** — the same expression language as
+a derived view, e.g. `section=brick wall type=Area` — plus a **parameter form
+built from the verb's own declaration**, so the form cannot drift from what the
+verb accepts.  Tick **Optional** when a step's failure should be logged and the
+run continue instead of stopping.
+
+**Recipe ▸ Run recipe** (`Ctrl+Shift+R`) runs the steps in order on a worker
+thread and registers what they produce as views — a prepared model as a geometry
+view, case results as result views — while the Message Log narrates each step.
+
+**Two masonry options, both available and independent.**  `scale_sections`
+*keeps* the wall elements and reduces their stiffness, so their weight stays with
+them; a `mesh` step whose selection matches the walls *leaves them out* of the
+OpenSees model entirely, reassigning their loads to the supporting frames.  The
+right one depends on whether the wall should still stiffen the frame a little or
+must not enter the stiffness system at all.
+
+**Recipe ▸ Save recipe…** writes the recipe as JSON, **Open recipe…** reads one
+back, and **Export as Python…** writes it as a runnable script — so a workflow
+built by clicking can be kept, reviewed, diffed and re-run from a terminal.
+
+Design notes and the full verb reference:
+[`workflow_authoring.md`](workflow_authoring.md).
+
 ## Menus at a glance
 
 Live items work today; the rest are present but greyed, each naming the
@@ -381,8 +426,9 @@ jarring than a greyed-out one.
 | **File** | Open (`Ctrl+O`), Open results…, Save results…, Quit | Export Tcl, Export screenshot |
 | **Edit** | Duplicate view, Edit view selection… | Copy, Preferences |
 | **View** | Zoom to fit, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show shells, Clear highlights) | Show element labels, Show loads, Show force diagrams, Reset layout |
-| **Model** | Split elements, Mesh areas (enabled while a parsed model is open) | Selections, Units |
+| **Model** | Split elements, Mesh areas (presets: each writes a recipe step and runs it) | Selections, Units |
 | **Analysis** | Run… (`Ctrl+R`), Stop | Modal analysis, Response spectrum, Pushover |
+| **Recipe** | Run recipe (`Ctrl+Shift+R`), Open recipe…, Save recipe…, Export as Python…, Clear recipe | — |
 | **Results** | Deformed shape, Force diagrams (+ Force selector), Clear results | Storey response, Pushover curve |
 | **Help** | Documentation, About | — |
 | Toolbars | Open; camera views; display toggles; Split / Mesh; Run / Stop; Deformed shape + Scale; Force diagrams + Force selector | Save results (until a result is shown), Export Tcl / screenshot |

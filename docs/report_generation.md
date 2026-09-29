@@ -26,6 +26,18 @@ The architecture has evolved significantly from the original proposal —
 see §3.9 for the two-stage pipeline and §2 for the simplified HDF5
 approach.
 
+> **The config dict is a recipe.** `generate_report(config)` is already a fixed,
+> declarative pipeline: a mapping of named stages to their parameters.  The
+> workflow layer (`docs/workflow_authoring.md`) generalises exactly that idea —
+> a **recipe** is an ordered list of **steps**, each a verb with parameters, so
+> the sequence is editable, inspectable and saveable rather than baked into one
+> function.  The two are **not merged yet, deliberately**: `generate_report` is a
+> stable public entry point, so the workflow layer was built beside it, and
+> re-expressing the report pipeline in terms of `Recipe` is a later, optional
+> step (P29, Phase C/D).  Until then, a report config and a recipe are two
+> spellings of the same intent — the former fixed and complete, the latter
+> editable and still growing.
+
 ---
 
 ## 1. Configuration (Python dict)

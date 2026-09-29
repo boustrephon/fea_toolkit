@@ -245,7 +245,10 @@ def test_the_inspector_reports_the_counts_of_the_view(window):
     # The split parent is kept, so the total exceeds the analysis-ready beams.
     assert rows["n_frames"] == "4"
     assert rows["n_frames_active"] == "3"
-    assert rows["source"] == "Preprocessor: split_elements"
+    # The Model-menu presets write a step and run the recipe, so a view's
+    # provenance names the recipe step that produced it rather than a bare
+    # Preprocessor call.
+    assert rows["source"] == "Recipe: Split"
 
 
 def test_the_view_stays_reported_after_switching(window):

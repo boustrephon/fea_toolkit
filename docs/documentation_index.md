@@ -44,6 +44,11 @@ for automated cross-referencing.
   Tags: `architecture`, `workflow`, `pipeline`, `end-to-end`
   Related: [Builder Reference — Two-stage Pipeline](builder_reference.md) · [Layered Analysis Workflow for the v3 Architecture](layered_analysis_workflow.md) · [Element Classification](element_classification.md) · [Element Splitting](element_splitting.md)
 
+- [Workflow Authoring — Steps and Recipes](workflow_authoring.md) — ⚠️ Partial
+  > The declarative workflow layer: a recipe is an ordered list of steps, each a verb applied to a Selection, saved as data. Architecture, verbs, and the two ways to make an element non-structural.
+  Tags: `workflow`, `recipe`, `steps`, `architecture`, `gui`, `selection`, `verbs`, `declarative`
+  Related: [Desktop GUI](gui.md) · [Desktop GUI Roadmap](gui_roadmap.md) · [Analysis Helpers](analysis.md) · [Analysis Workflow](workflow.md) · [Report Generation — Design Proposal](report_generation.md)
+
 
 ## 🔬 Analysis Types
 
@@ -334,7 +339,7 @@ Tags across all documentation files:
 - **`analysis-builder`** — [builder_reference.md](builder_reference.md), [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`analysis-type`** — [modal_analysis.md](modal_analysis.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [pushover_analysis.md](pushover_analysis.md), [storey_response.md](storey_response.md)
 - **`api-reference`** — [llm_guide.md](llm_guide.md)
-- **`architecture`** — [analysis.md](analysis.md), [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [builder_reference.md](builder_reference.md), [dev_notes.md](dev_notes.md), [gui_roadmap.md](gui_roadmap.md), [layered_analysis_workflow.md](layered_analysis_workflow.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [workflow.md](workflow.md)
+- **`architecture`** — [analysis.md](analysis.md), [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [builder_reference.md](builder_reference.md), [dev_notes.md](dev_notes.md), [gui_roadmap.md](gui_roadmap.md), [layered_analysis_workflow.md](layered_analysis_workflow.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [workflow.md](workflow.md), [workflow_authoring.md](workflow_authoring.md)
 - **`area-elements`** — [shell_support.md](shell_support.md)
 - **`asce41`** — [capacity.md](capacity.md)
 - **`attributes`** — [rhino_attributes.md](rhino_attributes.md)
@@ -366,6 +371,7 @@ Tags across all documentation files:
 - **`csm`** — [csm_bilinearization.md](csm_bilinearization.md), [csm_test_model_plan.md](csm_test_model_plan.md), [pushover_analysis.md](pushover_analysis.md)
 - **`data-model`** — [parser_coverage.md](parser_coverage.md)
 - **`dcr`** — [capacity.md](capacity.md)
+- **`declarative`** — [workflow_authoring.md](workflow_authoring.md)
 - **`deprecation`** — [deprecation_plan.md](deprecation_plan.md)
 - **`design`** — [capacity.md](capacity.md)
 - **`design-proposal`** — [report_generation.md](report_generation.md)
@@ -400,7 +406,7 @@ Tags across all documentation files:
 - **`gpl`** — [licence.md](licence.md)
 - **`gravity`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`ground-motion`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
-- **`gui`** — [gui.md](gui.md), [gui_roadmap.md](gui_roadmap.md)
+- **`gui`** — [gui.md](gui.md), [gui_roadmap.md](gui_roadmap.md), [workflow_authoring.md](workflow_authoring.md)
 - **`guide`** — [llm_guide.md](llm_guide.md)
 - **`hdf5`** — [model_stage_file.md](model_stage_file.md), [report_generation.md](report_generation.md)
 - **`hinges`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md)
@@ -458,6 +464,7 @@ Tags across all documentation files:
 - **`pyvistaqt`** — [gui.md](gui.md), [gui_roadmap.md](gui_roadmap.md)
 - **`qt`** — [gui_roadmap.md](gui_roadmap.md)
 - **`rc`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`recipe`** — [workflow_authoring.md](workflow_authoring.md)
 - **`refactor`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`reference`** — [builder_reference.md](builder_reference.md), [mander_confinement_validation.md](mander_confinement_validation.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`release`** — [versioning.md](versioning.md)
@@ -478,7 +485,7 @@ Tags across all documentation files:
 - **`schema`** — [results_schema.md](results_schema.md)
 - **`scripting`** — [tcl_export.md](tcl_export.md)
 - **`sections`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
-- **`selection`** — [gui.md](gui.md)
+- **`selection`** — [gui.md](gui.md), [workflow_authoring.md](workflow_authoring.md)
 - **`self-weight`** — [model_review.md](model_review.md)
 - **`semver`** — [versioning.md](versioning.md)
 - **`serialisation`** — [model_stage_file.md](model_stage_file.md)
@@ -491,6 +498,7 @@ Tags across all documentation files:
 - **`slabs`** — [element_classification.md](element_classification.md)
 - **`solver`** — [modal_analysis.md](modal_analysis.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`splitting`** — [element_splitting.md](element_splitting.md)
+- **`steps`** — [workflow_authoring.md](workflow_authoring.md)
 - **`stiffness`** — [stiffness_factors.md](stiffness_factors.md)
 - **`storage`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md)
 - **`storey`** — [diaphragm_constraints.md](diaphragm_constraints.md), [storey_response.md](storey_response.md)
@@ -505,6 +513,7 @@ Tags across all documentation files:
 - **`usage`** — [llm_guide.md](llm_guide.md)
 - **`userstrings`** — [rhino_attributes.md](rhino_attributes.md)
 - **`validation`** — [mander_confinement_validation.md](mander_confinement_validation.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [shear_failure_modelling.md](shear_failure_modelling.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`verbs`** — [workflow_authoring.md](workflow_authoring.md)
 - **`versioning`** — [versioning.md](versioning.md)
 - **`viewer`** — [viewer.md](viewer.md)
 - **`visualisation`** — [rhino_export.md](rhino_export.md), [viewer.md](viewer.md)
@@ -513,7 +522,7 @@ Tags across all documentation files:
 - **`walls`** — [element_classification.md](element_classification.md)
 - **`warranty`** — [licence.md](licence.md)
 - **`wind`** — [model_review.md](model_review.md)
-- **`workflow`** — [layered_analysis_workflow.md](layered_analysis_workflow.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [workflow.md](workflow.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
+- **`workflow`** — [layered_analysis_workflow.md](layered_analysis_workflow.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [workflow.md](workflow.md), [workflow_authoring.md](workflow_authoring.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`xara`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [tcl_export.md](tcl_export.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md), [xara_pushover_workflow.md](xara_pushover_workflow.md), [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`yaml-config`** — [report_generation.md](report_generation.md)
 - **`yield-point`** — [csm_bilinearization.md](csm_bilinearization.md)

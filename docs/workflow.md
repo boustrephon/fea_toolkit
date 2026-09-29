@@ -43,6 +43,16 @@ flowchart TD
     P3 -->|Results dicts| P4
 ```
 
+> **Phase 1 is script-level today, and P29 gives it a home in the application.**
+> "Fix base restraints", "compute supplemental masses" and "define the loads-only
+> selection" are the model *preparation* a script performs by hand before Phase
+> 2a — the reason `local/…/admin_linear_v3.py` exists.  The workflow layer
+> (`docs/workflow_authoring.md`) expresses them as **steps** applied to a
+> `Selection` — `scale_sections` for stiffness, `mesh` with a selection for the
+> loads-only route — so the same preparation can be authored, saved and replayed
+> from the GUI or a recipe file.  The script path remains the power-user route;
+> `Recipe.to_python()` exports a recipe into exactly that shape.
+
 ---
 
 ## Phase 0 — Parsing (`SAP2000Parser`)

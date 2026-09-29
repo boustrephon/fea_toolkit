@@ -1102,6 +1102,23 @@ fea-gui path/to/model.s2k  # or open a SAP2000 model
   macOS paints it from the interpreter's framework bundle, not from Qt:
   verified against Qt's names, AppKit retitles, `NSProcessInfo.processName`,
   and a generated `.app` bundle both with a script launcher *and* with the
+* **Workflows are authored, not implied.**  The **Recipe** dock at the bottom
+  shows the operations a model is put through as an ordered list of **steps** —
+  each a verb (`scale_sections`, `mesh`, `run_static`, `combine`) applied to a
+  selection, with its parameters.  `Recipe ▸ Run recipe` runs them on a worker
+  and registers what they produce as views; a recipe saves to JSON and exports
+  as a runnable Python script.  `Model ▸ Split elements` / `Mesh areas` are
+  **presets over that recipe** — each writes its step and runs it, so the work
+  performed stays visible and editable.  See
+  [`docs/workflow_authoring.md`](docs/workflow_authoring.md) and the
+  [user guide](docs/gui.md#workflows-recipes).
+* **Two ways to make masonry non-structural**, both available and independent:
+  `scale_sections` keeps the wall elements and reduces their stiffness (their
+  weight stays with them), while a `mesh` step whose selection matches the walls
+  leaves them out of the OpenSees model entirely and reassigns their loads to the
+  supporting frames.
+
+
   interpreter inside it.  Only a py2app/PyInstaller-style build (compiled
   launcher embedding `libpython`) changes that — and such a self-contained
   bundle is compatible with the OpenSeesPy licence provided it ships no

@@ -286,7 +286,7 @@ src/fea_toolkit/gui/                 # new subpackage (optional [gui] extra)
 │   ├── property_tree.py             # QTreeView grouped by object kind (sections/materials/loads/cases)
 │   ├── property_inspector.py        # selected object's dataclass → editable form
 │   └── message_log.py               # bottom dock: read-only QPlainTextEdit, severity-coloured
-├── actions/                         # QAction handlers wired to the pipeline
+├── actions/                         # SUPERSEDED by the workflow layer (see below)
 │   ├── import_model.py              # → SAP2000Parser
 │   ├── run_analysis.py              # → AnalysisBuilder (on a worker thread)
 │   └── export_results.py            # → write_results_npz
@@ -294,6 +294,16 @@ src/fea_toolkit/gui/                 # new subpackage (optional [gui] extra)
     ├── container.py                 # central QWidget holding 1..n QtInteractor viewports
     └── qt_renderer.py               # QtRenderBackend → pyvistaqt.QtInteractor (MultiBlock, render-once)
 ```
+
+> **`actions/` was never built, and P29 supersedes it.** The sketch above assumed
+> one `QAction` handler module per operation — a shape that adds a menu entry per
+> feature and hides the workflow inside handlers. The **workflow layer**
+> (`src/fea_toolkit/workflow/`, documented in `docs/workflow_authoring.md`)
+> replaces it: operations are **verbs** in a registry, a workflow is a **recipe**
+> of steps, and the authoring surface is the **Recipe panel**
+> (`gui/views/recipe_panel.py`) in a dock. `Model ▸ Split elements` /
+> `Mesh areas` are now **presets** that write a step and run the recipe. See
+> **P29** in `docs/_pending_work.md`.
 
 ### 6.1 Design rules
 
@@ -385,6 +395,15 @@ The GUI must respect the existing architectural contracts:
     `docs/dev_notes.md` → *Results repository and the NumPy-typed seam*.  Derived
     views (parent reference plus a `Selection`) and HDF5-backed lazy
     materialisation are the recorded follow-on slices.
+12. **A workflow is authored, not implied.**  ✅ **Implemented for the four
+    verbs that exist (P29).**  An operation the application performs is a
+    **step** — a verb, a `Selection`, parameters — and a sequence of them is a
+    **recipe**, edited in the Recipe dock and saved as data
+    (`docs/workflow_authoring.md`).  A menu action at most *presets* a step: it
+    writes the step it stands for and runs the recipe, so what the application
+    did is always visible, editable and replayable rather than hidden in a
+    handler.  When a GUI action cannot be expressed as a step, that is the
+    signal to add a verb — not to add a second code path in the window.
 
 ---
 
@@ -607,6 +626,7 @@ class QtRenderBackend(RenderBackend):
 | 8 | Persistence | geometry + dock state round-trip through `QSettings` |
 | 9 | Tests | headless `QT_QPA_PLATFORM=offscreen` suite green; `needs_gui` marker; `ops.wipe()` hygiene |
 | 10 | Quad-view + polish | central `QWidget` container hosts iso/front/top/side `QtInteractor`s with shared camera toggles |
+| 11 | ⚠️ Partial — workflow authoring (P29) | ✅ the `workflow` package (verbs, steps, recipes as data), the **Recipe dock**, the `&Recipe` menu and the Model-menu presets.  `check` and `chart` verbs with their table/figure views, and the command palette, remain — `docs/workflow_authoring.md` |
 
 ### 9.7 Testing strategy
 

@@ -435,7 +435,13 @@ as precisely as a ± pair (a `+QE` / `-QE` marker cannot express either).
 #### P22 — Desktop GUI (Qt/PySide6) design & roadmap
 Source: `docs/gui_roadmap.md`.
 
-**Status: Milestones 1–3 landed (viewport spike, application chrome, model tree + inspector), 2026-09-23 — selection sync, analysis and results are not yet built.**
+**Status: ⚠️ Partial — Milestones 1–4 landed (viewport spike, application chrome,
+model tree + inspector, bidirectional selection), as have Milestone 5's static
+run, Milestone 6's load rendering and Milestone 7's deformed shape and force
+diagrams.  **P29 (workflow authoring) landed its Phases A and B on 2026-09-29** —
+the Recipe panel and the Model-menu presets — see
+`docs/workflow_authoring.md`.  Modal / spectrum / pushover analyses, storey
+response and the quad view remain.**
 
 **What.** A native, document-centric desktop application wrapping the
 package's existing workflow (import `*.s2k` → display geometry and loading →
@@ -562,12 +568,79 @@ Preprocessor when none exists, so the first analysis is one click rather than tw
 menu steps.  Deliberately not done now because a Run that silently preprocessed
 would hide a topology change the user should see reported.
 
+> **Resolved by P29 (2026-09-29).** The deferral is no longer live, and the
+> tension it names is gone: with the workflow layer, preprocessing is an
+> *explicit step in a recipe*, so a run cannot silently change topology — the
+> topology change **is** a visible, editable step.  *Run* need not grow an
+> auto-preprocess path; a recipe that wants one writes `mesh` as its first step.
+> The `Analysis ▸ Run…` dialog remains for the single-shot case-set path.
+
 **Refinement 2 — a run replaces, but every run stays writable.**
 Re-running a case **replaces** the previous result in the view (the
 preprocessing-view pattern: keyed by kind, so views never pile up).  The results
 must nevertheless be writable to a **chosen** NPZ after each run — a path prompt
 with a suggested file name, not one fixed output — so variants differing by a
 small change can be kept side by side as documentation.
+
+#### P29 — Workflow authoring: steps, recipes, and the GUI Recipe panel
+Source: `docs/workflow_authoring.md` (the design record); the 2026-09-29
+planning session; `docs/gui_roadmap.md` §6 (the architecture it modifies).
+
+**Status: ⚠️ Partial — Phases A and B landed 2026-09-29. Phases C and D are
+planned.** See the phase table in `docs/workflow_authoring.md`.
+
+**What.** The toolkit's analysis primitives are composed by the caller, and a
+*script* composes them with Python control flow. That is code: it cannot be
+inspected as a workflow, edited in a GUI, or diffed as a document — which is why
+`local/…/admin_linear_v3.py` has to be read to be understood. P29 adds the
+**declarative counterpart**: a *step* is a verb applied to a `Selection` with
+parameters, and a *recipe* is an ordered list of them, saved as data.
+
+**Landed (A).** The `fea_toolkit.workflow` package — `Step`, `Recipe`,
+`StepSpec`/`ParamSpec`, the `STEP_SPECS` manifest, and four verbs (`mesh`,
+`scale_sections`, `run_static`, `combine`). Recipes round-trip through dict and
+JSON, and `to_python()` exports a runnable script. Two properties are asserted
+by test rather than assumed: importing the manifest does **not** load OpenSees,
+and a spec's parameters are the only ones its implementation may read.
+
+**Landed (B).** The GUI Recipe panel (a view over a `Recipe`, its forms built
+from `ParamSpec`), the `&Recipe` menu (Run / Open / Save / Export as Python /
+Clear), and the **Model-menu presets** — *Split elements* and *Mesh areas* now
+write the step they stand for and run the recipe, so one click still does what
+it always did while the work became visible and editable. This **resolves P27's
+refinement 1**: preprocessing is an explicit step in a recipe rather than
+something *Run* might silently do.
+
+**The two non-structural strategies (both wanted, deliberately independent).**
+To make masonry non-structural while retaining its weight there are two routes:
+`scale_sections` reduces the element's stiffness **in place** (the element stays,
+so its loads and mass stay with it), and `mesh` with a `selection` leaves the
+elements **out** entirely (their loads become edge loads on the supports, and
+their mass must be injected explicitly). `scale_sections`' default
+`attributes="auto"` scales the property each element kind actually uses —
+`A/I33/I22/J` for a frame, `thickness` for a shell — because a shell wall in a
+real SAP model usually has `A/I/J` left at zero, where a frame-shaped attribute
+list silently changes nothing.
+
+**Remaining — Phase C.** `check` and `chart` verbs with their views:
+`capacity.*` (`wall_shear_check`, `member_shear_capacity`), `model.checks` and
+`mesh.checks` as steps rendered as tables; `plotting.report.*` as figure views
+(this is the GUI's **first figure view** — nothing renders a chart today).
+`combine` gains its view in this phase. **Remaining — Phase D.** The command
+palette (`Ctrl+K`) compiling a command string into a step, a command-echo log
+recording every action as its equivalent step, and importing a Python script
+back into a recipe.
+
+**Supersedes.** The `actions/` directory sketched in `docs/gui_roadmap.md` §6 —
+one `QAction` handler per operation, which grows a menu per feature — is
+replaced by a step registry and a pipeline panel. The "derived views (parent
+reference plus a `Selection`)" follow-on recorded in `docs/gui_roadmap.md` §6.1
+rule 11 is **this item**: a selection-scoped step is exactly that mechanism.
+
+**Non-breaking by construction.** The layer is additive — no existing module's
+behaviour changes, so `admin_linear_v3.py` runs unchanged. The only edits outside
+the new package are in `gui/` (the panel, the menu, the preset wiring) and the
+GUI tests that document the menu bar and a view's provenance.
 
 ### Tier 4 — Deferred / low-priority
 
