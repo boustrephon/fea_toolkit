@@ -645,11 +645,14 @@ Source: `docs/workflow_authoring.md` § *Roadmap* and § *Resolving the
 `generate_report` duality*.
 
 **Status: ⚠️ Partial** — the three model-check verbs (`check_connectivity`,
-`check_self_weight`, `check_brace_buckling`) landed as `table` steps, and a
-recipe's solved cases and combinations now **register as result views** (both
-`cases` verbs return the same in-memory archive, so one registration path serves
-a solve and a reduction alike); the `chart` verb, the remaining `check` verbs
-(`capacity.*`, `mesh.checks`), and the figure / check-table views remain planned.
+`check_self_weight`, `check_brace_buckling`) landed as `table` steps, a recipe's
+solved cases and combinations now **register as result views** (both `cases`
+verbs return the same in-memory archive, so one registration path serves a solve
+and a reduction alike), and the `chart` verb plus the GUI's **first figure
+view** and a **check-table view** landed.  Remaining: the `capacity.*` /
+`mesh.checks` check verbs, and the other `plotting.report.*` charts (storey
+forces, pushover, modal, CSM) that need the results P32's analysis verbs
+produce.
 
 **What.** Phase A/B made the *model preparation* workflow explicit; Phase C makes
 the **computed results** visible in the same way.  Three things:
@@ -661,10 +664,12 @@ the **computed results** visible in the same way.  Three things:
    `plotting.report.*` (`plot_storey_forces`, `plot_storey_displacements`,
    `plot_pushover_curves`, `plot_modal_participation`, `plot_csm_4panel`).  Each
    declares a `kind` the run loop already understands, plus two new ones:
-   `table` and `figure`.
-2. **The views those need.**  The GUI's **first figure view** (nothing renders a
-   chart today — an embedded Matplotlib canvas) and a **check table view**.  Both
-   are new widget work, which is why this is its own item.
+   `table` and `figure`.  ✅ Landed so far: the three `model.checks` verbs and
+   the `chart` verb's `storey_displacements` plot (the one chart the solved
+   static cases can feed — the others need P32's analysis results).
+2. **The views those need.**  ✅ The GUI's **first figure view** (an embedded
+   Matplotlib canvas) and a **check-table view** (a read-only grid) both landed,
+   as lazy pages of the central stacked area beside the 3-D viewport.
 3. **Closing the two gaps Phase B left.**  ✅ `combine` gains a view, and a
    recipe's solved *cases* register as result views rather than only being
    reported in the log (`docs/gui.md` records the limitation).  Both fall out of

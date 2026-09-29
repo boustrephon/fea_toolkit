@@ -468,7 +468,7 @@ drives a *separately installed* OpenSees is the recorded route
 | Element labels, the Property Tree tab, explicit interaction modes ([P23](_pending_work.md)) | The corresponding menu item and tab are greyed |
 | Window-layout persistence (milestone 8) | Docks and window geometry are not remembered between sessions |
 | Quad view (milestone 10) | A single viewport; use the Camera menu and the view cube |
-| `check` and `chart` verbs, and the command palette ([P30](_pending_work.md) phase C, [P31](_pending_work.md)) | The Recipe panel runs the verbs that exist (`scale_sections`, `mesh`, `run_static`, `combine`, and the three model checks).  A recipe's solved cases and combinations **are** registered as result views; the `capacity.*` / `mesh.checks` verbs, the `chart` verb and its figure view, and a check-table view have no step yet |
+| `check` and `chart` verbs, and the command palette ([P30](_pending_work.md) phase C, [P31](_pending_work.md)) | The Recipe panel runs the verbs that exist (`scale_sections`, `mesh`, `run_static`, `combine`, the three model checks, and `chart`).  A recipe's solved cases and combinations **are** registered as result views, its checks as a check-table view, and its `chart` step as an embedded figure; the `capacity.*` / `mesh.checks` verbs and the remaining charts (storey forces, pushover, modal, CSM) have no step yet |
 
 ## Troubleshooting
 
