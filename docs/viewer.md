@@ -121,7 +121,7 @@ ModelViewer(builder=None, model_data=None, mesh_model=None, backend="pyvista", *
 ```python
 viewer.show_model(show_nodes=True, show_shells=True,
                   color_by_section=True, opacity=1.0, node_size=0.02,
-                  shrink=1.0, shell_opacity=None)
+                  shrink=1.0, shell_opacity=None, show_restraints=True)
 ```
 
 Draws the structural model — frame elements as coloured lines, shell
@@ -129,7 +129,7 @@ elements as polygon faces (**quads stay quads**, so no fan diagonal is drawn
 across a slab; triangles stay triangles and only 5+ sided elements are fanned),
 nodes as points.  Elements are coloured by section name by default.
 
-Two display transforms are available, both applied while drawing so the model
+Three display options are available, all applied while drawing so the model
 itself is never modified:
 
 * ``shrink`` draws every element at that fraction of its true size, centred on

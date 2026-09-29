@@ -1104,6 +1104,12 @@ fea-gui path/to/model.s2k  # or open a SAP2000 model
   macOS paints it from the interpreter's framework bundle, not from Qt:
   verified against Qt's names, AppKit retitles, `NSProcessInfo.processName`,
   and a generated `.app` bundle both with a script launcher *and* with the
+  interpreter inside it.  Only a py2app/PyInstaller-style build (compiled
+  launcher embedding `libpython`) changes that — and such a self-contained
+  bundle is compatible with the OpenSeesPy licence provided it ships no
+  OpenSees code and drives a separately-installed OpenSees instead: the future
+  option sketched in [`docs/gui_roadmap.md`](docs/gui_roadmap.md) §5 (**P22**).
+  Probes: [`docs/dev_notes.md`](docs/dev_notes.md).
 * **Workflows are authored, not implied.**  The **Recipe** dock at the bottom
   shows the operations a model is put through as an ordered list of **steps** —
   each a verb (`scale_sections`, `mesh`, `run_static`, `combine`) applied to a
@@ -1119,14 +1125,6 @@ fea-gui path/to/model.s2k  # or open a SAP2000 model
   weight stays with them), while a `mesh` step whose selection matches the walls
   leaves them out of the OpenSees model entirely and reassigns their loads to the
   supporting frames.
-
-
-  interpreter inside it.  Only a py2app/PyInstaller-style build (compiled
-  launcher embedding `libpython`) changes that — and such a self-contained
-  bundle is compatible with the OpenSeesPy licence provided it ships no
-  OpenSees code and drives a separately-installed OpenSees instead: the future
-  option sketched in [`docs/gui_roadmap.md`](docs/gui_roadmap.md) §5 (**P22**).
-  Probes: [`docs/dev_notes.md`](docs/dev_notes.md).
 * **Requires Python 3.10 or newer.**  `pyvistaqt` (the Qt viewport bridge)
   declares `requires-python >= 3.10`.  The **core toolkit stays on Python 3.9**
   -- the Rhino 8 embedded-interpreter floor -- and never imports the `gui`

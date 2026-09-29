@@ -23,11 +23,15 @@ as a workflow, edited in a GUI, or diffed as a document, and it cannot be reused
 without copying it.
 
 The workflow layer is the **declarative counterpart**. The unit is a **step** —
-a verb, a [`Selection`](selection dialog), and parameters — and a **recipe** is
-an ordered list of steps:
+a verb, a :class:`~fea_toolkit.model.selection.Selection`, and parameters — and a
+**recipe** is an ordered list of steps:
 
 ```python
+from fea_toolkit.io.s2k_parser import SAP2000Parser
+from fea_toolkit.model.selection import Selection
 from fea_toolkit.workflow import Recipe, run_recipe
+
+md = SAP2000Parser("model.s2k").parse().get_model_data()
 
 masonry = Selection(sections=["brick wall"], element_types=["Area"])
 
@@ -73,6 +77,18 @@ src/fea_toolkit/workflow/
 ```
 
 Three properties of this shape are load-bearing:
+
+1. **A verb's implementation and its parameter list live together** (in
+   `verbs/`), so a parameter the implementation reads but does not declare
+   cannot exist — there is no second place to forget to update.
+2. **The manifest is separate and is pure data** (`registry.py`). A caller that
+   wants to know the vocabulary — the GUI building its "Add step" menu and its
+   parameter forms, a validator, a help listing — imports the registry and
+   nothing else.
+3. **Every verb keeps its heavy imports inside the function body.** So reading
+   the manifest does **not** load OpenSees, and a parameter form can be rendered
+   before a model is open. `tests/test_recipe.py` asserts this in a subprocess.
+
 ## The verbs
 
 Registration order in `registry.py` is the order a menu should offer them, and
@@ -128,12 +144,6 @@ An **absent** selection (`None`, "act on everything") and an **empty** selection
 (`""`, "matches everything") stay distinct through a round-trip, because a verb
 reports them differently even though both select all.
 
-
-1. **A verb's implementation and its parameter list live together** (in
-   `verbs/`), so a parameter the implementation reads but does not declare
-   cannot exist — there is no second place to forget to update.
-2. **The manifest is separate and is pure data** (`registry.py`). A caller that
-   wants to know the vocabulary — the GUI building its "Add step" menu and its
 ## The two ways to make an element non-structural
 
 Masonry walls are the case that motivates both, and they are **independent** — a
@@ -236,14 +246,8 @@ other.
 * **Non-breaking by construction.** The layer is additive: no existing module's
   behaviour changes, so a script such as `admin_linear_v3.py` runs unchanged.
 
-   parameter forms, a validator, a help listing — imports the registry and
-   nothing else.
-3. **Every verb keeps its heavy imports inside the function body.** So reading
-   the manifest does **not** load OpenSees, and a parameter form can be rendered
-   before a model is open. `tests/test_recipe.py` asserts this in a subprocess.
-
 **What this layer must never do.** It owns no analysis logic and no topology
 mutation of its own: every verb delegates to the existing two-stage pipeline. A
 recipe *describes* work; it never reimplements it. This is the project rule that
 reusable logic belongs in the package and not in the entry point
-(`.clinerules` §14) applied to the GUI.
+(`.clinerules` §9, anti-pattern 14) applied to the GUI.

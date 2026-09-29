@@ -118,9 +118,10 @@ written from, so this works with **no model open**: the views draw the analysed
 geometry, and the case views share one display model between them.
 
 Those views are display-only — an archive has no materials, loads or restraints
-and no unit system — so `Model ▸ Split elements` / `Meshed` stay disabled while
-one is displayed.  Open the `.s2k` when you want to preprocess or re-analyse
-(`File ▸ Open`), and the results views are replaced by that model's own views.
+and no unit system — so `Model ▸ Split elements` / `Model ▸ Mesh areas` stay
+disabled while one is displayed.  Open the `.s2k` when you want to preprocess or
+re-analyse (`File ▸ Open`), and the results views are replaced by that model's
+own views.
 
 **Results ▸ Deformed shape** draws the active case's **deformed shape** over that
 geometry, amplified by the **Scale** box on the main toolbar (default 50×,
@@ -487,9 +488,9 @@ and malformed JSON are reported in the Message Log together with the file path
 — look there first.
 
 **The model shows fewer elements than expected.**  Members that were split are
-displayed as their sub-elements; untick **View ▸ Display ▸ Show original
-members** if you are looking at the collapsed view.  A model that was never
-preprocessed shows exactly the members as drawn.
+displayed as their sub-elements.  Switch to the **Unprocessed** view to see the
+members exactly as drawn in SAP2000; a model that was never preprocessed already
+shows them that way.
 
 **Preprocessing reports no change.**  Splitting happens only where the model asks
 for it — the SAP2000 auto-mesh flags (`AtJoints`, `AtFrames`) — and meshing needs

@@ -96,8 +96,13 @@ neither replaces the other.
 | `AnalysisBuilder.static_element_force_arrays()` | Component-keyed element forces (`fx_i … mz_j`), aligned to the exported geometry |
 | `AnalysisBuilder.extract_static_element_forces()` | The same forces keyed by element tag |
 | `analysis.linear.run_linear_cases(md, mesh_model, linear_cfg=…, raw_out=…)` | Runs the model's static cases plus any overrides and returns a summary table; `raw_out` collects per-case `{nodal_displacements, element_forces}` |
+| `analysis.case_listing.list_static_cases(md, mesh_model=None, config_cases=…)` | The model's static cases as `{case: {pattern: factor}}` — the shape the two runners below consume |
+| `analysis.linear.run_static_cases(mesh_model, cases, *, config=…, raw_out=…, should_cancel=…, on_progress=…)` | Runs *only* static cases (no RS/modal pass), with cooperative cancellation polled between cases and a per-case progress hook |
+| `analysis.linear.run_case_set(md, mesh_model, cases, *, combinations=…, config=…)` | Solves the cases, reduces the requested combinations, assembles the in-memory archive dict — nothing written to disk |
 | `analysis.static.run_static_analysis(…, collect_raw=True)` | The same run wrapped in an `AnalysisResult` whose `data["static_raw"]` holds the writer-shaped per-case results |
 | `analysis.combinations.build_combination_results(cases, model=md, envelope_mode=…, return_meta=True)` | Route B: composites in the same payload shape, plus `{group, kind, family, coords}` metadata |
+| `io.npz_writer.results_arrays(md, static_results=…, mesh_model=…, case_meta=…)` | Assembles the `{name: ndarray}` archive dict without writing it |
+| `io.npz_writer.save_results_arrays(path, arrays)` | Writes an already-assembled dict — the write half of the in-memory seam |
 | `AnalysisBuilder.export_results(path, static_results=…, model=md, expand_combinations=True)` | Route B in one call, straight to a file |
 | `AnalysisBuilder.export_static_results(path, results, case_name)` | Route A → one force-bearing archive for a single case |
 
@@ -123,9 +128,11 @@ serialization:
 
 | Step | API | Touches disk? |
 |---|---|---|
-| Solve | `run_static_analysis(…)`, `run_linear_cases(…)` | No |
+| List | `list_static_cases(…)` — the static cases the model offers | No |
+| Solve | `run_static_analysis(…)`, `run_linear_cases(…)`, `run_static_cases(…)`, `run_case_set(…)` | No |
 | Combine (route B) | `build_combination_results(…)` | No |
-| Serialize | `write_results_npz(path, md, static_results=…, case_meta=…)`, `export_results(…)` | Yes |
+| Assemble | `results_arrays(…)` — the in-memory archive (`run_case_set` returns it) | No |
+| Serialize | `write_results_npz(…)`, `save_results_arrays(path, arrays)`, `export_results(…)` | Yes |
 | Read | `read_results(path)` → the same dict | Yes |
 
 The read side is deliberately format-independent: `ResultsRepository` — and its
@@ -139,11 +146,11 @@ the cheap `has_displacements()` / `has_forces()` pre-checks a UI consults before
 offering an action.  The reasoning behind a NumPy-typed boundary is in
 [Development Notes](dev_notes.md) → *Results repository and the NumPy-typed seam*.
 
-One piece is still internal: the archive dict is assembled by the writer's own
-`_collect_geometry()` / `_collect_static()` steps and handed straight to
-`np.savez_compressed`.  Exposing that assembly as a function is the one small
-library addition the GUI work needs, so that **the same dict** can be registered
-in memory *or* written — instead of writing an archive and reading it back just to
+That assembly is a public function: `io.npz_writer.results_arrays()` returns the
+archive as a `{name: ndarray}` dict — the representation `NpzResultsRepository`
+serves — and `write_results_npz()` is that plus `save_results_arrays(path,
+arrays)`, the write half of the seam.  So **the same dict** can be registered in
+memory *or* written, instead of writing an archive and reading it back just to
 look at a result.
 
 **The producer side is OpenSees' query API, and the file-recorder door is being

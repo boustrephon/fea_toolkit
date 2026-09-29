@@ -1138,9 +1138,12 @@ worked; both failures were real, and neither was in the new code:
    them from the `MeshModel` — so a run over a preprocessed shell model was
    built **with every wall and slab missing**: a mechanism, and the
    ``matrix singular U(i,i) = 0`` failure the first attempt hit.
-   `run_static_cases` now derives it: any area element the Preprocessor did not
-   demote to loads-only is a shell, so ``create_shells`` is set from
-   `MeshModel.loads_only_area_ids` (a caller's explicit setting still wins).
+   `run_static_cases` now derives it: ``create_shells`` is set from
+   `MeshModel.area_element_types`, which the Preprocessor populates only when it
+   creates shells.  `loads_only_area_ids` cannot determine this — it is empty
+   for a plain ``create_shells=False`` run even though every area is then
+   loads-only, so reading it made a split-only mesh look meshed (a caller's
+   explicit setting still wins).
 2. **`int(node_id)` on a meshed model.**  `io/npz_writer._collect_static` wrote
    the nodal-displacement arrays by sorting the displacement dict
    numerically — so a meshed model, whose derived node ids are labels like
