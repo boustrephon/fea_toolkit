@@ -427,6 +427,10 @@ consolidation in commit `test: dissolve extracted grab-bag …`).
 - `examples/output/`, `/output/` — generated output.
 - Standard Python ignores (`__pycache__/`, `*.pyc`, `build/`, `dist/`, `*.egg-info/`, `.venv/`, etc.).
 - `.vscode/settings.json` — user-specific editor settings.
+- `.copilot-session/` — local AI-assistant repo memory (gitignored); it records the
+  dev/validation environment (venv path + optional-extra status) in
+  `.copilot-session/memories/repo/notes.md` — tool shells must invoke that
+  interpreter explicitly for OpenSees/GUI tests.
 
 ### 6.2 Commit conventions
 - Commit history is clean; follow conventional commits where practical.
