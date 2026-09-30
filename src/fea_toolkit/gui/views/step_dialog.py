@@ -61,6 +61,12 @@ class StepDialog(QDialog):
         self._verb = step.verb
         self._spec = STEP_SPECS[self._verb]
         self._widgets: dict[str, Any] = {}
+        #: The value seeded into each parameter field, before any rounding a
+        #: spin box applies — returned verbatim when the user leaves it untouched.
+        self._originals: dict[str, Any] = {}
+        #: The value each float spin box actually holds after seeding (rounded to
+        #: its display precision), used to tell an untouched field from an edit.
+        self._seeded: dict[str, float] = {}
         self.setWindowTitle(f"Step — {self._verb}")
 
         layout = QVBoxLayout(self)
@@ -132,8 +138,11 @@ class StepDialog(QDialog):
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         for name, spec in self._spec.params.items():
             value = step.params.get(name, spec.default)
+            self._originals[name] = value
             editor = self._param_editor(spec, value)
             self._widgets[name] = editor
+            if spec.type is float and not spec.choices:
+                self._seeded[name] = float(editor.value())
             if spec.manifest is not None:
                 form.addRow(editor)  # a collapsible ConfigEditor spans the row
             else:
@@ -160,7 +169,10 @@ class StepDialog(QDialog):
         elif kind is float:
             widget = QDoubleSpinBox(self)
             widget.setRange(-1e12, 1e12)
-            widget.setDecimals(6)
+            # More decimals than a solver tolerance ever uses, so a value like
+            # ``solver_test_tol=1e-8`` is displayed and read back unchanged
+            # (QDoubleSpinBox rounds to the configured precision).
+            widget.setDecimals(12)
             widget.setValue(float(value))
         else:
             widget = QLineEdit(self)
@@ -184,7 +196,14 @@ class StepDialog(QDialog):
         if spec.type is int:
             return int(widget.value())
         if spec.type is float:
-            return float(widget.value())
+            current = float(widget.value())
+            # The spin box rounds a value to its display precision, so an
+            # untouched field reads back as that rounded value.  Return the
+            # original instead, so toggling an unrelated field (e.g. the
+            # optional flag) cannot silently lose decimal places.
+            if current == self._seeded[name]:
+                return self._originals[name]
+            return current
         if spec.type is str:
             return widget.text()
         return self._literal_value(name)

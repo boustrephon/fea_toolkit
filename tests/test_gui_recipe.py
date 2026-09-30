@@ -447,6 +447,18 @@ class TestStepDialog:
         dialog._optional_box.setChecked(True)
         assert dialog.result().optional is True
 
+    def test_float_precision_survives_an_unrelated_edit(self, qapp):
+        """A high-precision float keeps its full value when only the optional flag changes."""
+        from fea_toolkit.gui.views.step_dialog import StepDialog
+        from fea_toolkit.workflow import Step
+
+        factor = 0.123456789012345
+        dialog = StepDialog(Step(verb="scale_sections", params={"factor": factor}))
+        dialog._optional_box.setChecked(True)
+        result = dialog.result()
+        assert result.optional is True
+        assert result.params["factor"] == factor
+
 
 def test_show_beams_toggle_hides_frames(window):
     """P33: a frame-visibility toggle joins Show nodes and Show shells."""
