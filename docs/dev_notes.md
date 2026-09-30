@@ -736,6 +736,70 @@ source model rather than duplicated.
 object-identity checks proving untouched nodes/elements are *shared*, and a
 `copy.deepcopy` spy proving the model itself is never deep-copied.
 
+### Remaining `deepcopy` call sites — the inventory (2026-09-30)
+
+The copy-on-write change retired **one** deepcopy: the Preprocessor's full-model
+`copy.deepcopy(model_data)`.  It was never a blanket ban — the pinning test
+states the pipeline "may still deep-copy small, derived objects".  A 2026-09-30
+audit of `src/fea_toolkit/` found the remaining `deepcopy` call sites in two
+tiers.
+
+**Full-graph deepcopies** — they duplicate a whole node/element graph, the same
+shape as the eliminated Preprocessor deepcopy, but outside `Preprocessor.run()`:
+
+| Site | Copies | Verdict |
+|---|---|---|
+| `workflow/verbs/scale_sections.py` | `copy.deepcopy(context.model_data)` | convert — only sections are edited |
+| `plotting/viz_model.py` | `copy.deepcopy(md)` (comparison viewer) | convert (lower priority) |
+| `rhino/importer.py` | `copy.deepcopy(self._raw_sap_model)` | convert (lower priority) |
+| `model/units.py` (`convert_mesh_units`) | `deepcopy(mesh)` | **leave** — full transform |
+| `opensees/_elements.py` (`_brace_canonical`) | 4 `copy.deepcopy(...)` of the element/node/load containers | **leave** — one-time snapshot |
+
+**Small / derived-object deepcopies** — sanctioned by the contract above, never
+the target:
+
+| Site | Copies |
+|---|---|
+| `opensees/preprocessor.py` | `deepcopy(base_mat)` (one material), `copy.deepcopy(sel_props)` (one element's props) |
+| `opensees/recorder.py` | `copy.deepcopy(args/kwargs)` — per-call replay snapshot |
+| `opensees/_limit_state.py` | `copy.deepcopy(joint_loads)` |
+| `report.py` | `copy.deepcopy(_DEFAULT_CONFIG)` |
+| `workflow/recipe.py` / `workflow/steps.py` | step params and declared defaults |
+| `gui/views/config_editor.py` | unlisted config keys (must be deep — the test mutates a nested value) |
+
+### Copy-on-write for the three convertible sites
+
+Three of the five full-graph sites are worth converting; two are not.
+
+*   **`scale_sections` (highest value).**  The verb rewrites section stiffness
+    attributes (`A`/`I33`/`I22`/`J`/`thickness`) on the selected sections only —
+    the exact "change a handful of objects" case that motivated the Preprocessor
+    change.  Reuse `_copy_for_preprocessing(context.model_data)`
+    (`opensees/preprocessor.py` — OpenSees-free, so a lazy import inside the verb
+    keeps the manifest loadable) and replace each scaled section with
+    `dataclasses.replace(...)` instead of `setattr`.  This matters because
+    `scale_sections` runs inside `run_recipe` on the GUI worker thread, so its
+    full-model deepcopy feeds the same GC-on-worker-thread race as the one this
+    section retired.
+
+*   **`viz_model` and `rhino/importer` (moderate, after `scale_sections`).**  Both
+    deep-copy and then make small, localised changes — the viewer fixes shell-only
+    base nodes and scales the `LOADS_ONLY` sections; the importer meshes areas and
+    splits frames.  Each can take `_copy_for_preprocessing` plus copy-on-write at
+    its own mutation sites.  Neither is a hot path (the viewer is per-open, not
+    per-build; the importer is a one-shot export), so schedule them behind
+    `scale_sections` and pin each with the same source-immutability tests.
+
+*   **`convert_mesh_units` — leave.**  Unit conversion rescales every node
+    coordinate and every material property, so there is nothing left to share;
+    copy-on-write would replace every object anyway and buy nothing.  `deepcopy`
+    is the correct tool for a full transform.
+
+*   **`_brace_canonical` — leave.**  Its purpose is an independent copy to restore
+    after `subdivide_elements` mutates the graph; it is taken once (guarded by
+    `hasattr`) and only when brace subdivision is configured.  Making it
+    copy-on-write would first require making `subdivide_elements` itself
+    copy-on-write, for no per-build saving.
 
 ## PySide6 item models - never call `internalPointer()`
 
