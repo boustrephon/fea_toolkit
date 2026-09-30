@@ -271,21 +271,28 @@ Settings file — `$FEA_TOOLKIT_GUI_CONFIG` if set, else
 
 | Key | Default | Meaning |
 |---|---|---|
-| `preset` | `"click_drag"` | Named starting point (`click_drag`, `right_click`) |
+| `preset` | `"click_drag"` | Named starting point (`click_drag`, `right_click`, `select_orbit`) |
 | `pick_button` | `"left"` | Which button selects — `"left"` or `"right"` |
 | `drag_threshold_px` | `5` | Pointer travel (logical pixels) above which a press is a *drag*, not a click |
 | `pick_tolerance` | `0.010` | Size of the invisible picking region around an element, as a fraction of the viewport diagonal.  Raise it if clicking feels unforgiving, lower it if nearby members steal your clicks |
 | `node_priority` | `true` | Prefer a node over the member passing through it |
 | `node_snap_tolerance` | `0.012` | Tolerance for that node-first pick |
+| `add_modifier` | `"shift"` | Modifier key held to add a pick to the current selection |
+| `toggle_modifier` | `"control"` | Modifier key held to toggle a pick |
+| `marquee_modifier` | `"shift"` | Modifier key that turns a drag into a rubber-band selection |
+| `select_mode` | `false` | Explicit Select / Orbit mode — a drag marquee-selects instead of orbiting |
 
 The file is read at start-up; the Message Log states which policy is in force
 ("Left-click an element to select it; drag to orbit") and **reports anything it
 did not understand** — an unknown key, an out-of-range value or unreadable JSON
 leaves the defaults in place and says so, rather than failing silently.
 
-Explicit **Select / Orbit modes** (the SAP2000 arrangement) are not available
-yet: a mode has to be able to disable rotation, which needs the interactor style
-switched.  It is recorded as [P23](_pending_work.md).
+Selecting supports **multiple** entities: a clean click replaces, Shift-click
+adds, Ctrl/Cmd-click toggles, and a drag with the marquee modifier (or any drag
+in Select mode) rubber-band-selects everything its rectangle touches.  **View ▸
+Select mode** toggles the explicit Select / Orbit arrangement, in which a drag
+marquee-selects instead of orbiting.  The viewport selection can be read back as
+a ``Selection`` (``MainWindow.current_selection()``) for a workflow step.
 
 ## Display toggles
 
@@ -336,6 +343,18 @@ Selecting a **node** also reports its support conditions in the Inspector:
 
 Only rows with something to say appear, and a results archive — which carries no
 restraints — adds none.
+
+Selecting a **frame or area** reports, beyond its own fields, its assignment and
+group memberships (a node reports groups too):
+
+| Property | Value |
+|---|---|
+| Section | the assigned section, e.g. `UB300 (I/Wide Flange)` |
+| Material | that section's material, e.g. `Steel` |
+| Groups | the groups the element belongs to, comma-joined |
+
+These are looked up from the model at click time (see the DONE register in
+`_pending_work.md` for why this is a scan, not a pre-built index).
 
 
 

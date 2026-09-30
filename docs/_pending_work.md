@@ -5,11 +5,11 @@ status: "draft"
 tags: [planning, work-log, internal]
 category: [planning]
 ---
-# Pending work — fea_toolkit (2026-09-17)
+# Pending work — fea_toolkit (2026-09-30)
 
 ## PENDING (active — not yet done)
 
-> Priority-ordered register (maintained 2026-09-17).  Every pending item
+> Priority-ordered register (maintained 2026-09-30).  Every pending item
 > below is cross-referenced to its source document.  **Sequencing notes:**
 > Tier 1 (P1 force-diagram unification, P2 large-file splits) landed
 > 2026-08-24 — see the DONE register.  The Tier 2 physics items (P3 solver
@@ -284,17 +284,14 @@ Source: `docs/gui_roadmap.md` milestone rows 3–4 and design rule 7;
 viewport→tree select-and-scroll (`SelectionIndex` + the cell index) — and mouse
 interaction became configurable: an `InteractionPolicy` (presets over knobs), the
 click-versus-drag gesture, a tighter picking region, node priority and the
-settings file.  Three follow-ups remain:
+settings file.  The explicit Select / Orbit modes and modeless multi-select
+(Shift/Ctrl-click add/toggle, a marquee drag) landed 2026-09-30 with the
+multi-selection work (see the DONE register).  Two follow-ups remain:
 
-1. **explicit Select / Orbit modes** (the SAP2000 arrangement — approaches A/D
-   of the interaction discussion).  A mode has to be able to *disable* rotation,
-   so this needs the VTK interactor style switched plus a toolbar/shortcut
-   toggle, with the mode remembered in `QSettings` (M8).  The policy table and
-   `ViewportInteraction` are where it lands.
-2. **element-label display toggle** — `view.show_labels` is still greyed
+1. **element-label display toggle** — `view.show_labels` is still greyed
    because nothing renders node/element labels; it needs a `labels` category
    in `PyVistaRenderer` before the toggle can exist.
-3. **macOS application name** — the Application menu's `About` / `Hide` /
+2. **macOS application name** — the Application menu's `About` / `Hide` /
    `Quit` *items* are retitled at launch through AppKit
    (`app.rename_macos_application_menu`, now a declared macOS dependency), but
    the **bold menu-bar / Dock name stays `Python`**: it comes from the
@@ -819,6 +816,38 @@ layer's Phase D (P31) and Phase E (P32).
 `test_gui_preprocess.py`, `test_gui_views.py`, `test_gui_analysis.py`,
 `test_gui_results.py`).
 
+**Follow-up (2026-09-30).** Float-precision preservation — see the DONE
+register ("StepDialog float precision").
+
+#### P34 — Selection-scoped hide / isolate (dig into a model)
+
+**What.** Select elements in the viewport and hide them — or isolate them (hide
+everything else) — so a crowded model can be examined layer by layer, then
+restored.  The natural pairing with the multi-selection work that just landed:
+the selection is already a ``Selection`` (``MainWindow.current_selection()``),
+so hide/show is a render-scope operation, not a new data model.
+
+**Routes (A then B).**
+
+1. **Hide / show selected (quick win).**  ``View ▸ Display ▸ Hide selected`` and
+   ``Show all``.  A hidden set of category → SAP labels lives in ``MainWindow``;
+   hiding removes those entities from the scene, and ``Show all`` restores them.
+   Because the PyVista backend batches a whole category into one actor, per-
+   element hide means re-rendering the batch *without* the hidden ids — rebuild
+   the scene from the model minus the hidden set, keeping the camera — rather
+   than toggling individual cells.
+2. **Isolate selected (inverse).**  ``Hide unselected`` — everything not in the
+   current selection is hidden; restore is the same ``Show all``.
+
+**Open decisions.** (a) Whether a hidden element's *nodes* are hidden too, or
+left for context.  (b) Whether the hidden set is per-view or global.  (c) That a
+deformed / force overlay must respect the same hide set, so this is cleanest
+after the result views (P30) are in.  Revisit then.
+
+**Touches.** `plotting/renderers/pyvista.py` (batched visibility), `plotting/
+viewer.py` + `gui/main_window.py` (the hide set + two menu actions), and
+`gui/views/selection_dialog.py` only if hide is ever exposed as a step.
+
 ### Tier 4 — Deferred / low-priority
 
 #### P8 — Tcl-exporter merge (deferred)
@@ -1129,6 +1158,101 @@ an implementation detail.
 
 **Trigger.** Revisit when a run is dominated by extraction rather than solving, or
 when a time-history model's per-step results no longer fit comfortably in memory.
+
+## DONE (2026-09-30 — Inspector shows an element's section, material and groups)
+
+The Inspector described only the selected entity's *own* fields — a frame's
+connectivity and flags — with nothing about its assignment.  Clicking an element
+now also reports, in `gui/views/property_inspector.py`:
+
+* **Section** — the assigned section as ``name (shape)`` (``UB300 (I/Wide Flange)``).
+* **Material** — that section's material as ``name (type)`` (``Steel``), the type
+  dropped when it merely repeats the name.
+* **Groups** — the groups the element belongs to, comma-joined (nodes too).
+
+The lookup lives in `model/element_context.py` (Qt-free, mirroring
+`model/supports.py`), keyed through `frame_assignments` / `area_assignments` →
+`sections` → `materials`, with a **parent-id fallback** so a split child still
+resolves its parent's section.  Rows with nothing to say are omitted, and a
+results archive adds none.
+
+**Group lookup decision — scan, not a reverse index.**  `groups_of()` does a
+linear scan of the forward `Group.objects` list (O(total group-object
+references)).  We deliberately did **not** build a reverse (member → groups)
+index at parse time, because `Group.objects` is **mutated after parsing** (area
+meshing appends child references — `tests/test_rhino.py` pins that), so a cached
+index would silently go stale.  For a once-per-click inspector the scan is a few
+milliseconds even at hundreds of thousands of members — not a hot path.  If it
+ever matters, the intended future shape is a reverse index built in
+`PropertyInspector.set_source_model()` (which receives the stable raw source),
+not in the parser.
+
+**Validation.** `tests/test_element_context.py` (Qt-free) covers the resolution,
+the parent fallback, the reference space and the empty/archive cases;
+`tests/test_gui_views.py::TestElementContext` wires it through the real
+Inspector table (CI `gui-test` job).
+
+## DONE (2026-09-30 — Multi-selection: modifier clicks, a rubber-band marquee, and Select mode)
+
+The viewport selected **one** entity per click, with no way to accumulate a
+selection, rubber-band a region, or hand the result to a workflow step.  This
+lands the whole multi-selection story — the modeless modifier route and the
+explicit Select / Orbit mode, the two approaches the interaction discussion
+sketched — plus the bridge from a visual selection back to a ``Selection``:
+
+* `model/selection.py` — a dedicated ``node_ids`` / ``exclude_node_ids`` field
+  (grammar key ``node``), decoupled from ``element_ids`` so a joint can be named
+  without colliding with a frame/area id.  ``to_string`` / ``from_string``
+  round-trip it; ``filter_model`` and the display resolution honour it.
+* `gui/controllers/interaction.py` — the ``InteractionPolicy`` grows
+  ``add_modifier`` / ``toggle_modifier`` / ``marquee_modifier`` / ``select_mode``
+  (plus a ``select_orbit`` preset); ``ClickGesture`` records the modifiers held
+  and answers ``marquee_wanted``.
+* `gui/controllers/marquee.py` — Qt/VTK-free screen-space geometry predicates
+  (``point_in_rect`` / ``segment_hits_rect`` / ``polygon_hits_rect``) that turn a
+  drag rectangle into the entities it touches.
+* `gui/views/interactor.py` / `gui/views/qt_mouse.py` — ``PickResult`` carries
+  the click's modifiers; a marquee drag fires ``on_marquee``, and the Qt filter
+  **consumes** a marquee-owned gesture so the camera cannot orbit while the
+  rubber band runs.
+* `gui/main_window.py` — the tree is ``ExtendedSelection``; Shift/Ctrl-click add
+  / toggle rows; a marquee (Shift-drag, or any drag in Select mode) selects many
+  by projecting geometry to screen space; ``current_selection()`` collapses the
+  visual selection into a ``Selection``.  ``View ▸ Select mode`` swaps the
+  interactor style (`render_backend.make_select_style`).
+
+**Validation.** Qt-free unit tests cover the policy / gesture / marquee
+predicates and the ``node_ids`` semantics; a pyvista test pins the marquee
+projection against a real off-screen render; the GUI bridge tests run on the CI
+``gui-test`` job.  ``ruff`` and ``py_compile`` clean.
+
+**Known limits.** A marquee replaces the selection (add/toggle are click-level),
+and no rubber-band rectangle is drawn during the drag yet.  The ``Selection``
+collapse is best-effort where a frame id collides with an area id (the same
+ambiguity the expression grammar has).
+
+## DONE (2026-09-30 — StepDialog float precision: high-precision parameters survive an unrelated edit)
+
+The Step dialog's float editor rounded a parameter to six decimals, so opening
+and accepting a step (e.g. toggling only the **Optional** flag) silently rewrote
+a high-precision value such as `factor=0.123456789012345` to `0.123457`.  The
+`ConfigEditor` already avoided this with `setDecimals(12)`; `StepDialog` now
+matches it, and preserves the original value for the lossless round-trip recipes
+promise (`docs/workflow_authoring.md`):
+
+* `gui/views/step_dialog.py` — the float `QDoubleSpinBox` uses `setDecimals(12)`;
+  `_build_params_group` records each parameter's seeded value (`_originals`) and
+  what the spin box holds after its display rounding (`_seeded`), and
+  `_param_value` returns the original value verbatim when the field is untouched,
+  so an unrelated edit cannot drop decimal places.
+* `tests/test_gui_recipe.py` — `TestStepDialog::test_float_precision_survives_an_unrelated_edit`
+  opens a `scale_sections` step at `factor=0.123456789012345`, toggles only the
+  optional flag, and asserts the factor round-trips exactly.
+
+**Validation.** `py_compile` and `ruff check` clean; the new test is collected
+under `needs_gui` (skipped locally where no Qt binding is installed — it runs on
+the CI `gui-test` job).
+
 ## DONE (2026-09-29 — Eurocode 8 spectra: EN 1998-1 acceleration and displacement)
 
 `ResponseSpectrum` gains the project's third code path for seismic demand,
