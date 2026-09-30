@@ -1271,7 +1271,7 @@ class TestSelectionOverlay:
         from fea_toolkit.model.selection import Selection
 
         md = _selection_model()
-        sel = Selection(element_types=["Node"], element_ids=["N1", "N3"])
+        sel = Selection(element_types=["Node"], node_ids=["N1", "N3"])
 
         captured = self._capture(md, sel, show_frames=False, show_shells=False)
 
@@ -1289,7 +1289,7 @@ class TestSelectionOverlay:
         from fea_toolkit.model.selection import Selection
 
         md = _selection_model()
-        sel = Selection(element_types=["Frame", "Node"], element_ids=["F2", "N4"])
+        sel = Selection(element_types=["Frame", "Node"], element_ids=["F2"], node_ids=["N4"])
 
         captured = self._capture(md, sel, show_shells=False)
 

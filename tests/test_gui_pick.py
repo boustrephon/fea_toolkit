@@ -316,3 +316,28 @@ def test_the_qt_filter_ignores_the_other_button(window, monkeypatch):
     )
 
     assert seen == []
+
+
+def test_shift_click_adds_and_the_bridge_collapses(window):
+    """Shift-click accumulates a multi-selection that ``current_selection`` wraps."""
+    frames, _shells, nodes = window._viewer.geometry()
+
+    assert window._select_entity_in_tree("frame_elements", frames[0].elem_id) is True
+    assert window._select_entity_in_tree("nodes", nodes[0].node_id, modifiers=("shift",)) is True
+
+    selection = window.current_selection()
+    assert selection is not None
+    assert selection.element_types == ["Frame", "Node"]
+    assert selection.element_ids == [frames[0].elem_id]
+    assert selection.node_ids == [nodes[0].node_id]
+
+
+def test_a_toggle_click_deselects_a_selected_row(window):
+    """Ctrl-click (the toggle modifier) removes a row that is already selected."""
+    frames, _shells, _nodes = window._viewer.geometry()
+    label = frames[0].elem_id
+
+    assert window._select_entity_in_tree("frame_elements", label) is True
+    assert window._select_entity_in_tree("frame_elements", label, modifiers=("control",)) is True
+
+    assert window.current_selection() is None

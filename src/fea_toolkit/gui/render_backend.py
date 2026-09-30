@@ -42,6 +42,46 @@ class MainThreadQtInteractor(QtInteractor):
             return None
 
 
+def make_select_style(button: str) -> Any:
+    """A trackball camera style whose *button* cannot orbit.
+
+    Select mode (``docs/_pending_work.md`` P23) has to be able to *disable*
+    rotation, because a drag in that mode is a rubber-band selection.  This
+    style subclasses ``vtkInteractorStyleTrackballCamera`` and swallows the
+    select button's press/release, so a drag over that button leaves the camera
+    untouched while the marquee gesture runs; the other buttons (zoom / pan)
+    keep their normal behaviour.
+
+    Args:
+        button: The policy's pick button, ``"left"`` or ``"right"``.
+
+    Returns:
+        A fresh style instance, ready to hand to ``SetInteractorStyle``.
+    """
+    import vtk
+
+    class _SelectStyle(vtk.vtkInteractorStyleTrackballCamera):
+        select_button = button
+
+        def OnLeftButtonDown(self):
+            if self.select_button != "left":
+                super().OnLeftButtonDown()
+
+        def OnLeftButtonUp(self):
+            if self.select_button != "left":
+                super().OnLeftButtonUp()
+
+        def OnRightButtonDown(self):
+            if self.select_button != "right":
+                super().OnRightButtonDown()
+
+        def OnRightButtonUp(self):
+            if self.select_button != "right":
+                super().OnRightButtonUp()
+
+    return _SelectStyle()
+
+
 class QtRenderBackend(PyVistaRenderer):
     """Render backend that draws into a ``pyvistaqt.QtInteractor``.
 

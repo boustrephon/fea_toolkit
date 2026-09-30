@@ -9,13 +9,15 @@ overrides either.  Qt- and VTK-free, so it is unit-tested on its own
 Presets:
 
 * ``click_drag`` (default) -- a clean left click selects; left-drag orbits, as
-  it always did.  Nothing is modal.
+  it always did.  Nothing is modal.  Hold the *add* modifier (Shift) to add a
+  pick, the *toggle* modifier (Ctrl/Cmd) to toggle one, and drag with the
+  *marquee* modifier to rubber-band select.
 * ``right_click`` -- the right button selects, the left button stays pure
   camera control (the pre-2026-09 behaviour).
-
-Explicit *Select / Orbit modes* (the SAP2000 arrangement) additionally need the
-interactor style switched, so they are a later step -- tracked in
-``docs/_pending_work.md`` P23.
+* ``select_orbit`` -- the explicit Select / Orbit arrangement (the SAP2000
+  arrangement): in Select mode a drag is a rubber-band selection and orbiting
+  is disabled.  This preset sets ``select_mode``; the GUI additionally switches
+  the VTK interactor style (tracked in ``docs/_pending_work.md`` P23).
 
 Settings file: ``$FEA_TOOLKIT_GUI_CONFIG``, else
 ``~/.config/fea_toolkit/gui.json``::
@@ -52,6 +54,10 @@ DEFAULT_PRESET = "click_drag"
 #: Mouse buttons a policy may nominate as the selecting button.
 _BUTTONS = ("left", "right")
 
+#: Modifier keys a policy may bind a selection gesture to.  Qt- and VTK-free
+#: canonical names; the Qt adapter maps ``Qt.KeyboardModifier`` onto these.
+_MODIFIERS = ("shift", "control", "alt", "meta")
+
 
 #: JSON keys that name a policy field (the preset name is handled separately).
 @dataclass(frozen=True)
@@ -73,6 +79,15 @@ class InteractionPolicy:
         node_priority: Try the node cloud first, so a click at a joint selects
             the node instead of the member passing through it.
         node_snap_tolerance: Tolerance for that node-first pick.
+        add_modifier: Modifier key held to *add* a pick to the current selection
+            (``"shift"`` by default).
+        toggle_modifier: Modifier key held to *toggle* a pick (``"control"``).
+        marquee_modifier: Modifier key that turns a drag into a rubber-band
+            selection (``"shift"``).  Only consulted when ``select_mode`` is off.
+        select_mode: When ``True`` (the explicit Select / Orbit arrangement), a
+            plain drag is a rubber-band selection and orbiting is disabled; when
+            ``False`` (modeless modifiers), a drag orbits unless the marquee
+            modifier is held.
     """
 
     preset: str = DEFAULT_PRESET
@@ -81,6 +96,10 @@ class InteractionPolicy:
     pick_tolerance: float = 0.010
     node_priority: bool = True
     node_snap_tolerance: float = 0.012
+    add_modifier: str = "shift"
+    toggle_modifier: str = "control"
+    marquee_modifier: str = "shift"
+    select_mode: bool = False
 
     def __post_init__(self) -> None:
         if self.pick_button not in _BUTTONS:
@@ -93,6 +112,10 @@ class InteractionPolicy:
             raise ValueError(
                 f"node_snap_tolerance must not be negative: {self.node_snap_tolerance}"
             )
+        for name in ("add_modifier", "toggle_modifier", "marquee_modifier"):
+            modifier = getattr(self, name)
+            if modifier not in _MODIFIERS:
+                raise ValueError(f"{name} must be one of {_MODIFIERS}, got {modifier!r}")
 
 
 #: The named combinations, so the four "approaches" are one file edit apart.
@@ -106,6 +129,9 @@ PRESETS = {
         drag_threshold_px=0.0,
         node_snap_tolerance=0.012,
     ),
+    # The explicit Select / Orbit arrangement: a drag marquee-selects; orbiting
+    # is disabled while in Select mode (the GUI switches the interactor style).
+    "select_orbit": InteractionPolicy(preset="select_orbit", select_mode=True),
 }
 
 #: Policy fields a settings file may set (the preset name is handled apart).
@@ -121,25 +147,39 @@ class ClickGesture:
     camera alone).  That is the whole of "no modes, but a drag must never
     select".
 
+    It also records the modifier keys held at the press, so a click can be an
+    *add* or a *toggle* rather than a replace, and answers whether a drag should
+    be a rubber-band marquee instead of an orbit (:attr:`marquee_wanted`).
+
     Attributes:
         policy: The policy being honoured.
         press_xy: Where the tracked press happened, or ``None`` between
             gestures.
         dragged: Set once the pointer has strayed beyond the threshold.
+        modifiers: Canonical modifier names held at the press (e.g.
+            ``("shift",)``).  Kept until the next press so the caller can read
+            them straight after :meth:`release`.
     """
 
     policy: InteractionPolicy
     press_xy: Optional[tuple] = None
     dragged: bool = False
+    modifiers: tuple = ()
 
     def handles(self, button: str) -> bool:
         """Whether a press of *button* begins a selectable gesture."""
         return button == self.policy.pick_button
 
-    def press(self, xy: tuple) -> None:
-        """Start tracking a gesture at *xy* (display coordinates)."""
+    def press(self, xy: tuple, modifiers: tuple = ()) -> None:
+        """Start tracking a gesture at *xy* (display coordinates).
+
+        Args:
+            xy: Press position.
+            modifiers: Canonical modifier names held at the press.
+        """
         self.press_xy = (float(xy[0]), float(xy[1]))
         self.dragged = False
+        self.modifiers = tuple(modifiers)
 
     def move(self, xy: tuple) -> None:
         """Note pointer movement; beyond the threshold the gesture is a drag."""
@@ -167,6 +207,18 @@ class ClickGesture:
         """Forget any in-flight gesture (after a mode or model change)."""
         self.press_xy = None
         self.dragged = False
+        self.modifiers = ()
+
+    @property
+    def marquee_wanted(self) -> bool:
+        """Whether a drag should be a rubber-band selection, not an orbit.
+
+        In explicit Select mode any drag is a marquee; otherwise the drag must
+        carry the policy's marquee modifier.
+        """
+        if self.policy.select_mode:
+            return True
+        return self.policy.marquee_modifier in self.modifiers
 
     @staticmethod
     def _distance(first: tuple, second: tuple) -> float:

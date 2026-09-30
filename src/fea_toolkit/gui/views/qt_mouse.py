@@ -26,6 +26,15 @@ _QT_BUTTONS = {
     "right": Qt.MouseButton.RightButton,
 }
 
+#: Qt keyboard modifier -> the policy's canonical modifier name, so the
+#: Qt-free interaction layer never sees a Qt enum.
+_MODIFIER_MAP = (
+    (Qt.KeyboardModifier.ShiftModifier, "shift"),
+    (Qt.KeyboardModifier.ControlModifier, "control"),
+    (Qt.KeyboardModifier.AltModifier, "alt"),
+    (Qt.KeyboardModifier.MetaModifier, "meta"),
+)
+
 
 class QtMouseFilter(QObject):
     """Drive *interaction* from a viewport widget's mouse events.
@@ -40,6 +49,7 @@ class QtMouseFilter(QObject):
         super().__init__(parent)
         self._widget = widget
         self._interaction = interaction
+        self._owned = False
 
     # ── Helpers ──────────────────────────────────────────────────────
 
@@ -52,6 +62,15 @@ class QtMouseFilter(QObject):
         """Position of a Qt mouse event, in logical pixels."""
         position = event.position()
         return (float(position.x()), float(position.y()))
+
+    @staticmethod
+    def _modifier_names(modifiers: Any) -> tuple:
+        """Map a Qt modifier bitfield onto the policy's canonical names."""
+        names = []
+        for flag, name in _MODIFIER_MAP:
+            if modifiers & flag:
+                names.append(name)
+        return tuple(names)
 
     def _device_height(self) -> float:
         """Render-window height in device pixels (``0.0`` before it is sized)."""
@@ -80,21 +99,37 @@ class QtMouseFilter(QObject):
     # ── QObject ──────────────────────────────────────────────────────
 
     def eventFilter(self, obj: Any, event: Any) -> bool:
-        """Track press/move/release; never consume the event.
+        """Track press/move/release; consume the gesture only when it is a marquee.
 
-        Returning ``False`` lets the widget and VTK keep handling it, so orbiting
-        and rubber-band zoom behave exactly as before.
+        Returning ``False`` lets VTK keep orbiting/zooming; returning ``True``
+        for a marquee-owned gesture stops VTK from orbiting while the rubber-band
+        drag runs.  A gesture is *owned* when the policy says a drag is a marquee
+        (``select_mode`` is on, or the marquee modifier is held).
         """
-        if obj is self._widget:
-            event_type = event.type()
+        if obj is not self._widget:
+            return False
+        event_type = event.type()
+        if event_type == QEvent.Type.MouseButtonPress:
             button = getattr(event, "button", lambda: None)()
-            if event_type == QEvent.Type.MouseButtonPress and button == self._button():
-                self._interaction.begin_gesture(self._logical(event))
-            elif event_type == QEvent.Type.MouseMove:
-                self._interaction.update_gesture(self._logical(event))
-            elif event_type == QEvent.Type.MouseButtonRelease and button == self._button():
-                logical = self._logical(event)
-                self._interaction.end_gesture(logical, self.to_device(logical))
+            if button != self._button():
+                return False
+            logical = self._logical(event)
+            self._owned = self._interaction.begin_gesture(
+                logical, self._modifier_names(event.modifiers()), self.to_device(logical)
+            )
+            return self._owned
+        if event_type == QEvent.Type.MouseMove:
+            self._interaction.update_gesture(self._logical(event))
+            return self._owned
+        if event_type == QEvent.Type.MouseButtonRelease:
+            button = getattr(event, "button", lambda: None)()
+            if button != self._button():
+                return False
+            logical = self._logical(event)
+            self._interaction.end_gesture(logical, self.to_device(logical))
+            owned = self._owned
+            self._owned = False
+            return owned
         return False
 
 

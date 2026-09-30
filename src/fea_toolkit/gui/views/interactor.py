@@ -47,12 +47,15 @@ class PickResult:
             the node-first pick won, a cell index otherwise.
         position: World coordinates of the pick.
         node: ``True`` when the node cloud was picked rather than an element.
+        modifiers: Canonical modifier names held at the click, so the caller can
+            decide replace / add / toggle (``()`` for a plain click).
     """
 
     actor: Any = None
     index: int = -1
     position: Optional[np.ndarray] = None
     node: bool = False
+    modifiers: tuple = ()
 
     @property
     def hit(self) -> bool:
@@ -69,6 +72,8 @@ class ViewportInteraction:
         policy: The resolved interaction policy.
         on_pick: Called with a :class:`PickResult` for every clean click --
             including a miss, so the caller can clear the selection.
+        on_marquee: Optional; called with ``(start, end)`` VTK device pixels
+            when a drag should be a rubber-band selection rather than an orbit.
         node_actors: Callable returning the current node-cloud actors.  A
             callable, because a new model means new actors and a stale pick list
             would pin the old ones.
@@ -80,12 +85,15 @@ class ViewportInteraction:
         policy: InteractionPolicy,
         on_pick: Callable[[PickResult], None],
         node_actors: Optional[Callable[[], list]] = None,
+        on_marquee: Optional[Callable[[tuple, tuple], None]] = None,
     ) -> None:
         self._plotter = plotter
         self._policy = policy
         self._on_pick = on_pick
+        self._on_marquee = on_marquee
         self._node_actors = node_actors
         self._gesture = ClickGesture(policy)
+        self._marquee_start: Optional[tuple] = None
         self._cell_picker: Any = None
         self._point_picker: Any = None
 
@@ -118,13 +126,28 @@ class ViewportInteraction:
         """The button this policy selects with (``"left"`` or ``"right"``)."""
         return self._policy.pick_button
 
-    def begin_gesture(self, logical_xy: tuple) -> None:
+    def begin_gesture(
+        self,
+        logical_xy: tuple,
+        modifiers: tuple = (),
+        device_xy: Optional[tuple] = None,
+    ) -> bool:
         """Start tracking a gesture.
 
         Args:
             logical_xy: Press position as Qt reports it (logical pixels).
+            modifiers: Canonical modifier names held at the press.
+            device_xy: The same point in VTK device pixels -- the marquee's
+                anchor, needed when the gesture becomes a rubber-band drag.
+
+        Returns:
+            ``True`` when the gesture should be *owned* by selection -- a drag
+            will be a marquee rather than an orbit -- so the Qt adapter can
+            consume the events and stop the camera from moving.
         """
-        self._gesture.press(logical_xy)
+        self._gesture.press(logical_xy, modifiers)
+        self._marquee_start = device_xy
+        return self._gesture.marquee_wanted
 
     def update_gesture(self, logical_xy: tuple) -> None:
         """Note pointer movement, so a drag is never mistaken for a click.
@@ -135,7 +158,7 @@ class ViewportInteraction:
         self._gesture.move(logical_xy)
 
     def end_gesture(self, logical_xy: tuple, device_xy: tuple) -> None:
-        """Finish a gesture; pick when it was a clean click.
+        """Finish a gesture: pick on a clean click, marquee on a selection drag.
 
         Args:
             logical_xy: Release position as Qt reports it -- the space the drag
@@ -144,11 +167,20 @@ class ViewportInteraction:
                 origin, which is what the pickers expect.
         """
         if self._gesture.release(logical_xy):
-            self._on_pick(self.pick_at(*device_xy))
+            result = self.pick_at(*device_xy)
+            result.modifiers = self._gesture.modifiers
+            self._on_pick(result)
+        elif (
+            self._on_marquee is not None
+            and self._gesture.marquee_wanted
+            and self._marquee_start is not None
+        ):
+            self._on_marquee(self._marquee_start, device_xy)
 
     def cancel_gesture(self) -> None:
         """Forget any in-flight gesture (after a model or policy change)."""
         self._gesture.reset()
+        self._marquee_start = None
 
     # ── Picking ──────────────────────────────────────────────────────
 

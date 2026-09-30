@@ -34,6 +34,9 @@ SELECT_KEYS: dict[str, str] = {
     "id": "element_ids",
     "ids": "element_ids",
     "element_ids": "element_ids",
+    "node": "node_ids",
+    "nodes": "node_ids",
+    "node_ids": "node_ids",
     "z": "elevation_range",
     "elevation": "elevation_range",
     "elevation_range": "elevation_range",
@@ -42,7 +45,7 @@ SELECT_KEYS: dict[str, str] = {
 }
 
 #: Human-readable key list, for CLI help and error messages.
-SELECT_KEYS_HELP = "type, section, material, group, constraint, id, z"
+SELECT_KEYS_HELP = "type, section, material, group, constraint, id, node, z"
 
 #: Field → canonical expression key, in the order :meth:`Selection.to_string`
 #: emits them.  The short forms are the ones the help text and the examples in
@@ -54,6 +57,7 @@ SELECT_FIELD_KEYS: dict[str, str] = {
     "groups": "group",
     "constraints": "constraint",
     "element_ids": "id",
+    "node_ids": "node",
     "story": "story",
     "elevation_range": "z",
 }
@@ -411,7 +415,9 @@ class Selection:
         ``MeshModel`` / NPZ archives do not — those sources match no nodes.
         ``None`` means all.
     element_ids:
-        Filter by specific element ID(s).  ``None`` means all.
+        Filter by specific frame/area element ID(s).  ``None`` means all.
+    node_ids:
+        Filter by specific node (joint) ID(s).  ``None`` means all.
     elevation_range:
         ``(z_min, z_max)`` tuple in model length units.  An element is
         included if its **mid-height Z** coordinate falls within
@@ -487,6 +493,7 @@ class Selection:
     groups: Optional[list[str]] = None
     constraints: Optional[list[str]] = None
     element_ids: Optional[list[str]] = None
+    node_ids: Optional[list[str]] = None
     elevation_range: Optional[tuple[float, float]] = None
     story: Optional[list[str]] = None
     # Negated counterparts — each ``exclude_*`` field removes the elements that
@@ -498,6 +505,7 @@ class Selection:
     exclude_groups: Optional[list[str]] = None
     exclude_constraints: Optional[list[str]] = None
     exclude_element_ids: Optional[list[str]] = None
+    exclude_node_ids: Optional[list[str]] = None
     exclude_elevation_range: Optional[tuple[float, float]] = None
     exclude_story: Optional[list[str]] = None
 
@@ -539,6 +547,7 @@ class Selection:
         ``group``           ``groups``
         ``constraint``      ``constraints`` — SAP2000 joint constraints
         ``id``              ``element_ids``
+        ``node``            ``node_ids``
         ``z``               ``elevation_range`` — ``LO:HI``
         ==================  ====================================================
 
@@ -744,6 +753,11 @@ class Selection:
             return False
         return self.exclude_element_ids is None or eid not in self.exclude_element_ids
 
+    def _match_node_id(self, nid: str) -> bool:
+        if self.node_ids is not None and nid not in self.node_ids:
+            return False
+        return self.exclude_node_ids is None or nid not in self.exclude_node_ids
+
     def _selects_nodes_explicitly(self) -> bool:
         """Whether the node criterion selects joints in its own right,
         rather than nodes merely being *eligible*.
@@ -760,6 +774,8 @@ class Selection:
         if self.element_types is not None and "Node" in self.element_types:
             return True
         if self.constraints is not None or self.exclude_constraints is not None:
+            return True
+        if self.node_ids is not None or self.exclude_node_ids is not None:
             return True
         return self.exclude_element_types is not None and "Node" not in self.exclude_element_types
 
@@ -853,7 +869,7 @@ class Selection:
     ) -> bool:
         if not self._match_element_type("Node"):
             return False
-        if not self._match_id(eid):
+        if not self._match_node_id(eid):
             return False
         # Nodes have no section/material, so those criteria are skipped
         if not self._match_groups(model, "Joint", eid):

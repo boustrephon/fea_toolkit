@@ -20,6 +20,7 @@ from typing import Any, Optional
 from qtpy.QtCore import QItemSelectionModel, Qt, QTimer, QUrl
 from qtpy.QtGui import QAction, QDesktopServices, QKeySequence
 from qtpy.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
     QDockWidget,
     QDoubleSpinBox,
@@ -38,11 +39,12 @@ from qtpy.QtWidgets import (
 
 from .app import APP_NAME
 from .controllers.interaction import load_policy
-from .controllers.selection import CATEGORY_NOUNS, SelectionIndex
+from .controllers.marquee import point_in_rect, polygon_hits_rect, segment_hits_rect
+from .controllers.selection import CATEGORY_GROUPS, CATEGORY_NOUNS, SelectionIndex
 from .controllers.view_registry import FIGURE, GEOMETRY, RESULTS, TABLE, View, ViewRegistry
 from .controllers.worker import TaskWorker
 from .models.tree_model import ModelTreeModel
-from .render_backend import QtRenderBackend
+from .render_backend import QtRenderBackend, make_select_style
 from .views.interactor import PickResult, ViewportInteraction
 from .views.message_log import MessageLog
 from .views.property_inspector import PropertyInspector
@@ -52,6 +54,12 @@ _PROJECT_URL = "https://github.com/boustrephon/fea_toolkit"
 _CURSOR_POLL_MS = 60
 _SELECT_COLOR = (1.0, 0.45, 0.0)  # selected frame / area element
 _SELECT_NODE_COLOR = (0.15, 0.55, 1.0)  # selected node
+
+#: Model-tree group key -> render category, the reverse of
+#: ``controllers.selection.CATEGORY_GROUPS`` (which maps render category ->
+#: group key).  Used to turn selected tree rows back into a highlight / a
+#: ``Selection``.
+_GROUP_CATEGORY = {group: category for category, group in CATEGORY_GROUPS.items()}
 
 #: Once-only guard for :func:`_freeze_gc_once`.  A one-element list rather than a
 #: bool, so marking it does not need a ``global`` rebind (ruff PLW0603).
@@ -175,6 +183,7 @@ class MainWindow(QMainWindow):
         self._selection_index: Any = None
         self._interaction: Any = None
         self._mouse_filter: Any = None
+        self._default_style: Any = None  # interactor style to restore after Select mode
         self._worker: Any = None
         self._policy, self._policy_notes = load_policy()
         self._cursor_timer: Optional[QTimer] = None
@@ -274,25 +283,31 @@ class MainWindow(QMainWindow):
             policy=self._policy,
             on_pick=self._on_viewport_pick,
             node_actors=lambda: self._backend.actors("nodes"),
+            on_marquee=self._on_marquee,
         )
         self._mouse_filter = install_mouse_filter(self._interactor, self._interaction, self)
 
     def _on_viewport_pick(self, result: PickResult) -> None:
-        """Select whatever a click found; a click on nothing clears the selection.
+        """Apply a click to the selection: replace, add, toggle, or clear.
 
         Args:
             result: The pick from the interaction adapter (``hit`` is ``False``
-                when the click met no geometry).
+                when the click met no geometry).  ``result.modifiers`` decides
+                the action -- empty for replace, the policy's add / toggle
+                modifiers otherwise.
         """
         if self._viewer is None or self._selection_index is None:
             return
         category = self._backend.category_of_actor(result.actor) if result.hit else None
         label = self._selection_index.label(category, result.index) if category else None
         if label is None:
-            self._clear_selection()
+            # A click on empty space clears -- unless a modifier is holding the
+            # current selection open.
+            if not result.modifiers:
+                self._clear_selection()
             return
         group_key = self._selection_index.group_key(category)
-        if self._select_entity_in_tree(group_key, label):
+        if self._select_entity_in_tree(group_key, label, modifiers=result.modifiers):
             noun = CATEGORY_NOUNS.get(category, "entity")
             self.log(f"Selected {noun} {label} in the tree from the viewport.")
 
@@ -305,15 +320,19 @@ class MainWindow(QMainWindow):
         if selection is not None:
             selection.clear()
 
-    def _select_entity_in_tree(self, group_key: str, label: str) -> bool:
-        """Expand *group_key*, select the row for *label* and scroll to it.
+    def _select_entity_in_tree(self, group_key: str, label: str, modifiers: tuple = ()) -> bool:
+        """Select the row for *label* with the flag *modifiers* imply.
 
-        Selecting the row drives the inspector and the viewport highlight
-        through the ordinary tree wiring, so a pick refreshes all three views.
+        Expand *group_key*, apply a replace / add / toggle to the tree selection
+        and scroll the row into view.  Selecting the row drives the inspector and
+        the viewport highlight through the ordinary tree wiring.
 
         Args:
             group_key: Group key, e.g. ``"frame_elements"``.
             label: The entity's SAP label.
+            modifiers: Canonical modifier names held at the pick; the policy's
+                add / toggle modifier decide the selection flag, empty means
+                replace.
 
         Returns:
             ``True`` when the row existed and was selected.
@@ -322,11 +341,186 @@ class MainWindow(QMainWindow):
         if index is None:
             return False
         self._tree_view.expand(index.parent())
-        self._tree_view.selectionModel().setCurrentIndex(
-            index, QItemSelectionModel.SelectionFlag.ClearAndSelect
-        )
+        model = self._tree_view.selectionModel()
+        if self._policy.toggle_modifier in modifiers:
+            flag = QItemSelectionModel.SelectionFlag.Toggle
+        elif self._policy.add_modifier in modifiers:
+            flag = QItemSelectionModel.SelectionFlag.Select
+        else:
+            flag = QItemSelectionModel.SelectionFlag.ClearAndSelect
+        model.setCurrentIndex(index, QItemSelectionModel.SelectionFlag.NoUpdate)
+        model.select(index, flag)
         self._tree_view.scrollTo(index)
         return True
+
+    # ── Multi-selection (viewport -> tree -> Selection) ───────────────
+
+    def _on_marquee(self, start: tuple, end: tuple) -> None:
+        """Rubber-band select everything whose projection the rectangle touches.
+
+        Args:
+            start, end: Rectangle corners in VTK *device* pixels (bottom-left
+                origin), the drag's anchor and release.
+        """
+        if self._viewer is None or self._selection_index is None:
+            return
+        x0, y0 = start
+        x1, y1 = end
+        if abs(x1 - x0) < 3 or abs(y1 - y0) < 3:
+            return  # a click-sized box is a pick, not a marquee
+        frames, areas, nodes = self._marquee_entities(x0, y0, x1, y1)
+        self._select_many(frames, areas, nodes)
+        total = len(frames) + len(areas) + len(nodes)
+        self.log(f"Marquee selected {total} entit{'y' if total == 1 else 'ies'}.")
+
+    def _marquee_entities(self, x0: float, y0: float, x1: float, y1: float) -> tuple:
+        """``(frame_ids, area_ids, node_ids)`` sets whose projection is in the box."""
+        import vtk
+
+        renderer = self._interactor.renderer
+
+        def project(world: Any) -> tuple:
+            coord = vtk.vtkCoordinate()
+            coord.SetCoordinateSystemToWorld()
+            coord.SetValue(*[float(v) for v in world])
+            disp = coord.GetComputedDisplayValue(renderer)
+            return float(disp[0]), float(disp[1])
+
+        index = self._selection_index
+        frames = {
+            f.elem_id
+            for f in index.frames
+            if segment_hits_rect(*project(f.start), *project(f.end), x0, y0, x1, y1)
+        }
+        areas = {
+            s.area_id
+            for s in index.shells
+            if polygon_hits_rect([project(v) for v in s.vertices], x0, y0, x1, y1)
+        }
+        nodes = {
+            n.node_id for n in index.nodes if point_in_rect(*project(n.position), x0, y0, x1, y1)
+        }
+        return frames, areas, nodes
+
+    def _select_many(self, frames: set, areas: set, nodes: set) -> None:
+        """Replace the tree selection with *frames* / *areas* / *nodes*."""
+        model = self._tree_view.selectionModel()
+        if model is None:
+            return
+        model.clearSelection()
+        entities = (
+            [("frame_elements", label) for label in sorted(frames)]
+            + [("area_elements", label) for label in sorted(areas)]
+            + [("nodes", label) for label in sorted(nodes)]
+        )
+        for group_key, label in entities:
+            index = self._tree_model.index_for(group_key, label)
+            if index is None:
+                continue
+            self._tree_view.expand(index.parent())
+            model.setCurrentIndex(index, QItemSelectionModel.SelectionFlag.NoUpdate)
+            model.select(index, QItemSelectionModel.SelectionFlag.Select)
+
+    def _selected_entities(self) -> tuple:
+        """``(frame_ids, area_ids, node_ids)`` sets for the current selection."""
+        frames: set = set()
+        areas: set = set()
+        nodes: set = set()
+        model = self._tree_view.selectionModel()
+        if model is None:
+            return frames, areas, nodes
+        for index in model.selectedIndexes():
+            if index.column() != 0:
+                continue
+            group = self._tree_model._group_of(index)
+            if group is None:
+                continue
+            category = _GROUP_CATEGORY.get(group.key)
+            if category is None:
+                continue
+            entity = index.data(Qt.ItemDataRole.UserRole)
+            label = (
+                getattr(entity, "elem_id", None)
+                or getattr(entity, "area_id", None)
+                or getattr(entity, "node_id", None)
+            )
+            if label is None:
+                continue
+            ({"frames": frames, "shells": areas, "nodes": nodes})[category].add(str(label))
+        return frames, areas, nodes
+
+    def _refresh_selection_highlight(self) -> None:
+        """Re-highlight the viewport to match the full tree selection."""
+        if self._viewer is None:
+            return
+        frames, areas, nodes = self._selected_entities()
+        self._viewer.clear_highlights()
+        if frames or areas:
+            self._viewer.highlight_elements(
+                frame_ids=sorted(frames), area_ids=sorted(areas), color=_SELECT_COLOR
+            )
+        if nodes:
+            self._viewer.highlight_nodes(sorted(nodes), color=_SELECT_NODE_COLOR)
+
+    def _on_selection_changed(self, *_args) -> None:
+        """Keep the viewport highlight in step with a multi-row selection."""
+        self._refresh_selection_highlight()
+
+    def current_selection(self) -> Optional[Any]:
+        """The current visual selection as a ``Selection``, or ``None``.
+
+        Collapses the selected tree rows into a scoping ``Selection`` a workflow
+        step (or a duplicate view) can take.  Best-effort: ``element_ids`` is
+        shared between frames and areas, so a frame id that collides with an
+        area id cannot be told apart once collapsed -- the same ambiguity the
+        expression grammar has.
+        """
+        frames, areas, nodes = self._selected_entities()
+        if not (frames or areas or nodes):
+            return None
+        from ..model.selection import Selection
+
+        types = []
+        if frames:
+            types.append("Frame")
+        if areas:
+            types.append("Area")
+        if nodes:
+            types.append("Node")
+        return Selection(
+            element_types=types,
+            element_ids=sorted(frames | areas) or None,
+            node_ids=sorted(nodes) or None,
+        )
+
+    # ── Select / Orbit mode (the SAP2000 arrangement) ─────────────────
+
+    def _on_select_mode_toggled(self, checked: bool) -> None:
+        """**View ▸ Select mode**: swap between Select and Orbit interaction.
+
+        In Select mode a drag marquee-selects and orbiting is disabled; in Orbit
+        mode a drag orbits and a clean click still selects.
+        """
+        from dataclasses import replace
+
+        self._policy = replace(self._policy, select_mode=checked)
+        self._interaction.set_policy(self._policy)
+        self._set_select_style(checked)
+        self.log("Select mode on." if checked else "Orbit mode on.")
+
+    def _set_select_style(self, select: bool) -> None:
+        """Disable the select button's orbit while in Select mode."""
+        iren = getattr(self._interactor, "iren", None)
+        if iren is None:
+            return
+        vtk_iren = getattr(iren, "interactor", None) or iren
+        if select:
+            if self._default_style is None:
+                self._default_style = vtk_iren.GetInteractorStyle()
+            vtk_iren.SetInteractorStyle(make_select_style(self._policy.pick_button))
+        elif self._default_style is not None:
+            vtk_iren.SetInteractorStyle(self._default_style)
+            self._default_style = None
 
     # ── Actions ─────────────────────────────────────────────────────
 
@@ -454,6 +648,12 @@ class MainWindow(QMainWindow):
         a["view.clear_highlights"] = self._real_action(
             "Clear highlights", self._on_clear_highlights, tip="Drop the selection highlight"
         )
+        a["view.select_mode"] = self._toggle_action(
+            "Select mode",
+            self._on_select_mode_toggled,
+            tip="Toggle Select mode: a drag marquee-selects instead of orbiting",
+            checked=False,
+        )
         a["view.reset_layout"] = self._placeholder("Reset layout", "Milestone 8")
         a["model.mesh"] = self._real_action(
             "Mesh…",
@@ -568,6 +768,7 @@ class MainWindow(QMainWindow):
         display.addSeparator()
         display.addAction(a["view.clear_highlights"])
         m.addSeparator()
+        m.addAction(a["view.select_mode"])
         m.addAction(a["view.reset_layout"])
 
         m = bar.addMenu("&Model")
@@ -723,6 +924,7 @@ class MainWindow(QMainWindow):
             "view.xy",
             "view.xz",
             "view.yz",
+            "view.select_mode",
             None,
             "view.show_nodes",
             "view.show_frames",
@@ -767,7 +969,10 @@ class MainWindow(QMainWindow):
         self._tree_view.setUniformRowHeights(True)
         self._tree_view.setAlternatingRowColors(True)
         self._tree_view.setColumnWidth(0, 200)
+        # Multi-select: Shift/Ctrl-click add/toggle, and a marquee selects many.
+        self._tree_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._tree_view.selectionModel().currentChanged.connect(self._on_tree_selection)
+        self._tree_view.selectionModel().selectionChanged.connect(self._on_selection_changed)
 
         trees = QTabWidget(self)
         trees.setObjectName("tabs_trees")

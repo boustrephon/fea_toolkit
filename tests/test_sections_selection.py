@@ -991,11 +991,30 @@ class TestConstraintSelection:
         md = self._model()
         assert set(Selection(constraints=["Fix", "D1"]).get_node_ids(md)) == {"1", "2", "3"}
 
-    def test_and_with_element_ids(self):
-        """constraints AND element_ids = the intersection."""
+    def test_and_with_node_ids(self):
+        """constraints AND node_ids = the intersection."""
         md = self._model()
-        sel = Selection(constraints=["Fix"], element_ids=["1", "4"])
+        sel = Selection(constraints=["Fix"], node_ids=["1", "4"])
         assert set(sel.get_node_ids(md)) == {"1"}
+
+    def test_node_ids_select_specific_joints(self):
+        """node_ids address joints directly, without a constraint name."""
+        md = self._model()
+        assert set(Selection(element_types=["Node"], node_ids=["2", "4"]).get_node_ids(md)) == {
+            "2",
+            "4",
+        }
+
+    def test_node_ids_do_not_name_frames(self):
+        """node_ids is a node-only filter; element ids are a separate namespace."""
+        md = self._model()
+        sel = Selection(element_types=["Frame"], node_ids=["10", "20"])
+        assert set(sel.get_node_ids(md)) == set()
+        assert set(sel.get_frame_ids(md)) == {"10", "20"}
+
+    def test_exclude_node_ids_removes_the_named_joints(self):
+        md = self._model()
+        assert set(Selection(exclude_node_ids=["1", "2"]).get_node_ids(md)) == {"3", "4"}
 
     def test_and_with_group(self):
         """constraints AND groups = joints satisfying both."""
@@ -1069,7 +1088,7 @@ class TestConstraintSelection:
 
     def test_filter_model_node_scoped_by_element_type(self):
         md = self._model()
-        sub = Selection(element_types=["Node"], element_ids=["1", "4"]).filter_model(md)
+        sub = Selection(element_types=["Node"], node_ids=["1", "4"]).filter_model(md)
         assert set(sub.nodes) == {"1", "4"}
         assert sub.frame_elements == {}
 
@@ -1092,6 +1111,16 @@ class TestSelectionFromString:
         sel = Selection.from_string("id=10, 11,12")
         assert sel.element_ids == ["10", "11", "12"]
         assert sel.element_types is None
+
+    def test_node_key_and_alias(self):
+        assert Selection.from_string("node=1,2").node_ids == ["1", "2"]
+        assert Selection.from_string("nodes=1").node_ids == ["1"]
+        assert Selection.from_string("NOT node=3").exclude_node_ids == ["3"]
+
+    def test_node_ids_round_trip(self):
+        sel = Selection(element_types=["Node"], node_ids=["1", "4"])
+        assert sel.to_string() == "type=Node node=1, 4"
+        assert Selection.from_string(sel.to_string()).node_ids == ["1", "4"]
 
     def test_constraint_key_and_alias(self):
         assert Selection.from_string("constraint=Fix,D1").constraints == ["Fix", "D1"]

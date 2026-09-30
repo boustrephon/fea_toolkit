@@ -153,9 +153,9 @@ class TestResolveConnected:
         """A lone marker is useless to look at; the connection is the point."""
         from fea_toolkit.model.selection import Selection
 
-        frames, areas, nodes = Selection(
-            element_types=["Node"], element_ids=["1"]
-        ).resolve_connected(_chain_model())
+        frames, areas, nodes = Selection(element_types=["Node"], node_ids=["1"]).resolve_connected(
+            _chain_model()
+        )
 
         assert frames == {"1"}  # the member on joint 1 ...
         assert nodes == {"1", "2"}  # ... and its far end, so it draws complete
@@ -165,9 +165,9 @@ class TestResolveConnected:
         """Joint 2 shows members 1 and 2 — member 3 is two hops away."""
         from fea_toolkit.model.selection import Selection
 
-        frames, _areas, nodes = Selection(
-            element_types=["Node"], element_ids=["2"]
-        ).resolve_connected(_chain_model())
+        frames, _areas, nodes = Selection(element_types=["Node"], node_ids=["2"]).resolve_connected(
+            _chain_model()
+        )
 
         assert frames == {"1", "2"}
         assert nodes == {"1", "2", "3"}
@@ -200,9 +200,9 @@ class TestResolveConnected:
         md.area_elements["A1"] = AreaElement(area_id="A1", area_tag=101, node_ids=["3", "4", "9"])
         md.area_assignments["A1"] = "UB300"
 
-        frames, areas, nodes = Selection(
-            element_types=["Node"], element_ids=["3"]
-        ).resolve_connected(md)
+        frames, areas, nodes = Selection(element_types=["Node"], node_ids=["3"]).resolve_connected(
+            md
+        )
 
         assert areas == {"A1"}  # the panel on joint 3 ...
         assert nodes == {"2", "3", "4", "9"}  # ... drawn closed, plus member 2's far end
@@ -246,7 +246,7 @@ class TestViewerAppliesTheLens:
 
         viewer = ModelViewer(
             model_data=_chain_model(),
-            selection=Selection(element_types=["Node"], element_ids=["2"]),
+            selection=Selection(element_types=["Node"], node_ids=["2"]),
         )
         frames, _shells, nodes = viewer.geometry()
 
@@ -304,7 +304,7 @@ class TestDerivedViews:
             "processed:1",
             "Processed \u00b7 joint 2",
             "processed",
-            Selection(element_types=["Node"], element_ids=["2"]),
+            Selection(element_types=["Node"], node_ids=["2"]),
         )
 
         assert derived is not None
@@ -324,7 +324,7 @@ class TestDerivedViews:
             "processed:1",
             "joint 2",
             "processed",
-            Selection(element_types=["Node"], element_ids=["2"]),
+            Selection(element_types=["Node"], node_ids=["2"]),
         )
 
         assert derived.n_frames == 2
@@ -350,7 +350,7 @@ class TestDerivedViews:
             "unprocessed:1",
             "joint 2",
             "unprocessed",
-            Selection(element_types=["Node"], element_ids=["2"]),
+            Selection(element_types=["Node"], node_ids=["2"]),
             activate=False,
         )
 

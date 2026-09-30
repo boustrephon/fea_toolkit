@@ -254,3 +254,37 @@ def test_node_markers_are_visible_enough_to_click():
 
     assert node_point_size(0.02) >= 6.0  # the show_model default
     assert node_point_size(0.0001) >= 6.0  # floored for tiny models
+
+
+def test_marquee_predicates_select_the_projected_geometry(viewer):
+    """The rubber-band geometry tests select what a click would, in screen space."""
+    from fea_toolkit.gui.controllers.marquee import point_in_rect, segment_hits_rect
+
+    frames, _shells, nodes = viewer.geometry()
+    renderer = viewer._backend.plotter.renderer
+
+    def project(point):
+        coord = vtk.vtkCoordinate()
+        coord.SetCoordinateSystemToWorld()
+        coord.SetValue(*[float(v) for v in point])
+        disp = coord.GetComputedDisplayValue(renderer)
+        return float(disp[0]), float(disp[1])
+
+    # A box around a member's midpoint selects it.
+    frame = frames[0]
+    mid = (np.asarray(frame.start) + np.asarray(frame.end)) / 2.0
+    x, y = project(mid)
+    assert (
+        segment_hits_rect(
+            *project(frame.start), *project(frame.end), x - 20, y - 20, x + 20, y + 20
+        )
+        is True
+    )
+
+    # A tiny box at the top-left corner of the window selects nothing.
+    assert segment_hits_rect(*project(frame.start), *project(frame.end), 0, 0, 5, 5) is False
+
+    # A node is selected by its projected point.
+    node = nodes[0]
+    nx, ny = project(node.position)
+    assert point_in_rect(nx, ny, nx - 10, ny - 10, nx + 10, ny + 10) is True

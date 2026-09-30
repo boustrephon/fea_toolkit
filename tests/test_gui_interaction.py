@@ -187,3 +187,85 @@ def test_a_second_press_restarts_the_gesture():
     gesture.move((50, 50))  # a drag...
     gesture.press((200, 200))  # ...but the user pressed again
     assert gesture.release((200, 200)) is True
+
+
+# ── Modifier bookkeeping and marquee ───────────────────────────────────
+
+
+def test_a_press_records_the_modifiers_held():
+    gesture = _gesture()
+    gesture.press((0, 0), ("shift",))
+    assert gesture.modifiers == ("shift",)
+    gesture.reset()
+    assert gesture.modifiers == ()
+
+
+def test_marquee_wanted_only_with_the_marquee_modifier():
+    gesture = _gesture()  # marquee_modifier == "shift", select_mode False
+    assert gesture.marquee_wanted is False
+    gesture.press((0, 0), ("control",))
+    assert gesture.marquee_wanted is False
+    gesture.press((0, 0), ("shift",))
+    assert gesture.marquee_wanted is True
+
+
+def test_marquee_wanted_in_select_mode_without_a_modifier():
+    gesture = _gesture(select_mode=True)
+    assert gesture.marquee_wanted is True  # even before a press
+    gesture.press((0, 0), ())
+    assert gesture.marquee_wanted is True
+
+
+def test_the_policy_rejects_an_unknown_modifier():
+    from fea_toolkit.gui.controllers.interaction import InteractionPolicy
+
+    with pytest.raises(ValueError):
+        InteractionPolicy(add_modifier="wibble")
+
+
+def test_a_drag_with_the_marquee_modifier_requests_a_marquee():
+    from fea_toolkit.gui.views.interactor import ViewportInteraction
+
+    marquees = []
+    interaction = ViewportInteraction(
+        None,
+        policy=_gesture().policy,
+        on_pick=lambda result: None,
+        on_marquee=lambda start, end: marquees.append((start, end)),
+    )
+    interaction.begin_gesture((0.0, 0.0), ("shift",), (10.0, 20.0))
+    interaction.update_gesture((100.0, 100.0))
+    interaction.end_gesture((100.0, 100.0), (110.0, 120.0))
+    assert marquees == [((10.0, 20.0), (110.0, 120.0))]
+
+
+def test_a_plain_drag_does_not_marquee():
+    from fea_toolkit.gui.views.interactor import ViewportInteraction
+
+    marquees = []
+    interaction = ViewportInteraction(
+        None,
+        policy=_gesture().policy,
+        on_pick=lambda result: None,
+        on_marquee=lambda start, end: marquees.append((start, end)),
+    )
+    interaction.begin_gesture((0.0, 0.0), (), (10.0, 20.0))
+    interaction.update_gesture((100.0, 100.0))
+    interaction.end_gesture((100.0, 100.0), (110.0, 120.0))
+    assert marquees == []
+
+
+def test_a_clean_click_reports_its_modifiers():
+    from fea_toolkit.gui.views.interactor import PickResult, ViewportInteraction
+
+    seen = []
+    interaction = ViewportInteraction(
+        None,
+        policy=_gesture().policy,
+        on_pick=seen.append,
+    )
+    # ``pick_at`` returns an empty result; the click still carries its modifiers.
+    interaction.pick_at = lambda x, y: PickResult()
+    interaction.begin_gesture((0.0, 0.0), ("shift",), (10.0, 20.0))
+    interaction.end_gesture((1.0, 1.0), (11.0, 21.0))
+    assert seen[0].modifiers == ("shift",)

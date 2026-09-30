@@ -110,7 +110,7 @@ class TestDuplicateView:
     def test_duplicating_registers_a_derived_view_and_renders_it(self, window, monkeypatch):
         from fea_toolkit.model.selection import Selection
 
-        selection = Selection(element_types=["Node"], element_ids=["2"])
+        selection = Selection(element_types=["Node"], node_ids=["2"])
         _stub_dialog(monkeypatch, selection)
 
         window._on_duplicate_view()
@@ -141,7 +141,7 @@ class TestDuplicateView:
     def test_the_inspector_reports_the_derived_view(self, window, monkeypatch):
         from fea_toolkit.model.selection import Selection
 
-        _stub_dialog(monkeypatch, Selection(element_types=["Node"], element_ids=["2"]))
+        _stub_dialog(monkeypatch, Selection(element_types=["Node"], node_ids=["2"]))
 
         window._on_duplicate_view()
 
@@ -162,7 +162,7 @@ class TestDuplicateView:
         """The pick index is rebuilt from what is drawn, so hidden cells are not pickable."""
         from fea_toolkit.model.selection import Selection
 
-        _stub_dialog(monkeypatch, Selection(element_types=["Node"], element_ids=["2"]))
+        _stub_dialog(monkeypatch, Selection(element_types=["Node"], node_ids=["2"]))
 
         window._on_duplicate_view()
 
@@ -182,7 +182,7 @@ class TestEditViewSelection:
         window._on_duplicate_view()
         key = window._views.active.key
 
-        newer = Selection(element_types=["Node"], element_ids=["1"])
+        newer = Selection(element_types=["Node"], node_ids=["1"])
         _stub_dialog(monkeypatch, newer)
 
         window._on_edit_view_selection()
