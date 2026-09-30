@@ -749,7 +749,7 @@ shape as the eliminated Preprocessor deepcopy, but outside `Preprocessor.run()`:
 
 | Site | Copies | Verdict |
 |---|---|---|
-| `workflow/verbs/scale_sections.py` | `copy.deepcopy(context.model_data)` | convert — only sections are edited |
+| `workflow/verbs/scale_sections.py` | `copy.deepcopy(context.model_data)` | **done** — copy-on-write via `_copy_for_preprocessing` + `dataclasses.replace` |
 | `plotting/viz_model.py` | `copy.deepcopy(md)` (comparison viewer) | convert (lower priority) |
 | `rhino/importer.py` | `copy.deepcopy(self._raw_sap_model)` | convert (lower priority) |
 | `model/units.py` (`convert_mesh_units`) | `deepcopy(mesh)` | **leave** — full transform |
@@ -770,17 +770,19 @@ the target:
 ### Copy-on-write for the three convertible sites
 
 Three of the five full-graph sites are worth converting; two are not.
+`scale_sections` is converted; `viz_model` and `rhino/importer` remain.
 
-*   **`scale_sections` (highest value).**  The verb rewrites section stiffness
+*   **`scale_sections` (done).**  The verb rewrites section stiffness
     attributes (`A`/`I33`/`I22`/`J`/`thickness`) on the selected sections only —
     the exact "change a handful of objects" case that motivated the Preprocessor
-    change.  Reuse `_copy_for_preprocessing(context.model_data)`
+    change.  It now reuses `_copy_for_preprocessing(context.model_data)`
     (`opensees/preprocessor.py` — OpenSees-free, so a lazy import inside the verb
-    keeps the manifest loadable) and replace each scaled section with
+    keeps the manifest loadable) and replaces each scaled section with
     `dataclasses.replace(...)` instead of `setattr`.  This matters because
     `scale_sections` runs inside `run_recipe` on the GUI worker thread, so its
-    full-model deepcopy feeds the same GC-on-worker-thread race as the one this
-    section retired.
+    former full-model deepcopy fed the same GC-on-worker-thread race as the one
+    this section retired.  Pinned by
+    `tests/test_recipe.py::test_the_scaled_section_is_replaced_and_untouched_objects_are_shared`.
 
 *   **`viz_model` and `rhino/importer` (moderate, after `scale_sections`).**  Both
     deep-copy and then make small, localised changes — the viewer fixes shell-only
