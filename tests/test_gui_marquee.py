@@ -52,3 +52,9 @@ def test_polygon_hits_by_vertex_or_edge():
 
 def test_polygon_fully_outside_misses():
     assert polygon_hits_rect([(20, 20), (30, 20), (30, 30), (20, 30)], 0, 0, 10, 10) is False
+
+
+def test_polygon_containing_the_whole_box_hits():
+    """A box lying entirely inside a polygon has no vertex in the box and no
+    crossing edge, so the corner point-in-polygon test must catch it."""
+    assert polygon_hits_rect([(0, 0), (20, 0), (20, 20), (0, 20)], 5, 5, 10, 10) is True

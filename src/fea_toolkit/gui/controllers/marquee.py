@@ -52,8 +52,8 @@ def segment_hits_rect(
 def polygon_hits_rect(
     vertices: Sequence[tuple[float, float]], x0: float, y0: float, x1: float, y1: float
 ) -> bool:
-    """Whether a polygon touches the rectangle -- a vertex inside or an edge
-    crossing it.
+    """Whether a polygon touches the rectangle -- a vertex inside, an edge
+    crossing it, or the rectangle lying wholly inside the polygon.
 
     Args:
         vertices: Polygon corners as ``(x, y)`` pairs, in order.
@@ -68,7 +68,30 @@ def polygon_hits_rect(
             return True
         if segment_hits_rect(ax, ay, bx, by, x_lo, y_lo, x_hi, y_hi):
             return True
-    return False
+    # A rectangle lying wholly inside the polygon has no vertex in the box and
+    # no edge crossing it, so test a corner of the box against the polygon.
+    return _point_in_polygon(x_lo, y_lo, vertices)
+
+
+def _point_in_polygon(px: float, py: float, vertices: Sequence[tuple[float, float]]) -> bool:
+    """Whether ``(px, py)`` lies inside the polygon (even-odd ray casting).
+
+    A point exactly on an edge or vertex is treated as outside -- the caller
+    already tested the polygon's own vertices and edges against the rectangle,
+    so a corner on the boundary is covered by those checks.
+    """
+    inside = False
+    n = len(vertices)
+    j = n - 1
+    for i in range(n):
+        xi, yi = vertices[i]
+        xj, yj = vertices[j]
+        if (yi > py) != (yj > py):
+            x_cross = (xj - xi) * (py - yi) / (yj - yi) + xi
+            if px < x_cross:
+                inside = not inside
+        j = i
+    return inside
 
 
 def _segments_cross(
