@@ -192,7 +192,7 @@ class StepDialog(QDialog):
         if spec.type is bool:
             return bool(widget.isChecked())
         if spec.choices:
-            return widget.currentText()
+            return spec.choices[widget.currentIndex()]
         if spec.type is int:
             return int(widget.value())
         if spec.type is float:
@@ -243,7 +243,7 @@ class StepDialog(QDialog):
         ok = self._buttons.button(QDialogButtonBox.StandardButton.Ok)
         ok.setEnabled(not errors)
 
-    def result(self) -> Step:
+    def edited_step(self) -> Step:
         """The edited step, with only the parameters that differ from defaults."""
         text = self._selection_field.text()
         selection = Selection.from_string(text) if text.strip() else None
@@ -276,4 +276,4 @@ class StepDialog(QDialog):
         dialog = StepDialog(step, parent)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return None
-        return dialog.result()
+        return dialog.edited_step()

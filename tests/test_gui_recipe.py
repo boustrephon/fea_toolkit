@@ -380,6 +380,19 @@ def test_the_config_editor_preserves_tolerances_below_six_decimals(qapp):
     assert editor.value()["solver_test_tol"] == 1e-8
 
 
+def test_the_config_editor_preserves_choice_type(qapp):
+    """A choice key reads back the declared-typed entry, not its text form."""
+    from fea_toolkit.gui.views.config_editor import ConfigEditor
+    from fea_toolkit.workflow import ParamSpec
+
+    manifest = {"levels": ParamSpec(default=1, type=int, choices=(1, 2, 3), help="levels")}
+    editor = ConfigEditor(manifest, {})
+    editor._widgets["levels"].setCurrentIndex(2)
+    value = editor.value()["levels"]
+    assert value == 3
+    assert type(value) is int
+
+
 def test_the_step_list_has_a_help_context_menu(window):
     """Right-click help is wired to the recipe step list."""
     from qtpy.QtCore import Qt
@@ -416,7 +429,7 @@ class TestStepDialog:
 
     def test_only_non_default_params_are_emitted(self, qapp):
         dialog = self._dialog("mesh")
-        result = dialog.result()
+        result = dialog.edited_step()
         assert result.verb == "mesh"
         assert result.params == {}  # every mesh param was left at its default
         assert result.selection is None
@@ -425,14 +438,14 @@ class TestStepDialog:
     def test_an_edit_reaches_the_resulting_step(self, qapp):
         dialog = self._dialog("mesh")
         dialog._widgets["split_slabs_at_walls"].setChecked(True)
-        assert dialog.result().params == {"split_slabs_at_walls": True}
+        assert dialog.edited_step().params == {"split_slabs_at_walls": True}
 
     def test_the_selection_is_parsed_from_the_field(self, qapp):
         from fea_toolkit.model.selection import Selection
 
         dialog = self._dialog("scale_sections")
         dialog._selection_field.setText("section=brick wall")
-        assert dialog.result().selection == Selection(sections=["brick wall"])
+        assert dialog.edited_step().selection == Selection(sections=["brick wall"])
 
     def test_an_invalid_selection_gates_ok(self, qapp):
         from qtpy.QtWidgets import QDialogButtonBox
@@ -445,7 +458,7 @@ class TestStepDialog:
     def test_the_optional_flag_is_recorded(self, qapp):
         dialog = self._dialog("mesh")
         dialog._optional_box.setChecked(True)
-        assert dialog.result().optional is True
+        assert dialog.edited_step().optional is True
 
     def test_float_precision_survives_an_unrelated_edit(self, qapp):
         """A high-precision float keeps its full value when only the optional flag changes."""
@@ -455,9 +468,31 @@ class TestStepDialog:
         factor = 0.123456789012345
         dialog = StepDialog(Step(verb="scale_sections", params={"factor": factor}))
         dialog._optional_box.setChecked(True)
-        result = dialog.result()
+        result = dialog.edited_step()
         assert result.optional is True
         assert result.params["factor"] == factor
+
+    def test_choice_param_preserves_declared_type(self, qapp, monkeypatch):
+        """A choice parameter reads back the declared-typed entry, not its text form."""
+        import fea_toolkit.gui.views.step_dialog as step_dialog_mod
+        from fea_toolkit.workflow import ParamSpec, Step, StepSpec
+
+        fake_spec = StepSpec(
+            verb="combine",
+            run=lambda ctx, step: [],
+            params={
+                "envelope_mode": ParamSpec(default=1, type=int, choices=(1, 2, 3), help="mode")
+            },
+            kind="cases",
+        )
+        monkeypatch.setattr(step_dialog_mod, "STEP_SPECS", {"combine": fake_spec})
+
+        dialog = step_dialog_mod.StepDialog(Step(verb="combine"))
+        combo = dialog._widgets["envelope_mode"]
+        combo.setCurrentIndex(2)
+        value = dialog._param_value("envelope_mode")
+        assert value == 3
+        assert type(value) is int
 
 
 def test_show_beams_toggle_hides_frames(window):

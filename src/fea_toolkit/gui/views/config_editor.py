@@ -147,7 +147,7 @@ class ConfigEditor(QGroupBox):
         if kind is bool:
             return bool(widget.isChecked())
         if spec.choices:
-            return widget.currentText()
+            return spec.choices[widget.currentIndex()]
         if kind is int:
             return int(widget.value())
         if kind is float:
