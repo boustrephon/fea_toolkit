@@ -11,7 +11,7 @@ Presets:
 * ``click_drag`` (default) -- a clean left click selects; left-drag orbits, as
   it always did.  Nothing is modal.  Hold the *add* modifier (Shift) to add a
   pick, the *toggle* modifier (Ctrl/Cmd) to toggle one, and drag with the
-  *marquee* modifier to rubber-band select.
+  *marquee* modifier (Alt/Opt) to rubber-band select.
 * ``right_click`` -- the right button selects, the left button stays pure
   camera control (the pre-2026-09 behaviour).
 * ``select_orbit`` -- the explicit Select / Orbit arrangement (the SAP2000
@@ -83,7 +83,7 @@ class InteractionPolicy:
             (``"shift"`` by default).
         toggle_modifier: Modifier key held to *toggle* a pick (``"control"``).
         marquee_modifier: Modifier key that turns a drag into a rubber-band
-            selection (``"shift"``).  Only consulted when ``select_mode`` is off.
+            selection (``"alt"``).  Only consulted when ``select_mode`` is off.
         select_mode: When ``True`` (the explicit Select / Orbit arrangement), a
             plain drag is a rubber-band selection and orbiting is disabled; when
             ``False`` (modeless modifiers), a drag orbits unless the marquee
@@ -98,7 +98,7 @@ class InteractionPolicy:
     node_snap_tolerance: float = 0.012
     add_modifier: str = "shift"
     toggle_modifier: str = "control"
-    marquee_modifier: str = "shift"
+    marquee_modifier: str = "alt"
     select_mode: bool = False
 
     def __post_init__(self) -> None:

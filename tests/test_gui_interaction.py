@@ -201,11 +201,11 @@ def test_a_press_records_the_modifiers_held():
 
 
 def test_marquee_wanted_only_with_the_marquee_modifier():
-    gesture = _gesture()  # marquee_modifier == "shift", select_mode False
+    gesture = _gesture()  # marquee_modifier == "alt", select_mode False
     assert gesture.marquee_wanted is False
     gesture.press((0, 0), ("control",))
     assert gesture.marquee_wanted is False
-    gesture.press((0, 0), ("shift",))
+    gesture.press((0, 0), ("alt",))
     assert gesture.marquee_wanted is True
 
 
@@ -233,7 +233,7 @@ def test_a_drag_with_the_marquee_modifier_requests_a_marquee():
         on_pick=lambda result: None,
         on_marquee=lambda start, end: marquees.append((start, end)),
     )
-    interaction.begin_gesture((0.0, 0.0), ("shift",), (10.0, 20.0))
+    interaction.begin_gesture((0.0, 0.0), ("alt",), (10.0, 20.0))
     interaction.update_gesture((100.0, 100.0))
     interaction.end_gesture((100.0, 100.0), (110.0, 120.0))
     assert marquees == [((10.0, 20.0), (110.0, 120.0))]
