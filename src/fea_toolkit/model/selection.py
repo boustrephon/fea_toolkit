@@ -117,7 +117,7 @@ def _quote(value: str) -> str:
 
 
 def _render_value(value: str, *, follows_value: bool = False) -> str:
-    """A value as it appears in an expression — quoted only when it must be.
+    """Format a value for an expression, quoting it only when it must be.
 
     ``follows_value`` is ``True`` when *value* is not the first item of its
     comma-separated list.  A standalone ``NOT`` there must be quoted even
@@ -125,6 +125,16 @@ def _render_value(value: str, *, follows_value: bool = False) -> str:
     list is not read by :func:`_scan_clauses` as the negation of a following
     clause.  ``_NOT_RE.fullmatch`` matches exactly the keyword — ``NOTCH`` /
     ``NOTIONAL`` stay unquoted values.
+
+    Args:
+        value: The value to format.
+        follows_value: ``True`` when *value* is not the first item of its
+            comma-separated list, in which case a standalone ``NOT`` value is
+            quoted.
+
+    Returns:
+        The value as it appears in the expression, double-quoted only when
+        required to survive a round-trip through parsing.
     """
     text = str(value)
     needs_quoting = _needs_quoting(text) or (follows_value and _NOT_RE.fullmatch(text) is not None)
