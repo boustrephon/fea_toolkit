@@ -3,7 +3,9 @@
 from fea_toolkit.gui.controllers.marquee import (
     point_in_rect,
     polygon_hits_rect,
+    polygon_inside_rect,
     segment_hits_rect,
+    segment_inside_rect,
 )
 
 
@@ -58,3 +60,24 @@ def test_polygon_containing_the_whole_box_hits():
     """A box lying entirely inside a polygon has no vertex in the box and no
     crossing edge, so the corner point-in-polygon test must catch it."""
     assert polygon_hits_rect([(0, 0), (20, 0), (20, 20), (0, 20)], 5, 5, 10, 10) is True
+
+
+def test_segment_fully_inside_hits_window():
+    # both endpoints inside -> the whole member is enclosed (window selects it)
+    assert segment_inside_rect(3, 3, 7, 7, 0, 0, 10, 10) is True
+
+
+def test_segment_with_an_endpoint_out_misses_window():
+    # crossing the box, but not fully enclosed -> window rejects, crossing accepts
+    assert segment_inside_rect(5, 5, 20, 20, 0, 0, 10, 10) is False
+    assert segment_hits_rect(5, 5, 20, 20, 0, 0, 10, 10) is True
+
+
+def test_polygon_fully_inside_hits_window():
+    assert polygon_inside_rect([(2, 2), (8, 2), (8, 8), (2, 8)], 0, 0, 10, 10) is True
+
+
+def test_polygon_with_a_vertex_out_misses_window():
+    # a vertex pokes out, so it is not enclosed -- window rejects, crossing accepts
+    assert polygon_inside_rect([(5, 5), (20, 5), (20, 20), (5, 20)], 0, 0, 10, 10) is False
+    assert polygon_hits_rect([(5, 5), (20, 5), (20, 20), (5, 20)], 0, 0, 10, 10) is True

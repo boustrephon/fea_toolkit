@@ -10,7 +10,13 @@ these predicates only test the result.
 
 from collections.abc import Sequence
 
-__all__ = ["point_in_rect", "polygon_hits_rect", "segment_hits_rect"]
+__all__ = [
+    "point_in_rect",
+    "polygon_hits_rect",
+    "polygon_inside_rect",
+    "segment_hits_rect",
+    "segment_inside_rect",
+]
 
 
 def point_in_rect(px: float, py: float, x0: float, y0: float, x1: float, y1: float) -> bool:
@@ -49,6 +55,18 @@ def segment_hits_rect(
     )
 
 
+def segment_inside_rect(
+    ax: float, ay: float, bx: float, by: float, x0: float, y0: float, x1: float, y1: float
+) -> bool:
+    """Whether the whole closed segment ``A-B`` lies inside the rectangle.
+
+    The rectangle is convex, so a straight segment is fully enclosed exactly when
+    both endpoints are inside (or on) the box.  This is the *window* marquee test,
+    in contrast to :func:`segment_hits_rect` (the *crossing* test).
+    """
+    return point_in_rect(ax, ay, x0, y0, x1, y1) and point_in_rect(bx, by, x0, y0, x1, y1)
+
+
 def polygon_hits_rect(
     vertices: Sequence[tuple[float, float]], x0: float, y0: float, x1: float, y1: float
 ) -> bool:
@@ -71,6 +89,19 @@ def polygon_hits_rect(
     # A rectangle lying wholly inside the polygon has no vertex in the box and
     # no edge crossing it, so test a corner of the box against the polygon.
     return _point_in_polygon(x_lo, y_lo, vertices)
+
+
+def polygon_inside_rect(
+    vertices: Sequence[tuple[float, float]], x0: float, y0: float, x1: float, y1: float
+) -> bool:
+    """Whether a polygon lies entirely inside the rectangle.
+
+    Every vertex inside (or on) a convex rectangle keeps the whole polygon inside
+    it, because the polygon lies within the convex hull of its vertices.  This is
+    the *window* marquee test for areas, in contrast to :func:`polygon_hits_rect`
+    (the *crossing* test).
+    """
+    return all(point_in_rect(px, py, x0, y0, x1, y1) for px, py in vertices)
 
 
 def _point_in_polygon(px: float, py: float, vertices: Sequence[tuple[float, float]]) -> bool:

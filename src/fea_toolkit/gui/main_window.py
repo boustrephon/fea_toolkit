@@ -39,7 +39,13 @@ from qtpy.QtWidgets import (
 
 from .app import APP_NAME
 from .controllers.interaction import load_policy
-from .controllers.marquee import point_in_rect, polygon_hits_rect, segment_hits_rect
+from .controllers.marquee import (
+    point_in_rect,
+    polygon_hits_rect,
+    polygon_inside_rect,
+    segment_hits_rect,
+    segment_inside_rect,
+)
 from .controllers.selection import CATEGORY_GROUPS, CATEGORY_NOUNS, SelectionIndex
 from .controllers.view_registry import FIGURE, GEOMETRY, RESULTS, TABLE, View, ViewRegistry
 from .controllers.worker import TaskWorker
@@ -356,7 +362,10 @@ class MainWindow(QMainWindow):
     # ── Multi-selection (viewport -> tree -> Selection) ───────────────
 
     def _on_marquee(self, start: tuple, end: tuple) -> None:
-        """Rubber-band select everything whose projection the rectangle touches.
+        """Rubber-band select what the drag rectangle encloses or touches.
+
+        A left-to-right drag is a *window* marquee (only fully-enclosed entities);
+        a right-to-left drag is a *crossing* marquee (whatever the box touches).
 
         Args:
             start, end: Rectangle corners in VTK *device* pixels (bottom-left
@@ -368,13 +377,19 @@ class MainWindow(QMainWindow):
         x1, y1 = end
         if abs(x1 - x0) < 3 or abs(y1 - y0) < 3:
             return  # a click-sized box is a pick, not a marquee
-        frames, areas, nodes = self._marquee_entities(x0, y0, x1, y1)
+        window = x1 >= x0  # left-to-right -> window, right-to-left -> crossing
+        frames, areas, nodes = self._marquee_entities(x0, y0, x1, y1, window)
         self._select_many(frames, areas, nodes)
         total = len(frames) + len(areas) + len(nodes)
-        self.log(f"Marquee selected {total} entit{'y' if total == 1 else 'ies'}.")
+        kind = "window" if window else "crossing"
+        self.log(f"Marquee ({kind}) selected {total} entit{'y' if total == 1 else 'ies'}.")
 
-    def _marquee_entities(self, x0: float, y0: float, x1: float, y1: float) -> tuple:
-        """``(frame_ids, area_ids, node_ids)`` sets whose projection is in the box."""
+    def _marquee_entities(self, x0: float, y0: float, x1: float, y1: float, window: bool) -> tuple:
+        """``(frame_ids, area_ids, node_ids)`` sets inside the drag rectangle.
+
+        A *window* marquee keeps only what is fully enclosed; a *crossing* marquee
+        keeps whatever the rectangle touches.
+        """
         import vtk
 
         renderer = self._interactor.renderer
@@ -387,15 +402,17 @@ class MainWindow(QMainWindow):
             return float(disp[0]), float(disp[1])
 
         index = self._selection_index
+        frame_test = segment_inside_rect if window else segment_hits_rect
+        area_test = polygon_inside_rect if window else polygon_hits_rect
         frames = {
             f.elem_id
             for f in index.frames
-            if segment_hits_rect(*project(f.start), *project(f.end), x0, y0, x1, y1)
+            if frame_test(*project(f.start), *project(f.end), x0, y0, x1, y1)
         }
         areas = {
             s.area_id
             for s in index.shells
-            if polygon_hits_rect([project(v) for v in s.vertices], x0, y0, x1, y1)
+            if area_test([project(v) for v in s.vertices], x0, y0, x1, y1)
         }
         nodes = {
             n.node_id for n in index.nodes if point_in_rect(*project(n.position), x0, y0, x1, y1)
