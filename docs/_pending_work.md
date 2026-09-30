@@ -689,6 +689,17 @@ operations whose output the GUI already knew how to draw (a model, a case view).
 P30 is what makes *new kinds* of output drawable, and is independently
 reviewable.
 
+**Remaining check verbs — granularity.**  The `capacity.*` checks
+(`wall_shear_check`, `member_shear_capacity`, `hinge_length`) stay **one verb
+each**: they take different arguments, so a single `check` verb with a `choices`
+selector would lie about its parameter surface — the exact case
+`workflow/verbs/checks.py` already argues.  The `mesh.checks` trio
+(`aspect_ratios`, `flatness`, `skew`) is the opposite case — identical input
+(`area_elements`, `nodes`), differing only in the metric — so they become **one
+`mesh_checks` verb** with a `metric` choice defaulting to `report`, wrapping
+`mesh.checks.report` (all three metrics, their warnings and a `passed` verdict in
+one `table`).
+
 **Touches (anticipated).** `workflow/verbs/{check,chart}.py`,
 `workflow/steps.py` (the new `TABLE`/`FIGURE` kinds),
 `workflow/registry.py`, `gui/views/` (a figure panel and a table panel),
@@ -710,6 +721,11 @@ Source: `docs/workflow_authoring.md` § *Roadmap*.
    be handed on as data.
 3. **Importing a Python script back into a recipe**, where the script's steps are
    expressible as verbs — the inverse of `Recipe.to_python()`.
+4. **Precursor-aware completion.**  The palette reads the same `kind` / `needs`
+   metadata the recipe panel and the validator use (Decision 0, in
+   `docs/workflow_authoring.md` → *Precursors*), so it can grey a step whose
+   precursor is missing or offer to insert it — one ordering vocabulary, never a
+   second one.
 
 **Why it is separate from P30.** P30 is about *output*; P31 is about *input*.
 Neither blocks the other, and a user gains from either alone.
@@ -736,6 +752,17 @@ does not yet have:
    (the HTML/Quarto report) stages, which are *not* model operations and must not
    become verbs.
 3. **`generate_report`'s public signature stays unchanged throughout.**
+4. **The precursor chain is a `kind`/`needs` chain (Decision 0).**  `modal`
+   produces the new `modal` kind; `response_spectrum` and `pushover` declare
+   `needs=("model", "modal")` — so the report's modal → RS → pushover order is
+   expressed as declared data, not as ad-hoc `StepContext` slots.  `run_recipe`
+   validates the chain in order (see `docs/workflow_authoring.md` →
+   *Precursors*).
+5. **The greyed menu entries become presets (Decision 3).**  Each `Analysis ▸
+   Modal / Response spectrum / Pushover` entry opens a small parameter dialog,
+   writes the matching verb's step and runs the recipe — the `_add_preset`
+   pattern Split/Mesh already use — so an analysis is a visible, editable,
+   exportable step like any other.
 
 **Why it is its own item, not part of P30.**  The report overlaps the recipe in
 the *analysis* verbs, not in P30's `check`/`chart`.  It also changes a stable
@@ -748,8 +775,9 @@ the survey in `docs/workflow_authoring.md` points at a *blend*: verbs for the
 analysis, report-only code for the storage and presentation.
 
 **Touches (anticipated).** `workflow/verbs/{modal,response_spectrum,pushover}.py`,
-`workflow/registry.py`, `report.py`, and the GUI's greyed analysis actions once
-the verbs exist.
+`workflow/registry.py` and `workflow/steps.py` (the `modal` kind),
+`workflow/recipe.py` (`run_recipe`'s precursor validation), `report.py`, and the
+GUI's greyed analysis actions (now presets) once the verbs exist.
 
 ### Tier 4 — Deferred / low-priority
 

@@ -144,6 +144,36 @@ previous produced:
   `run_static` solves *that*;
 * `run_static` fills `case_results`, which `combine` reduces.
 
+### Precursors — what a step needs, and what it produces
+
+A step's output and its inputs are declared, not implicit.  `StepSpec.kind`
+names what the step **produces** (`geometry`, `model`, `cases`, `table`,
+`figure`); `StepSpec.needs` names the kinds that must **already exist** for the
+step to run.  This is the precursor mechanism, and it is consumed everywhere the
+vocabulary is used:
+
+* **`run_recipe` validates it.**  A step whose `needs` is unsatisfied is a
+  *structural* error, not a per-verb failure: the run stops with a `StepError`
+  naming the missing kind and the verbs that produce it — the same "fail where
+  the mistake is made, not at the end of a run" policy as `Recipe.add`'s
+  parameter checking.
+* **The Recipe panel greys it.**  A step that cannot run yet is shown disabled,
+  so authoring prevents the error the validator would otherwise raise.
+* **The command palette (P31) and the report (P32) read it.**  The same two
+  fields drive palette validation and the report's analysis order, so ordering
+  knowledge has one home and cannot drift.
+
+Validation is **order-based, not a graph**: the run scans the steps in order and
+tracks the set of satisfied kinds — initialised with `model` when a starting
+topology is supplied.  A later step still reads an earlier step's output through
+`StepContext` (see *What each step sees*); `kind`/`needs` is the *declaration* of
+what must precede what, never a scheduler.  Composition stays explicit, exactly
+as in `fea_toolkit.analysis`, while prerequisites become checkable.
+
+The `modal` kind is the next addition the mechanism needs: P32's `modal` verb
+produces it, and `response_spectrum` / `pushover` declare
+`needs=("model", "modal")`.
+
 ### Failure, and cancellation
 
 * A **non-optional** step that raises stops the run with a `StepError` carrying
@@ -237,6 +267,15 @@ computed results *visible*, D makes authoring *fast*, and E reconciles an
 existing public pipeline with the new vocabulary.  None depends on another, so
 they can be scheduled, reviewed and delivered independently.
 
+**Precursors are the cross-cutting enabler (Decision 0).**  Phase E's analysis
+verbs introduce the first real prerequisite chain — `modal` before
+`response_spectrum` / `pushover` — and it must not become ad-hoc context slots.
+The plan formalises the existing `StepSpec.kind` / `needs` fields into a
+validated precursor mechanism (see *Precursors* under *The verbs*): `kind` is
+what a step produces, `needs` what it consumes, `run_recipe` validates the chain
+in order, and the GUI, the palette (D) and the report (E) all read the same two
+fields.
+
 **Why E is not part of C.**  C's verbs (`check`, `chart`) are ones the report
 pipeline barely uses.  The *real* overlap between `Recipe` and
 `generate_report` is the **modal / response-spectrum / pushover** analyses — which
@@ -289,7 +328,10 @@ the 3-D viewport.
 * **No analysis logic, no topology logic** in this layer — every verb delegates
   to the two-stage pipeline (see *Package layout*, above).
 * **No dependency graph.** Steps run in the order written. Composition is
-  explicit, exactly as it is in `fea_toolkit.analysis`.
+  explicit, exactly as it is in `fea_toolkit.analysis`.  *Precursors* — what a
+  step needs and what it produces (`kind`/`needs`) — are declared and validated
+  in order, but never scheduled: there is no topological sort and no edge
+  inference, so a recipe stays a readable, hand-editable list.
 * **No new required dependencies.** The layer is stdlib plus the package.
 * **The Qt-free half stays Qt-free.** `steps.py`, `registry.py` and `recipe.py`
   import neither Qt nor OpenSees, which is what lets the vocabulary be tested and
