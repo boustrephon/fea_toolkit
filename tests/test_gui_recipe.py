@@ -321,6 +321,35 @@ def test_the_config_editor_emits_only_the_keys_a_user_changes(qapp):
     assert editor._scroll.maximumHeight() > 0
 
 
+def test_the_config_editor_preserves_unlisted_config_keys(qapp):
+    """Keys the manifest does not curate survive a round-trip through the editor."""
+    from fea_toolkit.gui.views.config_editor import ConfigEditor
+    from fea_toolkit.workflow import BUILDER_CONFIG_KEYS
+
+    editor = ConfigEditor(BUILDER_CONFIG_KEYS, {"stiffness_factors": {"beam": 0.35}})
+    assert editor.value() == {"stiffness_factors": {"beam": 0.35}}
+
+    # Editing a curated key must not drop the unlisted option.
+    editor._widgets["verbose"].setChecked(True)
+    assert editor.value() == {
+        "stiffness_factors": {"beam": 0.35},
+        "verbose": True,
+    }
+
+
+def test_the_config_editor_preserves_tolerances_below_six_decimals(qapp):
+    """``solver_test_tol=1e-8`` stays exact through ``editor.value()``."""
+    from fea_toolkit.gui.views.config_editor import ConfigEditor
+    from fea_toolkit.workflow import BUILDER_CONFIG_KEYS
+
+    editor = ConfigEditor(BUILDER_CONFIG_KEYS, {"solver_test_tol": 1e-8})
+
+    # Changing an unrelated field must not clobber the tolerance.
+    editor._widgets["verbose"].setChecked(True)
+    assert editor.value()["verbose"] is True
+    assert editor.value()["solver_test_tol"] == 1e-8
+
+
 def test_the_step_list_has_a_help_context_menu(window):
     """Right-click help is wired to the recipe step list."""
     from qtpy.QtCore import Qt

@@ -102,7 +102,10 @@ class ConfigEditor(QGroupBox):
         elif kind is float:
             widget = QDoubleSpinBox(self)
             widget.setRange(-1e12, 1e12)
-            widget.setDecimals(6)
+            # More decimals than a solver tolerance ever uses, so a value like
+            # ``solver_test_tol=1e-8`` is displayed and read back unchanged
+            # (QDoubleSpinBox rounds to the configured precision).
+            widget.setDecimals(12)
             widget.setValue(float(current))
             widget.editingFinished.connect(self.changed.emit)
         else:
@@ -116,8 +119,17 @@ class ConfigEditor(QGroupBox):
     # ── Query ────────────────────────────────────────────────────────
 
     def value(self) -> dict:
-        """The keys the user changed from their manifest default, in manifest order."""
-        result: dict[str, Any] = {}
+        """The manifest keys the user changed, plus any unlisted options preserved.
+
+        Manifest-managed keys are emitted only when they differ from their
+        declared default (an untouched key is omitted, so the builder applies
+        its own default).  Keys the manifest does not manage are carried through
+        unchanged, so editing a curated key cannot silently drop an option the
+        manifest does not curate.
+        """
+        result: dict[str, Any] = {
+            key: current for key, current in self._current.items() if key not in self._manifest
+        }
         for key, spec in self._manifest.items():
             current = self._read(key, spec)
             if current != spec.default:
