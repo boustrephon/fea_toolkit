@@ -337,6 +337,19 @@ def test_the_config_editor_preserves_unlisted_config_keys(qapp):
     }
 
 
+def test_the_config_editor_deep_copies_unlisted_config_keys(qapp):
+    """Mutating a returned unlisted option must not reach ``self._current``."""
+    from fea_toolkit.gui.views.config_editor import ConfigEditor
+    from fea_toolkit.workflow import BUILDER_CONFIG_KEYS
+
+    editor = ConfigEditor(BUILDER_CONFIG_KEYS, {"stiffness_factors": {"beam": 0.35}})
+
+    returned = editor.value()
+    returned["stiffness_factors"]["beam"] = 0.9
+    assert editor.value() == {"stiffness_factors": {"beam": 0.35}}
+    assert editor._current["stiffness_factors"]["beam"] == 0.35
+
+
 def test_the_config_editor_preserves_tolerances_below_six_decimals(qapp):
     """``solver_test_tol=1e-8`` stays exact through ``editor.value()``."""
     from fea_toolkit.gui.views.config_editor import ConfigEditor

@@ -13,6 +13,7 @@ default.
 Qt-only; the manifest itself is Qt-free.
 """
 
+from copy import deepcopy
 from typing import Any, Optional
 
 from qtpy.QtCore import Signal
@@ -125,10 +126,14 @@ class ConfigEditor(QGroupBox):
         declared default (an untouched key is omitted, so the builder applies
         its own default).  Keys the manifest does not manage are carried through
         unchanged, so editing a curated key cannot silently drop an option the
-        manifest does not curate.
+        manifest does not curate.  Those unlisted values are deep-copied, so
+        mutating a nested value in the returned mapping leaves ``self._current``
+        untouched.
         """
         result: dict[str, Any] = {
-            key: current for key, current in self._current.items() if key not in self._manifest
+            key: deepcopy(current)
+            for key, current in self._current.items()
+            if key not in self._manifest
         }
         for key, spec in self._manifest.items():
             current = self._read(key, spec)
