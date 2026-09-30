@@ -649,10 +649,11 @@ Source: `docs/workflow_authoring.md` § *Roadmap* and § *Resolving the
 solved cases and combinations now **register as result views** (both `cases`
 verbs return the same in-memory archive, so one registration path serves a solve
 and a reduction alike), and the `chart` verb plus the GUI's **first figure
-view** and a **check-table view** landed.  Remaining: the `capacity.*` /
-`mesh.checks` check verbs, and the other `plotting.report.*` charts (storey
-forces, pushover, modal, CSM) that need the results P32's analysis verbs
-produce.
+view** and a **check-table view** landed.  The **capacity checks**
+(`member_shear_capacity`, `wall_shear_check`, `hinge_length`) and the
+**`mesh_checks` verb** have also landed, completing the check half of Phase C.
+Remaining: the other `plotting.report.*` charts (storey forces, pushover, modal,
+CSM), which need the results P32's analysis verbs produce.
 
 **What.** Phase A/B made the *model preparation* workflow explicit; Phase C makes
 the **computed results** visible in the same way.  Three things:
@@ -664,9 +665,12 @@ the **computed results** visible in the same way.  Three things:
    `plotting.report.*` (`plot_storey_forces`, `plot_storey_displacements`,
    `plot_pushover_curves`, `plot_modal_participation`, `plot_csm_4panel`).  Each
    declares a `kind` the run loop already understands, plus two new ones:
-   `table` and `figure`.  ✅ Landed so far: the three `model.checks` verbs and
-   the `chart` verb's `storey_displacements` plot (the one chart the solved
-   static cases can feed — the others need P32's analysis results).
+   `table` and `figure`.  ✅ Landed so far: the three `model.checks` verbs, the
+   `capacity.*` checks (`member_shear_capacity`, `wall_shear_check`,
+   `hinge_length`), the `mesh_checks` verb (a `metric` choice over the
+   `mesh.checks` trio), and the `chart` verb's `storey_displacements` plot (the
+   one chart the solved static cases can feed — the others need P32's analysis
+   results).
 2. **The views those need.**  ✅ The GUI's **first figure view** (an embedded
    Matplotlib canvas) and a **check-table view** (a read-only grid) both landed,
    as lazy pages of the central stacked area beside the 3-D viewport.
@@ -689,16 +693,18 @@ operations whose output the GUI already knew how to draw (a model, a case view).
 P30 is what makes *new kinds* of output drawable, and is independently
 reviewable.
 
-**Remaining check verbs — granularity.**  The `capacity.*` checks
+**Check-verb granularity (✅ landed as planned).**  The `capacity.*` checks
 (`wall_shear_check`, `member_shear_capacity`, `hinge_length`) stay **one verb
 each**: they take different arguments, so a single `check` verb with a `choices`
 selector would lie about its parameter surface — the exact case
-`workflow/verbs/checks.py` already argues.  The `mesh.checks` trio
-(`aspect_ratios`, `flatness`, `skew`) is the opposite case — identical input
-(`area_elements`, `nodes`), differing only in the metric — so they become **one
-`mesh_checks` verb** with a `metric` choice defaulting to `report`, wrapping
+`workflow/verbs/checks.py` argues.  The `mesh.checks` trio (`aspect_ratios`,
+`flatness`, `skew`) is the opposite case — identical input (`area_elements`,
+`nodes`), differing only in the metric — so they became **one `mesh_checks`
+verb** with a `metric` choice defaulting to `report`, wrapping
 `mesh.checks.report` (all three metrics, their warnings and a `passed` verdict in
-one `table`).
+one `table`).  All four landed as `table` steps: `wall_shear_check` reports the
+step's `Nxy` / `Ny` membrane resultants against the GB 50010 limits (a demand-free
+"what-if" check), and `mesh_checks` declares `needs=("geometry",)`.
 
 **Touches (anticipated).** `workflow/verbs/{check,chart}.py`,
 `workflow/steps.py` (the new `TABLE`/`FIGURE` kinds),
