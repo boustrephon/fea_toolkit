@@ -370,6 +370,41 @@ class TestScaleSectionsVerb:
         run_recipe(Recipe(steps=[self._step(Selection(sections=["SLAB"]))]), model)
         assert model.sections["SLAB"].A == 5.0
 
+    def test_the_scaled_section_is_replaced_and_untouched_objects_are_shared(self):
+        """Copy-on-write: the scaled section is a new object, untouched ones are shared."""
+        model = _slab_model()
+        model.sections["OTHER"] = ShellSection(
+            name="OTHER",
+            shape="Shell",
+            material="C30",
+            thickness=0.2,
+            A=5.0,
+            I33=2.0,
+            I22=1.0,
+            J=0.5,
+        )
+        source_section = model.sections["SLAB"]
+        source_node = model.nodes["1"]
+        source_area = model.area_elements["A1"]
+
+        scaled = (
+            run_recipe(Recipe(steps=[self._step(Selection(sections=["SLAB"]))]), model)
+            .results[0]
+            .payload
+        )
+
+        # The containers are new, but every untouched object is shared.
+        assert scaled.sections is not model.sections
+        assert scaled.nodes is not model.nodes
+        assert scaled.sections["OTHER"] is model.sections["OTHER"]  # unselected → shared
+        assert scaled.nodes["1"] is source_node
+        assert scaled.area_elements["A1"] is source_area
+
+        # The scaled section is a replacement, never a mutation of the caller's object.
+        assert scaled.sections["SLAB"] is not source_section
+        assert source_section.A == 5.0
+        assert pytest.approx(0.05) == scaled.sections["SLAB"].A
+
     def test_a_selection_that_matches_nothing_leaves_every_section_alone(self):
         run = run_recipe(Recipe(steps=[self._step(Selection(sections=["NOPE"]))]), _slab_model())
         assert run.results[0].payload.sections["SLAB"].A == 5.0

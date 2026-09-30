@@ -15,10 +15,14 @@ The two are independent, and both are wanted: option 1 keeps a wall's weight and
 a little stiffness, option 2 removes the wall from the stiffness system
 altogether.  A recipe may use either, or neither.
 
-The parsed model is **copied before it is edited**, so a recipe never mutates
-the caller's model; the scaled copy becomes
+The parsed model is **copied before it is edited** — a shallow copy-on-write
+clone (the Preprocessor's ``_copy_for_preprocessing``) that shares every
+untouched object and replaces only the scaled sections — so a recipe never
+mutates the caller's model; the scaled copy becomes
 :attr:`~fea_toolkit.workflow.steps.StepContext.model_data`, which the next step
-(usually :mod:`fea_toolkit.workflow.verbs.mesh`) reads.
+(usually :mod:`fea_toolkit.workflow.verbs.mesh`) reads.  The Preprocessor import
+is deliberately inside the function, so importing this module does not load
+OpenSees.
 
 Stiffness lives in a different property per element kind — ``A``/``I33``/``I22``/
 ``J`` for a frame, ``thickness`` for a shell — so the default ``attributes``
@@ -29,7 +33,7 @@ weight must be exactly preserved is better served by option 2, with the mass
 supplied explicitly.
 """
 
-import copy
+from dataclasses import replace
 from typing import Any
 
 from ..steps import MODEL, ParamSpec, Step, StepContext, StepResult, validate_params
@@ -118,7 +122,9 @@ def run_scale_sections(context: StepContext, step: Step) -> list[StepResult]:
     else:
         attributes = [name.strip() for name in named.split(",") if name.strip()]
 
-    model = copy.deepcopy(context.model_data)
+    from ...opensees.preprocessor import _copy_for_preprocessing
+
+    model = _copy_for_preprocessing(context.model_data)
     changed: dict[str, list[str]] = {}
     inert: list[str] = []
     for name in _selected_sections(model, step.selection):
@@ -126,16 +132,16 @@ def run_scale_sections(context: StepContext, step: Step) -> list[StepResult]:
         if section is None:
             context.log(f"scale_sections: section {name!r} is not defined — skipped")
             continue
-        touched = []
+        updates: dict[str, float] = {}
         for attr in attributes:
             value = getattr(section, attr, None)
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 continue
             if value:
-                setattr(section, attr, value * factor)
-                touched.append(attr)
-        if touched:
-            changed[name] = touched
+                updates[attr] = value * factor
+        if updates:
+            model.sections[name] = replace(section, **updates)
+            changed[name] = list(updates)
         else:
             inert.append(name)
 
