@@ -1216,8 +1216,9 @@ sketched — plus the bridge from a visual selection back to a ``Selection``:
   **consumes** a marquee-owned gesture so the camera cannot orbit while the
   rubber band runs.
 * `gui/main_window.py` — the tree is ``ExtendedSelection``; Shift/Ctrl-click add
-  / toggle rows; a marquee (Shift-drag, or any drag in Select mode) selects many
-  by projecting geometry to screen space; ``current_selection()`` collapses the
+  / toggle rows; a marquee (Alt/Opt-drag, or any drag in Select mode) selects many
+  by projecting geometry to screen space (left-to-right = window, right-to-left =
+  crossing); ``current_selection()`` collapses the
   visual selection into a ``Selection``.  ``View ▸ Select mode`` swaps the
   interactor style (`render_backend.make_select_style`).
 

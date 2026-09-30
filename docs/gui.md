@@ -279,7 +279,7 @@ Settings file — `$FEA_TOOLKIT_GUI_CONFIG` if set, else
 | `node_snap_tolerance` | `0.012` | Tolerance for that node-first pick |
 | `add_modifier` | `"shift"` | Modifier key held to add a pick to the current selection |
 | `toggle_modifier` | `"control"` | Modifier key held to toggle a pick |
-| `marquee_modifier` | `"shift"` | Modifier key that turns a drag into a rubber-band selection |
+| `marquee_modifier` | `"alt"` | Modifier key that turns a drag into a rubber-band selection |
 | `select_mode` | `false` | Explicit Select / Orbit mode — a drag marquee-selects instead of orbiting |
 
 The file is read at start-up; the Message Log states which policy is in force
@@ -288,10 +288,12 @@ did not understand** — an unknown key, an out-of-range value or unreadable JSO
 leaves the defaults in place and says so, rather than failing silently.
 
 Selecting supports **multiple** entities: a clean click replaces, Shift-click
-adds, Ctrl/Cmd-click toggles, and a drag with the marquee modifier (or any drag
-in Select mode) rubber-band-selects everything its rectangle touches.  **View ▸
-Select mode** toggles the explicit Select / Orbit arrangement, in which a drag
-marquee-selects instead of orbiting.  The viewport selection can be read back as
+adds, Ctrl/Cmd-click toggles, and a drag with the marquee modifier (Alt/Opt, or
+any drag in Select mode) rubber-band-selects.  A left-to-right marquee is a
+*window* (only elements fully inside the box); a right-to-left marquee is a
+*crossing* (everything the box touches).  **View ▸ Select mode** toggles the
+explicit Select / Orbit arrangement, in which a drag marquee-selects instead of
+orbiting.  The viewport selection can be read back as
 a ``Selection`` (``MainWindow.current_selection()``) for a workflow step.
 
 ## Display toggles
