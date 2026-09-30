@@ -17,7 +17,7 @@ import contextlib
 import gc
 from typing import Any, Optional
 
-from qtpy.QtCore import QItemSelectionModel, Qt, QTimer, QUrl
+from qtpy.QtCore import QItemSelection, QItemSelectionModel, QItemSelectionRange, Qt, QTimer, QUrl
 from qtpy.QtGui import QAction, QDesktopServices, QKeySequence
 from qtpy.QtWidgets import (
     QAbstractItemView,
@@ -413,13 +413,18 @@ class MainWindow(QMainWindow):
             + [("area_elements", label) for label in sorted(areas)]
             + [("nodes", label) for label in sorted(nodes)]
         )
+        selection = QItemSelection()
+        last_index = None
         for group_key, label in entities:
             index = self._tree_model.index_for(group_key, label)
             if index is None:
                 continue
             self._tree_view.expand(index.parent())
-            model.setCurrentIndex(index, QItemSelectionModel.SelectionFlag.NoUpdate)
-            model.select(index, QItemSelectionModel.SelectionFlag.Select)
+            selection.append(QItemSelectionRange(index))
+            last_index = index
+        model.select(selection, QItemSelectionModel.SelectionFlag.Select)
+        if last_index is not None:
+            model.setCurrentIndex(last_index, QItemSelectionModel.SelectionFlag.NoUpdate)
 
     def _selected_entities(self) -> tuple:
         """``(frame_ids, area_ids, node_ids)`` sets for the current selection."""
