@@ -701,6 +701,10 @@ builder.build(selection=sel)
 Only area loads on the two slab sections are converted to frame edge loads;
 all other area loads are ignored.
 
+To *exclude* instead of include, prefix a key with `NOT` —
+`Selection.from_string("NOT section=Slab 200mm")` selects everything except
+that section.
+
 ---
 
 ### What Remains to Be Done (Next Steps)

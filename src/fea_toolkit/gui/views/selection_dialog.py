@@ -52,15 +52,20 @@ class SelectionDialog(QDialog):
         layout.addWidget(self._keys)
 
         examples = QLabel(
-            "Combine keys to narrow (AND); list values to widen (OR):\n"
+            "Combine keys to narrow (AND); list values to widen (OR).\n"
+            "Prefix a key with NOT to exclude:\n"
             "\n"
-            "  type=Frame                    frame elements only\n"
-            "  section=COL,BEAM              section COL or BEAM\n"
-            "  type=Area section=Roof slab   areas with that section\n"
-            "  z=0:3                         nodes between z 0 and 3\n"
-            "  group=Core                    elements in group Core\n"
-            "  constraint=Fix                nodes with a Fix joint constraint\n"
-            "  id=1,5,9                      those SAP ids",
+            "  type=Frame                  frame elements only\n"
+            "  section=COL,BEAM            section COL or BEAM\n"
+            "  type=Area section=Roof slab areas with that section\n"
+            "  NOT section=COL             everything except COL\n"
+            "  NOT type=Area               everything except areas\n"
+            "  NOT z=0:3                   everything outside z 0-3\n"
+            "  group=Core                  elements in group Core\n"
+            "  id=1,5,9                    those SAP ids\n"
+            "\n"
+            "NOT applies to the single clause after it. A value named NOT is\n"
+            "written after '=' (section=NOT) and is never the keyword.",
             self,
         )
         examples.setEnabled(False)

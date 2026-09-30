@@ -32,6 +32,10 @@ Usage::
     python examples/view_model.py /path/to/model.s2k --result mesh \
         --select "constraint=Fix"
 
+    # Mesh view: exclude everything with a given section (NOT negates a clause)
+    python examples/view_model.py /path/to/model.s2k --result mesh \
+        --select "NOT section=2xR3"
+
     # Static analysis - deformed shape, then a force diagram
     python examples/view_model.py /path/to/model.s2k --result static --quantity Mz
 
@@ -763,7 +767,8 @@ def main():
             "keys " + SELECT_KEYS_HELP + ", e.g. --select 'type=Frame; "
             "section=2xR3,2xR4', --select 'id=10,11,12', --select "
             "'constraint=Fix' (joints of a SAP2000 constraint group) or "
-            "--select 'z=3.4:4.5'.  Repeat --select to overlay several "
+            "--select 'z=3.4:4.5'.  Prefix a key with NOT to exclude, e.g. "
+            "--select 'NOT section=2xR3'.  Repeat --select to overlay several "
             "selections.  Needs a .s2k model."
         ),
     )

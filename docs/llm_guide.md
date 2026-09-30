@@ -361,6 +361,23 @@ sel = Selection(
 frame_ids = sel.get_frame_ids(model)
 ```
 
+### Excluding elements
+Prefix any `KEY=VALUE` clause with `NOT` to remove the matching elements:
+
+```python
+# "Everything except the columns"
+sel = Selection.from_string("NOT section=COL 400x400")
+# equivalent dataclass form:
+sel = Selection(exclude_sections=["COL 400x400"])
+
+# NOT negates exactly the one clause after it:
+Selection.from_string("type=Area NOT section=Roof slab")  # areas, minus Roof slab
+Selection.from_string("NOT section=COL NOT type=Area")    # remove both sets (union)
+```
+
+A value named `NOT` is written after `=` (`section=NOT`) and is never confused
+with the keyword.
+
 ### Create a standalone subset model for plotting
 ```python
 subset = sel.filter_model(model)

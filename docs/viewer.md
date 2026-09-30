@@ -307,7 +307,9 @@ NPZ source.  The ``constraints`` criterion — e.g.
 constraint group (BODY / DIAPHRAGM / EQUAL / WELD alike); it needs a
 ``.s2k``-backed source, since only ``SAPModelData`` carries
 ``constraint_assignments``.  See also ``--select`` in
-``examples/view_model.py``.
+``examples/view_model.py``.  A ``NOT``-prefixed clause negates a criterion —
+``Selection.from_string("NOT section=2xR3")`` highlights everything *except*
+the ``2xR3`` members.
 
 ### 2b. Deformed shape (unified)
 
