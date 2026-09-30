@@ -9,9 +9,9 @@ The model below is a **T-junction** whose beam asks for splitting at joints
 element, so a model with no such request is legitimately unchanged.
 """
 
-import time
-
 import pytest
+
+from tests.fixtures.gui_preprocess import run_preprocess
 
 pytestmark = pytest.mark.needs_gui
 
@@ -96,31 +96,6 @@ def window(qapp, monkeypatch, tmp_path):
     win.close()
 
 
-_PRESETS = {
-    "model.split": (
-        {"split_elements": True, "create_shells": False},
-        "Splitting elements at joints",
-    ),
-    "model.mesh": (
-        {"split_elements": True, "create_shells": True},
-        "Splitting elements at joints and meshing areas",
-    ),
-}
-
-
-def _run_preprocess(window, action_key, timeout=30.0):
-    """Run a Model-menu preset and spin the GUI until its worker ends."""
-    from qtpy.QtCore import QCoreApplication
-
-    config, label = _PRESETS[action_key]
-    window._mesh_preset(config, label)
-    deadline = time.monotonic() + timeout
-    while window._worker is not None and time.monotonic() < deadline:
-        QCoreApplication.processEvents()
-        time.sleep(0.01)
-    assert window._worker is None, "the preprocessing worker never finished"
-
-
 def _inspector_rows(window) -> dict:
     """The inspector's ``{field name: value text}`` for the current selection."""
     table = window._inspector._table
@@ -154,7 +129,7 @@ def test_split_elements_preprocesses_and_displays_the_model(window):
 
     assert window._actions["model.mesh"].isEnabled() is True
 
-    _run_preprocess(window, "model.split")
+    run_preprocess(window, "model.split")
 
     assert isinstance(window._model, MeshModel)
     elements = window._model.frame_elements
@@ -168,7 +143,7 @@ def test_split_elements_preprocesses_and_displays_the_model(window):
 
 def test_the_log_summarises_the_result(window):
     """The Message Log says what the preprocessor did, in user terms."""
-    _run_preprocess(window, "model.split")
+    run_preprocess(window, "model.split")
 
     log = window._message_log.toPlainText()
     assert "Splitting elements at joints" in log
@@ -183,7 +158,7 @@ def test_a_model_that_requests_no_splitting_says_so(qapp, monkeypatch, tmp_path)
     monkeypatch.setenv(CONFIG_ENV_VAR, str(tmp_path / "absent.json"))
     win = MainWindow(model=_t_junction_model(auto_split=False))
     try:
-        _run_preprocess(win, "model.split")
+        run_preprocess(win, "model.split")
         assert "no element requested splitting" in win._message_log.toPlainText()
         assert len(win._model.frame_elements) == 2
     finally:
@@ -192,7 +167,7 @@ def test_a_model_that_requests_no_splitting_says_so(qapp, monkeypatch, tmp_path)
 
 def test_the_inspector_surfaces_the_parent_child_topology(window):
     """Split sub-elements get real rows, and their topology is browsable."""
-    _run_preprocess(window, "model.split")
+    run_preprocess(window, "model.split")
 
     index = window._tree_model.index_for("frame_elements", "1-0")
     assert index is not None
@@ -236,7 +211,7 @@ def test_preprocessing_keeps_the_camera(window):
 
     camera = _camera_flat(window)
 
-    _run_preprocess(window, "model.split")
+    run_preprocess(window, "model.split")
 
     assert np.allclose(_camera_flat(window), camera, rtol=1e-6, atol=1e-9)
 
@@ -297,10 +272,10 @@ def test_mesh_areas_after_split_really_meshes(slab_window):
     split-only mesh was labelled "Meshed" and analysed with un-meshed areas — a
     mechanism, so every case failed with ``matrix singular``.
     """
-    _run_preprocess(slab_window, "model.split")
+    run_preprocess(slab_window, "model.split")
     assert not slab_window._model.area_element_types  # split only: no shells
 
-    _run_preprocess(slab_window, "model.mesh")
+    run_preprocess(slab_window, "model.mesh")
     assert slab_window._model.area_element_types  # the config was honoured
     assert slab_window._store.preprocessed() is slab_window._model
     assert "Meshed" in slab_window._message_log.toPlainText()

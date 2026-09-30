@@ -6,10 +6,10 @@ swaps the scene, the Inspector reports that view's counts, and neither the
 camera nor the tree selection is disturbed by the switch.
 """
 
-import time
-
 import numpy as np
 import pytest
+
+from tests.fixtures.gui_preprocess import run_preprocess
 
 pytestmark = pytest.mark.needs_gui
 
@@ -133,31 +133,6 @@ def slab_window(qapp, monkeypatch, tmp_path):
     win.close()
 
 
-_PRESETS = {
-    "model.split": (
-        {"split_elements": True, "create_shells": False},
-        "Splitting elements at joints",
-    ),
-    "model.mesh": (
-        {"split_elements": True, "create_shells": True},
-        "Splitting elements at joints and meshing areas",
-    ),
-}
-
-
-def _run_preprocess(window, action_key="model.split", timeout=30.0):
-    """Run a Model-menu preset and spin the GUI until its worker ends."""
-    from qtpy.QtCore import QCoreApplication
-
-    config, label = _PRESETS[action_key]
-    window._mesh_preset(config, label)
-    deadline = time.monotonic() + timeout
-    while window._worker is not None and time.monotonic() < deadline:
-        QCoreApplication.processEvents()
-        time.sleep(0.01)
-    assert window._worker is None, "the preprocessing worker never finished"
-
-
 def _inspector_rows(window) -> dict:
     """The inspector's ``{field name: value text}`` for the current selection."""
     table = window._inspector._table
@@ -192,7 +167,7 @@ def test_preprocessing_freezes_the_gc_before_handing_work_to_the_worker(window, 
 
     monkeypatch.setattr(main_window, "_GC_FROZEN", [])
 
-    _run_preprocess(window)
+    run_preprocess(window)
 
     assert main_window._GC_FROZEN == [True]
 
@@ -218,7 +193,7 @@ def test_the_views_group_leads_the_tree(window):
 
 def test_splitting_adds_and_activates_a_processed_view(window):
     """``Model ▸ Split elements`` registers the result as a view of its own."""
-    _run_preprocess(window)
+    run_preprocess(window)
 
     assert [view.name for view in window._views.views()] == ["Unprocessed", "Processed"]
     assert window._views.active.name == "Processed"
@@ -227,7 +202,7 @@ def test_splitting_adds_and_activates_a_processed_view(window):
 
 def test_switching_views_swaps_the_scene(window):
     """Selecting a view redraws that view's geometry — the point of the feature."""
-    _run_preprocess(window)
+    run_preprocess(window)
     assert len(window._viewer.geometry()[0]) == 3  # two sub-elements + the column
 
     assert window._select_entity_in_tree("views", "Unprocessed") is True
@@ -251,7 +226,7 @@ def test_the_inspector_reports_the_counts_of_the_view(window):
     assert rows["n_frames"] == "2"
     assert rows["n_frames_active"] == "2"
 
-    _run_preprocess(window)
+    run_preprocess(window)
     assert window._select_entity_in_tree("views", "Processed") is True
     rows = _inspector_rows(window)
 
@@ -270,7 +245,7 @@ def test_the_view_stays_reported_after_switching(window):
     A rebuild would invalidate the very index the selection arrived on, Qt would
     report an empty selection, and the Inspector would be cleared again.
     """
-    _run_preprocess(window)
+    run_preprocess(window)
 
     assert window._select_entity_in_tree("views", "Unprocessed") is True
 
@@ -281,7 +256,7 @@ def test_switching_views_keeps_the_camera(window):
     """Comparing two views of one model must not move the user's viewpoint."""
     import numpy as np
 
-    _run_preprocess(window)
+    run_preprocess(window)
     camera = _camera_flat(window)
 
     window._select_entity_in_tree("views", "Unprocessed")
