@@ -1012,6 +1012,16 @@ class TestConstraintSelection:
         assert set(sel.get_node_ids(md)) == set()
         assert set(sel.get_frame_ids(md)) == {"10", "20"}
 
+    def test_element_ids_on_a_node_selection_is_rejected(self):
+        """element_ids names frames/areas, not joints — use node_ids instead."""
+        with pytest.raises(ValueError):
+            Selection(element_types=["Node"], element_ids=["2"])
+
+    def test_exclude_element_ids_on_a_node_selection_is_rejected(self):
+        """exclude_element_ids names frames/areas, not joints — use exclude_node_ids."""
+        with pytest.raises(ValueError):
+            Selection(element_types=["Node"], exclude_element_ids=["2"])
+
     def test_exclude_node_ids_removes_the_named_joints(self):
         md = self._model()
         assert set(Selection(exclude_node_ids=["1", "2"]).get_node_ids(md)) == {"3", "4"}

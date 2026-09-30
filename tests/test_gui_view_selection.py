@@ -156,7 +156,7 @@ class TestDuplicateView:
         assert rows["n_frames"] == "2"
         # The expression itself is inspectable, so a view explains its own filter.
         assert rows["selection"].startswith("Selection(")
-        assert "element_ids=['2']" in rows["selection"]
+        assert "node_ids=['2']" in rows["selection"]
 
     def test_picking_follows_the_filtered_scene(self, window, monkeypatch):
         """The pick index is rebuilt from what is drawn, so hidden cells are not pickable."""

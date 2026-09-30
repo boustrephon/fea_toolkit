@@ -346,8 +346,10 @@ class Selection:
       (:attr:`SAPModelData.frame_assignments` /
       :attr:`SAPModelData.area_assignments`).
     - **Node** elements ignore ``section`` and ``material`` (they have
-      none).  They match on ``element_types``, ``groups``, ``element_ids``,
-      and ``constraints``.
+      none).  They match on ``element_types``, ``groups``, ``node_ids``,
+      and ``constraints``.  ``element_ids`` / ``exclude_element_ids`` name
+      frames and areas only, so a node selection that sets either without the
+      corresponding ``node_ids`` / ``exclude_node_ids`` is rejected.
     - **Joint constraints** (:attr:`constraints`) apply to **Node**
       elements only — a joint either carries one of the named constraint
       assignments or it does not.  A frame or area can never carry a
@@ -370,6 +372,8 @@ class Selection:
     ========================  ==============================================
     ``element_types``,        ``SAPModelData``, ``MeshModel``, resolved
     ``element_ids``, groups   sources
+    ``node_ids``              ``SAPModelData``, ``MeshModel``, resolved
+                              sources
     ``sections``, materials   ``SAPModelData``, ``MeshModel``
     ``elevation_range``       ``SAPModelData``, ``MeshModel`` (node geometry)
     ``constraints``           ``SAPModelData`` / ``ResolvedSource`` only — a
@@ -415,7 +419,9 @@ class Selection:
         ``MeshModel`` / NPZ archives do not — those sources match no nodes.
         ``None`` means all.
     element_ids:
-        Filter by specific frame/area element ID(s).  ``None`` means all.
+        Filter by specific frame/area element ID(s).  Joints are named through
+        :attr:`node_ids`, never this field — a node selection that sets
+        ``element_ids`` without ``node_ids`` raises.  ``None`` means all.
     node_ids:
         Filter by specific node (joint) ID(s).  ``None`` means all.
     elevation_range:
@@ -515,6 +521,23 @@ class Selection:
             rng = getattr(self, attr)
             if rng is not None and rng[0] > rng[1]:
                 raise ValueError(f"Invalid {attr} {rng}: lower bound must not exceed upper bound")
+
+        # ``element_ids`` / ``exclude_element_ids`` name frames and areas only.
+        # On an explicit node selection they would otherwise be silently ignored
+        # (matching every joint, or excluding nothing), so reject them and point
+        # at the dedicated joint fields instead.
+        node_scoped = self.element_types is not None and "Node" in self.element_types
+        if node_scoped and self.element_ids is not None and self.node_ids is None:
+            raise ValueError(
+                "element_ids names frames and areas only; for a node selection use "
+                "node_ids (element_types includes 'Node' but node_ids is unset)"
+            )
+        if node_scoped and self.exclude_element_ids is not None and self.exclude_node_ids is None:
+            raise ValueError(
+                "exclude_element_ids names frames and areas only; for a node selection "
+                "use exclude_node_ids (element_types includes 'Node' but exclude_node_ids "
+                "is unset)"
+            )
 
     # ── Constructors ─────────────────────────────────────────────────────────
 
