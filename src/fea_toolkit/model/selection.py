@@ -64,6 +64,29 @@ _KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 #: A ``KEY=`` fragment — what would open a new clause if written plainly.
 _CLAUSE_FRAGMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\s*=")
 
+#: The ``NOT`` keyword that negates the clause it precedes.  Whole-word and
+#: case-insensitive, so ``NOTCH`` / ``NOTIONAL`` are values, not keywords.
+_NOT_RE = re.compile(r"not(?![A-Za-z0-9_])", re.IGNORECASE)
+
+
+def _clause_key_pos(expr: str, i: int) -> int:
+    """The index of a clause key starting at *i*, skipping any ``NOT`` prefix.
+
+    Returns the position where the ``KEY=`` fragment begins, or ``-1`` when
+    neither a ``KEY=`` nor a ``NOT KEY=`` clause starts at *i*.
+    """
+    n = len(expr)
+    j = i
+    not_match = _NOT_RE.match(expr, j)
+    if not_match is not None:
+        j = not_match.end()
+        while j < n and (expr[j].isspace() or expr[j] == ";"):
+            j += 1
+    ahead = _KEY_RE.match(expr, j)
+    if ahead is not None and ahead.end() < n and expr[ahead.end()] == "=":
+        return j
+    return -1
+
 
 def _needs_quoting(value: str) -> bool:
     """Whether *value* must be quoted to survive a round-trip through parsing.
@@ -91,8 +114,8 @@ def _render_value(value: str) -> str:
     return _quote(text) if _needs_quoting(text) else text
 
 
-def _scan_clauses(expr: str) -> tuple[list[tuple[str, str]], str]:
-    """Split *expr* into ``(key, raw value)`` clauses plus any leftover text.
+def _scan_clauses(expr: str) -> tuple[list[tuple[bool, str, str]], str]:
+    """Split *expr* into ``(negated, key, raw value)`` clauses plus any leftover.
 
     Quote-aware: a ``;``, ``,`` or `` word=`` inside a double-quoted value is
     data, not a delimiter, so a value written by :meth:`Selection.to_string`
@@ -100,24 +123,41 @@ def _scan_clauses(expr: str) -> tuple[list[tuple[str, str]], str]:
     ``KEY=VALUE`` clause is returned as the *leftover*, for the caller to report
     rather than silently ignore.
 
+    A ``NOT`` token immediately before a clause negates it (``NOT section=COL``);
+    the ``negated`` flag is ``True`` for that clause.  ``NOT`` is recognised only
+    at clause start, so a *value* named ``NOT`` (``section=NOT``) is untouched.
+
     Args:
         expr: The expression to scan.
 
     Returns:
-        ``(clauses, leftover)`` — the parsed ``(key, raw value)`` pairs, and any
-        text the scanner could not read as a clause (``""`` when it consumed
-        everything).
+        ``(clauses, leftover)`` — the parsed ``(negated, key, raw value)``
+        triples, and any text the scanner could not read as a clause (``""`` when
+        it consumed everything).
 
     Raises:
         ValueError: If a quoted value is left unclosed at the end of *expr*.
     """
-    clauses: list[tuple[str, str]] = []
+    clauses: list[tuple[bool, str, str]] = []
     i, n = 0, len(expr)
     while i < n:
         while i < n and (expr[i].isspace() or expr[i] == ";"):
             i += 1
         if i >= n:
             break
+        negated = False
+        not_match = _NOT_RE.match(expr, i)
+        if not_match is not None:
+            k = not_match.end()
+            while k < n and (expr[k].isspace() or expr[k] == ";"):
+                k += 1
+            ahead = _KEY_RE.match(expr, k)
+            if ahead is not None and ahead.end() < n and expr[ahead.end()] == "=":
+                negated = True
+                i = k
+            else:
+                # NOT with no clause after it — report it rather than ignore it.
+                return clauses, expr[not_match.start() :].strip().strip(";").strip()
         match = _KEY_RE.match(expr, i)
         if match is None or match.end() >= n or expr[match.end()] != "=":
             start = i if match is None else match.start()
@@ -144,12 +184,12 @@ def _scan_clauses(expr: str) -> tuple[list[tuple[str, str]], str]:
             if ch == ";":
                 break
             if ch.isspace():
-                # A `` word=`` ahead means the current clause ends here.
+                # A `` word=`` or ``NOT word=`` ahead means the current clause
+                # ends here.
                 j = i
                 while j < n and expr[j].isspace():
                     j += 1
-                ahead = _KEY_RE.match(expr, j)
-                if ahead is not None and ahead.end() < n and expr[ahead.end()] == "=":
+                if _clause_key_pos(expr, j) != -1:
                     break
             i += 1
         if quote:
@@ -157,7 +197,7 @@ def _scan_clauses(expr: str) -> tuple[list[tuple[str, str]], str]:
                 f"unterminated quote in selection expression {expr!r} "
                 "(missing closing double-quote)"
             )
-        clauses.append((key, expr[value_start:i]))
+        clauses.append((negated, key, expr[value_start:i]))
     return clauses, ""
 
 
@@ -253,6 +293,20 @@ class Selection:
 
         Selection(sections=['Roof slab', 'Floor slab'])
         # → element section can be "Roof slab" OR "Floor slab"
+
+    *Exclusion* — each ``exclude_*`` field is the mirror of its positive
+    counterpart: an element that matches **any** set exclusion rule is
+    removed.  In the expression language this is spelled ``NOT KEY=VALUE``:
+
+        Selection(exclude_sections=['COL'])
+        # → everything except elements whose section is "COL"
+
+        Selection(element_types=['Area'], exclude_sections=['Roof slab'])
+        # → areas, except those with section "Roof slab"
+
+    ``NOT`` applies to the single clause it precedes, so ``NOT section=COL
+    NOT type=Area`` removes both the COL sections and the areas — the union
+    of the excluded sets, not their intersection.
 
     *Type-specific behaviour*
 
@@ -408,14 +462,24 @@ class Selection:
     element_ids: Optional[list[str]] = None
     elevation_range: Optional[tuple[float, float]] = None
     story: Optional[list[str]] = None
+    # Negated counterparts — each ``exclude_*`` field removes the elements that
+    # match the corresponding positive criterion (an element is excluded when it
+    # matches *any* set ``exclude_*`` field).
+    exclude_element_types: Optional[list[str]] = None
+    exclude_sections: Optional[list[str]] = None
+    exclude_materials: Optional[list[str]] = None
+    exclude_groups: Optional[list[str]] = None
+    exclude_constraints: Optional[list[str]] = None
+    exclude_element_ids: Optional[list[str]] = None
+    exclude_elevation_range: Optional[tuple[float, float]] = None
+    exclude_story: Optional[list[str]] = None
 
     def __post_init__(self) -> None:
         """Validate invariants after construction."""
-        if self.elevation_range is not None and self.elevation_range[0] > self.elevation_range[1]:
-            raise ValueError(
-                f"Invalid elevation_range {self.elevation_range}: "
-                f"lower bound must not exceed upper bound"
-            )
+        for attr in ("elevation_range", "exclude_elevation_range"):
+            rng = getattr(self, attr)
+            if rng is not None and rng[0] > rng[1]:
+                raise ValueError(f"Invalid {attr} {rng}: lower bound must not exceed upper bound")
 
     # ── Constructors ─────────────────────────────────────────────────────────
 
@@ -431,6 +495,12 @@ class Selection:
         A value may be double-quoted (with ``\\`` and ``"`` escaped) when it
         itself contains a comma, a semicolon or a ``KEY=`` fragment, so a section
         name like ``"S, 200"`` round-trips through :meth:`to_string` unchanged.
+
+        A clause may be **negated** by preceding it with ``NOT`` (any casing):
+        ``NOT section=COL`` selects everything *except* the elements whose
+        section is ``COL``.  ``NOT`` applies to the single clause that follows
+        it, and is recognised only at clause start — a value named ``NOT`` is
+        written after ``=`` and is never confused with the keyword.
 
         Recognised keys (case-insensitive; the plural and the
         :class:`Selection` field name are accepted aliases):
@@ -450,6 +520,8 @@ class Selection:
             >>> Selection.from_string("type=Frame; section=2xR3,2xR4")
             >>> Selection.from_string("constraint=Fix")
             >>> Selection.from_string("z=3.4:4.5")
+            >>> Selection.from_string("NOT section=COL")       # everything except COL
+            >>> Selection.from_string("type=Area NOT section=Roof slab")
 
         Args:
             expr: The expression to parse.
@@ -460,20 +532,29 @@ class Selection:
         Raises:
             ValueError: If a clause has no ``=``, names an unknown key, gives a
                 ``z`` value that is not a pair of numbers, names an unknown
-                element type, leaves a quoted value unclosed, or appends text to
-                a quoted value.
+                element type, leaves a quoted value unclosed, appends text to
+                a quoted value, or leaves a ``NOT`` without a clause after it.
         """
         kwargs: dict = {}
         clauses, leftovers = _scan_clauses(expr)
         # Anything the scanner could not read as a clause is malformed input —
         # most often a bare value with no ``KEY=``.
         if leftovers:
+            if leftovers.lower() == "not":
+                raise ValueError(
+                    "NOT must be followed by a KEY=VALUE clause, e.g. 'NOT section=COL'"
+                )
+            if leftovers.lower().startswith("not="):
+                raise ValueError(
+                    f"{leftovers!r}: write NOT before a KEY=VALUE clause, e.g. 'NOT section=COL'"
+                )
             raise ValueError(f"expected KEY=VALUE in {leftovers!r} (keys: {SELECT_KEYS_HELP})")
 
-        for key, value in clauses:
+        for negated, key, value in clauses:
             field = SELECT_KEYS.get(key.lower())
             if field is None:
                 raise ValueError(f"unknown selection key {key!r} (keys: {SELECT_KEYS_HELP})")
+            target = f"exclude_{field}" if negated else field
             if field == "elevation_range":
                 bounds = [b for b in re.split(r"[:,]", value) if b.strip()]
                 if len(bounds) != 2:
@@ -482,7 +563,7 @@ class Selection:
                         f"z=3.4:4.5 — got {value.strip()!r}"
                     )
                 try:
-                    kwargs[field] = (float(bounds[0]), float(bounds[1]))
+                    kwargs[target] = (float(bounds[0]), float(bounds[1]))
                 except ValueError as exc:
                     raise ValueError(
                         f"selection key 'z' takes two numbers — got {value.strip()!r}"
@@ -493,7 +574,7 @@ class Selection:
                     raise ValueError(f"selection key {key!r} has no values")
                 if field == "element_types":
                     values = [_canonical_element_type(v) for v in values]
-                kwargs[field] = values
+                kwargs[target] = values
         return cls(**kwargs)
 
     def to_string(self) -> str:
@@ -504,41 +585,50 @@ class Selection:
 
             >>> Selection(sections=["Roof slab"], elevation_range=(3.0, 6.0)).to_string()
             'section=Roof slab z=3.0:6.0'
+            >>> Selection(exclude_sections=["COL"]).to_string()
+            'NOT section=COL'
 
-        A value that itself contains a comma, a semicolon or a ``KEY=`` fragment
-        is double-quoted (with ``\\`` and ``"`` escaped) so it survives the
-        re-parse, and the elevation bounds are written in full precision.
+        Positive clauses are emitted first, then the ``NOT``-prefixed ones, each
+        in the same canonical key order.  A value that itself contains a comma, a
+        semicolon or a ``KEY=`` fragment is double-quoted (with ``\\`` and ``"``
+        escaped) so it survives the re-parse, and the elevation bounds are
+        written in full precision.
 
         Returns:
             The expression (``""`` for an empty selection).
         """
         clauses = []
-        for field_name, key in SELECT_FIELD_KEYS.items():
-            values = getattr(self, field_name)
-            if not values:
-                continue
-            if field_name == "elevation_range":
-                # ``str`` (not ``:g``) keeps the bound exact: ``:g`` rounds to
-                # six significant figures, so ``3.0000001`` would come back as
-                # ``3`` and the round-trip would not be lossless.
-                clauses.append(f"{key}={values[0]}:{values[1]}")
-            else:
-                clauses.append(f"{key}={', '.join(_render_value(v) for v in values)}")
+        for negate in (False, True):
+            for field_name, key in SELECT_FIELD_KEYS.items():
+                attr = f"exclude_{field_name}" if negate else field_name
+                values = getattr(self, attr)
+                if not values:
+                    continue
+                if field_name == "elevation_range":
+                    # ``str`` (not ``:g``) keeps the bound exact: ``:g`` rounds to
+                    # six significant figures, so ``3.0000001`` would come back as
+                    # ``3`` and the round-trip would not be lossless.
+                    clause = f"{key}={values[0]}:{values[1]}"
+                else:
+                    clause = f"{key}={', '.join(_render_value(v) for v in values)}"
+                clauses.append(f"NOT {clause}" if negate else clause)
         return " ".join(clauses)
 
     # ── helpers ──────────────────────────────────────────────────────────────
 
     def _match_element_type(self, etype: str) -> bool:
-        if self.element_types is None:
-            return True
-        return etype in self.element_types
+        if self.element_types is not None and etype not in self.element_types:
+            return False
+        return self.exclude_element_types is None or etype not in self.exclude_element_types
 
     def _match_section(self, sec_name: Optional[str]) -> bool:
-        if self.sections is None:
-            return True
-        if sec_name is None:
+        if self.sections is not None and (sec_name is None or sec_name not in self.sections):
             return False
-        return sec_name in self.sections
+        return (
+            self.exclude_sections is None
+            or sec_name is None
+            or sec_name not in self.exclude_sections
+        )
 
     def _match_material(
         self,
@@ -550,14 +640,21 @@ class Selection:
         Both :class:`SAPModelData` and :class:`MeshModel` expose the same
         ``sections`` mapping, so the same lookup serves both.
         """
-        if self.materials is None:
+        if self.materials is None and self.exclude_materials is None:
             return True
         if sec_name is None:
-            return False
+            # No section → no material to test: it cannot satisfy a positive
+            # criterion, nor be excluded by a negative one.
+            return self.materials is None
         sec = model.sections.get(sec_name)
-        if sec is None:
+        material = sec.material if sec is not None else None
+        if self.materials is not None and (material is None or material not in self.materials):
             return False
-        return sec.material in self.materials
+        return (
+            self.exclude_materials is None
+            or material is None
+            or material not in self.exclude_materials
+        )
 
     def _match_groups(
         self,
@@ -570,17 +667,23 @@ class Selection:
         Both :class:`SAPModelData` and :class:`MeshModel` expose the same
         ``groups`` mapping, so the same lookup serves both.
         """
-        if self.groups is None:
-            return True
         # Groups store references as "Frame:123", "Area:456", "Joint:1"
-        prefix = etype + ":"
-        for gname in self.groups:
-            grp = model.groups.get(gname)
-            if grp is None:
-                continue
-            if f"{prefix}{eid}" in grp.objects:
-                return True
-        return False
+        ref = f"{etype}:{eid}"
+        if self.groups is not None:
+            matched = False
+            for gname in self.groups:
+                grp = model.groups.get(gname)
+                if grp is not None and ref in grp.objects:
+                    matched = True
+                    break
+            if not matched:
+                return False
+        if self.exclude_groups is not None:
+            for gname in self.exclude_groups:
+                grp = model.groups.get(gname)
+                if grp is not None and ref in grp.objects:
+                    return False
+        return True
 
     def _match_constraints(self, model: Union["SAPModelData", "MeshModel"], eid: str) -> bool:
         """Check the joint-constraint criterion against either model type.
@@ -590,30 +693,37 @@ class Selection:
         wrapper) but not by :class:`MeshModel` or an NPZ archive — a source
         without the mapping therefore matches no joint.
         """
-        if self.constraints is None:
+        if self.constraints is None and self.exclude_constraints is None:
             return True
         assignments = getattr(model, "constraint_assignments", None) or {}
-        return assignments.get(eid) in self.constraints
+        assigned = assignments.get(eid)
+        if self.constraints is not None and assigned not in self.constraints:
+            return False
+        return self.exclude_constraints is None or assigned not in self.exclude_constraints
 
     def _match_id(self, eid: str) -> bool:
-        if self.element_ids is None:
-            return True
-        return eid in self.element_ids
+        if self.element_ids is not None and eid not in self.element_ids:
+            return False
+        return self.exclude_element_ids is None or eid not in self.exclude_element_ids
 
     def _selects_nodes_explicitly(self) -> bool:
         """Whether the node criterion selects joints in its own right,
         rather than nodes merely being *eligible*.
 
         True when nodes are opted into (:attr:`element_types` names
-        ``Node``) or when a joint-only criterion is set
-        (:attr:`constraints`).  With ``element_types`` unset, a section /
-        material / elevation criterion would match every node trivially
-        (nodes ignore those criteria), which would drag the whole node set
-        into :meth:`filter_model` subsets.
+        ``Node``), a joint-only criterion is set (:attr:`constraints` /
+        :attr:`exclude_constraints`), or a type is *excluded* without naming
+        ``Node`` (:attr:`exclude_element_types`) — a type exclusion that does
+        not list ``Node`` leaves nodes in the result.  With ``element_types``
+        unset, a section / material / elevation criterion would match every
+        node trivially (nodes ignore those criteria), which would drag the
+        whole node set into :meth:`filter_model` subsets.
         """
         if self.element_types is not None and "Node" in self.element_types:
             return True
-        return self.constraints is not None
+        if self.constraints is not None or self.exclude_constraints is not None:
+            return True
+        return self.exclude_element_types is not None and "Node" not in self.exclude_element_types
 
     def _frame_matches(
         self,
@@ -646,8 +756,13 @@ class Selection:
             return False
         if not self._match_groups(model, "Frame", eid):
             return False
-        # Elevation and story filters (only if either is set)
-        if self.elevation_range is not None or self.story is not None:
+        # Elevation and story filters (only if any is set)
+        if (
+            self.elevation_range is not None
+            or self.story is not None
+            or self.exclude_elevation_range is not None
+            or self.exclude_story is not None
+        ):
             z_mid = self._get_frame_z_mid(model, eid)
             if not self._match_z_filter(z_mid, story_elevations, story_z_tolerance):
                 return False
@@ -681,8 +796,13 @@ class Selection:
             return False
         if not self._match_groups(model, "Area", eid):
             return False
-        # Elevation and story filters (only if either is set)
-        if self.elevation_range is not None or self.story is not None:
+        # Elevation and story filters (only if any is set)
+        if (
+            self.elevation_range is not None
+            or self.story is not None
+            or self.exclude_elevation_range is not None
+            or self.exclude_story is not None
+        ):
             z_mid = self._get_area_z_mid(model, eid)
             if not self._match_z_filter(z_mid, story_elevations, story_z_tolerance):
                 return False
@@ -1160,23 +1280,29 @@ class Selection:
     ) -> bool:
         """Apply the elevation-range and storey filters to a resolved Z.
 
-        The elevation and storey criteria are applied only when set
-        (:meth:`_match_elevation` and :meth:`_match_story` each trivially
-        pass when their filter is unset).  A ``None`` ``z_mid`` — element
-        geometry unavailable — excludes the element from the selection.
+        The elevation and storey criteria are applied only when set.  A
+        ``None`` ``z_mid`` — element geometry unavailable — excludes the
+        element when a *positive* criterion needs it, but keeps it when only
+        an exclusion is set (nothing to test means nothing to exclude).
         """
         if z_mid is None:
-            return False
+            has_positive = self.elevation_range is not None or self.story is not None
+            return not has_positive
         if not self._match_elevation(z_mid):
             return False
         return self._match_story(z_mid, story_elevations, story_z_tolerance)
 
     def _match_elevation(self, z_mid: float) -> bool:
-        """Check if a Z coordinate falls within *elevation_range*."""
-        if self.elevation_range is None:
-            return True
-        z_min, z_max = self.elevation_range
-        return z_min <= z_mid <= z_max
+        """Check if a Z coordinate falls within *elevation_range* (or not)."""
+        if self.elevation_range is not None:
+            z_min, z_max = self.elevation_range
+            if not (z_min <= z_mid <= z_max):
+                return False
+        if self.exclude_elevation_range is not None:
+            z_min, z_max = self.exclude_elevation_range
+            if z_min <= z_mid <= z_max:
+                return False
+        return True
 
     def _match_story(
         self,
@@ -1184,18 +1310,28 @@ class Selection:
         story_elevations: Optional[dict[str, float]],
         story_z_tolerance: float,
     ) -> bool:
-        """Check if a Z coordinate matches any named storey."""
-        if self.story is None:
-            return True
-        if story_elevations is None:
-            return False  # no elevation data to match against — exclude
-        for story_name in self.story:
-            elev = story_elevations.get(story_name)
-            if elev is None:
-                continue  # unknown story name — skip conservatively
-            if abs(z_mid - elev) <= story_z_tolerance:
-                return True
-        return False
+        """Check if a Z coordinate matches (or is excluded from) a storey."""
+        if self.story is not None:
+            if story_elevations is None:
+                return False  # no elevation data to match against — exclude
+            matched = False
+            for story_name in self.story:
+                elev = story_elevations.get(story_name)
+                if elev is None:
+                    continue  # unknown story name — skip conservatively
+                if abs(z_mid - elev) <= story_z_tolerance:
+                    matched = True
+                    break
+            if not matched:
+                return False
+        if self.exclude_story is not None:
+            if story_elevations is None:
+                return True  # no elevation data — cannot tell whether to exclude
+            for story_name in self.exclude_story:
+                elev = story_elevations.get(story_name)
+                if elev is not None and abs(z_mid - elev) <= story_z_tolerance:
+                    return False
+        return True
 
     @staticmethod
     def _get_frame_z_mid(model: Union["SAPModelData", "MeshModel"], eid: str) -> Optional[float]:

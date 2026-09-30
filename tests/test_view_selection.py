@@ -58,6 +58,12 @@ class TestSelectionExpression:
             Selection(sections=["Roof slab"], elevation_range=(3.0, 6.0)),
             Selection(materials=["C30"], groups=["Walls"], constraints=["DIAPHRAGM"]),
             Selection(element_ids=["1", "2"], story=["Level 2"]),
+            Selection(exclude_sections=["COL"]),
+            Selection(exclude_element_types=["Area"]),
+            Selection(exclude_sections=["COL", "BEAM"]),
+            Selection(element_types=["Area"], exclude_sections=["Roof slab"]),
+            Selection(exclude_elevation_range=(0.0, 3.0)),
+            Selection(sections=["NOT"], exclude_sections=["NOT"]),
         ]
         for selection in cases:
             assert Selection.from_string(selection.to_string()) == selection
@@ -68,6 +74,22 @@ class TestSelectionExpression:
         selection = Selection(sections=["Roof slab"], elevation_range=(3.0, 6.0))
 
         assert selection.to_string() == "section=Roof slab z=3.0:6.0"
+
+    def test_exclusion_is_written_with_NOT(self):
+        from fea_toolkit.model.selection import Selection
+
+        assert Selection(exclude_sections=["COL"]).to_string() == "NOT section=COL"
+        assert (
+            Selection(element_types=["Area"], exclude_sections=["Roof slab"]).to_string()
+            == "type=Area NOT section=Roof slab"
+        )
+
+    def test_a_value_named_NOT_is_not_the_keyword(self):
+        from fea_toolkit.model.selection import Selection
+
+        assert Selection(sections=["NOT"]).to_string() == "section=NOT"
+        assert Selection.from_string("section=NOT").sections == ["NOT"]
+        assert Selection(exclude_sections=["NOT"]).to_string() == "NOT section=NOT"
 
     def test_values_with_delimiters_round_trip(self):
         """A comma, semicolon, quote or ``KEY=`` fragment in a value survives."""

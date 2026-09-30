@@ -560,6 +560,54 @@ class TestSelection:
         sel = Selection(element_types=["Area"], groups=["Moment Frame"])
         assert sel.get_area_ids(model) == []
 
+    # ── exclusion (NOT / exclude_*) ──
+
+    def test_exclude_by_section(self, model):
+        """exclude_sections removes every element with that section."""
+        sel = Selection(exclude_sections=["UB100"])
+        assert sel.get_frame_ids(model) == []
+        assert sel.get_area_ids(model) == ["1"]  # Slab200 is untouched
+
+    def test_exclude_by_element_type(self, model):
+        sel = Selection(exclude_element_types=["Area"])
+        assert set(sel.get_frame_ids(model)) == {"1", "2"}
+        assert sel.get_area_ids(model) == []
+
+    def test_exclude_by_material(self, model):
+        sel = Selection(exclude_materials=["Steel"])
+        assert sel.get_frame_ids(model) == []
+        assert sel.get_area_ids(model) == ["1"]
+
+    def test_exclude_by_group(self, model):
+        sel = Selection(exclude_groups=["Moment Frame"])
+        assert sel.get_frame_ids(model) == []
+        assert sel.get_area_ids(model) == ["1"]
+
+    def test_exclude_by_element_id(self, model):
+        sel = Selection(exclude_element_ids=["1"])
+        assert sel.get_frame_ids(model) == ["2"]  # frame 1 removed, frame 2 stays
+        assert sel.get_area_ids(model) == []  # area 1 removed
+
+    def test_exclude_composes_with_positive(self, model):
+        """positive AND negative — an Area except Slab200 matches nothing here."""
+        sel = Selection(element_types=["Area"], exclude_sections=["Slab200"])
+        assert sel.get_area_ids(model) == []
+
+    def test_multiple_exclusions_remove_the_union(self, model):
+        """Each exclude field is an independent removal rule (OR of removals)."""
+        sel = Selection(exclude_sections=["UB100"], exclude_element_types=["Area"])
+        assert sel.get_frame_ids(model) == []
+        assert sel.get_area_ids(model) == []
+
+    def test_exclude_by_elevation_range(self, model):
+        """Everything sits at z=0, so excluding z∈[0,1] removes all frames/areas."""
+        sel = Selection(exclude_elevation_range=(0.0, 1.0))
+        assert sel.get_frame_ids(model) == []
+        assert sel.get_area_ids(model) == []
+        keep = Selection(exclude_elevation_range=(10.0, 20.0))
+        assert set(keep.get_frame_ids(model)) == {"1", "2"}
+        assert keep.get_area_ids(model) == ["1"]
+
     # ── dict filter methods ──
 
     def test_filter_frames(self, model):
@@ -1103,6 +1151,41 @@ class TestSelectionFromString:
         with pytest.raises(ValueError, match="unexpected text after quoted value"):
             Selection.from_string('section="S, 200"bar')
 
+    def test_NOT_prefix_excludes(self):
+        sel = Selection.from_string("NOT section=COL")
+        assert sel.sections is None
+        assert sel.exclude_sections == ["COL"]
+
+    def test_NOT_is_case_insensitive(self):
+        assert Selection.from_string("not type=Area").exclude_element_types == ["Area"]
+        assert Selection.from_string("Not type=Area").exclude_element_types == ["Area"]
+
+    def test_NOT_applies_to_one_clause(self):
+        sel = Selection.from_string("type=Area NOT section=Roof slab")
+        assert sel.element_types == ["Area"]
+        assert sel.exclude_sections == ["Roof slab"]
+
+    def test_NOT_value_is_not_the_keyword(self):
+        sel = Selection.from_string("section=NOT")
+        assert sel.sections == ["NOT"]
+        assert sel.exclude_sections is None
+
+    def test_NOT_before_a_value_named_NOT_round_trips(self):
+        assert Selection.from_string("NOT section=NOT").exclude_sections == ["NOT"]
+
+    def test_NOT_without_a_clause_raises(self):
+        with pytest.raises(ValueError, match="NOT must be followed"):
+            Selection.from_string("NOT")
+
+    def test_NOT_equals_raises_a_hint(self):
+        with pytest.raises(ValueError, match="write NOT before a KEY=VALUE"):
+            Selection.from_string("NOT=COL")
+
+    def test_NOT_keyword_requires_a_whole_word(self):
+        """``NOTCH`` is a bare value, not the keyword — it still errors."""
+        with pytest.raises(ValueError, match="expected KEY=VALUE"):
+            Selection.from_string("NOTCH")
+
 
 # ============================================================================
 # Selection filter_model tests
@@ -1324,6 +1407,22 @@ class TestSelectionFilterModel:
         assert "Slab" in sub.groups
         assert "Cols" not in sub.groups
         assert sub.groups["Slab"].objects == ["Area:1", "Joint:5", "Joint:6"]
+
+    # ── Exclusion ──
+
+    def test_excluding_a_type_keeps_the_other_elements_and_nodes(self, full_model):
+        """``NOT type=Area`` drops the area but keeps frames and (D3) nodes."""
+        sub = Selection(exclude_element_types=["Area"]).filter_model(full_model)
+        assert set(sub.frame_elements) == {"1", "2", "3", "4"}
+        assert sub.area_elements == {}
+        # Nodes are "not Area", so they survive as the selection's payload.
+        assert len(sub.nodes) == len(full_model.nodes)
+
+    def test_excluding_a_section_drops_only_that_section(self, full_model):
+        """``NOT section=UB100`` keeps the UB200 frames and the slab."""
+        sub = Selection(exclude_sections=["UB100"]).filter_model(full_model)
+        assert set(sub.frame_elements) == {"3", "4"}
+        assert set(sub.area_elements) == {"1"}
 
     # ── Empty / no-match ──
 
