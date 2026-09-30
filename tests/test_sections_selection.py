@@ -1173,6 +1173,20 @@ class TestSelectionFromString:
     def test_NOT_before_a_value_named_NOT_round_trips(self):
         assert Selection.from_string("NOT section=NOT").exclude_sections == ["NOT"]
 
+    def test_repeated_exclusions_merge(self):
+        """Two ``NOT`` clauses with the same key union, neither is dropped."""
+        sel = Selection.from_string("NOT section=COL NOT section=BEAM")
+        assert sel.exclude_sections == ["COL", "BEAM"]
+
+    def test_repeated_elevation_is_rejected(self):
+        """A single-interval field cannot hold two ``z=`` clauses."""
+        with pytest.raises(ValueError, match="appears more than once"):
+            Selection.from_string("z=0:3 z=6:9")
+
+    def test_repeated_elevation_exclusion_is_rejected(self):
+        with pytest.raises(ValueError, match="appears more than once"):
+            Selection.from_string("NOT z=0:3 NOT z=6:9")
+
     def test_NOT_without_a_clause_raises(self):
         with pytest.raises(ValueError, match="NOT must be followed"):
             Selection.from_string("NOT")

@@ -68,6 +68,11 @@ _CLAUSE_FRAGMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\s*=")
 #: case-insensitive, so ``NOTCH`` / ``NOTIONAL`` are values, not keywords.
 _NOT_RE = re.compile(r"not(?![A-Za-z0-9_])", re.IGNORECASE)
 
+#: A value ending in a standalone ``NOT`` token (``"COL NOT"``).  Quoting it
+#: keeps the trailing ``NOT`` as data, not a negation keyword, when a later
+#: clause follows it in the expression.
+_TRAILING_NOT_RE = re.compile(r"\snot$", re.IGNORECASE)
+
 
 def _clause_key_pos(expr: str, i: int) -> int:
     """The index of a clause key starting at *i*, skipping any ``NOT`` prefix.
@@ -94,11 +99,14 @@ def _needs_quoting(value: str) -> bool:
     A comma or semicolon would be read as a delimiter, a ``KEY=`` fragment would
     open a new clause, a quote or backslash would be read as an escape, and
     leading or trailing whitespace would be trimmed.  An empty value is quoted
-    too, so it is not silently dropped.
+    too, so it is not silently dropped.  A value ending in a standalone ``NOT``
+    token is quoted so a following clause is not read as a negation of itself.
     """
     if not value or value != value.strip():
         return True
     if any(ch in value for ch in (",", ";", '"', "\\")):
+        return True
+    if _TRAILING_NOT_RE.search(value):
         return True
     return _CLAUSE_FRAGMENT_RE.search(value) is not None
 
@@ -108,10 +116,19 @@ def _quote(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def _render_value(value: str) -> str:
-    """A value as it appears in an expression — quoted only when it must be."""
+def _render_value(value: str, *, follows_value: bool = False) -> str:
+    """A value as it appears in an expression — quoted only when it must be.
+
+    ``follows_value`` is ``True`` when *value* is not the first item of its
+    comma-separated list.  A standalone ``NOT`` there must be quoted even
+    though :func:`_needs_quoting` passes it, so the ``"…, NOT"`` tail of the
+    list is not read by :func:`_scan_clauses` as the negation of a following
+    clause.  ``_NOT_RE.fullmatch`` matches exactly the keyword — ``NOTCH`` /
+    ``NOTIONAL`` stay unquoted values.
+    """
     text = str(value)
-    return _quote(text) if _needs_quoting(text) else text
+    needs_quoting = _needs_quoting(text) or (follows_value and _NOT_RE.fullmatch(text) is not None)
+    return _quote(text) if needs_quoting else text
 
 
 def _scan_clauses(expr: str) -> tuple[list[tuple[bool, str, str]], str]:
@@ -556,6 +573,11 @@ class Selection:
                 raise ValueError(f"unknown selection key {key!r} (keys: {SELECT_KEYS_HELP})")
             target = f"exclude_{field}" if negated else field
             if field == "elevation_range":
+                if target in kwargs:
+                    raise ValueError(
+                        f"selection key {key!r} appears more than once "
+                        "(only one elevation interval is supported)"
+                    )
                 bounds = [b for b in re.split(r"[:,]", value) if b.strip()]
                 if len(bounds) != 2:
                     raise ValueError(
@@ -574,7 +596,10 @@ class Selection:
                     raise ValueError(f"selection key {key!r} has no values")
                 if field == "element_types":
                     values = [_canonical_element_type(v) for v in values]
-                kwargs[target] = values
+                if negated and target in kwargs:
+                    kwargs[target].extend(values)
+                else:
+                    kwargs[target] = values
         return cls(**kwargs)
 
     def to_string(self) -> str:
@@ -610,7 +635,10 @@ class Selection:
                     # ``3`` and the round-trip would not be lossless.
                     clause = f"{key}={values[0]}:{values[1]}"
                 else:
-                    clause = f"{key}={', '.join(_render_value(v) for v in values)}"
+                    rendered = ", ".join(
+                        _render_value(v, follows_value=i > 0) for i, v in enumerate(values)
+                    )
+                    clause = f"{key}={rendered}"
                 clauses.append(f"NOT {clause}" if negate else clause)
         return " ".join(clauses)
 
@@ -895,7 +923,9 @@ class Selection:
         Expansion happens **only** when the selection opts into nodes
         (:attr:`element_types` names ``Node``, or :attr:`constraints` is set), so
         a pure ``section=`` / ``material=`` / ``z=`` filter never drags the node
-        set in.
+        set in.  A member is never reintroduced through that expansion when its
+        type is excluded (:attr:`exclude_element_types`) — a retained node does
+        not make an excluded area eligible.
 
         Args:
             model: The ``SAPModelData`` or ``MeshModel`` to resolve against.
@@ -909,6 +939,7 @@ class Selection:
         """
         frames = getattr(model, "frame_elements", None) or {}
         areas = getattr(model, "area_elements", None) or {}
+        excluded_types = self.exclude_element_types or ()
 
         def visible(elem: Any) -> bool:
             """Whether a view would draw *elem* at all."""
@@ -938,7 +969,7 @@ class Selection:
             node_i = getattr(elem, "node_i", None)
             node_j = getattr(elem, "node_j", None)
             incident = seeds is not None and (node_i in seeds or node_j in seeds)
-            if not (eid in frame_ids or incident):
+            if not (eid in frame_ids or (incident and "Frame" not in excluded_types)):
                 continue
             frame_ids.add(eid)
             node_ids.update(nid for nid in (node_i, node_j) if nid is not None)
@@ -948,7 +979,7 @@ class Selection:
                 continue
             corners = tuple(getattr(elem, "node_ids", None) or ())
             incident = seeds is not None and any(nid in seeds for nid in corners)
-            if not (aid in area_ids or incident):
+            if not (aid in area_ids or (incident and "Area" not in excluded_types)):
                 continue
             area_ids.add(aid)
             node_ids.update(corners)

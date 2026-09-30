@@ -106,6 +106,24 @@ class TestSelectionExpression:
         for selection in cases:
             assert Selection.from_string(selection.to_string()) == selection
 
+    def test_a_value_ending_in_NOT_with_a_following_clause_round_trips(self):
+        """``COL NOT`` must be quoted so a later clause is not read as negation."""
+        from fea_toolkit.model.selection import Selection
+
+        selection = Selection(sections=["COL NOT"], materials=["C30"])
+
+        assert selection.to_string() == 'section="COL NOT" material=C30'
+        assert Selection.from_string(selection.to_string()) == selection
+
+    def test_a_standalone_NOT_list_value_round_trips_with_a_following_clause(self):
+        """A trailing ``NOT`` list item must be quoted so the next clause survives."""
+        from fea_toolkit.model.selection import Selection
+
+        selection = Selection(sections=["COL", "NOT"], materials=["C30"])
+
+        assert selection.to_string() == 'section=COL, "NOT" material=C30'
+        assert Selection.from_string(selection.to_string()) == selection
+
     def test_elevation_bounds_keep_their_precision(self):
         """:g would round the bound; the written form has to be exact."""
         from fea_toolkit.model.selection import Selection
@@ -189,6 +207,22 @@ class TestResolveConnected:
         assert areas == {"A1"}  # the panel on joint 3 ...
         assert nodes == {"2", "3", "4", "9"}  # ... drawn closed, plus member 2's far end
         assert frames == {"2", "3"}  # the members on joint 3 — never member 1 further up
+
+    def test_an_excluded_type_is_not_reintroduced_by_expansion(self):
+        """``exclude_element_types=['Area']`` keeps areas out even though their
+        corners are retained nodes."""
+        from fea_toolkit.model.sap_data import AreaElement
+        from fea_toolkit.model.selection import Selection
+
+        md = _chain_model()
+        md.area_elements["A1"] = AreaElement(area_id="A1", area_tag=101, node_ids=["3", "4", "9"])
+        md.area_assignments["A1"] = "UB300"
+
+        frames, areas, nodes = Selection(exclude_element_types=["Area"]).resolve_connected(md)
+
+        assert frames == {"1", "2", "3"}  # frames are not excluded
+        assert areas == set()  # the excluded area is not reintroduced as connected
+        assert nodes == {"1", "2", "3", "4", "9"}  # nodes are "not Area", so retained
 
     def test_inactive_split_parents_are_not_drawn(self):
         """A preprocessed model shows its active sub-elements, not the parent."""
