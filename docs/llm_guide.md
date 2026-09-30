@@ -162,6 +162,7 @@ see `.clinerules` §3.11.
 "Plot model from NPZ"               → from fea_toolkit.io import npz_to_pyvista_frame_mesh
 "Load a model (s2k / parsed JSON)"  → from fea_toolkit.io import load_model_data
 "Selection from a string"           → Selection.from_string("type=Frame; section=2xR3")
+"Exclude elements (everything but X)" → Selection(exclude_sections=['COL'])   # or from_string("NOT section=COL")
 "NPZ force diagram"                 → from fea_toolkit.plotting import plot_force_diagram
 "Highlight a Selection (yellow)"    → plot_mesh(builder, highlight_selection=Selection(sections=['2xR3']))
 "Select joints of a constraint group" → Selection(constraints=['Fix']).get_node_ids(md)
@@ -362,17 +363,29 @@ frame_ids = sel.get_frame_ids(model)
 ```
 
 ### Excluding elements
-Prefix any `KEY=VALUE` clause with `NOT` to remove the matching elements:
+Prefix any `KEY=VALUE` clause with `NOT` to remove the matching elements.  The
+dataclass form is the mirror `exclude_*` field — `NOT section=COL` is exactly
+`Selection(exclude_sections=["COL"])`.  The string form is for **text entry**
+(GUI selection field, CLI `--select`, recipe JSON); the dataclass form is for
+**Python code**.  They are the same object:
 
 ```python
-# "Everything except the columns"
-sel = Selection.from_string("NOT section=COL 400x400")
-# equivalent dataclass form:
-sel = Selection(exclude_sections=["COL 400x400"])
+# "Everything except the columns" — no positive filter, one exclusion
+Selection(exclude_sections=["COL"])
+Selection.from_string("NOT section=COL")     # same object
 
 # NOT negates exactly the one clause after it:
 Selection.from_string("type=Area NOT section=Roof slab")  # areas, minus Roof slab
 Selection.from_string("NOT section=COL NOT type=Area")    # remove both sets (union)
+```
+
+**Combine a positive criterion with a negative one** — they AND together — when
+you want a subset *minus* a specific case:
+
+```python
+# All C30 material, but NOT the DUMMY section
+Selection(materials=["C30"], exclude_sections=["DUMMY"])
+Selection.from_string("material=C30 NOT section=DUMMY")
 ```
 
 A value named `NOT` is written after `=` (`section=NOT`) and is never confused
@@ -389,6 +402,7 @@ subset = sel.filter_model(model)
 - Show only lateral system: `Selection(groups=['Lateral'])`
 - Show only braces: `Selection.from_brace_sections(model)`
 - Show only areas: `Selection(element_types=['Area'])`
+- Show everything except a section: `Selection(exclude_sections=['COL'])`
 
 ---
 
