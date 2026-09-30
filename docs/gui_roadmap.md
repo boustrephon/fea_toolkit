@@ -44,7 +44,7 @@ visualisation screen.
 ┌──────────────────────────────────────────────────────────────────────────┐
 │ File   Edit   View   Model   Analysis   Results   Help                   │ ← menu bar
 ├──────────────────────────────────────────────────────────────────────────┤
-│ [Open] [Save] │ [Run ▶] [Stop ■] │ [Mesh] [Deformed] [Forces] │ [Units]  │ ← toolbar
+│ [Open] [Save] │ [Run ▶] [Stop ■] │ [Mesh…]                            │ ← toolbar
 ├────────────────────────────┬───────────────────────────────┬─────────────┤
 │ ╭ Model Tree ╮ ╭ Property ╮│                               │ View        │
 │ │ ▸ Geometry │ │ Tree     ││                               │  [Iso]      │
@@ -77,7 +77,7 @@ Everything maps onto `QMainWindow` primitives:
 |---|---|---|
 | **Menubar** | `QMainWindow.menuBar()` | File / Edit / View / Model / Analysis / Results / Help |
 | **Toolbar** | `QToolBar` (top) | Open, save, run/stop, mesh/deformed/forces, units |
-| **View toolbar** | `QToolBar` (right edge, vertical) | Camera (iso / X / Y / Z), display toggles |
+| **View toolbar** | `QToolBar` (right edge, vertical) | Camera (iso / X / Y / Z), display toggles (nodes / beams / shells / restraints), results controls (deformed % / flags %) |
 | **Model Tree + Property Tree** | `QDockWidget` (`LeftDockWidgetArea`), top half — tabbed | Entity hierarchy (lazy) and object-*kind* groups |
 | **Property Inspector** | `QDockWidget` (`LeftDockWidgetArea`), bottom half — `splitDockWidget` | Editable properties of the current selection |
 | **3-D viewport** | `setCentralWidget(QWidget container)` | The `QtInteractor`, plus room for a future quad view |
@@ -335,8 +335,8 @@ src/fea_toolkit/gui/                 # optional [gui] extra; imported lazily
 >   handler module per operation grows a menu entry per feature and hides the
 >   workflow inside handlers: operations are now **verbs** in a registry, a
 >   workflow is a **recipe** of steps, and the authoring surface is the Recipe
->   panel.  `Model ▸ Split elements` / `Mesh areas` are **presets** that write a
->   step and run the recipe ([P29](_pending_work.md)).
+>   panel.  `Model ▸ Mesh…` composes a `mesh` step in a dialog and runs the
+>   recipe on OK ([P29](_pending_work.md), [P33](_pending_work.md)).
 
 ### 6.1 Design rules
 
@@ -672,7 +672,7 @@ class QtRenderBackend(RenderBackend):
 | 8 | Persistence | geometry + dock state round-trip through `QSettings` |
 | 9 | Tests | headless `QT_QPA_PLATFORM=offscreen` suite green; `needs_gui` marker; `ops.wipe()` hygiene |
 | 10 | Quad-view + polish | central `QWidget` container hosts iso/front/top/side `QtInteractor`s with shared camera toggles |
-| 11 | ⚠️ Partial — workflow authoring (P29–P32) | ✅ **P29** (Phases A–B): the `workflow` package (verbs, steps, recipes as data), the **Recipe dock**, the `&Recipe` menu and the Model-menu presets.  **P30** (Phase C) — the three model-check verbs (`check_connectivity`, `check_self_weight`, `check_brace_buckling`) ✅ landed, a recipe's solved cases and combinations ✅ register as result views, and the `chart` verb plus the GUI's first figure view and a check-table view ✅ landed, and the capacity checks (`member_shear_capacity`, `wall_shear_check`, `hinge_length`) plus the `mesh_checks` verb ✅ landed; only the other charts (`storey_forces`, pushover, modal, CSM) remain 🚧 (they need P32's results) — **P31** (Phase D, the command palette) and **P32** (Phase E, the modal/RS/pushover verbs and the `generate_report` reconciliation) remain — `docs/workflow_authoring.md` |
+| 11 | ⚠️ Partial — workflow authoring (P29–P33) | ✅ **P29** (Phases A–B): the `workflow` package (verbs, steps, recipes as data), the **Recipe dock**, the `&Recipe` menu and the Model-menu presets.  **P30** (Phase C) — the three model-check verbs (`check_connectivity`, `check_self_weight`, `check_brace_buckling`) ✅ landed, a recipe's solved cases and combinations ✅ register as result views, and the `chart` verb plus the GUI's first figure view and a check-table view ✅ landed, and the capacity checks (`member_shear_capacity`, `wall_shear_check`, `hinge_length`) plus the `mesh_checks` verb ✅ landed; only the other charts (`storey_forces`, pushover, modal, CSM) remain 🚧 (they need P32's results) — **P33** (GUI ergonomics: the `StepDialog`, one `Model ▸ Mesh…` entry, the toolbar reorganisation and *Show beams*) ✅ landed (2026-09-30) — **P31** (Phase D, the command palette) and **P32** (Phase E, the modal/RS/pushover verbs and the `generate_report` reconciliation) remain — `docs/workflow_authoring.md` |
 
 ### 9.7 Testing strategy
 

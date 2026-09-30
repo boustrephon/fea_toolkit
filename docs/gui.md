@@ -34,9 +34,9 @@ python -m fea_toolkit.gui    # same entry point, for launchers and scripts
 ```
 
 `File ▸ Open` (`Ctrl+O`) parses a `.s2k` or JSON file and displays it.  What you
-see first is the **parsed** model, as drawn in SAP2000; `Model ▸ Split elements`
-and `Model ▸ Mesh areas` then run the Preprocessor and replace the display with
-the prepared topology (see [Preprocessing](#preprocessing-split-and-mesh)).
+see first is the **parsed** model, as drawn in SAP2000; `Model ▸ Mesh…` then
+runs the Preprocessor and replaces the display with the prepared topology (see
+[Preprocessing](#preprocessing-split-and-mesh)).
 
 ## The window
 
@@ -47,7 +47,7 @@ the prepared topology (see [Preprocessing](#preprocessing-split-and-mesh)).
 | **Inspector** dock (left, bottom) | Every field of the selected object, read-only |
 | **Messages** dock (bottom) | Log of what the application did, including any settings-file problems |
 | Status bar | Unit system, cursor coordinates, a busy indicator while preprocessing runs, and read-outs reserved for the analysis milestone |
-| Toolbars | Top: Open, Save/Export, Run, Split, Mesh, results.  Right edge: camera views and display toggles |
+| Toolbars | Top: Open, Save results, Run, Stop, Mesh.  Right edge: camera views, display toggles and results controls (Deform %, Flags %) |
 
 The Model Tree is **lazy**: groups (Nodes, Frame Elements, Materials, …) list
 their entities only when expanded, so a model with hundreds of thousands of
@@ -61,8 +61,8 @@ row per view, added as you work.
 | View | Added by | Shows |
 |---|---|---|
 | **Unprocessed** | opening a file | the members exactly as drawn in SAP2000 |
-| **Processed** | `Model ▸ Split elements` | the split sub-elements an analysis would build |
-| **Meshed** | `Model ▸ Mesh areas` | the above, plus the shell elements for areas |
+| **Processed** | `Model ▸ Mesh…` (create shells off) | the split sub-elements an analysis would build |
+| **Meshed** | `Model ▸ Mesh…` | the above, plus the shell elements for areas |
 
 Selecting a view redraws the scene with that view's geometry and **keeps the
 camera**, so comparing the drawn model with the prepared one does not move your
@@ -118,7 +118,7 @@ written from, so this works with **no model open**: the views draw the analysed
 geometry, and the case views share one display model between them.
 
 Those views are display-only — an archive has no materials, loads or restraints
-and no unit system — so `Model ▸ Split elements` / `Model ▸ Mesh areas` stay
+and no unit system — so `Model ▸ Mesh…` stays
 disabled while one is displayed.  Open the `.s2k` when you want to preprocess or
 re-analyse (`File ▸ Open`), and the results views are replaced by that model's
 own views.
@@ -161,12 +161,12 @@ turning off the shape leaves the diagram drawn and vice versa.
 
 **Analysis ▸ Run…** solves the model's own load cases inside the application.
 
-1. **Model ▸ Split elements** (or **Mesh areas**) must have been run first.  Run
+1. **Model ▸ Mesh…** must have been run first.  Run
    deliberately does *not* preprocess for you — a topology change is something
    to see reported, not something to happen silently — so until then Run stays
-   greyed and its tooltip names the step it needs.  **Which of the two matters:**
+   greyed and its tooltip names the step it needs.  **The shells matter:**
    in a building-shell model the walls and slabs are what tie the members
-   together, so only **Mesh areas** makes it solvable — `Split elements` alone
+   together, so *create shells* must be on (the dialog's default) — a split-only mesh
    leaves those areas as loads-only, members that frame into them stay detached,
    and the run reports a non-convergence rather than quietly solving something
    else (the Model Review's *floating sub-structures* count warns of this before
@@ -292,6 +292,7 @@ switched.  It is recorded as [P23](_pending_work.md).
 | Control | State |
 |---|---|
 | **View ▸ Display ▸ Show nodes** | Live — show or hide the node markers |
+| **View ▸ Display ▸ Show beams** | Live — show or hide frame elements |
 | **View ▸ Display ▸ Show shells** | Live — show or hide area elements |
 | **View ▸ Display ▸ Show restraints** | Live — support symbols at restrained nodes (one glyph per restrained DOF) |
 | **View ▸ Display ▸ Clear highlights** | Live — drop the selection highlight |
@@ -301,7 +302,7 @@ switched.  It is recorded as [P23](_pending_work.md).
 
 ### Display quality
 
-Two knobs sit on the **View toolbar**:
+The results controls (Deformed shape + **Deform %**, Force diagrams + **Flags %** + the Force selector) and two display-quality knobs sit on the **View toolbar**:
 
 | Knob | What it does | Default |
 |---|---|---|
@@ -343,17 +344,16 @@ always matches what is on screen.
 
 ## Preprocessing (split and mesh)
 
-Opening a file shows the model as it was drawn.  Two Model-menu actions run the
-package's Preprocessor over it and swap the display for the prepared topology.
-They are **presets over a recipe**: each writes the step it stands for into the
-Recipe dock and then runs the recipe, so one click still prepares the model while
-the work it performed becomes visible and editable — see
-[Workflows (recipes)](#workflows-recipes).
+Opening a file shows the model as it was drawn.  One Model-menu action —
+**Mesh…** — runs the package's Preprocessor over it and swaps the display for the
+prepared topology.  It is a **preset over a recipe**: the dialog writes the step
+it stands for into the Recipe dock and then runs the recipe, so one click still
+prepares the model while the work it performed becomes visible and editable —
+see [Workflows (recipes)](#workflows-recipes).
 
 | Action | What it does |
 |---|---|
-| **Model ▸ Split elements** | Splits members at the joints lying on them (`split_elements`) |
-| **Model ▸ Mesh areas** | The above, plus creating shell elements for area elements (`create_shells`) |
+| **Model ▸ Mesh…** | Composes the `mesh` step in a dialog — split members at joints (`split_elements`), create shell elements for areas (`create_shells`), split slabs at walls — and runs it on OK |
 
 Both run on a **worker thread**, so the window keeps repainting, and the Message
 Log reports the outcome:
@@ -396,15 +396,18 @@ Each step is a *verb* applied to a *selection*, with its own parameters:
 | `combine` | Reduces the solved cases into load combinations |
 
 The panel offers **Add** (a menu of verbs), **Remove**, **Up / Down** to reorder,
-and for the selected step a **selection field** — the same expression language as
-a derived view, e.g. `section=brick wall type=Area` — plus a **parameter form
-built from the verb's own declaration**, so the form cannot drift from what the
-verb accepts.  Each field shows its help text **inline** beneath it.  A
-`dict`-typed parameter whose verb declares a *manifest* — today `run_static`'s
-**config**, the OpenSees builder overrides — renders as a **collapsible**
-**Configuration** group (one widget per option, its help as a hover tooltip, in a
-height-capped scroll area, closed by default), not a raw literal; leaving an
-option at its default omits it, so the builder applies its own.  Tick
+and a one-line summary of the selected step.  Double-clicking a step, or the
+**Edit step…** button, opens a **Step dialog** — the same shape as
+**Analysis ▸ Run…** — with the step's **selection** (the same expression language
+as a derived view, e.g. `section=brick wall type=Area`, with a `…` button that
+opens the selection composer) and a **parameter form built from the verb's own
+declaration**, so the form cannot drift from what the verb accepts.  **Add**
+opens the same dialog pre-filled for the chosen verb.  A `dict`-typed parameter
+whose verb declares a *manifest* — today `run_static`'s **config**, the OpenSees
+builder overrides — renders as a **collapsible Configuration** group (one widget
+per option, its help as a hover tooltip, in a height-capped scroll area, closed
+by default), not a raw literal; a step's parameters are emitted only when they
+differ from their declared default, so the builder applies its own.  Tick
 **Optional** when a step's failure should be logged and the run continue instead
 of stopping.
 
@@ -454,14 +457,14 @@ jarring than a greyed-out one.
 |---|---|---|
 | **File** | Open (`Ctrl+O`), Open results…, Save results…, Quit | Export Tcl, Export screenshot |
 | **Edit** | Duplicate view, Edit view selection… | Copy, Preferences |
-| **View** | Zoom to fit, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show shells, Clear highlights) | Show element labels, Show loads, Show force diagrams, Reset layout |
-| **Model** | Split elements, Mesh areas (presets: each writes a recipe step and runs it) | Selections, Units |
+| **View** | Zoom to fit, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show beams, Show shells, Show restraints, Clear highlights) | Show element labels, Show loads, Show force diagrams, Reset layout |
+| **Model** | Mesh… (composes a `mesh` step in a dialog and runs it on OK) | Selections, Units |
 | **Analysis** | Run… (`Ctrl+R`), Stop | Modal analysis, Response spectrum, Pushover |
 | **Recipe** | Run recipe (`Ctrl+Shift+R`), Open recipe…, Save recipe…, Export as Python…, Clear recipe | — |
 | **Results** | Deformed shape (+ Deform %), Force diagrams (+ Force selector + Flags %), Clear results | Storey response, Pushover curve |
 | **Help** | Documentation, About | — |
-| Toolbars | Open; camera views; display toggles; Split / Mesh; Run / Stop; Deformed shape + Scale; Force diagrams + Force selector | Save results (until a result is shown), Export Tcl / screenshot |
-| View toolbar | Zoom/camera; display toggles; **Shells** opacity and **Shrink** | Show labels, Show loads, Show force diagrams |
+| Toolbars | Open; Save results; Run / Stop; Mesh | Save results (until a result is shown), Export Tcl / screenshot |
+| View toolbar | Zoom/camera; display toggles (nodes, beams, shells, restraints); Deformed shape + Deform %; Force diagrams + Force selector + Flags %; **Shells** opacity and **Shrink** | Show labels, Show loads, Show force diagrams |
 
 ## Application identity
 

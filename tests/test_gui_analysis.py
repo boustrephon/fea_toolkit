@@ -86,8 +86,10 @@ def _spin(window, timeout=60.0):
 
 
 def _preprocess(window):
-    """Run ``Model ▸ Split elements`` to completion — Run's prerequisite."""
-    window._actions["model.split"].trigger()
+    """Run the split preset to completion — Run's prerequisite."""
+    window._mesh_preset(
+        {"split_elements": True, "create_shells": False}, "Splitting elements at joints"
+    )
     _spin(window)
 
 

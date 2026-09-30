@@ -714,7 +714,7 @@ step's `Nxy` / `Ny` membrane resultants against the GB 50010 limits (a demand-fr
 #### P31 — Workflow Phase D: the command palette and script interop
 Source: `docs/workflow_authoring.md` § *Roadmap*.
 
-**Status: 🚧 Not started.**
+**Status: 🚧 Planned** — design in [docs/workflow_palette.md](workflow_palette.md).
 
 **What.** Authoring ergonomics, independent of P30:
 
@@ -784,6 +784,40 @@ analysis, report-only code for the storage and presentation.
 `workflow/registry.py` and `workflow/steps.py` (the `modal` kind),
 `workflow/recipe.py` (`run_recipe`'s precursor validation), `report.py`, and the
 GUI's greyed analysis actions (now presets) once the verbs exist.
+
+#### P33 — GUI ergonomics: the Step dialog, one Mesh entry, Show beams
+
+Source: a review of the desktop GUI (2026-09-30); pairs with the workflow
+layer's Phase D (P31) and Phase E (P32).
+
+**Status: ✅ Landed** (2026-09-30).
+
+**What.** Four connected ergonomics changes, all in the desktop GUI:
+
+1. **The Recipe panel's "Step" inspector became a modal `StepDialog`**
+   (`gui/views/step_dialog.py`), mirroring **Analysis ▸ Run…**: a `Selection`
+   group (inline field + a `…` composer that opens `SelectionDialog`) and a
+   `Parameters` group built from the verb's `StepSpec` (reusing `ConfigEditor`
+   for a manifest-dict parameter).  The dock now holds only the step list and a
+   one-line summary; double-click or **Edit step…** opens the dialog, and **Add**
+   opens it pre-filled for the chosen verb.  A step's parameters are emitted
+   only when they differ from their declared default.
+2. **One `Model ▸ Mesh…` entry** replaced *Split elements* and *Mesh areas*: the
+   dialog composes the `mesh` verb (split / create shells / split slabs at
+   walls / scope) and OK appends and runs the recipe.  The non-interactive
+   preset path survives as `MainWindow._mesh_preset` (tests, and the pattern
+   P32's analysis presets will reuse).
+3. **Toolbar reorganisation** — the top toolbar is *do* (`Open · Save results ·
+   Run · Stop · Mesh…`); the right View toolbar is *see* (camera, display
+   toggles, and the results controls `Deformed shape` + **Deform %**, `Force
+   diagrams` + **Flags %** + `Force`, `Shells` opacity, `Shrink`).
+4. **Show beams** — a `view.show_frames` toggle joins *Show nodes* and *Show
+   shells*, hiding or showing the frame elements.
+
+**Touches.** `gui/views/step_dialog.py`, `gui/views/recipe_panel.py`,
+`gui/main_window.py`, and the GUI tests (`test_gui_recipe.py`,
+`test_gui_preprocess.py`, `test_gui_views.py`, `test_gui_analysis.py`,
+`test_gui_results.py`).
 
 ### Tier 4 — Deferred / low-priority
 

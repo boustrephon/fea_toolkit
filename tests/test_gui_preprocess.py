@@ -96,11 +96,24 @@ def window(qapp, monkeypatch, tmp_path):
     win.close()
 
 
+_PRESETS = {
+    "model.split": (
+        {"split_elements": True, "create_shells": False},
+        "Splitting elements at joints",
+    ),
+    "model.mesh": (
+        {"split_elements": True, "create_shells": True},
+        "Splitting elements at joints and meshing areas",
+    ),
+}
+
+
 def _run_preprocess(window, action_key, timeout=30.0):
-    """Trigger a Model-menu action and spin the GUI until its worker ends."""
+    """Run a Model-menu preset and spin the GUI until its worker ends."""
     from qtpy.QtCore import QCoreApplication
 
-    window._actions[action_key].trigger()
+    config, label = _PRESETS[action_key]
+    window._mesh_preset(config, label)
     deadline = time.monotonic() + timeout
     while window._worker is not None and time.monotonic() < deadline:
         QCoreApplication.processEvents()
@@ -125,8 +138,11 @@ def test_the_actions_need_a_parsed_source_model(qapp, monkeypatch, tmp_path):
     try:
         assert win._store is None
         win._set_model_actions_enabled(False)
-        assert win._actions["model.split"].isEnabled() is False
-        win._on_split_elements()
+        assert win._actions["model.mesh"].isEnabled() is False
+        win._mesh_preset(
+            {"split_elements": True, "create_shells": False},
+            "Splitting elements at joints",
+        )
         assert "Open a SAP2000 model" in win._message_log.toPlainText()
     finally:
         win.close()
@@ -136,7 +152,7 @@ def test_split_elements_preprocesses_and_displays_the_model(window):
     """Model ▸ Split elements swaps the parsed model for the ``MeshModel``."""
     from fea_toolkit.model.mesh_model import MeshModel
 
-    assert window._actions["model.split"].isEnabled() is True
+    assert window._actions["model.mesh"].isEnabled() is True
 
     _run_preprocess(window, "model.split")
 

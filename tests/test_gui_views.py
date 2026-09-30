@@ -133,11 +133,24 @@ def slab_window(qapp, monkeypatch, tmp_path):
     win.close()
 
 
+_PRESETS = {
+    "model.split": (
+        {"split_elements": True, "create_shells": False},
+        "Splitting elements at joints",
+    ),
+    "model.mesh": (
+        {"split_elements": True, "create_shells": True},
+        "Splitting elements at joints and meshing areas",
+    ),
+}
+
+
 def _run_preprocess(window, action_key="model.split", timeout=30.0):
-    """Trigger a Model-menu action and spin the GUI until its worker ends."""
+    """Run a Model-menu preset and spin the GUI until its worker ends."""
     from qtpy.QtCore import QCoreApplication
 
-    window._actions[action_key].trigger()
+    config, label = _PRESETS[action_key]
+    window._mesh_preset(config, label)
     deadline = time.monotonic() + timeout
     while window._worker is not None and time.monotonic() < deadline:
         QCoreApplication.processEvents()

@@ -1,53 +1,41 @@
 """The Recipe panel — author a workflow, then run it.
 
 The panel is a *view over a* :class:`~fea_toolkit.workflow.Recipe`: it keeps no
-second copy of the workflow state, and it builds every parameter field from the
-verb's metadata in ``STEP_SPECS``.  That is what stops the form drifting from
-the schema — a parameter a verb does not declare cannot be edited here, and a
-new verb appears in the "Add" menu without touching this file.
+second copy of the workflow state.  It lists the steps and hands the editing of a
+step to :class:`~fea_toolkit.gui.views.step_dialog.StepDialog`, a modal dialog
+built from the verb's metadata in ``STEP_SPECS`` — so a parameter a verb does not
+declare cannot be edited, and a new verb appears in the "Add" menu without
+touching this file.  The step inspector used to live inline here; it moved to the
+dialog so the dock stays short beside the Message Log.
 
 Steps are :class:`~fea_toolkit.workflow.steps.Step` instances, which are frozen,
 so an edit *replaces* the step in the recipe rather than mutating in place; the
 recipe object is the single source of truth.
-
-Mapping and list parameters (a case set, a combination list) are edited as a
-literal in a single field and parsed on the spot, which is honest about what
-they are — data, not prose — without a bespoke editor for each verb.
 """
 
-import ast
-from dataclasses import replace
 from typing import Any, Optional
 
 from qtpy.QtCore import Qt, Signal
 from qtpy.QtWidgets import (
-    QCheckBox,
-    QComboBox,
-    QDoubleSpinBox,
-    QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMenu,
     QPushButton,
-    QSpinBox,
     QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from ...model.selection import Selection
-from ...workflow import STEP_SPECS, Recipe
-from .config_editor import ConfigEditor
-from .selection_dialog import SelectionDialog
+from ...workflow import STEP_SPECS, Recipe, Step
+from .step_dialog import StepDialog
 from .verb_help_dialog import VerbHelpDialog
 
 
 class RecipePanel(QWidget):
-    """A list of steps, the selected step's parameters, and its selection.
+    """A list of steps, with a one-line summary of the selected step.
 
     Args:
         parent: Optional Qt parent widget.
@@ -60,14 +48,13 @@ class RecipePanel(QWidget):
         super().__init__(parent)
         self._recipe = Recipe()
         self._selected = -1
-        self._loading = False  # suppress write-back while rebuilding the form
         self._build_ui()
         self._reload_list()
 
     # ── Construction ─────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
-        """Lay out the step list, its buttons, and the step inspector."""
+        """Lay out the step list, its buttons, and the selected-step summary."""
         outer = QVBoxLayout(self)
         outer.setContentsMargins(4, 4, 4, 4)
 
@@ -77,6 +64,7 @@ class RecipePanel(QWidget):
         self._list.currentRowChanged.connect(self._on_row_changed)
         self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._list.customContextMenuRequested.connect(self._on_step_context_menu)
+        self._list.itemDoubleClicked.connect(lambda _item: self._edit_step_interactive())
         row.addWidget(self._list, 1)
 
         buttons = QVBoxLayout()
@@ -86,7 +74,7 @@ class RecipePanel(QWidget):
         self._add_menu = QMenu(self._add_button)
         for verb, spec in STEP_SPECS.items():
             action = self._add_menu.addAction(f"{verb} \u2014 {spec.help}")
-            action.triggered.connect(lambda _=False, name=verb: self.add_step(name))
+            action.triggered.connect(lambda _=False, name=verb: self._add_step_interactive(name))
         self._add_button.setMenu(self._add_menu)
         buttons.addWidget(self._add_button)
 
@@ -102,24 +90,14 @@ class RecipePanel(QWidget):
         row.addLayout(buttons)
         outer.addLayout(row, 1)
 
-        self._detail = QGroupBox("Step", self)
-        self._detail_layout = QVBoxLayout(self._detail)
-        self._selection_label = QLabel("Selection: everything", self._detail)
-        self._detail_layout.addWidget(self._selection_label)
-        edit = QPushButton("Edit selection\u2026", self._detail)
-        edit.clicked.connect(self._on_edit_selection)
-        self._detail_layout.addWidget(edit)
-
-        self._form = QFormLayout()
-        self._detail_layout.addLayout(self._form)
-
-        self._optional = QCheckBox("Optional \u2014 continue if this step fails", self._detail)
-        self._optional.toggled.connect(self._on_optional_toggled)
-        self._detail_layout.addWidget(self._optional)
-        outer.addWidget(self._detail, 2)
-
-        self._empty = QLabel("No steps yet \u2014 use Add to build a recipe.", self)
-        self._detail_layout.addWidget(self._empty)
+        summary_row = QHBoxLayout()
+        self._summary = QLabel("No steps yet \u2014 use Add to build a recipe.", self)
+        self._summary.setWordWrap(True)
+        summary_row.addWidget(self._summary, 1)
+        self._edit_button = QPushButton("Edit step\u2026", self)
+        self._edit_button.clicked.connect(self._edit_step_interactive)
+        summary_row.addWidget(self._edit_button)
+        outer.addLayout(summary_row)
 
     @property
     def recipe(self) -> Any:
@@ -152,6 +130,10 @@ class RecipePanel(QWidget):
         optional: bool = False,
     ) -> int:
         """Append a step and select it.
+
+        This is the programmatic path (Model-menu presets, tests).  The
+        interactive path is :meth:`_add_step_interactive`, which opens the
+        :class:`StepDialog` first.
 
         Args:
             verb: The verb to add; must be a key of ``STEP_SPECS``.
@@ -195,6 +177,26 @@ class RecipePanel(QWidget):
         self._reload_list()
         self.changed.emit()
 
+    # ── Interactive add / edit ───────────────────────────────────────
+
+    def _add_step_interactive(self, verb: str) -> None:
+        """Open the step dialog for *verb* and append the edited step."""
+        edited = StepDialog.edit(Step(verb=verb), self)
+        if edited is not None:
+            self.add_step(edited.verb, edited.selection, edited.params, optional=edited.optional)
+
+    def _edit_step_interactive(self) -> None:
+        """Open the step dialog for the selected step and replace it."""
+        step = self._selected_step()
+        if step is None:
+            return
+        edited = StepDialog.edit(step, self)
+        if edited is None:
+            return
+        self._recipe.steps[self._selected] = edited
+        self._reload_list()
+        self.changed.emit()
+
     # ── The list ─────────────────────────────────────────────────────
 
     def _selected_step(self) -> Optional[Any]:
@@ -216,7 +218,28 @@ class RecipePanel(QWidget):
         self._list.blockSignals(False)
         if 0 <= self._selected < len(self._recipe):
             self._list.setCurrentRow(self._selected)
-        self._build_form()
+        self._update_summary()
+
+    def _on_row_changed(self, row: int) -> None:
+        """Track the newly selected step and refresh its summary.
+
+        Args:
+            row: The newly current row, or ``-1`` when the list is emptied.
+        """
+        self._selected = row
+        self._update_summary()
+
+    def _update_summary(self) -> None:
+        """Show a one-line summary of the selected step, or the empty hint."""
+        step = self._selected_step()
+        if step is None:
+            self._summary.setText("No steps yet \u2014 use Add to build a recipe.")
+            self._edit_button.setEnabled(False)
+            return
+        self._summary.setText(_step_summary(step))
+        self._edit_button.setEnabled(True)
+
+    # ── Help ─────────────────────────────────────────────────────────
 
     def _on_step_context_menu(self, pos) -> None:
         """Right-click a step: offer per-verb help for the step under the cursor."""
@@ -238,195 +261,24 @@ class RecipePanel(QWidget):
         verb = self._recipe.steps[index].verb
         VerbHelpDialog(verb, STEP_SPECS[verb], self).exec()
 
-    def _build_form(self) -> None:
-        """Render the selected step's selection, parameters and optional flag.
 
-        A spin box writes back on ``editingFinished`` rather than on every
-        ``valueChanged``: the form is rebuilt from the recipe, so writing per
-        keystroke would destroy the widget the user is typing in.
-        """
-        self._loading = True
-        try:
-            while self._form.rowCount():
-                self._form.removeRow(0)
-            step = self._selected_step()
-            self._detail.setEnabled(step is not None)
-            self._empty.setVisible(step is None)
-            if step is None:
-                self._selection_label.setText("Selection: \u2014")
-                return
-            described = step.selection if step.selection is not None else "everything"
-            self._selection_label.setText(f"Selection: {described}")
-            for name, parameter in STEP_SPECS[step.verb].params.items():
-                value = step.params.get(name, parameter.default)
-                editor = self._make_editor(name, parameter, value)
-                if parameter.manifest is not None:
-                    # A structured dict editor is a self-contained collapsible
-                    # group, so it spans the row rather than sitting under a
-                    # redundant "config" label.
-                    self._form.addRow(editor)
-                else:
-                    self._form.addRow(name, editor)
-            self._optional.setChecked(step.optional)
-        finally:
-            self._loading = False
+def _step_summary(step: Any) -> str:
+    """One line describing *step*, for the panel's summary label.
 
-    def _make_editor(self, name: str, parameter: Any, value: Any) -> QWidget:
-        """A widget for one parameter — the editor plus its inline help.
+    Args:
+        step: The step to describe.
 
-        A ``dict`` parameter whose spec declares a ``manifest`` renders a
-        structured :class:`~fea_toolkit.gui.views.config_editor.ConfigEditor`
-        (a collapsible group) instead of a raw literal, so the dict's keys are
-        discoverable and type-checked.  Every other parameter's help text is
-        shown **inline** beneath the editor, not only as a hover tooltip.
-
-        Args:
-            name: Parameter name, for the write-back.
-            parameter: The verb's :class:`~fea_toolkit.workflow.steps.ParamSpec`.
-            value: The step's current value (or the spec default).
-
-        Returns:
-            The editor, already connected to the recipe.
-        """
-
-        def write(new_value: Any) -> None:
-            if not self._loading:
-                self._set_param(name, new_value)
-
-        if parameter.manifest is not None:
-            editor = ConfigEditor(parameter.manifest, value, self._detail, title="Configuration")
-            editor.setToolTip(parameter.help)
-            editor.changed.connect(lambda: write(editor.value()))
-            return editor
-
-        editor = self._scalar_editor(parameter, value, write)
-
-        container = QWidget(self._detail)
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
-        layout.addWidget(editor)
-        if parameter.help:
-            help_label = QLabel(parameter.help)
-            help_label.setWordWrap(True)
-            # A word-wrapped label reports a single-line height at its preferred
-            # width, so a narrower form column clips multi-line text.  Capping
-            # the width makes it wrap at a known width, so its sizeHint is the
-            # wrapped height and the form reserves the full text.
-            help_label.setMaximumWidth(260)
-            help_label.setStyleSheet("color: #6a6a6a;")
-            layout.addWidget(help_label)
-        return container
-
-    def _scalar_editor(self, parameter: Any, value: Any, write: Any) -> QWidget:
-        """The editor for a scalar or free-form literal parameter."""
-        kind = parameter.type
-        if kind is bool:
-            widget = QCheckBox(self._detail)
-            widget.setChecked(bool(value))
-            widget.toggled.connect(write)
-        elif kind is int:
-            widget = QSpinBox(self._detail)
-            widget.setRange(-1_000_000, 1_000_000)
-            widget.setValue(int(value))
-            widget.editingFinished.connect(lambda w=widget: write(w.value()))
-        elif kind is float:
-            widget = QDoubleSpinBox(self._detail)
-            widget.setRange(-1e12, 1e12)
-            widget.setDecimals(6)
-            widget.setValue(float(value))
-            widget.editingFinished.connect(lambda w=widget: write(w.value()))
-        elif parameter.choices:
-            widget = QComboBox(self._detail)
-            widget.addItems([str(choice) for choice in parameter.choices])
-            widget.setCurrentText(str(value))
-            widget.currentTextChanged.connect(write)
-        else:
-            widget = QLineEdit(self._detail)
-            widget.setText(value if kind is str else repr(value))
-            if kind is str:
-                widget.editingFinished.connect(lambda w=widget: write(w.text()))
-            else:
-                widget.editingFinished.connect(
-                    lambda w=widget, k=kind: self._from_literal(w, k, write)
-                )
-        widget.setToolTip(parameter.help)
-        return widget
-
-    def _from_literal(self, widget: QLineEdit, kind: type, write: Any) -> None:
-        """Parse a mapping/list editor, refusing to write what will not parse.
-
-        A field that does not parse is marked rather than silently ignored: a
-        parameter that reads back as authored is the point of the panel.
-
-        Args:
-            widget: The line edit holding the literal.
-            kind: The required type — ``dict`` or ``list``.
-            write: The write-back callable.
-        """
-        try:
-            parsed = ast.literal_eval(widget.text())
-        except (ValueError, SyntaxError):
-            parsed = None
-        if not isinstance(parsed, kind):
-            widget.setStyleSheet("color: #b00020;")
-            return
-        widget.setStyleSheet("")
-        write(parsed)
-
-    def _set_param(self, name: str, value: Any) -> None:
-        """Write one parameter of the selected step back to the recipe."""
-        step = self._selected_step()
-        if step is None:
-            return
-        params = dict(step.params)
-        params[name] = value
-        self._replace_selected(params=params)
-
-    def _replace_selected(self, *, refresh_list: bool = False, **changes: Any) -> None:
-        """Swap the selected step for an edited copy.
-
-        :class:`~fea_toolkit.workflow.steps.Step` is frozen, so an edit replaces
-        the step and the recipe stays the single source of truth.  The list is
-        rebuilt only when its *text* changed (the optional flag), so editing a
-        parameter cannot steal focus from the field being edited.
-
-        Args:
-            refresh_list: Whether the list labels need rebuilding.
-            **changes: Fields to replace on the step.
-        """
-        step = self._selected_step()
-        if step is None:
-            return
-        self._recipe.steps[self._selected] = replace(step, **changes)
-        if refresh_list:
-            self._reload_list()
-        self.changed.emit()
-
-    def _on_edit_selection(self) -> None:
-        """Open the expression editor for the selected step's selection.
-
-        An empty expression is a valid selection that matches everything, and a
-        verb treats it exactly as it treats no selection at all.
-        """
-        step = self._selected_step()
-        if step is None:
-            return
-        selection = SelectionDialog.edit(step.selection, self)
-        if selection is None:  # the dialog was cancelled
-            return
-        self._replace_selected(selection=selection)
-
-    def _on_optional_toggled(self, flag: bool) -> None:
-        """Record that a failure of the selected step may be tolerated."""
-        if not self._loading:
-            self._replace_selected(refresh_list=True, optional=flag)
-
-    def _on_row_changed(self, row: int) -> None:
-        """Show the newly selected step's parameters.
-
-        Args:
-            row: The newly current row, or ``-1`` when the list is emptied.
-        """
-        self._selected = row
-        self._build_form()
+    Returns:
+        ``verb \u00b7 selection: ... \u00b7 params: ...`` — parameters omitted when the
+        step supplies none.
+    """
+    selection = "everything"
+    if step.selection is not None:
+        selection = step.selection.to_string() or "everything"
+    parts = [step.verb, f"selection: {selection}"]
+    if step.params:
+        rendered = ", ".join(f"{key}={value!r}" for key, value in step.params.items())
+        parts.append(f"params: {rendered}")
+    if step.optional:
+        parts.append("optional")
+    return " \u00b7 ".join(parts)

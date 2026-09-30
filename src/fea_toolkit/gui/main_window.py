@@ -440,6 +440,9 @@ class MainWindow(QMainWindow):
         a["view.show_shells"] = self._toggle_action(
             "Show shells", self._on_show_shells, tip="Show or hide area elements"
         )
+        a["view.show_frames"] = self._toggle_action(
+            "Show beams", self._on_show_frames, tip="Show or hide frame elements"
+        )
         a["view.show_restraints"] = self._toggle_action(
             "Show restraints",
             self._on_show_restraints,
@@ -452,15 +455,10 @@ class MainWindow(QMainWindow):
             "Clear highlights", self._on_clear_highlights, tip="Drop the selection highlight"
         )
         a["view.reset_layout"] = self._placeholder("Reset layout", "Milestone 8")
-        a["model.split"] = self._real_action(
-            "Split elements",
-            self._on_split_elements,
-            tip="Preprocess: split frames at interior joints (runs on a worker)",
-        )
         a["model.mesh"] = self._real_action(
-            "Mesh areas",
-            self._on_mesh_areas,
-            tip="Preprocess: split frames and create shell elements for areas",
+            "Mesh…",
+            self._on_mesh_dialog,
+            tip="Preprocess: split frames at joints and mesh areas (runs on a worker)",
         )
         a["model.selections"] = self._placeholder("Selections", "a future release")
         a["model.units"] = self._placeholder("Units", "a future release")
@@ -560,6 +558,7 @@ class MainWindow(QMainWindow):
         for key in (
             "view.show_nodes",
             "view.show_shells",
+            "view.show_frames",
             "view.show_restraints",
             "view.show_labels",
             "view.show_loads",
@@ -572,7 +571,7 @@ class MainWindow(QMainWindow):
         m.addAction(a["view.reset_layout"])
 
         m = bar.addMenu("&Model")
-        for key in ("model.split", "model.mesh", "model.selections", "model.units"):
+        for key in ("model.mesh", "model.selections", "model.units"):
             m.addAction(a[key])
 
         m = bar.addMenu("&Analysis")
@@ -707,15 +706,7 @@ class MainWindow(QMainWindow):
             "analysis.run",
             "analysis.stop",
             None,
-            "model.split",
             "model.mesh",
-            "results.deformed",
-            "@deformed_scale",
-            "results.forces",
-            "@force_scale",
-            "@force_quantity",
-            None,
-            "model.units",
         ):
             _put(main, key)
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, main)
@@ -734,11 +725,18 @@ class MainWindow(QMainWindow):
             "view.yz",
             None,
             "view.show_nodes",
+            "view.show_frames",
             "view.show_shells",
             "view.show_restraints",
             "view.show_labels",
             "view.show_loads",
             "view.show_forces",
+            None,
+            "results.deformed",
+            "@deformed_scale",
+            "results.forces",
+            "@force_scale",
+            "@force_quantity",
             None,
             "@shell_opacity",
             "@shrink",
@@ -811,6 +809,16 @@ class MainWindow(QMainWindow):
         self._recipe_dock.setWidget(self._recipe_panel)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._recipe_dock)
 
+    def _size_bottom_docks(self) -> None:
+        """Keep the Messages and Recipe docks to a fifth of the window height.
+
+        Both sit in the bottom dock area beside each other, so they share one
+        strip; sizing them together keeps the viewport dominant.
+        """
+        height = max(60, int(self.height() * 0.2))
+        docks = [self._log_dock, self._recipe_dock]
+        self.resizeDocks(docks, [height] * len(docks), Qt.Orientation.Vertical)
+
     # ── Status bar ──────────────────────────────────────────────────
 
     def _build_status_bar(self) -> None:
@@ -856,6 +864,7 @@ class MainWindow(QMainWindow):
         the window still opens (off-screen rendering is a legitimate use).
         """
         super().showEvent(event)
+        self._size_bottom_docks()
         if self._interaction_enabled:
             return
         self._interaction_enabled = True
@@ -990,7 +999,12 @@ class MainWindow(QMainWindow):
         unchecked by the previous model would otherwise contradict what is on
         screen.  Signals are blocked: there is nothing to re-render yet.
         """
-        for key in ("view.show_nodes", "view.show_shells", "view.show_restraints"):
+        for key in (
+            "view.show_nodes",
+            "view.show_frames",
+            "view.show_shells",
+            "view.show_restraints",
+        ):
             action = self._actions[key]
             action.blockSignals(True)
             action.setChecked(True)
@@ -1417,6 +1431,10 @@ class MainWindow(QMainWindow):
         """Show or hide the area-element overlay."""
         self._backend.set_category_visible("shells", checked)
 
+    def _on_show_frames(self, checked: bool) -> None:
+        """Show or hide the frame-element overlay."""
+        self._backend.set_category_visible("frames", checked)
+
     def _on_show_restraints(self, checked: bool) -> None:
         """Show or hide the support symbols."""
         self._backend.set_category_visible("restraints", checked)
@@ -1461,28 +1479,50 @@ class MainWindow(QMainWindow):
 
     # ── Preprocessing (Model menu) ───────────────────────────────────
 
-    def _on_split_elements(self) -> None:
-        """**Model ▸ Split elements**: append a split-only ``mesh`` step and run it.
+    def _on_mesh_dialog(self) -> None:
+        """**Model ▸ Mesh…**: compose the ``mesh`` step in a dialog, then run it.
 
-        The Model-menu entries are **presets over the recipe**: each appends the
-        step it stands for and runs the recipe, so one click still does what it
-        always did — while the work it performed is now visible, editable and
-        saveable in the Recipe panel instead of hidden in a handler.
+        The Model-menu entry is a preset over the recipe: the dialog composes the
+        meshing step the way the Recipe panel's Add does, and accepting appends
+        the step and runs the recipe — so one click still preprocesses, while
+        the step stays visible, editable and saveable in the Recipe panel instead
+        of hidden in a handler.
         """
-        self._add_preset(
-            {"split_elements": True, "create_shells": False},
-            "Splitting elements at joints",
-        )
+        from ..workflow import Step
+        from .views.step_dialog import StepDialog
 
-    def _on_mesh_areas(self) -> None:
-        """**Model ▸ Mesh areas**: append a meshing ``mesh`` step and run it."""
-        self._add_preset(
-            {"split_elements": True, "create_shells": True},
-            "Splitting elements at joints and meshing areas",
-        )
+        if self._store is None:
+            self.log("Open a SAP2000 model before preprocessing.", "warn")
+            return
+        edited = StepDialog.edit(Step(verb="mesh"), self)
+        if edited is None:
+            return
+        if edited.params.get("create_shells", True):
+            label = "Splitting elements at joints and meshing areas"
+        else:
+            label = "Splitting elements at joints"
+        self._mesh_preset_step(edited, label)
 
-    def _add_preset(self, config: dict, label: str) -> None:
-        """Append a ``mesh`` step for *config* and run the recipe.
+    def _mesh_preset_step(self, step: Any, label: str) -> None:
+        """Append *step* to the recipe and run it — the Model-menu preset pattern.
+
+        P32's analysis presets (Modal / Response spectrum / Pushover) will use
+        the same pattern: compose a step in a dialog, append it, and run the
+        recipe, so an analysis is a visible, editable step like any other.
+
+        Args:
+            step: The step to append and run.
+            label: What the Message Log should say is happening.
+        """
+        self._recipe_panel.add_step(step.verb, step.selection, step.params, optional=step.optional)
+        self._pending_label = label
+        self._on_recipe_run()
+
+    def _mesh_preset(self, config: dict, label: str) -> None:
+        """Append a ``mesh`` step for *config* and run it — the non-interactive form.
+
+        Tests and programmatic callers use this instead of the dialog; it is the
+        same preset the Model menu stands for, without the prompt.
 
         Args:
             config: The Preprocessor configuration the preset stands for.
@@ -1491,9 +1531,9 @@ class MainWindow(QMainWindow):
         if self._store is None:
             self.log("Open a SAP2000 model before preprocessing.", "warn")
             return
-        self._recipe_panel.add_step("mesh", params=config)
-        self._pending_label = label
-        self._on_recipe_run()
+        from ..workflow import Step
+
+        self._mesh_preset_step(Step(verb="mesh", params=config), label)
 
     def _on_recipe_run(self) -> None:
         """**Recipe ▸ Run recipe**: run the panel's steps on a worker.
@@ -1723,7 +1763,7 @@ class MainWindow(QMainWindow):
         Args:
             enabled: Whether a ``SAPModelData`` is loaded and can be preprocessed.
         """
-        for key in ("model.split", "model.mesh"):
+        for key in ("model.mesh",):
             self._actions[key].setEnabled(enabled)
 
     def _set_analysis_actions_enabled(self) -> None:

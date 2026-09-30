@@ -127,7 +127,7 @@ def test_preprocessing_stays_unavailable(window, tmp_path):
     window.open_results_path(str(_write_archive(tmp_path)))
 
     assert window._store is None
-    assert window._actions["model.split"].isEnabled() is False
+    assert window._actions["model.mesh"].isEnabled() is False
 
 
 def test_a_case_from_another_combination_is_qualified(window, tmp_path):

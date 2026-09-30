@@ -67,7 +67,9 @@ class TestModelPresets:
     """The Model menu writes steps into the recipe rather than hiding the work."""
 
     def test_split_elements_appends_a_split_only_step(self, window):
-        window._actions["model.split"].trigger()
+        window._mesh_preset(
+            {"split_elements": True, "create_shells": False}, "Splitting elements at joints"
+        )
         _await(window)
 
         (step,) = window._recipe_panel.recipe.steps
@@ -76,14 +78,20 @@ class TestModelPresets:
         assert window._model is not None  # the run still produced a topology
 
     def test_mesh_areas_appends_a_meshing_step(self, window):
-        window._actions["model.mesh"].trigger()
+        window._mesh_preset(
+            {"split_elements": True, "create_shells": True},
+            "Splitting elements at joints and meshing areas",
+        )
         _await(window)
 
         (step,) = window._recipe_panel.recipe.steps
         assert step.params.get("create_shells") is True
 
     def test_the_preset_registers_a_view_and_logs_the_summary(self, window):
-        window._actions["model.mesh"].trigger()
+        window._mesh_preset(
+            {"split_elements": True, "create_shells": True},
+            "Splitting elements at joints and meshing areas",
+        )
         _await(window)
 
         assert [view.key for view in window._views.views()] == ["unprocessed", "meshed"]
@@ -103,16 +111,25 @@ class TestPanel:
         assert panel._list.count() == 2
         assert panel._list.item(1).text() == "2. run_static"
 
-    def test_a_parameter_edit_reaches_the_step(self, window):
+    def test_an_edit_via_the_dialog_reaches_the_step(self, window, monkeypatch):
+        from fea_toolkit.workflow import Step
+
         panel = window._recipe_panel
         panel.add_step("mesh")
-        panel._set_param("split_slabs_at_walls", True)
+        monkeypatch.setattr(
+            "fea_toolkit.gui.views.step_dialog.StepDialog.edit",
+            staticmethod(
+                lambda step, parent=None: Step(
+                    verb=step.verb, params={"split_slabs_at_walls": True}
+                )
+            ),
+        )
+        panel._edit_step_interactive()
         assert panel.recipe.steps[0].params["split_slabs_at_walls"] is True
 
     def test_an_optional_step_is_marked_in_the_list(self, window):
         panel = window._recipe_panel
-        panel.add_step("mesh")
-        panel._on_optional_toggled(True)
+        panel.add_step("mesh", optional=True)
         assert panel.recipe.steps[0].optional is True
         assert "(optional)" in panel._list.item(0).text()
 
@@ -386,3 +403,55 @@ def test_the_verb_help_dialog_shows_the_verbs_surface(qapp):
     assert table.columnCount() == 4
     assert table.item(0, 0).text() == "cases"
     assert "run_static" in dialog.windowTitle()
+
+
+class TestStepDialog:
+    """The step inspector moved from the Recipe panel to a modal dialog (P33)."""
+
+    def _dialog(self, verb="mesh"):
+        from fea_toolkit.gui.views.step_dialog import StepDialog
+        from fea_toolkit.workflow import Step
+
+        return StepDialog(Step(verb=verb))
+
+    def test_only_non_default_params_are_emitted(self, qapp):
+        dialog = self._dialog("mesh")
+        result = dialog.result()
+        assert result.verb == "mesh"
+        assert result.params == {}  # every mesh param was left at its default
+        assert result.selection is None
+        assert result.optional is False
+
+    def test_an_edit_reaches_the_resulting_step(self, qapp):
+        dialog = self._dialog("mesh")
+        dialog._widgets["split_slabs_at_walls"].setChecked(True)
+        assert dialog.result().params == {"split_slabs_at_walls": True}
+
+    def test_the_selection_is_parsed_from_the_field(self, qapp):
+        from fea_toolkit.model.selection import Selection
+
+        dialog = self._dialog("scale_sections")
+        dialog._selection_field.setText("section=brick wall")
+        assert dialog.result().selection == Selection(sections=["brick wall"])
+
+    def test_an_invalid_selection_gates_ok(self, qapp):
+        from qtpy.QtWidgets import QDialogButtonBox
+
+        dialog = self._dialog("mesh")
+        dialog._selection_field.setText("section")
+        ok = dialog._buttons.button(QDialogButtonBox.StandardButton.Ok)
+        assert ok.isEnabled() is False
+
+    def test_the_optional_flag_is_recorded(self, qapp):
+        dialog = self._dialog("mesh")
+        dialog._optional_box.setChecked(True)
+        assert dialog.result().optional is True
+
+
+def test_show_beams_toggle_hides_frames(window):
+    """P33: a frame-visibility toggle joins Show nodes and Show shells."""
+    action = window._actions["view.show_frames"]
+    assert action.isCheckable() is True
+    assert action.isChecked() is True
+    action.setChecked(False)
+    assert action.isChecked() is False  # toggling does not raise on a live view
