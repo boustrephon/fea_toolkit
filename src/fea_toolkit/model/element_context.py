@@ -54,7 +54,7 @@ def _assignment(model: Any, etype: str, eid: str, obj: Any) -> str:
     else:
         assignments = getattr(model, "area_assignments", None) or {}
     name = assignments.get(eid)
-    if name is None:
+    if not name:
         parent = getattr(obj, "parent_id", None)
         if parent is not None:
             name = assignments.get(parent)
