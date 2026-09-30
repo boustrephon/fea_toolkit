@@ -138,6 +138,10 @@ class TestManifest:
             "check_connectivity",
             "check_self_weight",
             "check_brace_buckling",
+            "mesh_checks",
+            "hinge_length",
+            "member_shear_capacity",
+            "wall_shear_check",
             "scale_sections",
             "mesh",
             "run_static",
@@ -472,6 +476,65 @@ class TestCheckVerbs:
         """An undeclared parameter is rejected, exactly as for every other verb."""
         with pytest.raises(ValueError, match=r"unknown parameter\(s\) \['tol'\]"):
             Recipe().add("check_self_weight", params={"tol": 1e-3})
+
+
+class TestCapacityAndMeshCheckVerbs:
+    """The capacity and mesh-quality checks (P30 phase C, increment 2).
+
+    The capacity checks wrap :mod:`fea_toolkit.capacity` and stay demand-free —
+    they report a section's *capacity*, never a demand/capacity ratio.
+    ``mesh_checks`` is the one check that needs a meshed topology.
+    """
+
+    def test_hinge_length_reports_one_row_per_member(self):
+        from examples.sample_model import make_rc_frame_model
+
+        model = make_rc_frame_model()
+        run = run_recipe(Recipe(steps=[Step("hinge_length")]), model)
+        table = run.results[0].payload
+        assert table.columns == ("element", "section", "length", "Lp")
+        assert {row[0] for row in table.rows} == set(model.frame_elements)
+
+    def test_member_shear_capacity_reports_the_nominal_capacities(self):
+        from examples.sample_model import make_rc_frame_model
+
+        model = make_rc_frame_model()
+        step = Step("member_shear_capacity", Selection(sections=["COL"]))
+        run = run_recipe(Recipe(steps=[step]), model)
+        table = run.results[0].payload
+        assert table.columns == ("section", "Vc", "Vs", "Vn", "Vn_upper", "d", "dv", "bw")
+        assert [row[0] for row in table.rows] == ["COL"]
+
+    def test_wall_shear_check_reports_stress_against_the_code_limits(self):
+        model = _slab_model()
+        model.materials["C30"].Fc = 30.0e6  # Pa — the model is in N/m units
+        run = run_recipe(
+            Recipe(steps=[Step("wall_shear_check", params={"Nxy": 5000.0, "Ny": 10000.0})]),
+            model,
+        )
+        table = run.results[0].payload
+        assert table.columns == (
+            "area",
+            "tau",
+            "tau_limit",
+            "sigma",
+            "sigma_limit",
+            "ok_shear",
+            "ok_normal",
+        )
+        assert [row[0] for row in table.rows] == ["A1"]
+
+    def test_mesh_checks_needs_a_meshed_model(self):
+        with pytest.raises(StepError) as info:
+            run_recipe(Recipe(steps=[Step("mesh_checks")]), _slab_model())
+        assert "run a 'mesh' step first" in str(info.value.cause)
+
+    def test_mesh_checks_reports_the_summary_after_a_mesh_step(self):
+        run = run_recipe(Recipe(steps=[Step("mesh"), Step("mesh_checks")]), _slab_model())
+        table = run.results[-1].payload
+        assert table.title == "Mesh quality"
+        assert table.columns == ("check", "value")
+        assert dict(table.rows)["passed"] in ("True", "False")
 
 
 class TestFailuresAndCancellation:
