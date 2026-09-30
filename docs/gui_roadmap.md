@@ -76,7 +76,7 @@ Everything maps onto `QMainWindow` primitives:
 | Region | Qt primitive | Purpose |
 |---|---|---|
 | **Menubar** | `QMainWindow.menuBar()` | File / Edit / View / Model / Analysis / Results / Help |
-| **Toolbar** | `QToolBar` (top) | Open, save, run/stop, mesh/deformed/forces, units |
+| **Toolbar** | `QToolBar` (top) | Open, save, run/stop, mesh |
 | **View toolbar** | `QToolBar` (right edge, vertical) | Camera (iso / X / Y / Z), display toggles (nodes / beams / shells / restraints), results controls (deformed % / flags %) |
 | **Model Tree + Property Tree** | `QDockWidget` (`LeftDockWidgetArea`), top half — tabbed | Entity hierarchy (lazy) and object-*kind* groups |
 | **Property Inspector** | `QDockWidget` (`LeftDockWidgetArea`), bottom half — `splitDockWidget` | Editable properties of the current selection |
