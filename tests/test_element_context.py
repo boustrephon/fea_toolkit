@@ -82,9 +82,9 @@ def test_a_split_child_resolves_through_its_parent():
 
 def test_an_unassigned_element_has_no_section_or_material():
     model = _model()
-    rows = element_rows(model, model.frame_elements["2"])
-    assert ("Section", "UB300 (I/Wide Flange)") not in rows
-    assert ("Material", "Steel") not in rows
+    rows = dict(element_rows(model, model.frame_elements["2"]))
+    assert "Section" not in rows
+    assert "Material" not in rows
 
 
 def test_a_groupless_entity_has_no_groups_row():
