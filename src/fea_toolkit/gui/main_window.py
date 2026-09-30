@@ -422,9 +422,9 @@ class MainWindow(QMainWindow):
             self._tree_view.expand(index.parent())
             selection.append(QItemSelectionRange(index))
             last_index = index
-        model.select(selection, QItemSelectionModel.SelectionFlag.Select)
         if last_index is not None:
             model.setCurrentIndex(last_index, QItemSelectionModel.SelectionFlag.NoUpdate)
+        model.select(selection, QItemSelectionModel.SelectionFlag.Select)
 
     def _selected_entities(self) -> tuple:
         """``(frame_ids, area_ids, node_ids)`` sets for the current selection."""
