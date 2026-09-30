@@ -388,6 +388,23 @@ class TestSupportDisplay:
         assert "Restraints" not in _inspector_rows(window)
 
 
+class TestElementContext:
+    """A frame/area's section, material and groups reach the Inspector."""
+
+    def test_a_frame_reports_its_section_and_material(self, window):
+        """The assignment lives on the model, so the Inspector is given it."""
+        assert window._select_entity_in_tree("frame_elements", "1") is True
+        rows = _inspector_rows(window)
+        assert rows["Section"] == "SEC1 (I/Wide Flange)"
+        assert rows["Material"] == "Steel"
+
+    def test_a_node_has_no_section_or_material(self, window):
+        assert window._select_entity_in_tree("nodes", "4") is True
+        rows = _inspector_rows(window)
+        assert "Section" not in rows
+        assert "Material" not in rows
+
+
 class TestSelectionFeedback:
     """Selecting an element has to be visible in the viewport.
 

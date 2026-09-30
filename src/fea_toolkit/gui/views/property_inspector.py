@@ -82,6 +82,18 @@ def _support_rows(obj: Any, model: Any) -> list:
     return support_rows(model, obj.node_id)
 
 
+def _context_rows(obj: Any, model: Any) -> list:
+    """An element's section, material and groups, read from the model.
+
+    Frames and areas carry their assignment on the model, not on themselves, so
+    this enriches their own fields exactly as :func:`_support_rows` does for a
+    node's restraints.  Any entity type gains its group memberships.
+    """
+    from ...model.element_context import element_rows
+
+    return element_rows(model, obj)
+
+
 class PropertyInspector(QWidget):
     """Read-only property table for the current selection.
 
@@ -129,11 +141,17 @@ class PropertyInspector(QWidget):
 
         A node also reports its support conditions — restrained DOFs and its
         joint constraint — taken from the model set by
-        :meth:`set_source_model`.
+        :meth:`set_source_model`.  A frame or area additionally reports its
+        assigned section, that section's material, and the groups it belongs to,
+        resolved through the same model.
         """
         self._title.setText(object_title(obj))
         self._title.setEnabled(obj is not None)
-        rows = describe(obj) + _support_rows(obj, self._source_model)
+        rows = (
+            describe(obj)
+            + _support_rows(obj, self._source_model)
+            + _context_rows(obj, self._source_model)
+        )
         self._table.setRowCount(len(rows))
         for row, (name, value) in enumerate(rows):
             self._table.setItem(row, 0, QTableWidgetItem(name))
