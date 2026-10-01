@@ -235,6 +235,22 @@ class TestResolveConnected:
         assert "2" not in frames  # the superseded parent
         assert {"2-0", "2-1"} <= frames  # its active sub-elements
 
+    def test_a_type_qualified_exclusion_tells_a_frame_from_a_colliding_area(self):
+        """``Frame:1`` excludes the frame, not the area that shares the label."""
+        from fea_toolkit.model.sap_data import AreaElement
+        from fea_toolkit.model.selection import Selection
+
+        md = _chain_model()
+        md.area_elements["1"] = AreaElement(area_id="1", area_tag=101, node_ids=["1", "2", "3"])
+        md.area_assignments["1"] = "UB300"
+
+        frames, areas, _ = Selection(exclude_element_ids=["1"]).resolve_connected(md)
+        assert "1" not in frames and "1" not in areas  # a bare id excludes both
+
+        frames, areas, _ = Selection(exclude_element_ids=["Frame:1"]).resolve_connected(md)
+        assert "1" not in frames
+        assert "1" in areas
+
 
 @pytest.mark.needs_pyvista
 class TestViewerAppliesTheLens:

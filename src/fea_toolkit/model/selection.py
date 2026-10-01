@@ -771,10 +771,19 @@ class Selection:
             return False
         return self.exclude_constraints is None or assigned not in self.exclude_constraints
 
-    def _match_id(self, eid: str) -> bool:
-        if self.element_ids is not None and eid not in self.element_ids:
+    def _match_id(self, eid: str, etype: str) -> bool:
+        """Whether *eid* of type *etype* passes the (positive/negative) id criteria.
+
+        A bare id names frames and areas alike — the historical, type-agnostic
+        form.  A type-qualified id ``"Frame:1"`` / ``"Area:2"`` names only that
+        element type, so a frame and an area that share a SAP label can be told
+        apart; the GUI's hide/isolate relies on this.
+        """
+        positive = self.element_ids
+        if positive is not None and eid not in positive and f"{etype}:{eid}" not in positive:
             return False
-        return self.exclude_element_ids is None or eid not in self.exclude_element_ids
+        excluded = self.exclude_element_ids
+        return excluded is None or (eid not in excluded and f"{etype}:{eid}" not in excluded)
 
     def _match_node_id(self, nid: str) -> bool:
         if self.node_ids is not None and nid not in self.node_ids:
@@ -824,7 +833,7 @@ class Selection:
             # instead would select the whole model when the constraint set
             # is the only criterion.
             return False
-        if not self._match_id(eid):
+        if not self._match_id(eid, "Frame"):
             return False
         sec_name = model.frame_assignments.get(eid)
         if not self._match_section(sec_name):
@@ -864,7 +873,7 @@ class Selection:
         if self.constraints is not None:
             # See _frame_matches — a joint constraint excludes every area.
             return False
-        if not self._match_id(eid):
+        if not self._match_id(eid, "Area"):
             return False
         sec_name = model.area_assignments.get(eid)
         if not self._match_section(sec_name):
