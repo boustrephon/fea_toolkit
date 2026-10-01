@@ -119,6 +119,67 @@ def _slab_model():
     return mesh_model_from_geometry(geometry)
 
 
+def _colliding_model():
+    """A frame and an area that share the SAP label ``"1"``, plus a far frame.
+
+    SAP2000 reuses object labels across element types, so ``frame 1`` and
+    ``area 1`` are distinct entities with the same id string — the case the
+    type-qualified hidden set exists for.
+    """
+    from fea_toolkit.model.sap_data import (
+        AreaElement,
+        FrameElement,
+        Material,
+        Node,
+        SAPModelData,
+        Section,
+    )
+
+    return SAPModelData(
+        nodes={
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=10.0, y=0.0, z=0.0),
+            "3": Node(node_id="3", node_tag=3, x=20.0, y=0.0, z=0.0),
+            "4": Node(node_id="4", node_tag=4, x=30.0, y=0.0, z=0.0),
+            "5": Node(node_id="5", node_tag=5, x=0.0, y=0.0, z=10.0),
+        },
+        restraints={},
+        materials={
+            "Steel": Material(
+                name="Steel",
+                type="Steel",
+                E_mod=2.0e11,
+                G_mod=7.7e10,
+                nu=0.3,
+                unit_weight=7.85e4,
+                Fy=2.5e8,
+            )
+        },
+        sections={
+            "SEC1": Section(
+                name="SEC1",
+                shape="I/Wide Flange",
+                material="Steel",
+                A=0.005,
+                I33=8.4e-5,
+                I22=7.7e-6,
+                J=2.0e-6,
+            )
+        },
+        frame_elements={
+            "1": FrameElement(elem_id="1", elem_tag=1, node_i="1", node_j="2"),
+            "2": FrameElement(elem_id="2", elem_tag=2, node_i="3", node_j="4"),
+        },
+        area_elements={
+            "1": AreaElement(area_id="1", area_tag=101, node_ids=["1", "2", "5"]),
+        },
+        frame_assignments={"1": "SEC1", "2": "SEC1"},
+        area_assignments={"1": "SEC1"},
+        groups={},
+        frame_auto_mesh={},
+    )
+
+
 @pytest.fixture()
 def slab_window(qapp, monkeypatch, tmp_path):
     """A ``MainWindow`` showing a model with area elements."""
@@ -127,6 +188,20 @@ def slab_window(qapp, monkeypatch, tmp_path):
 
     monkeypatch.setenv(CONFIG_ENV_VAR, str(tmp_path / "absent.json"))
     win = MainWindow(model=_slab_model())
+    win.resize(900, 700)
+    win.show()
+    yield win
+    win.close()
+
+
+@pytest.fixture()
+def colliding_window(qapp, monkeypatch, tmp_path):
+    """A ``MainWindow`` showing a model whose frame and area share label ``1``."""
+    from fea_toolkit.gui.controllers.interaction import CONFIG_ENV_VAR
+    from fea_toolkit.gui.main_window import MainWindow
+
+    monkeypatch.setenv(CONFIG_ENV_VAR, str(tmp_path / "absent.json"))
+    win = MainWindow(model=_colliding_model())
     win.resize(900, 700)
     win.show()
     yield win
@@ -406,3 +481,99 @@ class TestSelectionFeedback:
         slab_window._actions["view.clear_highlights"].trigger()
 
         assert slab_window._backend.actors("highlights") == []
+
+
+class TestHideSelection:
+    """``View ▸ Display ▸ Hide selected`` / ``Isolate selected`` / ``Show all`` (P34)."""
+
+    def test_hide_selected_removes_the_shell_and_its_orphaned_nodes(self, slab_window):
+        slab_window._select_entity_in_tree("area_elements", "A1")
+        slab_window._actions["view.hide_selected"].trigger()
+
+        _frames, shells, nodes = slab_window._viewer.geometry()
+        assert {s.area_id for s in shells} == {"A2", "A3", "A4"}
+        # Node 1 is referenced only by the hidden slab; shared corners 2/4/5 stay.
+        assert {n.node_id for n in nodes} == {"2", "3", "4", "5", "6", "7", "8", "9"}
+
+    def test_show_all_restores_the_hidden_shell(self, slab_window):
+        slab_window._select_entity_in_tree("area_elements", "A1")
+        slab_window._actions["view.hide_selected"].trigger()
+        assert {s.area_id for s in slab_window._viewer.geometry()[1]} == {"A2", "A3", "A4"}
+
+        slab_window._actions["view.show_all"].trigger()
+        assert {s.area_id for s in slab_window._viewer.geometry()[1]} == {"A1", "A2", "A3", "A4"}
+
+    def test_hide_survives_a_display_refresh(self, slab_window):
+        slab_window._select_entity_in_tree("area_elements", "A1")
+        slab_window._actions["view.hide_selected"].trigger()
+
+        slab_window._shrink.setValue(0.9)  # re-render via _refresh_display
+
+        assert {s.area_id for s in slab_window._viewer.geometry()[1]} == {"A2", "A3", "A4"}
+
+    def test_hide_selected_with_no_selection_warns(self, slab_window):
+        slab_window._actions["view.hide_selected"].trigger()
+        assert "Nothing selected to hide" in slab_window._message_log.toPlainText()
+
+    def test_show_all_with_nothing_hidden_warns(self, slab_window):
+        slab_window._actions["view.show_all"].trigger()
+        assert "Nothing is hidden" in slab_window._message_log.toPlainText()
+
+    def test_a_preprocessing_result_clears_the_hidden_set(self, slab_window):
+        slab_window._select_entity_in_tree("area_elements", "A1")
+        slab_window._actions["view.hide_selected"].trigger()
+        assert slab_window._hidden_elem_ids == {"Area:A1"}
+
+        slab_window._show_geometry_result("Meshed", _slab_model())
+
+        assert slab_window._hidden_elem_ids == set()
+        assert "hidden elements were restored" in slab_window._message_log.toPlainText()
+
+    def test_isolate_selected_hides_everything_else(self, slab_window):
+        slab_window._select_entity_in_tree("area_elements", "A1")
+        slab_window._actions["view.isolate_selected"].trigger()
+
+        assert slab_window._hidden_elem_ids == {"Area:A2", "Area:A3", "Area:A4"}
+        _frames, shells, nodes = slab_window._viewer.geometry()
+        assert {s.area_id for s in shells} == {"A1"}
+        # Only A1's corners remain: its exclusive node 1 plus the shared 2/4/5.
+        assert {n.node_id for n in nodes} == {"1", "2", "4", "5"}
+
+    def test_show_all_restores_after_isolate(self, slab_window):
+        slab_window._select_entity_in_tree("area_elements", "A1")
+        slab_window._actions["view.isolate_selected"].trigger()
+        assert {s.area_id for s in slab_window._viewer.geometry()[1]} == {"A1"}
+
+        slab_window._actions["view.show_all"].trigger()
+        assert {s.area_id for s in slab_window._viewer.geometry()[1]} == {"A1", "A2", "A3", "A4"}
+
+    def test_isolate_selected_replaces_the_prior_hidden_set(self, slab_window):
+        slab_window._select_entity_in_tree("area_elements", "A4")
+        slab_window._actions["view.hide_selected"].trigger()
+        assert slab_window._hidden_elem_ids == {"Area:A4"}
+
+        slab_window._select_entity_in_tree("area_elements", "A1")
+        slab_window._actions["view.isolate_selected"].trigger()
+        assert slab_window._hidden_elem_ids == {"Area:A2", "Area:A3", "Area:A4"}
+
+    def test_isolate_selected_with_no_selection_warns(self, slab_window):
+        slab_window._actions["view.isolate_selected"].trigger()
+        assert "Nothing selected to isolate" in slab_window._message_log.toPlainText()
+
+    def test_isolate_tells_a_frame_from_an_area_that_share_an_id(self, colliding_window):
+        colliding_window._select_entity_in_tree("frame_elements", "1")
+        colliding_window._actions["view.isolate_selected"].trigger()
+
+        assert colliding_window._hidden_elem_ids == {"Frame:2", "Area:1"}
+        frames, shells, _nodes = colliding_window._viewer.geometry()
+        assert {f.elem_id for f in frames} == {"1"}
+        assert {s.area_id for s in shells} == set()
+
+    def test_isolate_an_area_leaves_a_same_id_frame_hidden(self, colliding_window):
+        colliding_window._select_entity_in_tree("area_elements", "1")
+        colliding_window._actions["view.isolate_selected"].trigger()
+
+        assert colliding_window._hidden_elem_ids == {"Frame:1", "Frame:2"}
+        frames, shells, _nodes = colliding_window._viewer.geometry()
+        assert {f.elem_id for f in frames} == set()
+        assert {s.area_id for s in shells} == {"1"}

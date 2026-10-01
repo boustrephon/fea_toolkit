@@ -189,6 +189,7 @@ class MainWindow(QMainWindow):
         self._selection_index: Any = None
         self._interaction: Any = None
         self._mouse_filter: Any = None
+        self._hidden_elem_ids: set[str] = set()
         self._default_style: Any = None  # interactor style to restore after Select mode
         self._worker: Any = None
         self._policy, self._policy_notes = load_policy()
@@ -670,6 +671,17 @@ class MainWindow(QMainWindow):
         a["view.clear_highlights"] = self._real_action(
             "Clear highlights", self._on_clear_highlights, tip="Drop the selection highlight"
         )
+        a["view.hide_selected"] = self._real_action(
+            "Hide selected", self._on_hide_selected, tip="Hide the selected elements"
+        )
+        a["view.isolate_selected"] = self._real_action(
+            "Isolate selected",
+            self._on_isolate_selected,
+            tip="Hide everything but the selected elements",
+        )
+        a["view.show_all"] = self._real_action(
+            "Show all", self._on_show_all, tip="Restore every hidden element"
+        )
         a["view.select_mode"] = self._toggle_action(
             "Select mode",
             self._on_select_mode_toggled,
@@ -788,6 +800,9 @@ class MainWindow(QMainWindow):
         ):
             display.addAction(a[key])
         display.addSeparator()
+        display.addAction(a["view.hide_selected"])
+        display.addAction(a["view.isolate_selected"])
+        display.addAction(a["view.show_all"])
         display.addAction(a["view.clear_highlights"])
         m.addSeparator()
         m.addAction(a["view.select_mode"])
@@ -1125,6 +1140,28 @@ class MainWindow(QMainWindow):
 
     # ── Model display ───────────────────────────────────────────────
 
+    def _merge_hidden(self, view_selection: Any) -> Any:
+        """Layer the hidden-element set over *view_selection* as exclusions.
+
+        ``None`` when there is nothing to hide and no view lens.  Otherwise a
+        ``Selection`` whose ``exclude_element_ids`` carries the hidden ids over
+        any lens already on *view_selection*.  A node-scoped lens is returned
+        unchanged: its joint expansion does not consult ``exclude_element_ids``
+        (a known limitation), so folding the exclusions in would be ignored.
+        """
+        if not self._hidden_elem_ids and view_selection is None:
+            return None
+        from dataclasses import replace
+
+        from ..model.selection import Selection
+
+        base = view_selection if view_selection is not None else Selection()
+        if "Node" in (getattr(base, "element_types", None) or ()):
+            return view_selection
+        excluded = set(base.exclude_element_ids or ())
+        excluded.update(self._hidden_elem_ids)
+        return replace(base, exclude_element_ids=sorted(excluded))
+
     def show_model(
         self,
         model: Any,
@@ -1155,6 +1192,8 @@ class MainWindow(QMainWindow):
         from ..model.mesh_model import MeshModel
         from ..model.sap_data import SAPModelData
         from ..plotting.viewer import ModelViewer
+
+        selection = self._merge_hidden(selection)
 
         camera = None
         if not reset_view:
@@ -1666,6 +1705,72 @@ class MainWindow(QMainWindow):
         """Show or hide the support symbols."""
         self._backend.set_category_visible("restraints", checked)
 
+    def _on_hide_selected(self) -> None:
+        """**View ▸ Display ▸ Hide selected**: hide the selected elements.
+
+        Folds the selected frame/area ids into the persistent hidden set, then
+        re-renders in place.  A node-only selection is a no-op — a lone joint has
+        no surface to hide, and ``Selection.resolve_connected`` drops its nodes
+        automatically once their elements are hidden.
+        """
+        refs = self._selected_element_refs()
+        if not refs:
+            self.log("Nothing selected to hide.", "warn")
+            return
+        self._hidden_elem_ids.update(refs)
+        self._refresh_display()
+        self.log(f"Hid {len(refs)} element(s).")
+
+    def _on_show_all(self) -> None:
+        """**View ▸ Display ▸ Show all**: restore every hidden element."""
+        if not self._hidden_elem_ids:
+            self.log("Nothing is hidden.", "warn")
+            return
+        self._hidden_elem_ids.clear()
+        self._refresh_display()
+        self.log("Restored all hidden elements.")
+
+    def _all_element_ids(self) -> set[str]:
+        """Every ``Frame:``/``Area:`` id the displayed model can draw.
+
+        Ids are type-qualified so a frame and an area sharing a SAP label stay
+        distinct — ``Selection.exclude_element_ids`` is a flat list that cannot
+        tell them apart on its own.  Inactive (split/meshed) parents are
+        skipped, so an id that is never drawn cannot leak into the hidden set.
+        """
+        model = self._model
+        ids: set[str] = set()
+        for etype, attr in (("Frame", "frame_elements"), ("Area", "area_elements")):
+            for key, elem in (getattr(model, attr, {}) or {}).items():
+                if not getattr(elem, "inactive", False):
+                    ids.add(f"{etype}:{key}")
+        return ids
+
+    def _selected_element_refs(self) -> set[str]:
+        """Type-qualified element ids for the current tree selection.
+
+        Unlike :meth:`current_selection` — which collapses frames and areas into
+        one ``element_ids`` list — this keeps the type, so a frame and an area
+        that share a SAP label are hidden/isolated independently.
+        """
+        frames, areas, _nodes = self._selected_entities()
+        return {f"Frame:{fid}" for fid in frames} | {f"Area:{aid}" for aid in areas}
+
+    def _on_isolate_selected(self) -> None:
+        """**View ▸ Display ▸ Isolate selected**: hide everything but the selection.
+
+        The inverse of ``Hide selected``: the hidden set is *replaced* by every
+        drawable element id minus the selected ones, so only the selection (and
+        its shared joints) remains.  ``Show all`` restores the full model.
+        """
+        keep = self._selected_element_refs()
+        if not keep:
+            self.log("Nothing selected to isolate.", "warn")
+            return
+        self._hidden_elem_ids = self._all_element_ids() - keep
+        self._refresh_display()
+        self.log(f"Isolated {len(keep)} element(s).")
+
     def _on_shell_opacity_changed(self, value: float) -> None:
         """Apply the new shell opacity to the drawn actors, in place.
 
@@ -1962,6 +2067,9 @@ class MainWindow(QMainWindow):
         else:
             key, name = "processed", "Processed"
         self._views.add_geometry(key, name, mesh_model, source=f"Recipe: {label}")
+        if self._hidden_elem_ids:
+            self._hidden_elem_ids.clear()
+            self.log("Preprocessing rebuilt the model; hidden elements were restored.")
         self.show_model(mesh_model, reset_view=False)
         self.log(f"Added view: {name}.")
 
@@ -2157,6 +2265,7 @@ class MainWindow(QMainWindow):
 
         first = self._views.get(f"results:{keys[0]}")
         if first is not None:
+            self._hidden_elem_ids.clear()
             self._show_view(first, rebuild_tree=True)
         return True
 
@@ -2210,6 +2319,7 @@ class MainWindow(QMainWindow):
             self.log(f"Failed to open {path}: {exc}", "error")
             return False
         self._remember_source(model, source=path)
+        self._hidden_elem_ids.clear()
         self.show_model(model)
         return True
 
