@@ -827,25 +827,75 @@ restored.  The natural pairing with the multi-selection work that just landed:
 the selection is already a ``Selection`` (``MainWindow.current_selection()``),
 so hide/show is a render-scope operation, not a new data model.
 
+**Groundwork (already done).**  The machinery this item once assumed it would
+have to build is in place: ``Selection`` carries ``exclude_element_ids`` (and
+the other ``exclude_*`` fields), and ``Selection.resolve_connected()`` — the
+**display** resolution that ``ModelViewer(selection=...)`` calls — honours them.
+So "hide" is a selection *lens with exclusions*, resolved into ``(frames,
+areas, nodes)`` before geometry is extracted.  No new renderer concept, and no
+batched-visibility work in ``plotting/renderers/pyvista.py``.  Covered by
+``tests/test_view_selection.py`` and ``tests/test_sections_selection.py``.
+
 **Routes (A then B).**
 
 1. **Hide / show selected (quick win).**  ``View ▸ Display ▸ Hide selected`` and
-   ``Show all``.  A hidden set of category → SAP labels lives in ``MainWindow``;
-   hiding removes those entities from the scene, and ``Show all`` restores them.
-   Because the PyVista backend batches a whole category into one actor, per-
-   element hide means re-rendering the batch *without* the hidden ids — rebuild
-   the scene from the model minus the hidden set, keeping the camera — rather
-   than toggling individual cells.
-2. **Isolate selected (inverse).**  ``Hide unselected`` — everything not in the
-   current selection is hidden; restore is the same ``Show all``.
+   ``Show all``.  Planned steps:
+   - a ``_hidden_elem_ids`` set on ``MainWindow``, folded into the render
+     selection by a ``_merge_hidden(view_selection)`` helper
+     (``dataclasses.replace`` layers ``exclude_element_ids`` over any view
+     lens), applied inside ``show_model`` so every render path honours it;
+   - ``Hide selected`` folds ``current_selection()`` into the set and calls
+     ``_refresh_display()`` — which already re-renders keeping the camera and the
+     tree selection; ``Show all`` clears the set and re-renders;
+   - the set resets when a new model is opened (``open_path`` /
+     ``open_results``) or the topology is rebuilt (a ``mesh``/``split`` result),
+     not on a view switch or a shrink/opacity refresh.
 
-**Open decisions.** (a) Whether a hidden element's *nodes* are hidden too, or
-left for context.  (b) Whether the hidden set is per-view or global.  (c) That a
-deformed / force overlay must respect the same hide set, so this is cleanest
-after the result views (P30) are in.  Revisit then.
+   Because the re-render goes through the existing selection lens, a deformed or
+   force overlay drawn for the same view is already narrowed to the visible
+   geometry — no per-overlay hide plumbing.
+2. **Isolate selected (inverse) — done.**  ``View ▸ Display ▸ Isolate selected``
+   (the "Hide unselected" inverse) *replaces* the hidden set with every drawable
+   element id except the current selection, so only the selection (and its
+   shared joints) remains.  ``Show all`` restores the full model.  The same
+   ``_merge_hidden`` lens, node-orphaning and mesh/``open`` resets as route A
+   apply.  ``MainWindow._all_element_ids`` enumerates the drawable ids from the
+   displayed model, skipping inactive split/meshed parents so an id that is
+   never drawn cannot leak into the hidden set.
 
-**Touches.** `plotting/renderers/pyvista.py` (batched visibility), `plotting/
-viewer.py` + `gui/main_window.py` (the hide set + two menu actions), and
+**Decisions taken for route A.**
+(a) Hide is element-scoped, and node-orphaning is automatic.  Hiding folds the
+selected frame/area ids into ``exclude_element_ids`` only — never
+``exclude_node_ids``.  ``Selection.resolve_connected()`` already returns the
+drawn node set as the joints of the elements shown, so a node referenced only
+by hidden elements drops out, while a shared node (a column base on a hidden
+slab's corner) stays.  ``exclude_node_ids`` is deliberately unused: setting it
+flips ``resolve_connected`` into joint-expansion mode and would reintroduce a
+hidden element through any shared end/corner node.  Explicit node-hide (a lone
+joint) is deferred — a v1 no-op when the selection has no frame/area ids — and
+a node-scoped derived view's expansion does not consult ``exclude_element_ids``,
+so hiding a member inside one is a known, pre-existing limitation.
+(b) The hidden set is **global per model** — it survives Unprocessed/Processed
+view switches and shrink/opacity refreshes, and resets when a new file is
+opened (``open_path`` / ``open_results``) or the topology is rebuilt (a
+``mesh``/``split`` result), because re-id'd sub-elements would otherwise
+partially reappear.  Per-view hide is a later option.
+(c) Overlay respect is **free**: deformed/force overlays and the highlight all
+read the lens-filtered ``_frames``/``_shells``/``_nodes``, so a hidden element
+cannot be drawn in them — P30 is no longer a gate.  Caveat: re-rendering resets
+an active results overlay (``show_model`` → ``_reset_results_overlay``), so hide
+drops the deformed/force view and it is re-applied afterward.
+(d) Frame/area ids can collide, so hide is **type-qualified**.  SAP2000 reuses
+object labels across element types — the Admin Building has 320 areas whose id
+collides with a frame — so a bare ``exclude_element_ids`` entry would hide (or
+fail to hide) *both*.  ``Selection._match_id`` now accepts a type-qualified id
+(``"Frame:1"`` / ``"Area:2"``) alongside the bare form, and the GUI stores the
+hidden set as qualified refs (``_all_element_ids`` / ``_selected_element_refs``)
+so a frame and an area that share a label are hidden and isolated independently.
+
+**Touches.** `gui/main_window.py` (the hide set + three menu actions) and
+`model/selection.py` (`_match_id` gains a type-qualified id form).  No change
+to `plotting/renderers/pyvista.py` or `plotting/viewer.py` for routes A/B;
 `gui/views/selection_dialog.py` only if hide is ever exposed as a step.
 
 ### Tier 4 — Deferred / low-priority
