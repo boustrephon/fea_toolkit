@@ -77,6 +77,10 @@ def test_polygon_fully_inside_hits_window():
     assert polygon_inside_rect([(2, 2), (8, 2), (8, 8), (2, 8)], 0, 0, 10, 10) is True
 
 
+def test_polygon_inside_rect_rejects_empty_vertices():
+    assert polygon_inside_rect([], 0, 0, 10, 10) is False
+
+
 def test_polygon_with_a_vertex_out_misses_window():
     # a vertex pokes out, so it is not enclosed -- window rejects, crossing accepts
     assert polygon_inside_rect([(5, 5), (20, 5), (20, 20), (5, 20)], 0, 0, 10, 10) is False

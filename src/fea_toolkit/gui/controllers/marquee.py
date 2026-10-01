@@ -101,6 +101,8 @@ def polygon_inside_rect(
     the *window* marquee test for areas, in contrast to :func:`polygon_hits_rect`
     (the *crossing* test).
     """
+    if not vertices:
+        return False
     return all(point_in_rect(px, py, x0, y0, x1, y1) for px, py in vertices)
 
 
