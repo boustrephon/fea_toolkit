@@ -745,7 +745,7 @@ that section.
 
 4. **Advanced Analyses**  
    - ~~Modal Analysis~~ ✅ `run_modal_analysis()` implemented — eigenvalue extraction with modal properties table.  
-   - ~~Response Spectrum~~ ✅ `run_response_spectrum_analysis()` + `extract_element_rs_forces()` + rigid / missing-mass corrections via `spectrum.cqc_base_shear(...)`.  
+   - ~~Response Spectrum~~ ✅ `run_response_spectrum_analysis()` + `extract_element_rs_forces()`; ⚠️ the rigid / missing-mass correction is implemented as the `spectrum.cqc_base_shear(...)` helper but is **not yet wired into** `AnalysisBuilder.run_response_spectrum_analysis()` — see `examples/modal_rs_analysis.py`.  
    - ~~Nonlinear Static Pushover~~ ✅ `run_pushover_analysis()` implemented — see [`docs/pushover_analysis.md`](docs/pushover_analysis.md).  
    - ~~HingeRadau integration~~ ✅ `beam_integration` config option (`'Lobatto'` / `'HingeRadau'`).  
    - ~~Brace subdivision (Approach A)~~ ✅ `subdivide_elements()` in `geometry.py`, `set_brace_selection()` / `check_brace_buckling()` in builder.  
