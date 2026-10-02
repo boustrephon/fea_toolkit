@@ -5,11 +5,11 @@ status: "draft"
 tags: [planning, work-log, internal]
 category: [planning]
 ---
-# Pending work — fea_toolkit (2026-09-30)
+# Pending work — fea_toolkit (2026-10-02)
 
 ## PENDING (active — not yet done)
 
-> Priority-ordered register (maintained 2026-09-30).  Every pending item
+> Priority-ordered register (maintained 2026-10-02).  Every pending item
 > below is cross-referenced to its source document.  **Sequencing notes:**
 > Tier 1 (P1 force-diagram unification, P2 large-file splits) landed
 > 2026-08-24 — see the DONE register.  The Tier 2 physics items (P3 solver
@@ -21,6 +21,10 @@ category: [planning]
 > not on the shear-strong V&E frame), and the P4 re-check plus the V&B
 > (1990) variant are deferred alongside it.  Tiers 3–4 are independent
 > feature gaps and deferred housekeeping.
+>
+> Since then the Tier 3 workflow/GUI batch has landed: P20/P21 (external
+> combination sets), P29 (workflow Phases A–B), P33 (GUI ergonomics) and
+> P34 (hide/isolate) — see the DONE register.
 
 ### Tier 2 — Correctness / physics follow-ups
 
