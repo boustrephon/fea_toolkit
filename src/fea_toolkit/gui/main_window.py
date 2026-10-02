@@ -1162,6 +1162,22 @@ class MainWindow(QMainWindow):
         excluded.update(self._hidden_elem_ids)
         return replace(base, exclude_element_ids=sorted(excluded))
 
+    def _warn_if_view_node_scoped(self) -> None:
+        """Warn when hide / isolate cannot take visible effect on the active view.
+
+        A node-scoped lens is the one case :meth:`_merge_hidden` returns
+        unchanged — its joint expansion does not consult ``exclude_element_ids``
+        — so the freshly hidden elements remain visible until the user switches
+        to a view whose selection is not node-scoped.
+        """
+        view = self._views.active
+        selection = view.selection if view is not None else None
+        if "Node" in (getattr(selection, "element_types", None) or ()):
+            self.log(
+                "This view's selection is node-scoped, so hidden elements remain visible here.",
+                "warn",
+            )
+
     def show_model(
         self,
         model: Any,
@@ -1720,6 +1736,7 @@ class MainWindow(QMainWindow):
         self._hidden_elem_ids.update(refs)
         self._refresh_display()
         self.log(f"Hid {len(refs)} element(s).")
+        self._warn_if_view_node_scoped()
 
     def _on_show_all(self) -> None:
         """**View ▸ Display ▸ Show all**: restore every hidden element."""
@@ -1770,6 +1787,7 @@ class MainWindow(QMainWindow):
         self._hidden_elem_ids = self._all_element_ids() - keep
         self._refresh_display()
         self.log(f"Isolated {len(keep)} element(s).")
+        self._warn_if_view_node_scoped()
 
     def _on_shell_opacity_changed(self, value: float) -> None:
         """Apply the new shell opacity to the drawn actors, in place.
