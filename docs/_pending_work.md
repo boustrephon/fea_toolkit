@@ -737,7 +737,10 @@ Neither blocks the other, and a user gains from either alone.
 Source: `docs/workflow_authoring.md` → *Resolving the `generate_report`
 duality*; `docs/report_generation.md`.
 
-**Status: 🚧 Not started.**
+**Status: ⚠️ Partial** — the three analysis verbs (`modal`, `response_spectrum`,
+`pushover`) and the precursor validation (Decision 0) landed 2026-10-02;
+remaining: `generate_report` composing the registry, and the greyed GUI
+analysis actions becoming presets.
 
 **What.** `generate_report(config)` is already a fixed, declarative pipeline, and
 a `Recipe` is the same idea made editable.  They currently coexist, deliberately.
@@ -821,6 +824,10 @@ register ("StepDialog float precision").
 
 #### P34 — Selection-scoped hide / isolate (dig into a model)
 
+**Status: ✅ Landed** (routes A and B) — Hide selected / Isolate selected and the
+node-scoped-view warnings all landed (commits `1b4a5e9`, `6581017`, `7b75540`).
+**Deferred:** explicit node-hide (a lone joint) and per-view hide (decision (b)).
+
 **What.** Select elements in the viewport and hide them — or isolate them (hide
 everything else) — so a crowded model can be examined layer by layer, then
 restored.  The natural pairing with the multi-selection work that just landed:
@@ -897,6 +904,53 @@ so a frame and an area that share a label are hidden and isolated independently.
 `model/selection.py` (`_match_id` gains a type-qualified id form).  No change
 to `plotting/renderers/pyvista.py` or `plotting/viewer.py` for routes A/B;
 `gui/views/selection_dialog.py` only if hide is ever exposed as a step.
+
+#### P35 — Named selections, and the document-lifecycle verbs (open / close / save)
+
+Source: the 2026-10-02 planning session (post-review); pairs with workflow
+Phase E (P32) and the GUI model tree.
+
+**What.** Two related additions, both agreed:
+
+1. **Named selections.**  Define a selection **by text** (the existing
+   ``Selection.from_string`` grammar) or **by graphical pick** (the viewport /
+   tree selection), save it under a name, and show it in the Model Tree under a
+   dedicated **Selections** node.  A named selection is a saved ``Selection`` —
+   the workflow layer's scoping primitive — so it is **not** folded into SAP
+   ``Groups`` (file-derived, already the ``Selection(groups=...)`` filter);
+   instead it follows the synthetic-``Views``-group precedent
+   (``gui/models/model_index.py`` ``views_group``).  **Middle path (agreed):** a
+   step may also *reference* a named selection as its scope — a new
+   ``Selection.selections=[...]`` field, serialised through
+   ``to_string()``/``from_string()`` — so it composes with the existing grammar
+   without conflating storage.
+
+2. **Document-lifecycle verbs.**  ``open`` / ``close`` / ``save`` as *recipe*
+   verbs that mutate the working document (agreed), with default versioned
+   filenames — a ``next_version_path(path)`` helper inserts ``_v1``/``_v2``…
+   before the extension.  ``close`` takes ``save`` (bool) and ``versioned``
+   (bool); ``save`` takes ``path``/``versioned``; ``open`` takes ``path`` (format
+   auto-detected via ``io.model_loader.load_model_data``).  A ``select`` verb
+   makes (or applies) a named selection (``name`` + ``expression`` or ``ids``).
+
+**Design decisions (settled 2026-10-02).**
+- ``open``/``close``/``save`` are recipe verbs that mutate document state:
+  extend ``StepContext`` with a document handle (current path + dirty flag +
+  named-selections store) and a new ``SESSION`` result kind; ``open``/``close``
+  replace/clear ``model_data``/``model``.  A recipe beginning with ``open`` is a
+  *document recipe* — the honest generalisation of ``run_recipe``.
+- Named selections render under a dedicated **Selections** node (not SAP
+  Groups), with the middle-path step-scope reference provided as well.
+
+**Sequencing.** Foundation first (``NamedSelection`` + the Selections node +
+text/graphical authoring), then the document verbs once the ``StepContext``
+extension is decided.
+
+**Touches (anticipated).** ``model/selection.py`` (``selections`` field),
+``model/named_selection.py`` (new), ``gui/models/model_index.py`` (Selections
+group), ``workflow/steps.py`` (``SESSION`` kind + ``StepContext`` document
+state), ``workflow/verbs/{open,close,save,select}.py``, ``io/`` (versioned-path
+helper), and the GUI's tree + selection-authoring surface.
 
 ### Tier 4 — Deferred / low-priority
 
