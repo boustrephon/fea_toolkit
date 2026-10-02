@@ -22,9 +22,10 @@ category: [planning]
    storage and HTML-rendering stages, which are *not* verbs) and the greyed
    `Analysis ▸ Modal / Response spectrum / Pushover` entries become presets.
    Landed 2026-10-02: the `pushover` verb declares `gravity_patterns`,
-   `brace_type`, `brace_sections` and `return_builders`, and `generate_report`
-   now composes the modal / RS / pushover verbs (its storage and rendering
-   stages stay report-only).
+   `brace_type`, `brace_sections` and `return_builders`; `generate_report`
+   composes the modal / RS / pushover verbs (its storage and rendering stages
+   stay report-only); and the `Analysis ▸ Modal / Response spectrum / Pushover`
+   entries are recipe presets.
 2. **P30 charts** — the remaining `chart` plots (`storey_forces`, pushover,
    modal, CSM), consuming P32's results.  **Flag:** `storey_forces` may want
    **P19** (member-interior force stations) — pull it forward if it blocks
@@ -781,10 +782,10 @@ Neither blocks the other, and a user gains from either alone.
 Source: `docs/workflow_authoring.md` → *Resolving the `generate_report`
 duality*; `docs/report_generation.md`.
 
-**Status: ⚠️ Partial** — the three analysis verbs (`modal`, `response_spectrum`,
-`pushover`), the precursor validation (Decision 0), and `generate_report`
-composing the registry landed 2026-10-02; remaining: the greyed GUI analysis
-actions becoming presets.
+**Status: ✅ Landed (2026-10-02)** — the three analysis verbs (`modal`,
+`response_spectrum`, `pushover`), the precursor validation (Decision 0),
+`generate_report` composing the registry, and the greyed GUI analysis actions
+becoming presets all landed.
 
 **What.** `generate_report(config)` is already a fixed, declarative pipeline, and
 a `Recipe` is the same idea made editable.  They currently coexist, deliberately.
