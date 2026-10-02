@@ -73,6 +73,11 @@ PUSHOVER_PARAMS: dict[str, ParamSpec] = {
         help="OpenSees builder overrides, merged over the material-type defaults.",
         manifest=BUILDER_CONFIG_KEYS,
     ),
+    "return_builders": ParamSpec(
+        default=False,
+        type=bool,
+        help="Retain each direction's builder for stage-file export.",
+    ),
 }
 
 
@@ -107,6 +112,7 @@ def run_pushover(context: StepContext, step: Step) -> list[StepResult]:
         directions=params["directions"],
         name=params["name"],
         config=params["config"] or None,
+        return_builders=params["return_builders"],
     )
     context.results["pushover"] = result
     context.log(f"Pushover ({params['directions']}): complete")

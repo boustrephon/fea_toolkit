@@ -227,6 +227,7 @@ class TestAnalysisVerbs:
         assert params["gravity_patterns"].type is dict
         assert params["brace_type"].choices == ("truss", "beam")
         assert params["brace_sections"].type is list
+        assert params["return_builders"].type is bool
 
     def test_pushover_passes_gravity_and_brace_through(self, monkeypatch):
         """Every declared parameter reaches ``run_pushover_analysis`` unchanged."""
@@ -247,6 +248,7 @@ class TestAnalysisVerbs:
                 "gravity_patterns": {"DEAD": 1.0, "LIVE": 0.5},
                 "brace_type": "beam",
                 "brace_sections": ["BRACE-1"],
+                "return_builders": True,
             },
         )
         STEP_SPECS["pushover"].run(context, step)
@@ -254,6 +256,7 @@ class TestAnalysisVerbs:
         assert captured["gravity_patterns"] == {"DEAD": 1.0, "LIVE": 0.5}
         assert captured["brace_type"] == "beam"
         assert captured["brace_sections"] == ["BRACE-1"]
+        assert captured["return_builders"] is True
 
 
 class TestRecipeSerialisation:

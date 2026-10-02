@@ -55,12 +55,7 @@ except ImportError:  # pragma: no cover — pandas is optional (Rhino 8 CPython)
 
     pd = _MissingPandas()  # type: ignore[assignment]
 
-from .analysis import (
-    run_modal_analysis,
-    run_pushover_analysis,
-    run_response_spectrum_analysis,
-    run_static_analysis,
-)
+from .analysis import run_static_analysis
 from .analysis.linear import static_load_verification, wind_sanity_check
 from .io.log import AnalysisLog
 from .io.report import (
@@ -89,6 +84,7 @@ from .utils import (
     infer_loads,
     pick_wind,
 )
+from .workflow import Recipe, run_recipe
 
 # ────────────────────────────────────────────────────────────────────
 # Generic defaults — override at the call site per-project.
@@ -495,23 +491,19 @@ def generate_report(
     else:
         push_alpha_max, push_tg, push_zeta = alpha_max, tg, zeta
 
-    # ── Core analyses (modal, linear, RS, pushover) ──────────────
-    # Explicit pipeline order: modal first (feeds RS, pushover, CSM),
-    # then static linear, response spectrum, and pushover.  Each step
-    # is a module-level function returning an AnalysisResult.
+    # ── Core analyses (static, modal, RS, pushover) ──────────────
+    # The modal / response-spectrum / pushover analyses are composed from the
+    # workflow verbs — the same vocabulary a Recipe or the GUI runs — while the
+    # static-linear pass stays a direct call (there is no verb for it) and the
+    # storage / presentation stages below stay report-only (a write or a render
+    # is not a model operation).  ``generate_report`` is therefore a shorthand
+    # for a recipe, not a second spelling of one.
     if verbose:
         print("Running analyses...")
 
     _man_results: dict = {}
 
-    # Modal (always required)
-    _man_results["ModalAnalysis"] = run_modal_analysis(
-        mesh_model, n_modes=n_modes, name="ModalAnalysis", config={"verbose": verbose}
-    )
-    modal_result = _man_results["ModalAnalysis"].data
-    modal = modal_result["modal"]
-
-    # Static linear (if enabled)
+    # Static linear (if enabled) — a direct call, as there is no verb for it.
     if cfg.get("linear", {}).get("run", True):
         # Propagate the resolved n_modes (general.n_modes, default 12) into
         # linear_cfg so run_linear_cases' RS pass stays consistent with the
@@ -528,41 +520,57 @@ def generate_report(
             collect_raw=bool(export_cfg.get("static", False)),
         )
 
-    # Response spectrum (one per direction)
+    # Modal → response spectrum → pushover, authored as a recipe of verbs.  The
+    # ``kind``/``needs`` chain (Decision 0) validates the order; each verb is a
+    # thin wrapper over the same analysis function the report used to call.
+    analysis_recipe = Recipe(name="report")
+    analysis_recipe.add("modal", params={"n_modes": n_modes, "name": "ModalAnalysis"})
     if T_spec and Sa_spec:
         for rs_dir in ("X", "Y"):
-            _man_results[f"RS-{rs_dir}"] = run_response_spectrum_analysis(
-                mesh_model,
-                modal_result=_man_results["ModalAnalysis"],
-                direction=rs_dir,
-                T_spec=T_spec,
-                Sa_spec=Sa_spec,
-                damping=zeta,
-                n_modes=n_modes,
-                name=f"RS-{rs_dir}",
+            analysis_recipe.add(
+                "response_spectrum",
+                params={
+                    "direction": rs_dir,
+                    "T_spec": T_spec,
+                    "Sa_spec": Sa_spec,
+                    "damping": zeta,
+                    "n_modes": n_modes,
+                    "name": f"RS-{rs_dir}",
+                },
             )
-
-    # Pushover (one per pattern)
-    # Note: rs_modal_base_shear is not available until after modal + RS
-    # run, so it's omitted here (the mode1 diagnostic is skipped).
+    # Note: rs_modal_base_shear is not available until after modal + RS run, so
+    # it is omitted here (the mode1 diagnostic is skipped).
     if cfg.get("pushover") and push_cfg.get("patterns") and push_cfg.get("directions"):
         for pattern in push_cfg["patterns"]:
-            _man_results[f"Pushover-{pattern}"] = run_pushover_analysis(
-                mesh_model,
-                modal_result=_man_results["ModalAnalysis"],
-                gravity_patterns=load_cfg["gravity"],
-                lateral_load_type=pattern,
-                max_disp_val=push_cfg["max_disp"],
-                num_steps=push_cfg["num_steps"],
-                brace_type=push_cfg.get("brace_type", "beam"),
-                brace_sections=push_cfg.get("brace_sections"),
-                directions=push_cfg["directions"],
-                name=f"Pushover-{pattern}",
-                config={"record_pushover_steps": True}
-                if export_cfg.get("pushover", False)
-                else None,
-                return_builders=bool(export_cfg.get("pushover", False)),
-            )
+            # The report's pushover is the steel path, where the ``directions``
+            # list is a no-op (``run_pushover_4dir`` always pushes all four), so
+            # it stays at the verb's ``"4dir"`` default.  ``gravity_patterns`` and
+            # ``brace_sections`` are optional, so they are omitted when unset —
+            # the verb's declared types (a mapping / a list) must hold.
+            push_params: dict = {
+                "lateral_load_type": pattern,
+                "max_disp_val": push_cfg["max_disp"],
+                "num_steps": push_cfg["num_steps"],
+                "brace_type": push_cfg.get("brace_type", "beam"),
+                "name": f"Pushover-{pattern}",
+                "return_builders": bool(export_cfg.get("pushover", False)),
+            }
+            if load_cfg.get("gravity"):
+                push_params["gravity_patterns"] = load_cfg["gravity"]
+            if push_cfg.get("brace_sections"):
+                push_params["brace_sections"] = push_cfg["brace_sections"]
+            if export_cfg.get("pushover", False):
+                push_params["config"] = {"record_pushover_steps": True}
+            analysis_recipe.add("pushover", params=push_params)
+
+    # Run the verbs and re-key each result by its ``AnalysisResult.name``, so
+    # the extraction below is unchanged.
+    _analysis_run = run_recipe(analysis_recipe, md, model=mesh_model)
+    for _step_result in _analysis_run.results:
+        _man_results[_step_result.payload.name] = _step_result.payload
+
+    modal_result = _man_results["ModalAnalysis"].data
+    modal = modal_result["modal"]
 
     if log:
         log.info("analyses", f"ran {len(_man_results)} analyses")
