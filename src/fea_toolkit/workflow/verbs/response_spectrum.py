@@ -14,7 +14,7 @@ verb manifest — does not load OpenSees.
 
 from typing import Any
 
-from ..steps import CASES, ParamSpec, Step, StepContext, StepResult, validate_params
+from ..steps import RS, ParamSpec, Step, StepContext, StepResult, validate_params
 
 __all__ = ["RS_PARAMS", "run_response_spectrum"]
 
@@ -62,7 +62,7 @@ def run_response_spectrum(context: StepContext, step: Step) -> list[StepResult]:
         step: The step to run.  ``params`` supplies the direction and spectrum.
 
     Returns:
-        One :data:`~fea_toolkit.workflow.steps.CASES` result whose payload is
+        One :data:`~fea_toolkit.workflow.steps.RS` result whose payload is
         the response-spectrum :class:`~fea_toolkit.analysis.base.AnalysisResult`.
 
     Raises:
@@ -85,6 +85,4 @@ def run_response_spectrum(context: StepContext, step: Step) -> list[StepResult]:
     )
     context.results["rs"] = result
     context.log(f"Response spectrum ({params['direction']}): complete")
-    return [
-        StepResult(kind=CASES, label=f"Response spectrum ({params['direction']})", payload=result)
-    ]
+    return [StepResult(kind=RS, label=f"Response spectrum ({params['direction']})", payload=result)]

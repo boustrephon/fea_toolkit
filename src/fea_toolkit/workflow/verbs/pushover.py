@@ -14,7 +14,7 @@ verb manifest — does not load OpenSees.
 from typing import Any
 
 from ..config_keys import BUILDER_CONFIG_KEYS
-from ..steps import CASES, ParamSpec, Step, StepContext, StepResult, validate_params
+from ..steps import PUSHOVER, ParamSpec, Step, StepContext, StepResult, validate_params
 
 __all__ = ["PUSHOVER_PARAMS", "run_pushover"]
 
@@ -69,7 +69,7 @@ def run_pushover(context: StepContext, step: Step) -> list[StepResult]:
         step: The step to run.
 
     Returns:
-        One :data:`~fea_toolkit.workflow.steps.CASES` result whose payload is
+        One :data:`~fea_toolkit.workflow.steps.PUSHOVER` result whose payload is
         the pushover :class:`~fea_toolkit.analysis.base.AnalysisResult`.
 
     Raises:
@@ -91,4 +91,4 @@ def run_pushover(context: StepContext, step: Step) -> list[StepResult]:
     )
     context.results["pushover"] = result
     context.log(f"Pushover ({params['directions']}): complete")
-    return [StepResult(kind=CASES, label="Pushover", payload=result)]
+    return [StepResult(kind=PUSHOVER, label="Pushover", payload=result)]

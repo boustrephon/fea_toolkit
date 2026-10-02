@@ -157,11 +157,28 @@ class TestManifest:
         for verb, spec in STEP_SPECS.items():
             assert spec.verb == verb
             assert callable(spec.run)
-            assert spec.kind in ("geometry", "model", "cases", "modal", "table", "figure")
+            assert spec.kind in (
+                "geometry",
+                "model",
+                "cases",
+                "modal",
+                "response_spectrum",
+                "pushover",
+                "table",
+                "figure",
+            )
             assert spec.help, f"{verb} has no help text"
             for name, param in spec.params.items():
                 assert isinstance(param, ParamSpec), f"{verb}.{name}"
                 assert param.help, f"{verb}.{name} has no help text"
+
+    def test_analysis_results_that_are_not_cases_have_their_own_kind(self):
+        """RS and pushover return an ``AnalysisResult``, not solved case payloads —
+        so they must not claim the ``cases`` kind that ``combine`` / ``chart`` read."""
+        assert STEP_SPECS["response_spectrum"].kind == "response_spectrum"
+        assert STEP_SPECS["pushover"].kind == "pushover"
+        assert STEP_SPECS["response_spectrum"].kind != "cases"
+        assert STEP_SPECS["pushover"].kind != "cases"
 
     def test_importing_the_manifest_does_not_load_opensees(self):
         """A parameter form must be renderable without OpenSees."""
@@ -612,6 +629,24 @@ class TestEndToEnd:
     def test_combine_without_solved_cases_fails_with_a_clear_message(self):
         with pytest.raises(StepError) as info:
             run_recipe(Recipe(steps=[Step("combine")]), _slab_model())
+        assert "needs 'cases'" in str(info.value.cause)
+
+    def test_a_re_mesh_invalidates_earlier_case_results(self):
+        """A second mesh replaces the topology, so earlier solved cases are stale
+        and a later combine fails its ``needs`` check instead of reducing them."""
+        from examples.sample_model import make_sample_model
+
+        recipe = Recipe(
+            steps=[
+                Step("mesh"),
+                Step("run_static", params={"cases": {"DEAD": {"DEAD": 1.0}}}),
+                Step("mesh"),
+                Step("combine"),
+            ]
+        )
+        with pytest.raises(StepError) as info:
+            run_recipe(recipe, make_sample_model())
+        assert info.value.verb == "combine"
         assert "needs 'cases'" in str(info.value.cause)
 
     def test_a_cancelled_solve_marks_the_run_cancelled(self):

@@ -292,7 +292,7 @@ def run_recipe(
         ValueError: If a step names an unknown verb.
     """
     from .registry import STEP_SPECS
-    from .steps import GEOMETRY, StepContext, StepError
+    from .steps import CASES, FIGURE, GEOMETRY, MODAL, StepContext, StepError
 
     context = StepContext(model_data=model_data, model=model)
     if cancel is not None:
@@ -327,6 +327,15 @@ def run_recipe(
                 )
             run.results.extend(spec.run(context, step))
             produced.add(spec.kind)
+            if spec.kind == GEOMETRY:
+                # A meshing step replaced ``context.model``, so the results the
+                # previous topology produced — solved cases, a modal result and
+                # any chart — are stale.  Drop them from ``produced`` so a later
+                # step's ``needs`` is re-validated against the new mesh, and
+                # clear their context slots so nothing reads a stale payload.
+                produced.difference_update((CASES, MODAL, FIGURE))
+                context.case_results.clear()
+                context.results.clear()
         except Exception as exc:
             if not step.optional:
                 raise StepError(index, step.verb, exc) from exc

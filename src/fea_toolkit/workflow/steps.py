@@ -30,6 +30,8 @@ __all__ = [
     "GEOMETRY",
     "MODAL",
     "MODEL",
+    "PUSHOVER",
+    "RS",
     "TABLE",
     "ParamSpec",
     "Step",
@@ -50,6 +52,12 @@ MODEL = "model"
 CASES = "cases"
 #: A step's output is a modal (eigenvalue) result.
 MODAL = "modal"
+#: A step's output is a response-spectrum (CQC) result, stored on the context
+#: under ``"rs"`` rather than as solved cases.
+RS = "response_spectrum"
+#: A step's output is a pushover (nonlinear static) result, stored on the
+#: context under ``"pushover"`` rather than as solved cases.
+PUSHOVER = "pushover"
 #: A step's output is a table of findings — a check's result, rendered as a grid.
 TABLE = "table"
 #: A step's output is a figure — a chart, rendered as an image.
@@ -187,7 +195,7 @@ class StepResult:
 
     Attributes:
         kind: :data:`GEOMETRY`, :data:`MODEL`, :data:`CASES`, :data:`MODAL`,
-            :data:`TABLE` or :data:`FIGURE`.
+            :data:`RS`, :data:`PUSHOVER`, :data:`TABLE` or :data:`FIGURE`.
         label: Display name for the output, e.g. ``"Meshed"``.
         payload: The output itself — a ``MeshModel``, a ``SAPModelData``,
             ``{case_name: result_dict}``, a :class:`Table`, or a matplotlib

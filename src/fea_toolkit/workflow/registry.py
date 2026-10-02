@@ -12,7 +12,7 @@ prepare properties, prepare topology, solve, reduce — and is the order a menu
 should offer them.
 """
 
-from .steps import CASES, FIGURE, GEOMETRY, MODAL, MODEL, TABLE, StepSpec
+from .steps import CASES, FIGURE, GEOMETRY, MODAL, MODEL, PUSHOVER, RS, TABLE, StepSpec
 from .verbs import (
     BRACE_BUCKLING_PARAMS,
     CHART_PARAMS,
@@ -140,7 +140,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         verb="response_spectrum",
         run=run_response_spectrum,
         params=RS_PARAMS,
-        kind=CASES,
+        kind=RS,
         needs=("geometry", "modal"),
         help="CQC response-spectrum combination for one spectrum direction.",
     ),
@@ -148,7 +148,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         verb="pushover",
         run=run_pushover,
         params=PUSHOVER_PARAMS,
-        kind=CASES,
+        kind=PUSHOVER,
         needs=("geometry", "modal"),
         help="Nonlinear static (pushover) analysis with CSM evaluation.",
     ),
