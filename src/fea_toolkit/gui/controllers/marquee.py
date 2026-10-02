@@ -63,6 +63,20 @@ def segment_inside_rect(
     The rectangle is convex, so a straight segment is fully enclosed exactly when
     both endpoints are inside (or on) the box.  This is the *window* marquee test,
     in contrast to :func:`segment_hits_rect` (the *crossing* test).
+
+    Args:
+        ax: X coordinate of the segment's first endpoint ``A``.
+        ay: Y coordinate of the segment's first endpoint ``A``.
+        bx: X coordinate of the segment's second endpoint ``B``.
+        by: Y coordinate of the segment's second endpoint ``B``.
+        x0: X coordinate of one corner of the rectangle.
+        y0: Y coordinate of one corner of the rectangle.
+        x1: X coordinate of the opposite corner of the rectangle.
+        y1: Y coordinate of the opposite corner of the rectangle.
+
+    Returns:
+        ``True`` if both endpoints lie inside (or on) the rectangle, ``False``
+        otherwise.
     """
     return point_in_rect(ax, ay, x0, y0, x1, y1) and point_in_rect(bx, by, x0, y0, x1, y1)
 
@@ -100,6 +114,17 @@ def polygon_inside_rect(
     it, because the polygon lies within the convex hull of its vertices.  This is
     the *window* marquee test for areas, in contrast to :func:`polygon_hits_rect`
     (the *crossing* test).
+
+    Args:
+        vertices: Polygon corners as ``(x, y)`` pairs, in order.
+        x0: X coordinate of one corner of the rectangle.
+        y0: Y coordinate of one corner of the rectangle.
+        x1: X coordinate of the opposite corner of the rectangle.
+        y1: Y coordinate of the opposite corner of the rectangle.
+
+    Returns:
+        ``True`` if every vertex lies inside (or on) the rectangle, ``False``
+        otherwise (including for an empty polygon).
     """
     if not vertices:
         return False
