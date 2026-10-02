@@ -952,6 +952,39 @@ group), ``workflow/steps.py`` (``SESSION`` kind + ``StepContext`` document
 state), ``workflow/verbs/{open,close,save,select}.py``, ``io/`` (versioned-path
 helper), and the GUI's tree + selection-authoring surface.
 
+#### P36 — Shell (area) result display in the GUI
+
+Source: the 2026-10-02 planning session (post-review); completes milestone 5's
+static-linear slice and pairs with the NPZ shell-force storage already landed.
+
+**Status: 🚧 Planned** — extraction and storage exist; the display seam does not.
+
+**What.** Draw per-shell scalar fields (stress/force resultants — ``Nx``, ``Ny``,
+``Nxy``, ``Mx``, ``My``, ``Mxy``) as a colour overlay on area elements, the
+shell counterpart of the frame force-flag diagram.  The heavy lifting is already
+done: ``opensees/_runner_static.py::extract_static_shell_forces`` extracts the
+resultants, ``io/npz_writer.py`` persists them, and ``plotting`` has shell
+stress/damage-map precedent to reuse.  What is missing:
+
+1. **Repository seam.** ``ResultsRepository.shell_forces(case)`` +
+   ``has_shell_forces(case)``, mirroring ``element_forces`` / ``has_forces``.
+2. **Per-case collection.** ``analysis/linear.py::run_static_cases`` /
+   ``run_case_set`` collect only ``nodal_displacements`` and ``element_forces``;
+   shell forces are not on the in-memory path.  Thread
+   ``extract_static_shell_forces`` through per case, and grow the static schema
+   with per-case ``shell_*`` arrays (today shell forces are one global
+   ``shell_forces/*`` block, not per case).
+3. **Renderer.** A per-shell scalar-field overlay in
+   ``plotting/renderers/pyvista.py``, reusing the existing shell result-math; no
+   new dependencies.
+4. **GUI.** A shell-result quantity selector and a "Show shell results" toggle
+   beside the Deform / Flags controls.
+
+**Touches (anticipated).** ``io/results_repository.py``,
+``io/results_schema.py``, ``io/npz_writer.py``, ``analysis/linear.py``,
+``plotting/renderers/pyvista.py``, ``plotting/viewer.py``,
+``gui/main_window.py`` and their tests.
+
 ### Tier 4 — Deferred / low-priority
 
 #### P8 — Tcl-exporter merge (deferred)
