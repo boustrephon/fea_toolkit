@@ -608,6 +608,7 @@ class TestHideSelection:
         log = slab_window._message_log.toPlainText()
         assert "Hid 1 element(s)" in log
         assert "node-scoped" in log
+        assert "A1" in {s.area_id for s in slab_window._viewer.geometry()[1]}
 
     def test_isolate_warns_when_the_view_is_node_scoped(self, slab_window):
         from fea_toolkit.model.selection import Selection
