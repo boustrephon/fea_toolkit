@@ -9,14 +9,6 @@ import pytest
 pytestmark = pytest.mark.needs_gui
 
 
-@pytest.fixture(scope="module")
-def qapp():
-    """Provide the single process-wide ``QApplication`` Qt requires."""
-    from qtpy.QtWidgets import QApplication
-
-    yield QApplication.instance() or QApplication(["pytest-fea-gui"])
-
-
 @pytest.fixture()
 def model(qapp):
     """A tree model over the sample model."""

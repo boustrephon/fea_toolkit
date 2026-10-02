@@ -84,6 +84,20 @@ def _matplotlib_agg():
     plt.close("all")
 
 
+@pytest.fixture(scope="module")
+def qapp():
+    """Provide the single process-wide ``QApplication`` Qt requires.
+
+    Defined once here rather than re-declared per GUI test module (it was
+    previously duplicated across ~14 files).  The import stays inside the
+    fixture so a Qt-less interpreter -- Rhino 8's embedded CPython, a minimal
+    ``pip install -e .`` -- never touches ``qtpy`` during collection.
+    """
+    from qtpy.QtWidgets import QApplication
+
+    yield QApplication.instance() or QApplication(["pytest-fea-gui"])
+
+
 def pytest_collection_modifyitems(config, items):
     """Skip marker-gated tests when their optional backend is missing."""
     if not _HAVE_PYVISTA:

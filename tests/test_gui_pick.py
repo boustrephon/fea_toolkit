@@ -16,14 +16,6 @@ import pytest
 pytestmark = pytest.mark.needs_gui
 
 
-@pytest.fixture(scope="module")
-def qapp():
-    """Provide the single process-wide ``QApplication`` Qt requires."""
-    from qtpy.QtWidgets import QApplication
-
-    yield QApplication.instance() or QApplication(["pytest-fea-gui"])
-
-
 @pytest.fixture()
 def window(qapp, monkeypatch, tmp_path):
     """A shown ``MainWindow`` with the sample model and default settings."""
@@ -316,6 +308,70 @@ def test_the_qt_filter_ignores_the_other_button(window, monkeypatch):
     )
 
     assert seen == []
+
+
+def test_a_clean_right_click_opens_the_context_menu(window, monkeypatch):
+    """With the default policy the right button is free, so a clean click menus."""
+    from qtpy.QtCore import QEvent, Qt
+
+    seen = []
+    monkeypatch.setattr(window._mouse_filter, "_on_context_menu", seen.append)
+
+    widget = window._interactor
+    window._mouse_filter.eventFilter(
+        widget,
+        _qt_mouse_event(QEvent.Type.MouseButtonPress, (5.0, 5.0), Qt.MouseButton.RightButton),
+    )
+    window._mouse_filter.eventFilter(
+        widget,
+        _qt_mouse_event(QEvent.Type.MouseButtonRelease, (5.0, 5.0), Qt.MouseButton.RightButton),
+    )
+    assert len(seen) == 1
+
+
+def test_a_right_drag_does_not_open_the_context_menu(window, monkeypatch):
+    """A right-drag belongs to the camera, not the menu."""
+
+    def _forbidden(_pos):
+        raise AssertionError("a right drag must not open the context menu")
+
+    monkeypatch.setattr(window._mouse_filter, "_on_context_menu", _forbidden)
+
+    from qtpy.QtCore import QEvent, Qt
+
+    widget = window._interactor
+    window._mouse_filter.eventFilter(
+        widget,
+        _qt_mouse_event(QEvent.Type.MouseButtonPress, (10.0, 10.0), Qt.MouseButton.RightButton),
+    )
+    window._mouse_filter.eventFilter(widget, _qt_mouse_event(QEvent.Type.MouseMove, (80.0, 70.0)))
+    window._mouse_filter.eventFilter(
+        widget,
+        _qt_mouse_event(QEvent.Type.MouseButtonRelease, (80.0, 70.0), Qt.MouseButton.RightButton),
+    )
+
+
+def test_right_button_as_pick_button_never_opens_the_context_menu(window, monkeypatch):
+    """Under the ``right_click`` preset the right button selects, never menus."""
+    from qtpy.QtCore import QEvent, Qt
+
+    from fea_toolkit.gui.controllers.interaction import PRESETS
+
+    def _forbidden(_pos):
+        raise AssertionError("the right button is the pick button; no context menu")
+
+    monkeypatch.setattr(window._mouse_filter, "_on_context_menu", _forbidden)
+    window._interaction.set_policy(PRESETS["right_click"])
+
+    widget = window._interactor
+    window._mouse_filter.eventFilter(
+        widget,
+        _qt_mouse_event(QEvent.Type.MouseButtonPress, (5.0, 5.0), Qt.MouseButton.RightButton),
+    )
+    window._mouse_filter.eventFilter(
+        widget,
+        _qt_mouse_event(QEvent.Type.MouseButtonRelease, (5.0, 5.0), Qt.MouseButton.RightButton),
+    )
 
 
 def test_shift_click_adds_and_the_bridge_collapses(window):

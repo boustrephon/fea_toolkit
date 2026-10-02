@@ -13,20 +13,15 @@ import pytest
 pytestmark = pytest.mark.needs_gui
 
 
-@pytest.fixture(scope="module")
-def qapp():
-    """Provide the single process-wide ``QApplication`` Qt requires."""
-    from qtpy.QtWidgets import QApplication
-
-    yield QApplication.instance() or QApplication(["pytest-fea-gui"])
-
-
 @pytest.fixture()
-def window(qapp):
+def window(qapp, monkeypatch, tmp_path):
     """A ``MainWindow`` showing the sample model."""
     from examples.sample_model import make_sample_model
+    from fea_toolkit.gui.controllers.interaction import CONFIG_ENV_VAR
     from fea_toolkit.gui.main_window import MainWindow
 
+    # Pin the settings file, so the developer's own ~/.config cannot leak in.
+    monkeypatch.setenv(CONFIG_ENV_VAR, str(tmp_path / "absent.json"))
     win = MainWindow(model=make_sample_model())
     yield win
     win.close()

@@ -9,14 +9,6 @@ import pytest
 pytestmark = pytest.mark.needs_gui
 
 
-@pytest.fixture(scope="module")
-def qapp():
-    """Provide the single process-wide ``QApplication`` Qt requires."""
-    from qtpy.QtWidgets import QApplication
-
-    yield QApplication.instance() or QApplication(["pytest-fea-gui"])
-
-
 def _chain_model():
     """The sample member extended into the chain 1-2-3-4 (see the Qt-free suite)."""
     from examples.sample_model import make_sample_model

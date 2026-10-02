@@ -16,14 +16,6 @@ from tests.fixtures.gui_preprocess import run_preprocess
 pytestmark = pytest.mark.needs_gui
 
 
-@pytest.fixture(scope="module")
-def qapp():
-    """Provide the single process-wide ``QApplication`` Qt requires."""
-    from qtpy.QtWidgets import QApplication
-
-    yield QApplication.instance() or QApplication(["pytest-fea-gui"])
-
-
 def _t_junction_model(*, auto_split: bool = True):
     """A beam (1-2) crossed by a column framing into its midpoint (node 3).
 
