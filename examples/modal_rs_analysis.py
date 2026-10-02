@@ -187,9 +187,11 @@ def main():
         print("\nDone.")
         return
 
-    # ── 7. Missing mass correction (requires add_missing_mass_correction
-    #     which is not yet ported to AnalysisBuilder) ─────────────────────────
-    print("  (skipped — pending port of add_missing_mass_correction)")
+    # ── 7. Missing mass correction (rigid response) ─────────────────────
+    # The rigid / missing-mass response is available via
+    #   spectrum.cqc_base_shear(..., T_rigid=..., total_mass=...)
+    # but is not yet wired into AnalysisBuilder.run_response_spectrum_analysis().
+    print("  (skipped — missing-mass correction not yet wired into AnalysisBuilder)")
 
     # ── 8. Output directory ──────────────────────────────────────────────────
     out = Path(__file__).parent / "output"

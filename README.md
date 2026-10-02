@@ -1,7 +1,7 @@
 # fea_toolkit
 
 A toolkit for importing, analysing, and visualising structural
-engineering models.  Parses SAP2000 (`.s2k` / JSON), builds OpenSees
+engineering models.  Parses SAP2000 `.s2k` text models, builds OpenSees
 models for structural analysis, and exports to Rhino 3-D for
 visualisation and Grasshopper workflows.
 
@@ -12,8 +12,8 @@ visualisation and Grasshopper workflows.
 
 The goal is to create a Python package `fea_toolkit` that:
 
-- Parses SAP2000 `.s2k` text files (and JSON exports) into a common
-  intermediate data model (`SAPModelData`).
+- Parses SAP2000 `.s2k` text files into a common
+  intermediate data model (`SAPModelData`); ETABS (`.e2k` / `.$et`) parsing is not yet supported.
 - Enriches section properties using a manufacturer database.
 - Splits frame elements at joints (and optionally at frame intersections)
   with parent‑child tracking.
@@ -133,7 +133,7 @@ the "Package tree (abbreviated)" section below for the full subpackage list
 | **Modal Analysis** | ✅ Complete | `run_modal_analysis()` — eigenvalue extraction (`ops.eigen`), modal properties table with frequencies, periods, participating masses & ratios.
 | **Response Spectrum** | ✅ Complete | `run_response_spectrum_analysis()` — mode‑by‑mode RS analysis with a spectrum from **GB 50011** (`from_gb50011`), **Eurocode 8** (`from_eurocode8` / `from_eurocode8_displacement`), **IEC 62271-207** (`from_iec62271`) or any user‑supplied table (`from_arrays`); CQC/SRSS combination, base shear + moment.
 | **Element‑Level RS Forces** | ✅ Complete | `extract_element_rs_forces()` — CQC‑combined moments/shears per element, sorted by elevation.
-| **Missing Mass Correction** | ✅ Complete | `add_missing_mass_correction()` — rigid response from residual modal mass, adds to CQC base shear/moment.
+| **Missing Mass Correction** | ⚠️ Partial | Rigid / missing-mass response is computed by `spectrum.cqc_base_shear(..., total_mass=...)` (keys `base_shear_missing_mass`, `residual_mass`); not yet wired into `AnalysisBuilder.run_response_spectrum_analysis()` — see `examples/modal_rs_analysis.py`. |
 | **Seismic Masses** | ✅ Complete | `compute_seismic_masses()` — lumps element self‑weight and load‑based masses per MASS SOURCE (Elements/Masses/Loads flags). Load patterns contribute only their **global‑Z** component (SAP2000's rule: `Gravity`/`Projected` are downward‑positive, `Z` is sign‑flipped, horizontal `X`/`Y` excluded). Per‑source totals are exposed via `builder.mass_components` and the review's `mass_source["components"]`. |
 | **Rhino Export** | ✅ Complete | Centreline + lightweight Extrusion geometry with section profiles, section-based layers, UserString metadata, groups. See [`docs/rhino_export.md`](docs/rhino_export.md). |
 | **Frame Member Types (Steel)** | ✅ Complete | All steel section shapes (I, Box, Pipe, Channel, Angle, etc.) with `Steel01` fiber sections or elastic sections. |
@@ -175,7 +175,7 @@ the "Package tree (abbreviated)" section below for the full subpackage list
 - **Trapezoidal Splitting** – Exact redistribution of varying loads using `trapezoidal_force_split`.
 - **Configurable Builder** – Element type, integration points, splitting, verbosity can be set via `config` dict.
 - **MASS SOURCE** – The `MASS SOURCE` table is parsed by `_get_mass_sources()` which groups rows by MassSource name, **accumulates** multipliers when the same LoadPat appears on multiple rows, and stores the result in `SAPModelData.mass_sources`. The builder's `compute_seismic_masses()` then uses this to derive nodal masses (self‑weight from `Elements=True`, load‑based from `Loads=True` + `LoadPat`/`Multiplier` pairs).
-- **Modal & RS Analysis** – `run_modal_analysis()` uses `ops.eigen('-fullGenLapack', …)`. `run_response_spectrum_analysis()` and `extract_element_rs_forces()` call `ops.responseSpectrumAnalysis()` mode‑by‑mode and extract element forces via `ops.eleResponse(eid, 'forces')` (global system). CQC follows Der Kiureghian's formula. `add_missing_mass_correction()` computes the rigid response from residual mass at short‑period spectral acceleration.
+- **Modal & RS Analysis** – `run_modal_analysis()` uses `ops.eigen('-fullGenLapack', …)`. `run_response_spectrum_analysis()` and `extract_element_rs_forces()` call `ops.responseSpectrumAnalysis()` mode‑by‑mode and extract element forces via `ops.eleResponse(eid, 'forces')` (global system). CQC follows Der Kiureghian's formula. `spectrum.cqc_base_shear(..., T_rigid=..., total_mass=...)` computes the rigid cut-off and missing-mass response from residual mass at short‑period spectral acceleration.
 - **Brace buckling — two approaches** – The builder supports two buckling modelling strategies. **Approach A** (experimental) subdivides braces into segments with a sinusoidal imperfection and uses `Corotational` geometric transformation — has element-level convergence issues. **Approach B** (recommended) replaces braces with `Truss` elements using a `Hysteretic` material with asymmetric tension/compression. Approach B is numerically robust and captures directional asymmetry correctly. Controlled via `brace_type="truss"` (default) / `brace_type="beam"` (experimental).
 - **Configurable solver settings** – The builder's `run_static_analysis()` and `run_pushover_analysis()` read solver parameters from config: `solver_test_tol`, `solver_test_max_iter`, `solver_algorithm` (`'Newton'`, `'ModifiedNewton'`, `'NewtonLineSearch'`, `'KrylovNewton'`), and `gravity_num_substeps` for gravity load ramping.
 - **Per-type stiffness factors (ACI 318 cracked sections)** – The `stiffness_factors` config option maps structural types to E_mod reduction factors for elastic analysis.  Keys: `'beam'`, `'column'`, `'brace'`, `'wall'`, `'slab'`.  Typical RC values per ACI 318-19 Table 6.6.3.1.1(a): beams=0.35, columns=0.70, walls=0.70, slabs=0.25.  Set to ``None`` (default) for gross/uncracked stiffness.  Classification: columns have |Δz| > 4× Δh; braces are diagonal; areas with all corner nodes at the same Z are slabs.  Separate OpenSees section tags are created per (section_name, type) pair so the same SAP2000 section used for both beams and columns gets different modifiers.
@@ -745,7 +745,7 @@ that section.
 
 4. **Advanced Analyses**  
    - ~~Modal Analysis~~ ✅ `run_modal_analysis()` implemented — eigenvalue extraction with modal properties table.  
-   - ~~Response Spectrum~~ ✅ `run_response_spectrum_analysis()` + `extract_element_rs_forces()` + `add_missing_mass_correction()` implemented.  
+   - ~~Response Spectrum~~ ✅ `run_response_spectrum_analysis()` + `extract_element_rs_forces()` + rigid / missing-mass corrections via `spectrum.cqc_base_shear(...)`.  
    - ~~Nonlinear Static Pushover~~ ✅ `run_pushover_analysis()` implemented — see [`docs/pushover_analysis.md`](docs/pushover_analysis.md).  
    - ~~HingeRadau integration~~ ✅ `beam_integration` config option (`'Lobatto'` / `'HingeRadau'`).  
    - ~~Brace subdivision (Approach A)~~ ✅ `subdivide_elements()` in `geometry.py`, `set_brace_selection()` / `check_brace_buckling()` in builder.  
