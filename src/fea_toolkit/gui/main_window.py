@@ -18,7 +18,7 @@ import gc
 from typing import Any, Optional
 
 from qtpy.QtCore import QItemSelection, QItemSelectionModel, QItemSelectionRange, Qt, QTimer, QUrl
-from qtpy.QtGui import QAction, QDesktopServices, QKeySequence
+from qtpy.QtGui import QAction, QDesktopServices, QGuiApplication, QKeySequence
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -27,6 +27,7 @@ from qtpy.QtWidgets import (
     QFileDialog,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QStackedWidget,
@@ -38,7 +39,7 @@ from qtpy.QtWidgets import (
 )
 
 from .app import APP_NAME
-from .controllers.interaction import load_policy
+from .controllers.interaction import default_config_path
 from .controllers.marquee import (
     point_in_rect,
     polygon_hits_rect,
@@ -47,7 +48,9 @@ from .controllers.marquee import (
     segment_inside_rect,
 )
 from .controllers.selection import CATEGORY_GROUPS, CATEGORY_NOUNS, SelectionIndex
+from .controllers.settings import load_gui_settings, save_display_settings
 from .controllers.view_registry import FIGURE, GEOMETRY, RESULTS, TABLE, View, ViewRegistry
+from .controllers.view_state import clear_view_state, load_view_state, save_view_state
 from .controllers.worker import TaskWorker
 from .models.tree_model import ModelTreeModel
 from .render_backend import QtRenderBackend, make_select_style
@@ -135,25 +138,6 @@ def _case_view_name(case: str, meta: dict) -> str:
 #: Prefix of a results view's key; the load-case label follows it.
 _RESULTS_KEY_PREFIX = "results:"
 
-#: Default size for a results overlay, as a **percentage of the model diagonal**.
-#: Both the deformed shape and the force-diagram flags auto-scale to this fraction
-#: of the model's size, so a millimetre model and a metre model read the same way
-#: and neither a large displacement nor a large force overwhelms the scene (a raw
-#: "amplification ×N" cannot do that — see ``ModelViewer.overlay_forces``).
-_DEFAULT_OVERLAY_PCT = 10.0
-
-#: Which end-force component a flag diagram opens on.  This is the **label**,
-#: not the schema key: ``"M3"`` is SAP's local-DOF name for the moment about
-#: local 3 (``"Mz"`` underneath — see
-#: :data:`~fea_toolkit.model.sap_data.FORCE_QUANTITY_LABELS`), and bending is
-#: what a flag diagram is usually read for.
-_DEFAULT_FORCE_QUANTITY = "M3"
-
-#: Default opacity for area elements.  Slabs are drawn translucent so the joints
-#: and the members behind them stay readable — the reason a modeller reaches for
-#: the opacity control at all.
-_DEFAULT_SHELL_OPACITY = 0.7
-
 
 def _case_of(view: Optional[View]) -> str:
     """The load case a results view stands for (``""`` for any other view).
@@ -190,9 +174,12 @@ class MainWindow(QMainWindow):
         self._interaction: Any = None
         self._mouse_filter: Any = None
         self._hidden_elem_ids: set[str] = set()
+        #: The camera and hidden set right after ``View ▸ Reset view``, so
+        #: ``closeEvent`` can tell an unchanged view from one the user has moved.
+        self._reset_view_baseline: Optional[tuple] = None
         self._default_style: Any = None  # interactor style to restore after Select mode
         self._worker: Any = None
-        self._policy, self._policy_notes = load_policy()
+        self._policy, self._display, self._policy_notes = load_gui_settings()
         self._cursor_timer: Optional[QTimer] = None
         self._interaction_enabled = False
         self._actions: dict = {}
@@ -238,6 +225,7 @@ class MainWindow(QMainWindow):
         from ..model.sap_data import SAPModelData
 
         self._source_label = source
+        self._reset_view_baseline = None
         self._store = None
         self._views = ViewRegistry()
         if isinstance(model, SAPModelData):
@@ -292,7 +280,12 @@ class MainWindow(QMainWindow):
             node_actors=lambda: self._backend.actors("nodes"),
             on_marquee=self._on_marquee,
         )
-        self._mouse_filter = install_mouse_filter(self._interactor, self._interaction, self)
+        self._mouse_filter = install_mouse_filter(
+            self._interactor,
+            self._interaction,
+            self,
+            on_context_menu=self._on_viewport_context_menu,
+        )
 
     def _on_viewport_pick(self, result: PickResult) -> None:
         """Apply a click to the selection: replace, add, toggle, or clear.
@@ -516,6 +509,67 @@ class MainWindow(QMainWindow):
             node_ids=sorted(nodes) or None,
         )
 
+    # ── Selection read-outs and the context menu ──────────────────────
+
+    def _on_copy_selection(self) -> None:
+        """Copy the current selection to the clipboard as a selection expression."""
+        selection = self.current_selection()
+        if selection is None:
+            self.log("Nothing selected to copy.", "warn")
+            return
+        expr = selection.to_string()
+        QGuiApplication.clipboard().setText(expr)
+        self.log(f"Copied selection: {expr}")
+
+    def _on_selection_weight(self) -> None:
+        """Report the self-weight of the current selection in a dialog."""
+        selection = self.current_selection()
+        if selection is None or self._model is None:
+            self.log("Nothing selected to weigh.", "warn")
+            return
+        from ..model.self_weight import selection_weight
+
+        weight = selection_weight(self._model, selection)
+        if weight.count == 0:
+            self.log(
+                "The selection has no weightable elements (nodes only, or no "
+                "section/material with a unit weight).",
+                "warn",
+            )
+            return
+        message = (
+            f"{weight.frame_count} frame(s), {weight.area_count} area(s)\n\n"
+            f"Frame weight:  {weight.frame_weight:.4g} {weight.unit}\n"
+            f"Area weight:   {weight.area_weight:.4g} {weight.unit}\n"
+            f"Total weight:  {weight.total:.4g} {weight.unit}"
+        )
+        QMessageBox.information(self, "Selection weight", message)
+
+    def _on_viewport_context_menu(self, global_pos: Any) -> None:
+        """Open a context menu for the current selection (right-click, when free).
+
+        The right button reaches here only when it is not the policy's pick
+        button (see ``views/qt_mouse.py``), so a ``right_click`` preset keeps its
+        button for selection and never opens the menu.
+        """
+        menu = QMenu(self)
+        has_selection = self.current_selection() is not None
+
+        copy_action = menu.addAction("Copy selection")
+        copy_action.setEnabled(has_selection)
+        copy_action.triggered.connect(self._on_copy_selection)
+
+        weight_action = menu.addAction("Mass / weight of selection…")
+        weight_action.setEnabled(has_selection)
+        weight_action.triggered.connect(self._on_selection_weight)
+
+        menu.addSeparator()
+        menu.addAction(self._actions["view.hide_selected"])
+        menu.addAction(self._actions["view.isolate_selected"])
+        menu.addAction(self._actions["view.show_all"])
+
+        menu.exec(global_pos)
+
     # ── Select / Orbit mode (the SAP2000 arrangement) ─────────────────
 
     def _on_select_mode_toggled(self, checked: bool) -> None:
@@ -614,6 +668,11 @@ class MainWindow(QMainWindow):
         )
         a["file.quit"] = self._real_action("Quit", self.close, shortcut="Ctrl+Q")
         a["view.fit"] = self._real_action("Zoom to fit", self._on_zoom_fit)
+        a["view.reset_view"] = self._real_action(
+            "Reset view",
+            self._on_reset_view,
+            tip="Reset the camera, show all hidden elements, and forget this model's saved view state",
+        )
         a["view.iso"] = self._real_action("Isometric", self._view_iso, tip="Isometric view")
         a["view.xy"] = self._real_action("Top (XY)", self._view_xy, tip="Look down the Z axis")
         a["view.xz"] = self._real_action("Front (XZ)", self._view_xz, tip="Look along the Y axis")
@@ -638,7 +697,11 @@ class MainWindow(QMainWindow):
         a["file.save_results"].setEnabled(False)
         a["file.export_tcl"] = self._placeholder("Export Tcl", "Milestone 7")
         a["file.export_image"] = self._placeholder("Export screenshot", "Milestone 7")
-        a["edit.copy"] = self._placeholder("Copy", "a future release")
+        a["edit.copy"] = self._real_action(
+            "Copy selection",
+            self._on_copy_selection,
+            tip="Copy the current selection to the clipboard as a selection expression",
+        )
         a["edit.duplicate_view"] = self._real_action(
             "Duplicate view",
             self._on_duplicate_view,
@@ -784,6 +847,7 @@ class MainWindow(QMainWindow):
 
         m = bar.addMenu("&View")
         m.addAction(a["view.fit"])
+        m.addAction(a["view.reset_view"])
         m.addSeparator()
         camera = m.addMenu("Camera")
         for key in ("view.iso", "view.xy", "view.xz", "view.yz"):
@@ -859,7 +923,7 @@ class MainWindow(QMainWindow):
         self._deformed_scale.setRange(0.1, 1000.0)
         self._deformed_scale.setDecimals(1)
         self._deformed_scale.setSingleStep(5.0)
-        self._deformed_scale.setValue(_DEFAULT_OVERLAY_PCT)
+        self._deformed_scale.setValue(self._display.deformed_scale)
         self._deformed_scale.setSuffix("%")
         self._deformed_scale.setToolTip("Deformed-shape size (% of model diagonal)")
         self._deformed_scale.setStatusTip("Deformed-shape size (% of model diagonal)")
@@ -870,7 +934,7 @@ class MainWindow(QMainWindow):
         self._force_scale.setRange(0.1, 1000.0)
         self._force_scale.setDecimals(1)
         self._force_scale.setSingleStep(5.0)
-        self._force_scale.setValue(_DEFAULT_OVERLAY_PCT)
+        self._force_scale.setValue(self._display.force_scale)
         self._force_scale.setSuffix("%")
         self._force_scale.setToolTip("Force-diagram size (% of model diagonal)")
         self._force_scale.setStatusTip("Force-diagram size (% of model diagonal)")
@@ -886,7 +950,7 @@ class MainWindow(QMainWindow):
         self._force_quantity.setObjectName("force_quantity")
         for label in FORCE_QUANTITY_LABELS:
             self._force_quantity.addItem(label)
-        self._force_quantity.setCurrentText(_DEFAULT_FORCE_QUANTITY)
+        self._force_quantity.setCurrentText(self._display.force_quantity)
         self._force_quantity.setToolTip("End-force component drawn as a flag diagram")
         self._force_quantity.setStatusTip("End-force component drawn as a flag diagram")
         self._force_quantity.currentIndexChanged.connect(self._on_force_quantity_changed)
@@ -900,7 +964,7 @@ class MainWindow(QMainWindow):
         self._shell_opacity.setRange(0.05, 1.0)
         self._shell_opacity.setDecimals(2)
         self._shell_opacity.setSingleStep(0.05)
-        self._shell_opacity.setValue(_DEFAULT_SHELL_OPACITY)
+        self._shell_opacity.setValue(self._display.shell_opacity)
         self._shell_opacity.setToolTip("Opacity of area elements (shells)")
         self._shell_opacity.setStatusTip("Opacity of area elements (shells)")
         self._shell_opacity.valueChanged.connect(self._on_shell_opacity_changed)
@@ -910,7 +974,7 @@ class MainWindow(QMainWindow):
         self._shrink.setRange(0.5, 1.0)
         self._shrink.setDecimals(2)
         self._shrink.setSingleStep(0.05)
-        self._shrink.setValue(1.0)
+        self._shrink.setValue(self._display.shrink)
         self._shrink.setToolTip("Draw elements shrunken, opening up the joints")
         self._shrink.setStatusTip("Draw elements shrunken, opening up the joints")
         self._shrink.valueChanged.connect(self._on_shrink_changed)
@@ -1759,6 +1823,26 @@ class MainWindow(QMainWindow):
         self._refresh_display()
         self.log("Restored all hidden elements.")
 
+    def _on_reset_view(self) -> None:
+        """**View ▸ Reset view**: return to a clean view and forget the saved state.
+
+        Resets the camera, restores every hidden element and clears the saved
+        per-model state, so a strange saved view cannot follow the model to its
+        next open.  Display *preferences* (opacity, shrink, …) are untouched —
+        those are user settings, not this model's state.
+        """
+        if self._interactor is not None:
+            with contextlib.suppress(Exception):
+                self._interactor.reset_camera()
+        if self._hidden_elem_ids:
+            self._hidden_elem_ids.clear()
+            self._refresh_display()
+        if self._source_label:
+            for note in clear_view_state(self._source_label):
+                self.log(note, "warn")
+        self._reset_view_baseline = (self._current_camera(), frozenset(self._hidden_elem_ids))
+        self.log("Reset the view to defaults.")
+
     def _all_element_ids(self) -> set[str]:
         """Every ``Frame:``/``Area:`` id the displayed model can draw.
 
@@ -2348,9 +2432,18 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self.log(f"Failed to open {path}: {exc}", "error")
             return False
+        self._save_view_state()  # preserve the outgoing model's view before switching
         self._remember_source(model, source=path)
-        self._hidden_elem_ids.clear()
+        state, notes = load_view_state(path)
+        for note in notes:
+            # A stale state (the model was re-edited) is an ordinary outcome, so
+            # it is logged at info; anything else is a warning.
+            level = "info" if "is stale" in note else "warn"
+            self.log(note, level)
+        hidden = state.get("hidden_elem_ids")
+        self._hidden_elem_ids = {str(ref) for ref in hidden} if isinstance(hidden, list) else set()
         self.show_model(model)
+        self._restore_camera(state.get("camera_position"))
         return True
 
     def _on_zoom_fit(self) -> None:
@@ -2591,6 +2684,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Stop the cursor timer, detach the mouse filter and release the render window."""
+        with contextlib.suppress(Exception):
+            self._save_display_settings()
+            self._save_view_state()
         if self._cursor_timer is not None:
             self._cursor_timer.stop()
         if self._mouse_filter is not None:
@@ -2605,3 +2701,63 @@ class MainWindow(QMainWindow):
             with contextlib.suppress(Exception):
                 self._interactor.close()
         super().closeEvent(event)
+
+    def _save_display_settings(self) -> None:
+        """Write the display knobs to the settings file, best effort.
+
+        A failure to save is reported in the log rather than raised, so closing
+        the window never blocks on a read-only config directory.
+        """
+        values = {
+            "shell_opacity": float(self._shell_opacity.value()),
+            "shrink": float(self._shrink.value()),
+            "deformed_scale": float(self._deformed_scale.value()),
+            "force_scale": float(self._force_scale.value()),
+            "force_quantity": self._force_quantity.currentText(),
+        }
+        for note in save_display_settings(default_config_path(), values):
+            self.log(note, "warn")
+
+    def _current_camera(self) -> Optional[list]:
+        """The current camera position, best effort (``None`` when unavailable)."""
+        camera = None
+        with contextlib.suppress(Exception):
+            raw = self._interactor.camera_position
+            if raw:
+                camera = [list(map(float, row)) for row in raw]
+        return camera
+
+    def _save_view_state(self) -> None:
+        """Write the camera and hidden set for the open model, best effort.
+
+        Skipped when no model is open (``_source_label`` is empty), and when the
+        displayed model is not the one ``_source_label`` names — after
+        ``File ▸ Open results`` the archive draws its own geometry, so its camera
+        and visibility must not overwrite the model's saved state.  Also skipped
+        while the view is unchanged since a ``View ▸ Reset view``, so the reset
+        does not recreate the state it just cleared.  A failure is logged rather
+        than raised, exactly like :meth:`_save_display_settings`.
+        """
+        if not self._source_label:
+            return
+        if self._store is not None:
+            displayed = self._model
+            if displayed is not self._store.raw() and displayed is not self._store.preprocessed():
+                return
+        camera = self._current_camera()
+        if self._reset_view_baseline is not None:
+            baseline_camera, baseline_hidden = self._reset_view_baseline
+            if camera == baseline_camera and frozenset(self._hidden_elem_ids) == baseline_hidden:
+                return
+        state = {"hidden_elem_ids": sorted(self._hidden_elem_ids)}
+        if camera:
+            state["camera_position"] = camera
+        for note in save_view_state(self._source_label, state):
+            self.log(note, "warn")
+
+    def _restore_camera(self, camera: Any) -> None:
+        """Restore a saved camera position, best effort (bad data is ignored)."""
+        if not camera:
+            return
+        with contextlib.suppress(Exception):
+            self._interactor.camera_position = camera

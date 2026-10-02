@@ -282,6 +282,28 @@ Settings file — `$FEA_TOOLKIT_GUI_CONFIG` if set, else
 | `marquee_modifier` | `"alt"` | Modifier key that turns a drag into a rubber-band selection |
 | `select_mode` | `false` | Explicit Select / Orbit mode — a drag marquee-selects instead of orbiting |
 
+The **display-quality knobs** (Shells opacity, Shrink, Deform %, Flags % and the
+Force selector) are also remembered between sessions, in a `display` section of
+the same file:
+
+```json
+{
+  "preset": "click_drag",
+  "display": { "shrink": 0.9, "shell_opacity": 0.7 }
+}
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `shell_opacity` | `0.7` | Opacity of area elements (shells) |
+| `shrink` | `1.0` | Fraction of true size elements are drawn at (`1.0` = off) |
+| `deformed_scale` | `10.0` | Deformed-shape size, % of the model diagonal |
+| `force_scale` | `10.0` | Force-diagram size, % of the model diagonal |
+| `force_quantity` | `"M3"` | End-force component drawn as a flag diagram (a SAP local-DOF label) |
+
+The display section is written when the window closes; the interaction keys and
+anything else in the file are left untouched.
+
 The file is read at start-up; the Message Log states which policy is in force
 ("Left-click an element to select it; drag to orbit") and **reports anything it
 did not understand** — an unknown key, an out-of-range value or unreadable JSON
@@ -295,6 +317,13 @@ any drag in Select mode) rubber-band-selects.  A left-to-right marquee is a
 explicit Select / Orbit arrangement, in which a drag marquee-selects instead of
 orbiting.  The viewport selection can be read back as
 a ``Selection`` (``MainWindow.current_selection()``) for a workflow step.
+
+**Right-clicking** the viewport opens a context menu: **Copy selection** puts the
+selection on the clipboard as a selection expression (`type=Frame …`), **Mass /
+weight of selection…** reports the selected elements' self-weight, and **Hide
+selected** / **Isolate selected** / **Show all** dig into a crowded model.  The
+menu appears only when the right button is *not* the selecting button — under the
+`right_click` preset the right button still selects, and the menu is not shown.
 
 ## Display toggles
 
@@ -507,7 +536,8 @@ drives a *separately installed* OpenSees is the recorded route
 | Modal / spectrum / pushover runs (milestone 5, the rest) | `Analysis ▸ Run…` does static-linear cases and combinations; those three menu entries are greyed |
 | Loads, storey and pushover plots (milestones 6–7) | A case's deformed shape *and* its member end forces **are** drawn in the GUI; load glyphs, storey plots and pushover curves still need the [Visualisation Toolkit](viewer.md) and the `plot_*` functions |
 | Element labels, the Property Tree tab, explicit interaction modes ([P23](_pending_work.md)) | The corresponding menu item and tab are greyed |
-| Window-layout persistence (milestone 8) | Docks and window geometry are not remembered between sessions |
+| Window-layout persistence (milestone 8) | The mouse policy and the display-quality knobs **are** remembered (see the settings file above); dock positions and window geometry are not |
+| Shell (area) result display ([P36](_pending_work.md)) | Shell force resultants are extracted and stored in NPZ archives, but the GUI draws no per-shell scalar field |
 | Quad view (milestone 10) | A single viewport; use the Camera menu and the view cube |
 | `check` and `chart` verbs, and the command palette ([P30](_pending_work.md) phase C, [P31](_pending_work.md)) | The Recipe panel runs the verbs that exist (`scale_sections`, `mesh`, `run_static`, `combine`, the three model checks, the `capacity.*` checks and `mesh_checks`, and `chart`).  A recipe's solved cases and combinations **are** registered as result views, its checks as a check-table view, and its `chart` step as an embedded figure; the remaining charts (storey forces, pushover, modal, CSM) have no step yet |
 

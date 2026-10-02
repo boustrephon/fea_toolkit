@@ -14,7 +14,7 @@ and ``height - y * devicePixelRatio``, the same conversion the Qt widget itself
 performs before invoking ``LeftButtonPressEvent``.
 """
 
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from qtpy.QtCore import QEvent, QObject, Qt
 
@@ -45,11 +45,19 @@ class QtMouseFilter(QObject):
         parent: Optional Qt parent.
     """
 
-    def __init__(self, widget: Any, interaction: Any, parent: Optional[QObject] = None) -> None:
+    def __init__(
+        self,
+        widget: Any,
+        interaction: Any,
+        parent: Optional[QObject] = None,
+        on_context_menu: Optional[Callable] = None,
+    ) -> None:
         super().__init__(parent)
         self._widget = widget
         self._interaction = interaction
+        self._on_context_menu = on_context_menu
         self._owned = False
+        self._ctx_start: Optional[tuple] = None
 
     # ── Helpers ──────────────────────────────────────────────────────
 
@@ -111,6 +119,13 @@ class QtMouseFilter(QObject):
         event_type = event.type()
         if event_type == QEvent.Type.MouseButtonPress:
             button = getattr(event, "button", lambda: None)()
+            if self._is_context_button(button):
+                # The right button is free (it is not the pick button): remember
+                # the press so a clean click can open the context menu on
+                # release, but hand the event through so a right-*drag* still
+                # pans the camera.
+                self._ctx_start = self._logical(event)
+                return False
             if button != self._button():
                 return False
             logical = self._logical(event)
@@ -123,6 +138,14 @@ class QtMouseFilter(QObject):
             return self._owned
         if event_type == QEvent.Type.MouseButtonRelease:
             button = getattr(event, "button", lambda: None)()
+            if self._is_context_button(button) and self._ctx_start is not None:
+                start = self._ctx_start
+                self._ctx_start = None
+                if self._on_context_menu is not None and self._is_click(
+                    start, self._logical(event)
+                ):
+                    self._on_context_menu(self._global_pos(event))
+                return False
             if button != self._button():
                 return False
             logical = self._logical(event)
@@ -132,11 +155,34 @@ class QtMouseFilter(QObject):
             return owned
         return False
 
+    def _is_context_button(self, button: Any) -> bool:
+        """Whether *button* is the right button while the right button does not select."""
+        return button == Qt.MouseButton.RightButton and self._interaction.pick_button != "right"
+
+    def _is_click(self, start: tuple, end: tuple) -> bool:
+        """Whether press→release movement stays under the policy's drag threshold."""
+        dx = end[0] - start[0]
+        dy = end[1] - start[1]
+        threshold = float(getattr(self._interaction.policy, "drag_threshold_px", 5))
+        return float((dx * dx + dy * dy) ** 0.5) < threshold
+
+    @staticmethod
+    def _global_pos(event: Any) -> Any:
+        """The event's global position as a point, across Qt5/Qt6 API naming."""
+        getter = getattr(event, "globalPosition", None)
+        if getter is None:
+            getter = getattr(event, "globalPos", None)
+        pos = getter() if getter is not None else None
+        if pos is not None and hasattr(pos, "toPoint"):
+            return pos.toPoint()
+        return pos
+
 
 def install_mouse_filter(
     widget: Any,
     interaction: Any,
     parent: Optional[QObject] = None,
+    on_context_menu: Optional[Callable] = None,
 ) -> QtMouseFilter:
     """Install a :class:`QtMouseFilter` on *widget*.
 
@@ -144,11 +190,13 @@ def install_mouse_filter(
         widget: The viewport widget.
         interaction: The picking adapter to drive.
         parent: Optional Qt parent.
+        on_context_menu: Optional callback invoked with the global position of a
+            clean right-click, when the right button is **not** the pick button.
 
     Returns:
         The installed filter -- the caller must keep it alive (``parent`` does
         that when one is given).
     """
-    mouse_filter = QtMouseFilter(widget, interaction, parent)
+    mouse_filter = QtMouseFilter(widget, interaction, parent, on_context_menu=on_context_menu)
     widget.installEventFilter(mouse_filter)
     return mouse_filter
