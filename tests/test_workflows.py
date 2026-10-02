@@ -776,9 +776,36 @@ class TestResponseSpectrumWorkflow:
         )
         assert isinstance(results, dict)
         assert "base_shear_cqc" in results, "base_shear_cqc missing from RS results"
+        assert "missing_mass" not in results, "missing-mass correction should be opt-in"
         assert abs(results["base_shear_cqc"]) > 1e-6, (
             f"base_shear_cqc is near zero ({results['base_shear_cqc']})"
         )
+
+    def test_rs_missing_mass_correction_when_enabled(self, sample_ab, spectrum):
+        """``config["missing_mass"]`` adds the code-spectrum correction.
+
+        The per-element CQC combines only the extracted modes; the residual
+        (missing) mass is dropped.  Enabling the gate augments the result with
+        the rigid cut-off / missing-mass contribution from
+        :func:`fea_toolkit.spectrum.cqc_base_shear`.
+        """
+        sample_ab.build_domain()
+        sample_ab.compute_seismic_masses()
+        modal = sample_ab.run_modal_analysis(num_modes=3)
+        periods, accels = spectrum
+        sample_ab.config["missing_mass"] = True
+        results = sample_ab.run_response_spectrum_analysis(
+            num_modes=3,
+            modal_periods=modal["periods"],
+            spectrum_periods=periods,
+            spectrum_accels=accels,
+            direction="X",
+            damping_ratio=0.05,
+        )
+        mm = results["missing_mass"]
+        assert mm["base_shear_missing_mass"] >= 0.0
+        assert mm["base_shear_total"] >= mm["base_shear_missing_mass"] - 1e-12
+        assert mm["participation_ratio"] >= 0.0
 
     def test_local_forces_component_order(self):
         """``localForces`` is [Fx, Fy, Fz, Mx, My, Mz] per end — Fy/Fz are shears.

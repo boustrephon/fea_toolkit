@@ -472,6 +472,41 @@ class RsRunnerMixin:
             "base_reactions_srss": base_reactions_srss,
         }
 
+        # ── Missing-mass / rigid cut-off correction (config-gated) ──
+        # The per-element CQC above combines only the extracted modes; the
+        # residual (missing) mass is dropped.  ``spectrum.cqc_base_shear``
+        # computes the rigid cut-off and missing-mass contribution from the
+        # effective modal masses, so add it here — additively, without
+        # touching the existing keys.  Gated behind ``config["missing_mass"]``
+        # so the correction is opt-in and existing outputs are unchanged.
+        if self.config.get("missing_mass"):
+            from ..spectrum import cqc_base_shear
+
+            try:
+                _mp = ops.modalProperties("-return", "-unorm")
+            except Exception:
+                _mp = {}
+            _mass_key = {"X": "partiMassMX", "Y": "partiMassMY", "Z": "partiMassMZ"}[direction]
+            _eff = (list(_mp.get(_mass_key, [])) + [0.0] * num_modes)[:num_modes]
+            _total = float(sum(self.node_masses.values())) if self.node_masses else None
+            _mm = cqc_base_shear(
+                _eff,
+                modal_periods[:num_modes],
+                lambda T: float(np.interp(T, spectrum_periods, spectrum_accels)),
+                damping=damping_ratio,
+                T_rigid=T_rigid,
+                total_mass=_total,
+            )
+            result["missing_mass"] = {
+                "base_shear_missing_mass": _mm.get("base_shear_missing_mass", 0.0),
+                "base_shear_rigid_cutoff": _mm.get("base_shear_rigid_cutoff", 0.0),
+                "base_shear_total": _mm.get("base_shear_total", 0.0),
+                "participation_ratio": _mm.get("participation_ratio", 0.0),
+                "residual_mass": _mm.get("residual_mass", 0.0),
+                "captured_mass": _mm.get("captured_mass", 0.0),
+                "total_mass": _mm.get("total_mass", 0.0),
+            }
+
         if print_results:
             print(f"\n===== RESPONSE SPECTRUM ({direction}) =====")
             print(f"{'Mode':>5} {'Period(s)':>10} {'Shear (kN)':>14} {'Moment (kN-m)':>16}")
