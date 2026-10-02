@@ -7,6 +7,45 @@ category: [planning]
 ---
 # Pending work — fea_toolkit (2026-10-02)
 
+## Strategy — the next steps
+
+> The register is the single source of truth; this section is the
+> *sequencing layer* over it (maintained 2026-10-02).  The standalone plan
+> documents are historical records — `analysis_builder_migration_plan.md`,
+> `csm_test_model_plan.md` and `deprecation_plan.md` are ✅ complete, and
+> `linting_fix_plan.md`'s only open work is P9.  The **active front** is the
+> workflow/GUI layer (P30–P36).
+
+**Near term — finish the workflow layer.**
+
+1. **P32** — `generate_report` composes the registry (keeping its NPZ/HDF5
+   storage and HTML-rendering stages, which are *not* verbs) and the greyed
+   `Analysis ▸ Modal / Response spectrum / Pushover` entries become presets.
+   First increment (landed 2026-10-02): the `pushover` verb now declares
+   `gravity_patterns`, `brace_type` and `brace_sections` — the parameter gap
+   that blocked the composition.
+2. **P30 charts** — the remaining `chart` plots (`storey_forces`, pushover,
+   modal, CSM), consuming P32's results.  **Flag:** `storey_forces` may want
+   **P19** (member-interior force stations) — pull it forward if it blocks
+   rather than merely enhances.
+3. **P36** — shell (area) result display (repository seam → per-case
+   collection → renderer → GUI toggle).  Self-contained.
+4. **P35** — named selections first, then the `open`/`close`/`save`/`select`
+   document verbs.  **P31** (command palette) is independent input ergonomics
+   and can run in parallel with any of the above.
+
+**Then — physics / feature gaps.**  P6b, P7 (fibre patches, Python-native NLD),
+then P19 / P23 / P25.
+
+**Opportunistic — Tier 4.**  P9 (linting Phase 3 triage) is the easiest win.
+
+**Guardrails that shape the work.**  Every verb delegates to the two-stage
+pipeline (a thin wrapper, never a reimplementation); `Selection` stays the
+scoping primitive (P35's `selections` field must round-trip through
+`to_string()`/`from_string()`); `generate_report`'s public signature stays
+unchanged through P32; heavy imports stay inside the verb functions so
+`import fea_toolkit.workflow` never loads OpenSees.
+
 ## PENDING (active — not yet done)
 
 > Priority-ordered register (maintained 2026-10-02).  Every pending item
@@ -988,6 +1027,24 @@ stress/damage-map precedent to reuse.  What is missing:
 ``io/results_schema.py``, ``io/npz_writer.py``, ``analysis/linear.py``,
 ``plotting/renderers/pyvista.py``, ``plotting/viewer.py``,
 ``gui/main_window.py`` and their tests.
+
+#### P37 — Wire the missing-mass correction into the response-spectrum path
+
+Source: the 2026-10-02 review (README §4 "Advanced Analyses"); pairs with P32's
+`response_spectrum` verb.
+
+**Status: 🚧 Planned** — the helper exists; the call does not.
+
+**What.** `spectrum.cqc_base_shear(...)` implements the rigid / missing-mass
+correction and is documented as such, but
+`opensees/_runner_rs.py::AnalysisBuilder.run_response_spectrum_analysis` (and
+therefore the `response_spectrum` verb and `generate_report`) never call it, so
+the README's ⚠️ stands.  Wire it through, and add a test asserting the
+correction is applied (config-gated off by default if it changes existing
+outputs).
+
+**Touches (anticipated).** `opensees/_runner_rs.py`, `analysis/rs.py`,
+`workflow/verbs/response_spectrum.py`, and a test under `tests/`.
 
 ### Tier 4 — Deferred / low-priority
 
