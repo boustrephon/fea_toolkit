@@ -472,6 +472,29 @@ and must **never be published**:
 
 Rationale: §5.8.
 
+### 6.5 Git writes are serialised — never run two git write commands concurrently
+
+Tool calls that mutate the repository (`git add`, `git commit`, `git checkout`,
+`git merge`, `git rebase`, `git stash`, `git reset`, `git cherry-pick`,
+`git push`, …) contend for `.git/index.lock` and the per-ref locks under
+`.git/refs/` and `HEAD.lock`.  Running two of them in one parallel tool-call
+batch fails with `fatal: Unable to create '.git/index.lock': File exists` and
+can commit a *partial* set of files — one command wins the race while the
+other's staged set is lost.  Observed 2026-10-02: two `git commit` calls issued
+in parallel; one landed, the other errored on the lock, and a follow-up pass was
+needed to finish.
+
+- **Sequence git writes.**  Join them with `&&` in a *single* command string, or
+  issue them one per turn.  Never put two `git add` / `git commit` /
+  `git checkout` / `git push` (or any other index- or ref-mutating command) as
+  separate entries of one parallel `run_commands` batch.
+- **Reads may batch freely.**  `git status`, `git log`, `git diff`,
+  `git ls-remote` and similar take no index lock and may run in parallel with
+  each other and with reads.
+- **On a stale `index.lock`.**  Remove `.git/index.lock` only after confirming
+  no git process still holds it; never delete it while another command may be
+  running.
+
 
 ## 7. Documentation Rules
 
