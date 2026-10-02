@@ -288,7 +288,15 @@ def test_the_qt_filter_ignores_a_drag(window, monkeypatch):
 
 
 def test_the_qt_filter_ignores_the_other_button(window, monkeypatch):
-    """With the default policy the right button is not a selecting gesture."""
+    """With the default policy the right button is not a selecting gesture.
+
+    The right button is reserved for the context menu, so a clean right-click
+    must reach the context-menu path without ever calling ``pick_at``.  The menu
+    callback is stubbed here: the real handler pops a modal ``QMenu.exec`` which
+    blocks under the offscreen test platform once the native menu state has been
+    touched (``test_gui_app`` exercises the AppKit menu roles), and this test is
+    only about the *pick* half of that split.
+    """
     from qtpy.QtCore import QEvent, Qt
 
     from fea_toolkit.gui.views.interactor import PickResult
@@ -297,6 +305,8 @@ def test_the_qt_filter_ignores_the_other_button(window, monkeypatch):
     monkeypatch.setattr(
         window._interaction, "pick_at", lambda x, y: (seen.append((x, y)), PickResult())[1]
     )
+    menu_positions = []
+    monkeypatch.setattr(window._mouse_filter, "_on_context_menu", menu_positions.append)
 
     widget = window._interactor
     other = Qt.MouseButton.RightButton
@@ -308,6 +318,7 @@ def test_the_qt_filter_ignores_the_other_button(window, monkeypatch):
     )
 
     assert seen == []
+    assert len(menu_positions) == 1
 
 
 def test_a_clean_right_click_opens_the_context_menu(window, monkeypatch):
