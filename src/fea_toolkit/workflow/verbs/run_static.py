@@ -56,15 +56,12 @@ def run_static(context: StepContext, step: Step) -> list[StepResult]:
         write.
 
     Raises:
-        ValueError: If a parameter is not declared by this verb, or no meshing
-            step has run yet.
+        ValueError: If a parameter is not declared by this verb.
     """
     from ...analysis.case_listing import list_static_cases
     from ...analysis.linear import run_case_set
 
     params: dict[str, Any] = validate_params("run_static", RUN_STATIC_PARAMS, step.params)
-    if context.model is None:
-        raise ValueError("run_static needs a prepared topology — run a 'mesh' step first")
 
     cases = params["cases"] or list_static_cases(context.model_data, context.model)
     case_names = ", ".join(cases)

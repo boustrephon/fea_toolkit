@@ -12,7 +12,7 @@ prepare properties, prepare topology, solve, reduce — and is the order a menu
 should offer them.
 """
 
-from .steps import CASES, FIGURE, GEOMETRY, MODEL, TABLE, StepSpec
+from .steps import CASES, FIGURE, GEOMETRY, MODAL, MODEL, TABLE, StepSpec
 from .verbs import (
     BRACE_BUCKLING_PARAMS,
     CHART_PARAMS,
@@ -22,6 +22,9 @@ from .verbs import (
     MEMBER_SHEAR_CAPACITY_PARAMS,
     MESH_CHECKS_PARAMS,
     MESH_PARAMS,
+    MODAL_PARAMS,
+    PUSHOVER_PARAMS,
+    RS_PARAMS,
     RUN_STATIC_PARAMS,
     SCALE_SECTIONS_PARAMS,
     SELF_WEIGHT_PARAMS,
@@ -35,6 +38,9 @@ from .verbs import (
     run_member_shear_capacity,
     run_mesh,
     run_mesh_checks,
+    run_modal,
+    run_pushover,
+    run_response_spectrum,
     run_scale_sections,
     run_static,
     run_wall_shear_check,
@@ -119,8 +125,32 @@ STEP_SPECS: dict[str, StepSpec] = {
         run=run_static,
         params=RUN_STATIC_PARAMS,
         kind=CASES,
-        needs=("model",),
+        needs=("geometry",),
         help="Solve the model's static load cases.",
+    ),
+    "modal": StepSpec(
+        verb="modal",
+        run=run_modal,
+        params=MODAL_PARAMS,
+        kind=MODAL,
+        needs=("geometry",),
+        help="Solve the eigenvalue (modal) problem against the prepared topology.",
+    ),
+    "response_spectrum": StepSpec(
+        verb="response_spectrum",
+        run=run_response_spectrum,
+        params=RS_PARAMS,
+        kind=CASES,
+        needs=("geometry", "modal"),
+        help="CQC response-spectrum combination for one spectrum direction.",
+    ),
+    "pushover": StepSpec(
+        verb="pushover",
+        run=run_pushover,
+        params=PUSHOVER_PARAMS,
+        kind=CASES,
+        needs=("geometry", "modal"),
+        help="Nonlinear static (pushover) analysis with CSM evaluation.",
     ),
     "combine": StepSpec(
         verb="combine",

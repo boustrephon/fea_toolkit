@@ -145,6 +145,9 @@ class TestManifest:
             "scale_sections",
             "mesh",
             "run_static",
+            "modal",
+            "response_spectrum",
+            "pushover",
             "combine",
             "chart",
         ]
@@ -154,7 +157,7 @@ class TestManifest:
         for verb, spec in STEP_SPECS.items():
             assert spec.verb == verb
             assert callable(spec.run)
-            assert spec.kind in ("geometry", "model", "cases", "table", "figure")
+            assert spec.kind in ("geometry", "model", "cases", "modal", "table", "figure")
             assert spec.help, f"{verb} has no help text"
             for name, param in spec.params.items():
                 assert isinstance(param, ParamSpec), f"{verb}.{name}"
@@ -527,7 +530,7 @@ class TestCapacityAndMeshCheckVerbs:
     def test_mesh_checks_needs_a_meshed_model(self):
         with pytest.raises(StepError) as info:
             run_recipe(Recipe(steps=[Step("mesh_checks")]), _slab_model())
-        assert "run a 'mesh' step first" in str(info.value.cause)
+        assert "needs 'geometry'" in str(info.value.cause)
 
     def test_mesh_checks_reports_the_summary_after_a_mesh_step(self):
         run = run_recipe(Recipe(steps=[Step("mesh"), Step("mesh_checks")]), _slab_model())
@@ -546,7 +549,15 @@ class TestFailuresAndCancellation:
             run_recipe(recipe, _slab_model())
         assert info.value.index == 0
         assert info.value.verb == "run_static"
-        assert "prepared topology" in str(info.value.cause)
+        assert "needs 'geometry'" in str(info.value.cause)
+
+    def test_a_missing_precursor_is_rejected_by_name(self):
+        recipe = Recipe(steps=[Step("mesh"), Step("response_spectrum")])  # no modal step
+        with pytest.raises(StepError) as info:
+            run_recipe(recipe, _slab_model())
+        assert info.value.index == 1
+        assert info.value.verb == "response_spectrum"
+        assert "needs 'modal'" in str(info.value.cause)
 
     def test_an_optional_failure_is_recorded_and_the_run_continues(self):
         recipe = Recipe(
@@ -601,7 +612,7 @@ class TestEndToEnd:
     def test_combine_without_solved_cases_fails_with_a_clear_message(self):
         with pytest.raises(StepError) as info:
             run_recipe(Recipe(steps=[Step("combine")]), _slab_model())
-        assert "run_static" in str(info.value.cause)
+        assert "needs 'cases'" in str(info.value.cause)
 
     def test_a_cancelled_solve_marks_the_run_cancelled(self):
         """A run_static stopped mid-case marks the run cancelled, final step or not."""
@@ -677,4 +688,4 @@ class TestEndToEnd:
     def test_a_chart_step_without_solved_cases_fails_clearly(self):
         with pytest.raises(StepError) as info:
             run_recipe(Recipe(steps=[Step("chart")]), _slab_model())
-        assert "run_static" in str(info.value.cause)
+        assert "needs 'cases'" in str(info.value.cause)

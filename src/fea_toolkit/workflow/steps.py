@@ -28,6 +28,7 @@ __all__ = [
     "CASES",
     "FIGURE",
     "GEOMETRY",
+    "MODAL",
     "MODEL",
     "TABLE",
     "ParamSpec",
@@ -47,6 +48,8 @@ GEOMETRY = "geometry"
 MODEL = "model"
 #: A step's output is solved case results (``{case: result}``).
 CASES = "cases"
+#: A step's output is a modal (eigenvalue) result.
+MODAL = "modal"
 #: A step's output is a table of findings — a check's result, rendered as a grid.
 TABLE = "table"
 #: A step's output is a figure — a chart, rendered as an image.
@@ -183,8 +186,8 @@ class StepResult:
     """What one step produced, for display and for a later step to consume.
 
     Attributes:
-        kind: :data:`GEOMETRY`, :data:`MODEL`, :data:`CASES`, :data:`TABLE` or
-            :data:`FIGURE`.
+        kind: :data:`GEOMETRY`, :data:`MODEL`, :data:`CASES`, :data:`MODAL`,
+            :data:`TABLE` or :data:`FIGURE`.
         label: Display name for the output, e.g. ``"Meshed"``.
         payload: The output itself — a ``MeshModel``, a ``SAPModelData``,
             ``{case_name: result_dict}``, a :class:`Table`, or a matplotlib
@@ -240,6 +243,11 @@ class StepContext:
         case_results: ``{case name: payload}`` solved so far — the raw results a
             :mod:`fea_toolkit.workflow.verbs.combine` step reduces.  Keys are
             merged, never replaced, so several analysis steps can contribute.
+        results: Non-static analysis results keyed by a stable name — the modal
+            result under ``"modal"``, the response-spectrum result under
+            ``"rs"``, and so on.  This is the hand-off between an analysis verb
+            and the verb that consumes it; the *ordering* is the declared
+            ``needs`` chain, not this mapping.
         cancel: Zero-argument predicate — ``True`` asks the run to stop at the
             next step boundary.  Wired to the GUI worker's flag.
         log: One-line sink for progress, wired to the GUI message log.
@@ -252,6 +260,7 @@ class StepContext:
     model_data: SAPModelData
     model: Optional[Any] = None
     case_results: dict = field(default_factory=dict)
+    results: dict = field(default_factory=dict)
     cancel: Callable[[], bool] = _never_cancel
     log: Callable[[str], None] = _discard
     cancelled: bool = False
@@ -267,9 +276,10 @@ class StepSpec:
         params: ``{parameter name: ParamSpec}`` — the complete parameter set.
         kind: The :class:`StepResult` kind this verb produces.
         help: One-line description, for menus and the verb listing.
-        needs: Input prerequisites, e.g. ``("model",)`` for a verb that needs a
-            prepared topology.  Lets a caller grey out a step that cannot run
-            yet instead of failing on it.
+        needs: Input prerequisites — the kinds a previous step must have
+            produced, e.g. ``("geometry",)`` for a verb that needs a prepared
+            topology.  ``run_recipe`` validates the chain in order; a caller may
+            read the same field to grey out a step that cannot run yet.
     """
 
     verb: str

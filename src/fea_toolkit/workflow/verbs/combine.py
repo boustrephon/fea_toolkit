@@ -62,16 +62,14 @@ def run_combine(context: StepContext, step: Step) -> list[StepResult]:
         case when the model defines no combination the step can form.
 
     Raises:
-        ValueError: If a parameter is not declared by this verb, no case has
-            been solved yet, or (from the reducer) a requested combination is
-            unknown or references a case that was not solved.
+        ValueError: If a parameter is not declared by this verb, or (from the
+            reducer) a requested combination is unknown or references a case
+            that was not solved.
     """
     from ...analysis.combinations import build_combination_results
     from ...io.npz_writer import results_arrays
 
     params: dict[str, Any] = validate_params("combine", COMBINE_PARAMS, step.params)
-    if not context.case_results:
-        raise ValueError("combine needs solved cases — run a 'run_static' step first")
 
     combined, case_meta = build_combination_results(
         context.case_results,

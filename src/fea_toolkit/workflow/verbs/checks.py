@@ -327,13 +327,11 @@ def run_mesh_checks(context: StepContext, step: Step) -> list[StepResult]:
         for ``metric=\"report\"``, or one value per area for a single metric.
 
     Raises:
-        ValueError: If a parameter is not declared, or no mesh has been built yet.
+        ValueError: If a parameter is not declared by this verb.
     """
     from ...mesh.checks import aspect_ratios, flatness, report, skew
 
     params: dict[str, Any] = validate_params("mesh_checks", MESH_CHECKS_PARAMS, step.params)
-    if context.model is None:
-        raise ValueError("mesh_checks needs a meshed model — run a 'mesh' step first")
 
     areas = context.model.area_elements
     nodes = context.model.nodes

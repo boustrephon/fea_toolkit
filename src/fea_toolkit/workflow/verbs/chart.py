@@ -52,8 +52,8 @@ def run_chart(context: StepContext, step: Step) -> list[StepResult]:
         response to draw.
 
     Raises:
-        ValueError: If a parameter is not declared by this verb, no case has
-            been solved yet, or the model has no identifiable storeys.
+        ValueError: If a parameter is not declared by this verb, or the model
+            has no identifiable storeys.
     """
     import pandas as pd
 
@@ -68,8 +68,6 @@ def run_chart(context: StepContext, step: Step) -> list[StepResult]:
     from ...plotting.report import plot_storey_displacements
 
     params: dict[str, Any] = validate_params("chart", CHART_PARAMS, step.params)
-    if not context.case_results:
-        raise ValueError("chart needs solved cases — run a 'run_static' step first")
 
     # Rebuild the archive from the raw results, exactly as ``combine`` does, so
     # the chart reads the same object a results view would.

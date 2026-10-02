@@ -31,6 +31,9 @@ from .checks import (
 )
 from .combine import COMBINE_PARAMS, run_combine
 from .mesh import MESH_PARAMS, run_mesh
+from .modal import MODAL_PARAMS, run_modal
+from .pushover import PUSHOVER_PARAMS, run_pushover
+from .response_spectrum import RS_PARAMS, run_response_spectrum
 from .run_static import RUN_STATIC_PARAMS, run_static
 from .scale_sections import SCALE_SECTIONS_PARAMS, run_scale_sections
 
@@ -43,6 +46,9 @@ __all__ = [
     "MEMBER_SHEAR_CAPACITY_PARAMS",
     "MESH_CHECKS_PARAMS",
     "MESH_PARAMS",
+    "MODAL_PARAMS",
+    "PUSHOVER_PARAMS",
+    "RS_PARAMS",
     "RUN_STATIC_PARAMS",
     "SCALE_SECTIONS_PARAMS",
     "SELF_WEIGHT_PARAMS",
@@ -56,6 +62,9 @@ __all__ = [
     "run_member_shear_capacity",
     "run_mesh",
     "run_mesh_checks",
+    "run_modal",
+    "run_pushover",
+    "run_response_spectrum",
     "run_scale_sections",
     "run_static",
     "run_wall_shear_check",

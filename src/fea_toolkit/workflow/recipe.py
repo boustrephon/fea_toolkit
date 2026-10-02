@@ -292,13 +292,19 @@ def run_recipe(
         ValueError: If a step names an unknown verb.
     """
     from .registry import STEP_SPECS
-    from .steps import StepContext, StepError
+    from .steps import GEOMETRY, StepContext, StepError
 
     context = StepContext(model_data=model_data, model=model)
     if cancel is not None:
         context.cancel = cancel
     if log is not None:
         context.log = log
+
+    # A caller-supplied topology counts as produced geometry, so a recipe may
+    # start with an analysis step when run_recipe is handed an already-prepared
+    # ``MeshModel``.  Every successful step adds its kind here; a step's
+    # ``needs`` is validated against it before the step runs.
+    produced = {GEOMETRY} if model is not None else set()
 
     run = RecipeRun()
     for index, step in enumerate(recipe.steps):
@@ -312,8 +318,15 @@ def run_recipe(
                 f"recipe step {index}: unknown verb {step.verb!r}; "
                 f"known verbs: {sorted(STEP_SPECS)}"
             )
+        missing = [kind for kind in spec.needs if kind not in produced]
         try:
+            if missing:
+                raise ValueError(
+                    f"step {index} ({step.verb}) needs {missing[0]!r} — "
+                    f"run a step that produces {missing[0]!r} first"
+                )
             run.results.extend(spec.run(context, step))
+            produced.add(spec.kind)
         except Exception as exc:
             if not step.optional:
                 raise StepError(index, step.verb, exc) from exc
