@@ -216,6 +216,46 @@ class TestManifest:
 # ── Recipes as data ───────────────────────────────────────────────────
 
 
+class TestAnalysisVerbs:
+    """The analysis verbs are thin wrappers — what the report passes must arrive."""
+
+    def test_pushover_declares_the_report_s_parameters(self):
+        """``generate_report`` passes ``gravity_patterns`` / ``brace_type`` /
+        ``brace_sections`` to the analysis; the verb must declare them so a
+        recipe step can carry the same information."""
+        params = STEP_SPECS["pushover"].params
+        assert params["gravity_patterns"].type is dict
+        assert params["brace_type"].choices == ("truss", "beam")
+        assert params["brace_sections"].type is list
+
+    def test_pushover_passes_gravity_and_brace_through(self, monkeypatch):
+        """Every declared parameter reaches ``run_pushover_analysis`` unchanged."""
+        import fea_toolkit.analysis.pushover as pushover_module
+        from fea_toolkit.workflow.steps import StepContext
+
+        captured: dict = {}
+
+        def fake_run_pushover_analysis(_mesh, _modal, **kwargs):
+            captured.update(kwargs)
+            return object()
+
+        monkeypatch.setattr(pushover_module, "run_pushover_analysis", fake_run_pushover_analysis)
+        context = StepContext(model_data=_slab_model(), model=object(), results={"modal": object()})
+        step = Step(
+            "pushover",
+            params={
+                "gravity_patterns": {"DEAD": 1.0, "LIVE": 0.5},
+                "brace_type": "beam",
+                "brace_sections": ["BRACE-1"],
+            },
+        )
+        STEP_SPECS["pushover"].run(context, step)
+
+        assert captured["gravity_patterns"] == {"DEAD": 1.0, "LIVE": 0.5}
+        assert captured["brace_type"] == "beam"
+        assert captured["brace_sections"] == ["BRACE-1"]
+
+
 class TestRecipeSerialisation:
     """A recipe is data: it round-trips, and it refuses what it cannot mean."""
 
