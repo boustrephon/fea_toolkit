@@ -134,6 +134,7 @@ from .sap_data import (
 )
 from .sections import SectionLibrary
 from .selection import Selection
+from .self_weight import SelectionWeight, selection_weight
 from .source_resolver import ResolvedSource, resolve_model_source
 from .stories import (
     StoryLevel,
@@ -267,6 +268,7 @@ __all__ = [
     "SectionLibrary",
     # Selection
     "Selection",
+    "SelectionWeight",
     "ShellFiberLayer",
     "ShellSection",
     "SpatialGrid",
@@ -337,6 +339,7 @@ __all__ = [
     "review_model",
     "review_s2k_file",
     "rigid_body_fit",
+    "selection_weight",
     "split_areas_at_frame_edges",
     # Geometry
     "split_elements",
