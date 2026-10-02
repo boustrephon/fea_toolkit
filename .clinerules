@@ -488,9 +488,12 @@ needed to finish.
   issue them one per turn.  Never put two `git add` / `git commit` /
   `git checkout` / `git push` (or any other index- or ref-mutating command) as
   separate entries of one parallel `run_commands` batch.
-- **Reads may batch freely.**  `git status`, `git log`, `git diff`,
-  `git ls-remote` and similar take no index lock and may run in parallel with
-  each other and with reads.
+- **Reads may batch freely.**  `git log`, `git diff`, `git ls-remote` and
+  similar take no index lock and may run in parallel with each other and with
+  reads.  `git status` is **not** lock-free: it refreshes the index and may
+  take `.git/index.lock` (an optional lock), so run it with
+  `--no-optional-locks` when it must run beside a write, or sequence it
+  separately from Git writes.
 - **On a stale `index.lock`.**  Remove `.git/index.lock` only after confirming
   no git process still holds it; never delete it while another command may be
   running.
