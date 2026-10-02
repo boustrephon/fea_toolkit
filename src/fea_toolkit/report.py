@@ -553,13 +553,15 @@ def generate_report(
                 "num_steps": push_cfg["num_steps"],
                 "brace_type": push_cfg.get("brace_type", "beam"),
                 "name": f"Pushover-{pattern}",
-                "return_builders": bool(export_cfg.get("pushover", False)),
+                "return_builders": bool(
+                    export_cfg.get("enabled", False) and export_cfg.get("pushover", False)
+                ),
             }
             if load_cfg.get("gravity"):
                 push_params["gravity_patterns"] = load_cfg["gravity"]
             if push_cfg.get("brace_sections"):
                 push_params["brace_sections"] = push_cfg["brace_sections"]
-            if export_cfg.get("pushover", False):
+            if export_cfg.get("enabled", False) and export_cfg.get("pushover", False):
                 push_params["config"] = {"record_pushover_steps": True}
             analysis_recipe.add("pushover", params=push_params)
 

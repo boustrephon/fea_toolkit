@@ -482,10 +482,10 @@ class RsRunnerMixin:
         if self.config.get("missing_mass"):
             from ..spectrum import cqc_base_shear
 
-            try:
-                _mp = ops.modalProperties("-return", "-unorm")
-            except Exception:
-                _mp = {}
+            # modalProperties must succeed for the correction to be meaningful —
+            # an empty mapping would silently produce a correction from zero
+            # effective mass, so let the failure propagate instead.
+            _mp = ops.modalProperties("-return", "-unorm")
             _mass_key = {"X": "partiMassMX", "Y": "partiMassMY", "Z": "partiMassMZ"}[direction]
             _eff = (list(_mp.get(_mass_key, [])) + [0.0] * num_modes)[:num_modes]
             _total = float(sum(self.node_masses.values())) if self.node_masses else None
