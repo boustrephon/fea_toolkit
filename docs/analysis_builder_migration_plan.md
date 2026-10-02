@@ -162,7 +162,7 @@ Entry points: ``AnalysisBuilder.run_pushover_analysis()`` and the
 | Task | Status |
 |------|--------|
 | **Task 1** — Define the runtime boundary (Preprocessor + AnalysisBuilder only active stages) | ✅ **Done** |
-| **Task 2** — Add the analysis-case contract (`AnalysisCaseSpec` + `AnalysisManager`) | ✅ **Done** — `analysis/base.py` + `analysis/manager.py` |
+| **Task 2** — Add the analysis-case contract (`AnalysisCaseSpec` + `AnalysisManager`) | ✅ **Done** — `AnalysisCaseSpec` lives in `analysis/base.py`; the `AnalysisManager` orchestrator was later removed (2026-08-21 simplification) — composition is explicit, orchestrated by `report.py` |
 | **Task 3** — Make nonlinear OpenSeesPy cases explicit (RC pushover, nonlinear dynamic) | ✅ **Done** — `PushoverAnalysis` + `NonlinearDynamicAnalysis` with per-type defaults |
 | **Task 4** — Tcl/Xara workflow | ✅ **Done** — Tcl export + `XaraTclRunner` + result parsing |
 | **Task 5** — Align the local v3 scripts to the shared `MeshModel` / per-case `AnalysisBuilder` architecture | ✅ **Done** — model-specific drivers are thin wrappers over `generate_report()` |

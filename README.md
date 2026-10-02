@@ -391,15 +391,25 @@ parsing through analysis to visualisation and reporting.
 | `examples/static_analysis.py` | Parse → build → static → 2D/3D force diagrams |
 | `examples/modal_rs_analysis.py` | Parse → build → masses → modal → GB 50011 RS → element RS forces |
 | `examples/pushover_analysis.py` | Parse → fiber build → pushover → deformed shape plots |
-| `local/project_a_csm.py` | Full pipeline: parse → buckling → modal → RS → pushover 4-dir → CSM → NPZ |
-| `local/detect_edges.py` | Standalone unconnected shell edge detection |
 
-### 9. Report Generation Architecture (Proposed)
+Project-specific drivers (e.g. the CSM pipeline and edge detection) live in the
+private, gitignored `local/` directory and are not part of the distribution.
 
-**Coming:** A `generate_report()` function driven by a YAML config file
-that orchestrates the entire analysis pipeline, stores results in HDF5, and
-produces a self-contained report. See `docs/report_generation.md` for the
-detailed design.
+### 9. Report Generation
+
+`generate_report()` (in `report.py`, re-exported from `fea_toolkit`) runs the
+full two-stage pipeline — preprocess → modal → response spectrum → pushover →
+combination reduction → storey response → CSM — and returns the canonical result
+dict.  It is driven by a nested **Python dict** config (``config=…``, deep-merged
+over the defaults, with ``**overrides`` using ``__`` as a nesting separator) —
+**not** a YAML file.  With ``out_dir`` set it writes the results to a single
+self-contained ``.h5`` / ``.npz`` archive (default ``.h5``) and exports the
+figures.
+
+The self-contained HTML/PDF report-rendering stage is still designed but not yet
+implemented — see `docs/report_generation.md` (draft).  The pipeline's *analysis*
+stages are also scheduled to become workflow verbs so `generate_report` and the
+recipe layer compose the same registry (workflow Phase E, `docs/workflow_authoring.md`).
 
 ---
 

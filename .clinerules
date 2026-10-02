@@ -28,10 +28,12 @@ Each subpackage has a clear domain. Do not cross-contaminate:
 | `io/` | File I/O: parsing (`.s2k`, JSON), NPZ read/write, reporting. Shared NPZ/H5 serialisation lives in `io/_serial.py`. |
 | `opensees/` | OpenSees domain construction and analysis execution. Imports `ops`. |
 | `analysis/` | Type-specific analysis functions (`linear`, `static`, `modal`, `rs`, `pushover`, `nonlinear_dynamic`), the case listing, and combination reduction. Orchestration of a whole run lives at the root in `report.py` — there is no `manager.py`. |
+| `capacity/` | Code-specified member capacities (GB 50010, ASCE 41, Elwood limit state, simplified-MCFT shear) and DCR helpers. One module per building code; pure computation, no OpenSees imports. |
 | `workflow/` | Declarative workflow authoring: `steps.py` (the vocabulary), `registry.py` (the `STEP_SPECS` manifest), `recipe.py` (recipes as data), `verbs/` (one module per verb, holding its implementation and its declared parameters). Qt-free, and imports no `ops` at module level. |
 | `mesh/` | Mesh quality checks and Gmsh remeshing. Optional dependency. |
 | `plotting/` | PyVista/Matplotlib visualization. Backend-agnostic viewer via `renderers/`. |
 | `rhino/` | Rhino 8 geometry export, layers, colouring. |
+| `gui/` | Qt desktop application (PySide6 via `qtpy`, `pyvistaqt` viewport). Python 3.10+ only — installed via the `[gui]` extra; never imported by the core package. |
 
 **Root-level modules** form a small third tier and are deliberate: `utils.py`
 is a **re-export facade** over the single-concern modules `_unit_scaling.py`
