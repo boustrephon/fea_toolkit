@@ -144,6 +144,7 @@ class TestManifest:
             "wall_shear_check",
             "scale_sections",
             "mesh",
+            "save_model",
             "run_static",
             "modal",
             "response_spectrum",
@@ -390,6 +391,51 @@ class TestMeshVerb:
         assert config["create_shells"] is True  # the default was filled in
         assert passed == selection
         assert isinstance(run.results[0].payload, _FakeMesh)
+
+
+class TestSaveModelVerb:
+    """The ``save_model`` verb persists the prepared topology to a file."""
+
+    def test_saves_the_prepared_topology_as_a_stage_file(self, tmp_path):
+        from fea_toolkit.io.stage_reader import read_model_stages
+
+        target = tmp_path / "saved.npz"
+        recipe = Recipe(
+            steps=[
+                Step("mesh"),
+                Step("save_model", params={"path": str(target), "fmt": "npz"}),
+            ]
+        )
+        run = run_recipe(recipe, _slab_model())
+
+        assert target.exists()
+        assert read_model_stages(str(target), "mesh") == run.results[0].payload
+        assert run.results[1].payload.title == "Saved model"
+
+    def test_saves_json_via_the_codec(self, tmp_path):
+        from fea_toolkit.io.model_codec import json_to_model
+
+        target = tmp_path / "saved.json"
+        recipe = Recipe(
+            steps=[
+                Step("mesh"),
+                Step("save_model", params={"path": str(target), "fmt": "json"}),
+            ]
+        )
+        run = run_recipe(recipe, _slab_model())
+
+        assert target.exists()
+        assert json_to_model(target.read_text(encoding="utf-8")) == run.results[0].payload
+
+    def test_requires_a_path(self):
+        recipe = Recipe(steps=[Step("mesh"), Step("save_model")])
+        with pytest.raises(StepError):
+            run_recipe(recipe, _slab_model())
+
+    def test_needs_a_prepared_topology(self):
+        recipe = Recipe(steps=[Step("save_model", params={"path": "out.h5"})])
+        with pytest.raises(StepError):
+            run_recipe(recipe, _slab_model())
 
 
 class TestPerStepState:

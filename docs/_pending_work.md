@@ -485,6 +485,12 @@ the Recipe panel and the Model-menu presets — see
 `docs/workflow_authoring.md`.  Modal / spectrum / pushover analyses, storey
 response and the quad view remain.**
 
+**DONE (2026-10-02) — File ▸ Save model…** writes the preprocessed ``MeshModel``
+to a JSON (codec) / NPZ / HDF5 (stage) file, gated on a preprocessed model
+existing, and the same operation is available as the **`save_model`** recipe
+verb (``path`` + ``fmt``) — both delegate to
+``io.stage_writer.write_model_file``, so the menu and a recipe save identically.
+
 **What.** A native, document-centric desktop application wrapping the
 package's existing workflow (import `*.s2k` → display geometry and loading →
 query objects → run analyses → view results), built around a central 3-D

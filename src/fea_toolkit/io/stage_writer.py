@@ -411,3 +411,49 @@ def write_model_stages(
     else:
         _write_npz(path, arrays)
     return path
+
+
+def write_model_file(
+    path: str,
+    *,
+    sap: Optional[SAPModelData] = None,
+    mesh: Optional[t.Any] = None,
+    fmt: str = "h5",
+    **write_model_stages_options,
+) -> str:
+    """Write a model to *path* as a JSON codec payload or a stage file.
+
+    The single front door for "save the model to a file", shared by the GUI's
+    ``File ▸ Save model…`` action and the ``save_model`` recipe verb so the two
+    cannot drift apart.
+
+    ``fmt="json"`` writes the codec payload of *mesh* (falling back to *sap*)
+    as a JSON file — a lossless :func:`fea_toolkit.io.model_codec.json_to_model`
+    round-trip.  ``fmt="npz"`` / ``fmt="h5"`` delegate to
+    :func:`write_model_stages`, writing both stages (and accepting the same
+    keyword options).
+
+    Args:
+        path: Output file path (``.json`` / ``.npz`` / ``.h5``).
+        sap: ``SAPModelData`` (the ``sap`` stage of an NPZ/HDF5 file).
+        mesh: ``MeshModel`` (the ``mesh`` stage, and the JSON payload).
+        fmt: ``"json"``, ``"npz"`` or ``"h5"``.
+        **write_model_stages_options: Forwarded to :func:`write_model_stages`
+            for the ``npz`` / ``h5`` formats.
+
+    Returns:
+        The absolute path written.
+    """
+    if fmt == "json":
+        model = mesh if mesh is not None else sap
+        if model is None:
+            raise ValueError("write_model_file requires 'sap' or 'mesh' for JSON output")
+        from .model_codec import model_to_dict
+
+        resolved = str(Path(path).resolve())
+        Path(resolved).write_text(
+            json.dumps(model_to_dict(model), indent=2, sort_keys=True, allow_nan=False),
+            encoding="utf-8",
+        )
+        return resolved
+    return write_model_stages(path, sap=sap, mesh=mesh, fmt=fmt, **write_model_stages_options)

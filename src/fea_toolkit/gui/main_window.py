@@ -150,6 +150,28 @@ def _case_of(view: Optional[View]) -> str:
     return view.key[len(_RESULTS_KEY_PREFIX) :]
 
 
+def _model_file_format(path: str, chosen_filter: str) -> tuple[str, str]:
+    """Resolve a save-model format from *path* and the chosen dialog filter.
+
+    An explicit extension in *path* wins; otherwise the selected filter decides
+    and its canonical extension is appended.  ``"h5"`` covers both ``.h5`` and
+    ``.hdf5`` (:func:`~fea_toolkit.io.stage_writer.write_model_stages` accepts
+    ``fmt="h5"`` for either).
+    """
+    lower = path.lower()
+    if lower.endswith(".json"):
+        return "json", path
+    if lower.endswith(".npz"):
+        return "npz", path
+    if lower.endswith((".h5", ".hdf5")):
+        return "h5", path
+    if "JSON" in chosen_filter:
+        return "json", path + ".json"
+    if "NPZ" in chosen_filter:
+        return "npz", path + ".npz"
+    return "h5", path + ".h5"
+
+
 class MainWindow(QMainWindow):
     """Top-level window hosting the 3-D viewport and the application chrome.
 
@@ -689,6 +711,12 @@ class MainWindow(QMainWindow):
         a["help.about"].setMenuRole(QAction.MenuRole.AboutRole)
 
         # ── Greyed placeholders (each names its milestone) ──
+        a["file.save_model"] = self._real_action(
+            "Save model\u2026",
+            self._on_save_model,
+            tip="Write the meshed model to a JSON, NPZ or HDF5 file",
+        )
+        a["file.save_model"].setEnabled(False)
         a["file.save_results"] = self._real_action(
             "Save results\u2026",
             self._on_save_results,
@@ -847,7 +875,12 @@ class MainWindow(QMainWindow):
         m.addAction(a["file.open"])
         m.addAction(a["file.open_results"])
         m.addSeparator()
-        for key in ("file.save_results", "file.export_tcl", "file.export_image"):
+        for key in (
+            "file.save_model",
+            "file.save_results",
+            "file.export_tcl",
+            "file.export_image",
+        ):
             m.addAction(a[key])
         m.addSeparator()
         m.addAction(a["file.quit"])
@@ -2092,6 +2125,7 @@ class MainWindow(QMainWindow):
         self._set_model_actions_enabled(False)
         self._progress.setRange(0, 0)  # busy: a recipe reports no fine-grained progress
         self._progress.setVisible(True)
+        self._actions["analysis.stop"].setEnabled(True)
         self.log(f"{label} \u2026")
 
         def task(should_cancel):
@@ -2278,6 +2312,7 @@ class MainWindow(QMainWindow):
         self._worker = None
         self._progress.setVisible(False)
         self._progress.setRange(0, 100)
+        self._actions["analysis.stop"].setEnabled(False)
         self._set_model_actions_enabled(self._store is not None)
         self._set_analysis_actions_enabled()
         gc.collect()
@@ -2307,6 +2342,10 @@ class MainWindow(QMainWindow):
         enabled = mesh is not None and not running
         for key in ("analysis.run", "analysis.modal", "analysis.spectrum", "analysis.pushover"):
             self._actions[key].setEnabled(enabled)
+        # Saving the meshed model needs the same preprocessed ``MeshModel``, but
+        # is safe while an analysis runs (the topology is frozen), so it is not
+        # gated on ``running``.
+        self._actions["file.save_model"].setEnabled(mesh is not None)
         action = self._actions["analysis.run"]
         if mesh is None:
             action.setToolTip(
@@ -2496,6 +2535,53 @@ class MainWindow(QMainWindow):
             self.log(f"Could not save results: {exc}", "error")
             return
         self.log(f"Saved results to {saved}.")
+
+    def _on_save_model(self) -> None:
+        """**File ▸ Save model…**: write the meshed model to a chosen file.
+
+        The preprocessed ``MeshModel`` is what is saved; a parsed model that has
+        not been meshed yet has nothing to write, so the action stays greyed
+        until ``Model ▸ Split elements`` / ``Mesh areas`` has produced one.  The
+        format follows the chosen extension: ``.json`` writes the lossless
+        codec payload (a ``MeshModel`` round-trip through
+        :func:`~fea_toolkit.io.model_codec.json_to_model`), while ``.npz`` /
+        ``.h5`` write the self-describing stage file (both ``sap`` and ``mesh``
+        stages, so the file can be re-analysed or imported).  The write itself
+        is :func:`~fea_toolkit.io.stage_writer.write_model_file`, shared with the
+        ``save_model`` recipe verb, so the menu and a recipe save identically.
+        """
+        from pathlib import Path
+
+        store = self._store
+        mesh = store.preprocessed() if store is not None else None
+        if mesh is None:
+            self.log(
+                "Save model needs a preprocessed model \u2014 use Model \u25b8 Split "
+                "elements or Mesh areas first.",
+                "warn",
+            )
+            return
+
+        stem = Path(self._source_label).stem or "model"
+        path, chosen = QFileDialog.getSaveFileName(
+            self,
+            "Save model",
+            f"{stem}_mesh.h5",
+            "Model file (*.h5 *.npz *.json);;HDF5 stage file (*.h5 *.hdf5);;"
+            "NPZ stage file (*.npz);;JSON codec (*.json)",
+        )
+        if not path:
+            return
+
+        fmt, path = _model_file_format(path, chosen)
+        try:
+            from ..io.stage_writer import write_model_file
+
+            written = write_model_file(path, sap=store.raw(), mesh=mesh, fmt=fmt)
+        except Exception as exc:
+            self.log(f"Could not save model: {exc}", "error")
+            return
+        self.log(f"Saved model to {written}.")
 
     def open_path(self, path: str) -> bool:
         """Parse *path* and display it; return False on failure (no dialog).

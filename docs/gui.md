@@ -505,7 +505,7 @@ jarring than a greyed-out one.
 
 | Menu | Live | Greyed |
 |---|---|---|
-| **File** | Open (`Ctrl+O`), Open results…, Save results…, Quit | Export Tcl, Export screenshot |
+| **File** | Open (`Ctrl+O`), Open results…, Save model…, Save results…, Quit | Export Tcl, Export screenshot |
 | **Edit** | Duplicate view, Edit view selection… | Copy, Preferences |
 | **View** | Zoom to fit, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show beams, Show shells, Show restraints, Clear highlights) | Show element labels, Show loads, Show force diagrams, Reset layout |
 | **Model** | Mesh… (composes a `mesh` step in a dialog and runs it on OK) | Selections, Units |

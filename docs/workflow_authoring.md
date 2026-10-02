@@ -102,6 +102,7 @@ reduce.
 | `check_brace_buckling` | `table` | `model.checks.check_brace_buckling` | — |
 | `scale_sections` | `model` | edits the matched sections' stiffness properties in place | — |
 | `mesh` | `geometry` | `Preprocessor.run(md, load_shell_selection=…)` | — |
+| `save_model` | `table` | `io.stage_writer.write_model_file` | a topology |
 | `run_static` | `cases` | `analysis.linear.run_case_set` | a topology |
 | `combine` | `cases` | `analysis.combinations.build_combination_results` | solved cases |
 | `chart` | `figure` | `plotting.report.plot_storey_displacements` | solved cases |

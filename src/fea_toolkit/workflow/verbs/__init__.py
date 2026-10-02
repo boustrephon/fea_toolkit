@@ -35,6 +35,7 @@ from .modal import MODAL_PARAMS, run_modal
 from .pushover import PUSHOVER_PARAMS, run_pushover
 from .response_spectrum import RS_PARAMS, run_response_spectrum
 from .run_static import RUN_STATIC_PARAMS, run_static
+from .save_model import SAVE_MODEL_PARAMS, run_save_model
 from .scale_sections import SCALE_SECTIONS_PARAMS, run_scale_sections
 
 __all__ = [
@@ -50,6 +51,7 @@ __all__ = [
     "PUSHOVER_PARAMS",
     "RS_PARAMS",
     "RUN_STATIC_PARAMS",
+    "SAVE_MODEL_PARAMS",
     "SCALE_SECTIONS_PARAMS",
     "SELF_WEIGHT_PARAMS",
     "WALL_SHEAR_CHECK_PARAMS",
@@ -65,6 +67,7 @@ __all__ = [
     "run_modal",
     "run_pushover",
     "run_response_spectrum",
+    "run_save_model",
     "run_scale_sections",
     "run_static",
     "run_wall_shear_check",
