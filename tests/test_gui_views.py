@@ -593,6 +593,22 @@ class TestHideSelection:
         assert "Hid 1 element(s)" in log
         assert "node-scoped" in log
 
+    def test_hide_warns_when_the_view_selects_nodes_by_id_only(self, slab_window):
+        """A ``node_ids``-only lens expands joints too — hide must warn, not fold."""
+        from fea_toolkit.model.selection import Selection
+
+        view = slab_window._views.add_derived(
+            "processed:1", "Nodes", "processed", Selection(node_ids=["1"])
+        )
+        slab_window._show_view(view)
+
+        slab_window._select_entity_in_tree("area_elements", "A1")
+        slab_window._actions["view.hide_selected"].trigger()
+
+        log = slab_window._message_log.toPlainText()
+        assert "Hid 1 element(s)" in log
+        assert "node-scoped" in log
+
     def test_isolate_warns_when_the_view_is_node_scoped(self, slab_window):
         from fea_toolkit.model.selection import Selection
 

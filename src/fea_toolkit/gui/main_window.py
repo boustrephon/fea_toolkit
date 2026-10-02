@@ -1148,6 +1148,10 @@ class MainWindow(QMainWindow):
         any lens already on *view_selection*.  A node-scoped lens is returned
         unchanged: its joint expansion does not consult ``exclude_element_ids``
         (a known limitation), so folding the exclusions in would be ignored.
+        "Node-scoped" means any lens that expands from joints — ``element_types``
+        naming ``Node``, a ``node_ids`` / ``exclude_node_ids`` / ``constraints``
+        criterion, or a type exclusion that leaves nodes in — not only one whose
+        ``element_types`` names ``Node``.
         """
         if not self._hidden_elem_ids and view_selection is None:
             return None
@@ -1156,7 +1160,7 @@ class MainWindow(QMainWindow):
         from ..model.selection import Selection
 
         base = view_selection if view_selection is not None else Selection()
-        if "Node" in (getattr(base, "element_types", None) or ()):
+        if base._selects_nodes_explicitly():
             return view_selection
         excluded = set(base.exclude_element_ids or ())
         excluded.update(self._hidden_elem_ids)
@@ -1168,11 +1172,15 @@ class MainWindow(QMainWindow):
         A node-scoped lens is the one case :meth:`_merge_hidden` returns
         unchanged — its joint expansion does not consult ``exclude_element_ids``
         — so the freshly hidden elements remain visible until the user switches
-        to a view whose selection is not node-scoped.
+        to a view whose selection is not node-scoped.  "Node-scoped" means any
+        lens that expands from joints — ``element_types`` naming ``Node``, a
+        ``node_ids`` / ``exclude_node_ids`` / ``constraints`` criterion, or a
+        type exclusion that leaves nodes in — not only one whose
+        ``element_types`` names ``Node``.
         """
         view = self._views.active
         selection = view.selection if view is not None else None
-        if "Node" in (getattr(selection, "element_types", None) or ()):
+        if selection is not None and selection._selects_nodes_explicitly():
             self.log(
                 "This view's selection is node-scoped, so hidden elements remain visible here.",
                 "warn",
