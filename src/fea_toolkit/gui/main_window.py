@@ -792,9 +792,23 @@ class MainWindow(QMainWindow):
             shortcut="Ctrl+R",
             tip="Choose static cases or combinations to solve (needs a preprocessed model)",
         )
-        a["analysis.modal"] = self._placeholder("Modal analysis", "Milestone 5")
-        a["analysis.spectrum"] = self._placeholder("Response spectrum", "Milestone 5")
-        a["analysis.pushover"] = self._placeholder("Pushover", "Milestone 5")
+        a["analysis.modal"] = self._real_action(
+            "Modal analysis",
+            self._on_modal_preset,
+            tip="Solve the eigenvalue (modal) problem against the preprocessed model",
+        )
+        a["analysis.spectrum"] = self._real_action(
+            "Response spectrum",
+            self._on_spectrum_preset,
+            tip="CQC response-spectrum combination for one direction",
+        )
+        a["analysis.pushover"] = self._real_action(
+            "Pushover",
+            self._on_pushover_preset,
+            tip="Nonlinear static (pushover) analysis with CSM evaluation",
+        )
+        for key in ("analysis.modal", "analysis.spectrum", "analysis.pushover"):
+            a[key].setEnabled(False)
         a["analysis.stop"] = self._real_action(
             "Stop",
             self._on_analysis_stop,
@@ -1947,14 +1961,14 @@ class MainWindow(QMainWindow):
             label = "Splitting elements at joints and meshing areas"
         else:
             label = "Splitting elements at joints"
-        self._mesh_preset_step(edited, label)
+        self._preset_step(edited, label)
 
-    def _mesh_preset_step(self, step: Any, label: str) -> None:
-        """Append *step* to the recipe and run it — the Model-menu preset pattern.
+    def _preset_step(self, step: Any, label: str) -> None:
+        """Append *step* to the recipe and run it — the menu-preset pattern.
 
-        P32's analysis presets (Modal / Response spectrum / Pushover) will use
-        the same pattern: compose a step in a dialog, append it, and run the
-        recipe, so an analysis is a visible, editable step like any other.
+        The Model-menu Mesh entry and the Analysis-menu analysis entries are all
+        presets over the recipe: compose a step in a dialog, append it, and run
+        the recipe, so an operation is a visible, editable step like any other.
 
         Args:
             step: The step to append and run.
@@ -1979,7 +1993,69 @@ class MainWindow(QMainWindow):
             return
         from ..workflow import Step
 
-        self._mesh_preset_step(Step(verb="mesh", params=config), label)
+        self._preset_step(Step(verb="mesh", params=config), label)
+
+    # ── Analysis presets (Analysis menu) ─────────────────────────────
+
+    def _on_modal_preset(self) -> None:
+        """**Analysis ▸ Modal analysis**: compose a ``modal`` step and run it."""
+        self._analysis_preset("modal", "Modal analysis")
+
+    def _on_spectrum_preset(self) -> None:
+        """**Analysis ▸ Response spectrum**: compose an RS step and run it."""
+        self._analysis_preset("response_spectrum", "Response spectrum")
+
+    def _on_pushover_preset(self) -> None:
+        """**Analysis ▸ Pushover**: compose a pushover step and run it."""
+        self._analysis_preset("pushover", "Pushover")
+
+    def _analysis_preset(self, verb: str, label: str) -> None:
+        """Compose an analysis step in a dialog, append it, and run the recipe.
+
+        The Analysis-menu entries are presets over the recipe, exactly as
+        **Model ▸ Mesh** is: the dialog composes the step, and accepting appends
+        it and runs the recipe — so an analysis is a visible, editable,
+        exportable step rather than a hidden handler.
+
+        Args:
+            verb: The analysis verb — ``"modal"``, ``"response_spectrum"`` or
+                ``"pushover"``.
+            label: What the Message Log should say is happening.
+        """
+        store = self._store
+        mesh = store.preprocessed() if store is not None else None
+        if store is None or mesh is None:
+            self.log(
+                "This analysis needs a preprocessed model \u2014 use Model \u25b8 "
+                "Split elements or Mesh areas first.",
+                "warn",
+            )
+            return
+        if self._worker is not None and self._worker.isRunning():
+            self.log("An analysis is already running.", "warn")
+            return
+
+        from ..workflow import Step
+        from .views.step_dialog import StepDialog
+
+        edited = StepDialog.edit(Step(verb=verb), self)
+        if edited is None:
+            return
+        if verb in ("response_spectrum", "pushover"):
+            self._ensure_modal_precursor()
+        self._preset_step(edited, label)
+
+    def _ensure_modal_precursor(self) -> None:
+        """Append a default ``modal`` step when the recipe has none.
+
+        ``response_spectrum`` and ``pushover`` declare
+        ``needs=("geometry", "modal")``, so a preset for either must run after
+        a modal step has produced the modal result.  Prepending a default modal
+        step keeps the preset self-contained; the user can edit it afterwards
+        like any other step.
+        """
+        if not any(s.verb == "modal" for s in self._recipe_panel.recipe.steps):
+            self._recipe_panel.add_step("modal")
 
     def _on_recipe_run(self) -> None:
         """**Recipe ▸ Run recipe**: run the panel's steps on a worker.
@@ -2228,8 +2304,10 @@ class MainWindow(QMainWindow):
         store = self._store
         mesh = store.preprocessed() if store is not None else None
         running = self._worker is not None and self._worker.isRunning()
+        enabled = mesh is not None and not running
+        for key in ("analysis.run", "analysis.modal", "analysis.spectrum", "analysis.pushover"):
+            self._actions[key].setEnabled(enabled)
         action = self._actions["analysis.run"]
-        action.setEnabled(mesh is not None and not running)
         if mesh is None:
             action.setToolTip(
                 "Run \u2014 needs a preprocessed model: Model \u25b8 Split elements or Mesh areas"

@@ -88,10 +88,11 @@ def test_real_actions_enabled_placeholders_disabled(window):
     run = window._actions["analysis.run"]
     assert not run.isEnabled()
     assert "Model \u25b8 Split" in run.toolTip()
-    # The analyses this slice does not implement still name their milestone.
+    # Modal / spectrum / pushover are wired as recipe presets (P32): real
+    # actions, greyed until a model is preprocessed — like Run.
     pushover = window._actions["analysis.pushover"]
     assert not pushover.isEnabled()
-    assert "Milestone 5" in pushover.toolTip()
+    assert "Milestone 5" not in pushover.toolTip()
 
 
 def test_show_is_graceful_without_an_interactive_viewport(window):
