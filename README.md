@@ -402,9 +402,10 @@ full two-stage pipeline — preprocess → modal → response spectrum → pusho
 combination reduction → storey response → CSM — and returns the canonical result
 dict.  It is driven by a nested **Python dict** config (``config=…``, deep-merged
 over the defaults, with ``**overrides`` using ``__`` as a nesting separator) —
-**not** a YAML file.  With ``out_dir`` set it writes the results to a single
-self-contained ``.h5`` / ``.npz`` archive (default ``.h5``) and exports the
-figures.
+**not** a YAML file.  Figures are written to ``./output`` (or ``out_dir``); with
+``config={"export": {"enabled": True}}`` it additionally writes a single
+self-contained ``.h5`` / ``.npz`` archive (default ``.h5``) bundling the model
+stages and results.
 
 The self-contained HTML/PDF report-rendering stage is still designed but not yet
 implemented — see `docs/report_generation.md` (draft).  The pipeline's *analysis*
