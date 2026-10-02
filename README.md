@@ -133,7 +133,7 @@ the "Package tree (abbreviated)" section below for the full subpackage list
 | **Modal Analysis** | ✅ Complete | `run_modal_analysis()` — eigenvalue extraction (`ops.eigen`), modal properties table with frequencies, periods, participating masses & ratios.
 | **Response Spectrum** | ✅ Complete | `run_response_spectrum_analysis()` — mode‑by‑mode RS analysis with a spectrum from **GB 50011** (`from_gb50011`), **Eurocode 8** (`from_eurocode8` / `from_eurocode8_displacement`), **IEC 62271-207** (`from_iec62271`) or any user‑supplied table (`from_arrays`); CQC/SRSS combination, base shear + moment.
 | **Element‑Level RS Forces** | ✅ Complete | `extract_element_rs_forces()` — CQC‑combined moments/shears per element, sorted by elevation.
-| **Missing Mass Correction** | ⚠️ Partial | Rigid / missing-mass response is computed by `spectrum.cqc_base_shear(..., total_mass=...)` (keys `base_shear_missing_mass`, `residual_mass`); not yet wired into `AnalysisBuilder.run_response_spectrum_analysis()` — see `examples/modal_rs_analysis.py`. |
+| **Missing Mass Correction** | ✅ Complete | Rigid / missing-mass response is computed by `spectrum.cqc_base_shear(..., total_mass=...)` (keys `base_shear_missing_mass`, `residual_mass`) and wired into `AnalysisBuilder.run_response_spectrum_analysis()` behind the opt-in `config["missing_mass"]` gate. |
 | **Seismic Masses** | ✅ Complete | `compute_seismic_masses()` — lumps element self‑weight and load‑based masses per MASS SOURCE (Elements/Masses/Loads flags). Load patterns contribute only their **global‑Z** component (SAP2000's rule: `Gravity`/`Projected` are downward‑positive, `Z` is sign‑flipped, horizontal `X`/`Y` excluded). Per‑source totals are exposed via `builder.mass_components` and the review's `mass_source["components"]`. |
 | **Rhino Export** | ✅ Complete | Centreline + lightweight Extrusion geometry with section profiles, section-based layers, UserString metadata, groups. See [`docs/rhino_export.md`](docs/rhino_export.md). |
 | **Frame Member Types (Steel)** | ✅ Complete | All steel section shapes (I, Box, Pipe, Channel, Angle, etc.) with `Steel01` fiber sections or elastic sections. |
@@ -745,7 +745,7 @@ that section.
 
 4. **Advanced Analyses**  
    - ~~Modal Analysis~~ ✅ `run_modal_analysis()` implemented — eigenvalue extraction with modal properties table.  
-   - ~~Response Spectrum~~ ✅ `run_response_spectrum_analysis()` + `extract_element_rs_forces()`; ⚠️ the rigid / missing-mass correction is implemented as the `spectrum.cqc_base_shear(...)` helper but is **not yet wired into** `AnalysisBuilder.run_response_spectrum_analysis()` — see `examples/modal_rs_analysis.py`.  
+   - ~~Response Spectrum~~ ✅ `run_response_spectrum_analysis()` + `extract_element_rs_forces()`; the rigid / missing-mass correction (`spectrum.cqc_base_shear(...)`) is wired into `AnalysisBuilder.run_response_spectrum_analysis()` behind the opt-in `config["missing_mass"]` gate.  
    - ~~Nonlinear Static Pushover~~ ✅ `run_pushover_analysis()` implemented — see [`docs/pushover_analysis.md`](docs/pushover_analysis.md).  
    - ~~HingeRadau integration~~ ✅ `beam_integration` config option (`'Lobatto'` / `'HingeRadau'`).  
    - ~~Brace subdivision (Approach A)~~ ✅ `subdivide_elements()` in `geometry.py`, `set_brace_selection()` / `check_brace_buckling()` in builder.  

@@ -1034,18 +1034,20 @@ stress/damage-map precedent to reuse.  What is missing:
 Source: the 2026-10-02 review (README §4 "Advanced Analyses"); pairs with P32's
 `response_spectrum` verb.
 
-**Status: 🚧 Planned** — the helper exists; the call does not.
+**Status: ✅ Landed (2026-10-02)** — `config["missing_mass"]` (opt-in) adds the
+`spectrum.cqc_base_shear` rigid / missing-mass correction to the RS result,
+without changing the default output.
 
-**What.** `spectrum.cqc_base_shear(...)` implements the rigid / missing-mass
-correction and is documented as such, but
-`opensees/_runner_rs.py::AnalysisBuilder.run_response_spectrum_analysis` (and
-therefore the `response_spectrum` verb and `generate_report`) never call it, so
-the README's ⚠️ stands.  Wire it through, and add a test asserting the
-correction is applied (config-gated off by default if it changes existing
-outputs).
+**What.** `opensees/_runner_rs.py::AnalysisBuilder.run_response_spectrum_analysis`
+now appends a ``missing_mass`` block (``base_shear_missing_mass``,
+``base_shear_rigid_cutoff``, ``base_shear_total``, ``participation_ratio``,
+``residual_mass``, ``captured_mass``, ``total_mass``) computed by
+``spectrum.cqc_base_shear`` from the effective modal masses, when
+``config["missing_mass"]`` is set.  It is additive — the per-element CQC keys
+are untouched — and gated off by default so existing outputs are unchanged.
+Covered by ``tests/test_workflows.py::TestResponseSpectrumWorkflow``.
 
-**Touches (anticipated).** `opensees/_runner_rs.py`, `analysis/rs.py`,
-`workflow/verbs/response_spectrum.py`, and a test under `tests/`.
+**Touches.** `opensees/_runner_rs.py`, `tests/test_workflows.py`.
 
 ### Tier 4 — Deferred / low-priority
 
