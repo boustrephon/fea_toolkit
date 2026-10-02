@@ -1352,6 +1352,10 @@ class MainWindow(QMainWindow):
         """
         self._views.set_active(view.key)
         if view.kind in (GEOMETRY, RESULTS):
+            # A node-scoped lens ignores the hidden-element exclusions, so the
+            # hidden elements stay visible until a non-node-scoped view is shown.
+            if self._hidden_elem_ids:
+                self._warn_if_view_node_scoped()
             source = self._views.source(view.key)
             if source is None:
                 return

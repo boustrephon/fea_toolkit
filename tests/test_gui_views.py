@@ -607,3 +607,17 @@ class TestHideSelection:
         log = slab_window._message_log.toPlainText()
         assert "Isolated 1 element(s)" in log
         assert "node-scoped" in log
+
+    def test_show_view_warns_when_hidden_and_view_node_scoped(self, slab_window):
+        from fea_toolkit.model.selection import Selection
+
+        slab_window._select_entity_in_tree("area_elements", "A1")
+        slab_window._actions["view.hide_selected"].trigger()
+        assert slab_window._hidden_elem_ids == {"Area:A1"}
+
+        view = slab_window._views.add_derived(
+            "processed:1", "Nodes", "processed", Selection(element_types=["Node"], node_ids=["1"])
+        )
+        slab_window._show_view(view)
+
+        assert "node-scoped" in slab_window._message_log.toPlainText()
