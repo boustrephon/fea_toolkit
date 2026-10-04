@@ -105,7 +105,7 @@ re-solves.  The gate is deliberately conservative:
 | Criterion | Reason |
 |---|---|
 | `element_type == "elasticBeamColumn"` and no `create_fiber_sections` | build-once assumes every case starts from a zero state, which only holds for a **linear-elastic** build |
-| `len(cases) >= 3` **or** `len(mesh_model.nodes) >= 500` | below both, the per-case rebuild's simplicity and failure isolation beat a ~tens-of-milliseconds saving |
+| `len(cases) >= 5` **or** `len(mesh_model.nodes) >= 1000` | below both, the per-case rebuild's simplicity and failure isolation beat a ~tens-of-milliseconds saving |
 
 The thresholds are the module constants `analysis.linear._BUILD_ONCE_MIN_CASES`
 and `_BUILD_ONCE_MIN_NODES`, and are tunable.

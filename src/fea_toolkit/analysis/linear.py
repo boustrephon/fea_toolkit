@@ -308,8 +308,8 @@ def _mesh_has_shells(mesh_model) -> bool:
 #: reused across the case set only when there are enough cases and/or enough
 #: nodes for the per-case domain rebuild to matter.  Below both, the per-case
 #: rebuild's simplicity and its failure isolation are preferred.
-_BUILD_ONCE_MIN_CASES = 3
-_BUILD_ONCE_MIN_NODES = 500
+_BUILD_ONCE_MIN_CASES = 5
+_BUILD_ONCE_MIN_NODES = 1000
 
 
 def _should_build_once(ab_config: dict, n_cases: int, n_nodes: int) -> bool:
