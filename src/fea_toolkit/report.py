@@ -492,6 +492,7 @@ def generate_report(
             linear_cfg=linear_cfg,
             name="StaticAnalysis",
             collect_raw=bool(export_cfg.get("static", False)),
+            log=log,
         )
 
     # Modal → response spectrum → pushover, authored as a recipe of verbs.  The

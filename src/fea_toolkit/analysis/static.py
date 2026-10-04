@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Optional
 from .base import AnalysisResult
 
 if TYPE_CHECKING:
+    from fea_toolkit.io.log import PipelineLog
     from fea_toolkit.model.mesh_model import MeshModel
     from fea_toolkit.model.sap_data import SAPModelData
 
@@ -20,6 +21,7 @@ def run_static_analysis(
     name: str = "StaticAnalysis",
     config: Optional[dict] = None,
     collect_raw: bool = False,
+    log: Optional["PipelineLog"] = None,
 ) -> AnalysisResult:
     """Run static linear analysis cases.
 
@@ -38,6 +40,8 @@ def run_static_analysis(
             (nodal displacements + local element forces) under
             ``data["static_raw"]`` — the shape accepted by the unified
             writers.  ``False`` (default) keeps the existing behaviour.
+        log: Optional :class:`~fea_toolkit.io.log.PipelineLog` (or a ``bool``)
+            forwarded to the linear runner.
 
     Returns:
         :class:`AnalysisResult` whose ``data`` holds ``df_linear``.
@@ -51,6 +55,7 @@ def run_static_analysis(
         spec_cfg=spec_cfg,
         linear_cfg=linear_cfg,
         raw_out=raw_out,
+        log=log,
     )
     data: dict = {
         "df_linear": df_linear,

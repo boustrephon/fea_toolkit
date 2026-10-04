@@ -11,9 +11,12 @@ The pandas *summary* helpers they depend on (``bounding_box``,
 from __future__ import annotations
 
 import math
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from ..io.log import PipelineLog
 
 try:
     import pandas as pd
@@ -335,6 +338,7 @@ def run_static_cases(
     should_cancel: Optional[Callable[[], bool]] = None,
     on_progress: Optional[Callable[[int, str, int], None]] = None,
     attempted: Optional[list[str]] = None,
+    log: Optional[PipelineLog] = None,
 ) -> list[dict]:
     """Run each ``{case: {pattern: factor}}`` entry as one static solve.
 
@@ -375,6 +379,10 @@ def run_static_cases(
             reached, in run order.  A case skipped by cancellation never
             appears, so a caller can tell a case that **failed** from one that
             was never run.
+        log: Optional :class:`~fea_toolkit.io.log.PipelineLog` (or a ``bool``)
+            that receives the domain-reuse announcement and any per-case
+            failure warning.  ``None``/``True`` print to stdout and retain
+            nothing; ``False`` is silent.
 
     Returns:
         One summary row per solved case, in :func:`dict` form — the rows
@@ -382,6 +390,10 @@ def run_static_cases(
     """
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
     from fea_toolkit.utils import sum_reactions_with_overturning
+
+    from ..io.log import coerce_log
+
+    log = coerce_log(log)
 
     ab_config = {"element_type": "elasticBeamColumn", "verbose": False}
     # Build what the mesh holds: a preprocessed model with shell areas needs
@@ -402,14 +414,16 @@ def run_static_cases(
     # Announce the domain-reuse decision so a monitored run shows whether the
     # domain is rebuilt per case or built once and reused across the case set.
     if build_once:
-        print(
-            f"  Build-once: reusing one OpenSees domain for {total} static "
-            f"case(s) ({len(mesh_model.nodes)} node(s)) — per-case rebuild skipped"
+        log.info(
+            "static",
+            f"Build-once: reusing one OpenSees domain for {total} static "
+            f"case(s) ({len(mesh_model.nodes)} node(s)) — per-case rebuild skipped",
         )
     else:
-        print(
-            f"  Rebuilding the OpenSees domain per case "
-            f"({total} static case(s), {len(mesh_model.nodes)} node(s))"
+        log.info(
+            "static",
+            f"Rebuilding the OpenSees domain per case "
+            f"({total} static case(s), {len(mesh_model.nodes)} node(s))",
         )
     ab = None
     if build_once:
@@ -471,7 +485,7 @@ def run_static_cases(
                 raw_out[case_name] = entry
         except Exception as e:
             fx = fy = fz = mx = my = mz = max_roof_disp = 0.0
-            print(f"  Warning: {case_name} failed — {e}")
+            log.warning("static", f"{case_name} failed — {e}")
         finally:
             # A failed case must not leave its loads behind to poison the next.
             if build_once:
@@ -504,6 +518,7 @@ def run_case_set(
     raw_out: Optional[dict] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
     on_progress: Optional[Callable[[int, str, int], None]] = None,
+    log: Optional[PipelineLog] = None,
 ) -> dict:
     """Solve cases, reduce any combinations, and assemble an in-memory archive.
 
@@ -538,6 +553,8 @@ def run_case_set(
         should_cancel: Polled between cases (see :func:`run_static_cases`).
         on_progress: ``(index, case_name, total)`` before each case (see
             :func:`run_static_cases`).
+        log: Optional :class:`~fea_toolkit.io.log.PipelineLog` (or a ``bool``)
+            forwarded to :func:`run_static_cases`.
 
     Returns:
         ``{"arrays": {name: ndarray}, "cases": [name, ...], "failed": [...],
@@ -559,6 +576,7 @@ def run_case_set(
         should_cancel=should_cancel,
         on_progress=on_progress,
         attempted=attempted,
+        log=log,
     )
 
     static_results: dict = dict(raw)
@@ -595,6 +613,7 @@ def run_linear_cases(
     spec_cfg: Optional[dict] = None,
     linear_cfg: Optional[dict] = None,
     raw_out: Optional[dict] = None,
+    log: Optional[PipelineLog] = None,
 ) -> pd.DataFrame:
     """Run linear analysis cases and return a summary table.
 
@@ -617,6 +636,8 @@ def run_linear_cases(
             results).  Element forces are extracted in the element
             **local** coordinate system and stored under the plain
             ``fx_i`` … ``mz_j`` keys (aligned with the geometry arrays).
+        log: Optional :class:`~fea_toolkit.io.log.PipelineLog` (or a ``bool``)
+            forwarded to :func:`run_static_cases` for the static pass.
 
     Returns:
         Summary table (DataFrame) — one row per analysis case.
@@ -630,7 +651,7 @@ def run_linear_cases(
     # The listing lives in analysis/case_listing.py so the GUI's Analysis ▸ Run
     # dialog offers exactly the cases this runner would solve.
     static_cases = list_static_cases(md, mesh_model, config_cases=(linear_cfg or {}).get("cases"))
-    rows.extend(run_static_cases(mesh_model, static_cases, config=config, raw_out=raw_out))
+    rows.extend(run_static_cases(mesh_model, static_cases, config=config, raw_out=raw_out, log=log))
 
     # ── Response spectrum cases ─────────────────────────────────
     n_modes = 12

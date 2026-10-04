@@ -492,3 +492,33 @@ def test_run_static_cases_announces_domain_reuse(sample_mesh, monkeypatch, capsy
     monkeypatch.setattr(linear_mod, "_BUILD_ONCE_MIN_NODES", 0)
     run_static_cases(sample_mesh, cases)
     assert "per-case rebuild skipped" in capsys.readouterr().out
+
+
+def test_run_static_cases_records_reuse_decision_in_log(sample_mesh, monkeypatch):
+    """The reuse decision is recorded in the structured log, not just stdout.
+
+    A ``PipelineLog`` handed in as ``log=`` collects the same announcement the
+    stdout sink prints, so ``generate_report``'s Analysis Log table carries it.
+    """
+    import fea_toolkit.analysis.linear as linear_mod
+    from fea_toolkit.analysis.linear import run_static_cases
+    from fea_toolkit.io.log import PipelineLog
+
+    cases = {"DEAD": {"DEAD": 1.0}}
+
+    # Default (below the gate): the domain is rebuilt per case.
+    log = PipelineLog(verbose=False)
+    run_static_cases(sample_mesh, cases, log=log)
+    assert any(
+        e["step"] == "static" and "Rebuilding the OpenSees domain per case" in e["msg"]
+        for e in log.entries
+    )
+
+    # Forced build-once: the per-case rebuild is skipped.
+    monkeypatch.setattr(linear_mod, "_BUILD_ONCE_MIN_CASES", 0)
+    monkeypatch.setattr(linear_mod, "_BUILD_ONCE_MIN_NODES", 0)
+    log = PipelineLog(verbose=False)
+    run_static_cases(sample_mesh, cases, log=log)
+    assert any(
+        e["step"] == "static" and "per-case rebuild skipped" in e["msg"] for e in log.entries
+    )
