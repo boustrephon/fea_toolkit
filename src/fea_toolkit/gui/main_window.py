@@ -2573,7 +2573,18 @@ class MainWindow(QMainWindow):
         if not path:
             return
 
+        requested = path
         fmt, path = _model_file_format(path, chosen)
+        if path != requested and Path(path).exists():
+            answer = QMessageBox.question(
+                self,
+                "Confirm overwrite",
+                f"{path} already exists.\nOverwrite it?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
         try:
             from ..io.stage_writer import write_model_file
 
