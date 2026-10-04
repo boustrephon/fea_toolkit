@@ -148,8 +148,8 @@ class ConstraintMixin:
                         f"(master={master}, slave={slave}): {exc}"
                     ) from exc
             applied += 1
-        if applied and self.config.get("verbose"):
-            print(f"  Applied {applied} rigid-body constraint(s) (BODY).")
+        if applied:
+            self._log.info("constraints", f"Applied {applied} rigid-body constraint(s) (BODY).")
         return applied
 
     @staticmethod
@@ -300,7 +300,7 @@ class ConstraintMixin:
             coarse_elements: Auto-extract master edges from element tags.
             tolerance: Max perpendicular distance for slave detection.
             penalty_stiffness: Spring stiffness per DOF.  ``None`` = auto.
-            verbose: Print progress.
+            verbose: Deprecated; verbosity is now controlled by the builder's log.
 
         Returns:
             Number of ``twoNodeLink`` elements created (2 per slave-edge pair).
@@ -326,8 +326,7 @@ class ConstraintMixin:
                     t2 = int(n2)
                 edge_set.add((min(t1, t2), max(t1, t2)))
         if not edge_set:
-            if verbose:
-                print("No master edges — nothing to constrain.")
+            self._log.debug("constraints", "No master edges — nothing to constrain.")
             return 0
 
         # ── Resolve slave nodes ───────────────────────────────────
@@ -364,18 +363,20 @@ class ConstraintMixin:
             if _count > 0:
                 avg_Et /= _count
                 penalty_stiffness = 100.0 * avg_Et
-                if verbose:
-                    print(
-                        f"  Spring stiffness auto: E·t_avg = {avg_Et:.3e}, "
-                        f"k = {penalty_stiffness:.3e}  "
-                        f"(scanned {_count} shell element(s))"
-                    )
+                self._log.debug(
+                    "constraints",
+                    f"Spring stiffness auto: E·t_avg = {avg_Et:.3e}, "
+                    f"k = {penalty_stiffness:.3e}  "
+                    f"(scanned {_count} shell element(s))",
+                )
             else:
                 _E = 2e8  # KN/m² (200 GPa steel)
                 _t = 0.15  # m (typical slab)
                 penalty_stiffness = 100.0 * _E * _t
-                if verbose:
-                    print(f"  Spring stiffness auto: using fallback k = {penalty_stiffness:.3e}")
+                self._log.debug(
+                    "constraints",
+                    f"Spring stiffness auto: using fallback k = {penalty_stiffness:.3e}",
+                )
 
         # ── Find tags ─────────────────────────────────────────────
         max_elem = max(
@@ -449,11 +450,11 @@ class ConstraintMixin:
                         5,
                         6,
                     )
-                    if verbose:
-                        print(
-                            f"  Spring constraint: node {s_id} → "
-                            f"master {master}  (k={k:.2e}, w={weight:.3f})"
-                        )
+                    self._log.debug(
+                        "constraints",
+                        f"Spring constraint: node {s_id} → master {master}  "
+                        f"(k={k:.2e}, w={weight:.3f})",
+                    )
                     ele_tag += 1
                     mat_tag += 1
                     count += 1
@@ -475,8 +476,7 @@ class ConstraintMixin:
                         verbose,
                     )
                 ]
-            if verbose:
-                print(f"Applied {count} spring element(s).")
+            self._log.info("constraints", f"Applied {count} spring element(s).")
 
         return count
 
@@ -511,7 +511,7 @@ class ConstraintMixin:
             coarse_elements: Auto-extract master edges from element tags.
             tolerance: Max perpendicular distance to consider a slave
                 node "on the edge".
-            verbose: Print progress messages.
+            verbose: Deprecated; verbosity is now controlled by the builder's log.
 
         Returns:
             Number of multi-point constraints applied.
@@ -551,7 +551,7 @@ class ConstraintMixin:
                     t2 = int(n2)
                 edge_set.add((min(t1, t2), max(t1, t2)))
         if not edge_set:
-            print("No master edges provided — nothing to constrain.")
+            self._log.debug("constraints", "No master edges provided — nothing to constrain.")
             return 0
 
         # ── Resolve slave nodes ─────────────────────────────────────
@@ -616,12 +616,11 @@ class ConstraintMixin:
                             -N2,
                         )
                     count += 1
-                    if verbose:
-                        print(
-                            f"  Edge constraint: node {s_id} → "
-                            f"edge ({m1_id}–{m2_id})  "
-                            f"(N1={N1:.3f}, N2={N2:.3f})"
-                        )
+                    self._log.debug(
+                        "constraints",
+                        f"Edge constraint: node {s_id} → edge ({m1_id}–{m2_id})  "
+                        f"(N1={N1:.3f}, N2={N2:.3f})",
+                    )
 
         if count:
             self._edge_constraint_method = "penalty"
@@ -636,8 +635,10 @@ class ConstraintMixin:
                         verbose,
                     )
                 ]
-            if verbose:
-                print(f"Applied {count} edge constraint(s). Solver will use Penalty handler.")
+            self._log.info(
+                "constraints",
+                f"Applied {count} edge constraint(s). Solver will use Penalty handler.",
+            )
 
         return count
 

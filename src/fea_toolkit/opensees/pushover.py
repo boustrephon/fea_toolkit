@@ -7,6 +7,7 @@ from typing import Optional
 
 import numpy as np
 
+from ..io.log import PipelineLog, coerce_log
 from ..spectrum import ResponseSpectrum
 from ..utils import g_from_units
 
@@ -82,6 +83,7 @@ def run_pushover_4dir(
     control_node_id: Optional[str] = None,
     config: Optional[dict] = None,
     return_builders: bool = False,
+    log: Optional[PipelineLog] = None,
 ) -> dict:
     """Run pushover in all 4 directions with CSM (two-stage path).
 
@@ -121,6 +123,9 @@ def run_pushover_4dir(
         Optional dict passed to the bilinearisation function.
     verbose : bool
         Print progress.
+    log : PipelineLog, optional
+        Optional :class:`~fea_toolkit.io.log.PipelineLog` (or a ``bool``)
+        to collect events; ``None`` derives one from *verbose*.
     brace_type : str
         ``'truss'`` (Hysteretic) or ``'beam'`` (subdivided).
     brace_sections : list, optional
@@ -152,6 +157,8 @@ def run_pushover_4dir(
     """
     from fea_toolkit.model.csm import check_modal_pushover_mode
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+    log = coerce_log(log) if log is not None else PipelineLog(verbose=verbose, collect=False)
 
     if gravity_patterns is None:
         gravity_patterns = {"DEAD": 1.0, "DEAD SDL": 1.0, "LL": 0.5}
@@ -215,8 +222,7 @@ def run_pushover_4dir(
     all_out = {}
     for label in dirs:
         cfg = dir_cfg[label]
-        if verbose:
-            print(f"  Pushover {label} (brace_type={brace_type}) ...")
+        log.info("pushover", f"Pushover {label} (brace_type={brace_type}) ...")
 
         # Determine best mode for this push direction
         best_mode_idx = 0
@@ -233,7 +239,7 @@ def run_pushover_4dir(
         except Exception:
             pass
 
-        ab = AnalysisBuilder(mesh_model, builder_cfg)
+        ab = AnalysisBuilder(mesh_model, builder_cfg, log=log)
 
         try:
             results = ab.run_pushover_analysis(
@@ -280,8 +286,8 @@ def run_pushover_4dir(
                     ratios or [],
                     rs_list,
                 )
-                if rs_warning and verbose:
-                    print(f"    {rs_warning}")
+                if rs_warning:
+                    log.warning("pushover", str(rs_warning))
 
         all_out[label] = {
             "results": results,
@@ -316,6 +322,7 @@ def pushover_rc_openseespy(
     return_builders: bool = False,
     control_node_tag: Optional[int] = None,
     control_node_id: Optional[str] = None,
+    log: Optional[PipelineLog] = None,
 ) -> dict:
     """Run RC pushover in one or all 4 directions (OpenSeesPy path).
 
@@ -363,6 +370,9 @@ def pushover_rc_openseespy(
         function).
     verbose : bool
         Print progress.
+    log : PipelineLog, optional
+        Optional :class:`~fea_toolkit.io.log.PipelineLog` (or a ``bool``)
+        to collect events; ``None`` derives one from *verbose*.
     rs_modal_base_shear : dict, optional
         Per-direction RS base shear for mode validation
         ``{"X": [...], "Y": [...]}``.
@@ -395,6 +405,8 @@ def pushover_rc_openseespy(
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
     from ..analysis.base import _PUSHOVER_RC_DEFAULTS
+
+    log = coerce_log(log) if log is not None else PipelineLog(verbose=verbose, collect=False)
 
     if gravity_patterns is None:
         gravity_patterns = {"DEAD": 1.0, "DEAD SDL": 1.0, "LL": 0.5}
@@ -444,8 +456,9 @@ def pushover_rc_openseespy(
     all_out = {}
     for label in dir_labels:
         cfg = dir_cfg[label]
-        if verbose:
-            print(f"  Pushover {label} (RC, element_type={builder_cfg['element_type']}) ...")
+        log.info(
+            "pushover", f"Pushover {label} (RC, element_type={builder_cfg['element_type']}) ..."
+        )
 
         # Determine best mode for this push direction
         best_mode_idx = 0
@@ -459,7 +472,7 @@ def pushover_rc_openseespy(
         except Exception:
             pass
 
-        ab = AnalysisBuilder(mesh_model, builder_cfg)
+        ab = AnalysisBuilder(mesh_model, builder_cfg, log=log)
 
         try:
             results = ab.run_pushover_analysis(
@@ -507,8 +520,8 @@ def pushover_rc_openseespy(
                     ratios or [],
                     rs_list,
                 )
-                if rs_warning and verbose:
-                    print(f"    {rs_warning}")
+                if rs_warning:
+                    log.warning("pushover", str(rs_warning))
 
         all_out[label] = {
             "results": results,

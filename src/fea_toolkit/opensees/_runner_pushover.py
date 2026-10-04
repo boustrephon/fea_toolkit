@@ -190,8 +190,7 @@ class PushoverRunnerMixin:
         try:
             self.compute_seismic_masses()
         except Exception:
-            if self.config.get("verbose"):
-                print("  compute_seismic_masses failed, using fallback masses")
+            self._log.warning("pushover", "compute_seismic_masses failed, using fallback masses")
             self._compute_fallback_masses()
 
         # ── Apply per-node mass overrides (masonry/storey scaling) ─

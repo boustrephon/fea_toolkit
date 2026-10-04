@@ -27,6 +27,7 @@ removed.  Use the two-stage pipeline instead::
     results = builder.run_static_analysis()
 """
 
+import logging
 import math
 import re
 from collections import defaultdict
@@ -66,6 +67,9 @@ from ..utils import (
 
 if TYPE_CHECKING:
     from ..model.mesh_model import MeshModel
+
+
+logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -558,10 +562,11 @@ def export_model_to_tcl(
             if _nid in model_data.nodes
         ]
         if len(_w_nids) != 4:
-            print(
-                f"  ⚠ [export_model_to_tcl] wall '{_wall.elem_id}': node "
-                f"resolution incomplete "
-                f"({len(_w_nids)}/4 nodes resolved) — element skipped"
+            logger.warning(
+                "[export_model_to_tcl] wall '%s': node resolution incomplete "
+                "(%d/4 nodes resolved) — element skipped",
+                _wall.elem_id,
+                len(_w_nids),
             )
             continue
         if getattr(_wall, "material_type", "FSAM") == "uniaxial":
@@ -585,13 +590,16 @@ def export_model_to_tcl(
                     _rho_default = DEFAULT_RHO_MC_SI * mass_density_scale_factor(model_data.units)
                 _w_rho = [_rho_default] * _wall.m
             if len(_w_conc) != _wall.m or len(_w_steel) != _wall.m or _w_shear is None:
-                print(
-                    f"  ⚠ [export_model_to_tcl] wall '{_wall.elem_id}': "
-                    f"uniaxial MVLEM_3D material resolution incomplete "
-                    f"(concrete {len(_w_conc)}/{_wall.m}, steel "
-                    f"{len(_w_steel)}/{_wall.m}, shear "
-                    f"{'ok' if _w_shear is not None else 'missing'}) — "
-                    f"element skipped"
+                logger.warning(
+                    "[export_model_to_tcl] wall '%s': uniaxial MVLEM_3D material "
+                    "resolution incomplete (concrete %d/%d, steel %d/%d, shear %s) — "
+                    "element skipped",
+                    _wall.elem_id,
+                    len(_w_conc),
+                    _wall.m,
+                    len(_w_steel),
+                    _wall.m,
+                    "ok" if _w_shear is not None else "missing",
                 )
                 continue
             _w_elem = getattr(_wall, "element_type", None) or "MVLEM_3D"
@@ -626,10 +634,12 @@ def export_model_to_tcl(
             str(_nd_mat_tag[_name]) for _name in _wall.fsam_material_names if _name in _nd_mat_tag
         ]
         if len(_w_mat_tags) != _wall.m:
-            print(
-                f"  ⚠ [export_model_to_tcl] wall '{_wall.elem_id}': FSAM "
-                f"material resolution incomplete "
-                f"({len(_w_mat_tags)}/{_wall.m} tags) — element skipped"
+            logger.warning(
+                "[export_model_to_tcl] wall '%s': FSAM material resolution incomplete "
+                "(%d/%d tags) — element skipped",
+                _wall.elem_id,
+                len(_w_mat_tags),
+                _wall.m,
             )
             continue
         _w_elem = getattr(_wall, "element_type", None) or "SFI_MVLEM_3D"
@@ -1725,7 +1735,7 @@ def validate_control_node(
             control_node_id = nd.node_id
             break
     if control_node_id is None:
-        print(f"  ⚠ Control node tag {control_node_tag} not found!")
+        logger.warning("Control node tag %d not found!", control_node_tag)
         return False
     connected = 0
     for fe in mesh_model.frame_elements.values():
@@ -1734,9 +1744,11 @@ def validate_control_node(
         if control_node_id in (fe.node_i, fe.node_j):
             connected += 1
     if connected == 0:
-        print(f"  ⚠ Control node {control_node_tag} NOT connected to any frame element!")
+        logger.warning("Control node %d NOT connected to any frame element!", control_node_tag)
         return False
-    print(f"  Control node {control_node_tag} connected to {connected} frame element(s) — OK")
+    logger.info(
+        "Control node %d connected to %d frame element(s) — OK", control_node_tag, connected
+    )
     return True
 
 
