@@ -62,6 +62,7 @@ group and filter.  Current tags:
 | `modal` | modal runner |
 | `rs` | response-spectrum runner |
 | `pushover` | pushover runner / orchestration |
+| `workflow` | recipe-step progress routed through `run_recipe(..., pipeline_log=...)` |
 
 New code must use an existing tag or add one here deliberately.
 
@@ -123,13 +124,17 @@ bridge.
 
 ## Future work
 
-* **Merge the GUI's progress log into `PipelineLog`.**  The recipe/GUI layer
-  still runs on a one-line `Callable[[str], None]` (`StepContext.log`, wired to
-  `MainWindow`'s message list via `run_recipe(..., log=messages.append)`),
-  separate from the `pipeline_log` channel now threaded through the same
-  context.  The plan is to have the GUI hand `run_recipe` a `PipelineLog`
-  carrying a Qt-signal sink, so `context.log` progress and the structured
-  analysis events share one stream — the GUI message log and the report's
-  Analysis Log table then render the *same* events, each through its own sink.
-  `StepContext.log` and `StepContext.pipeline_log` stay separate until that
-  merge lands.
+* **Finish the `print()` sweep** in `rhino/`, `plotting/`, `io/` and `model/`.
+  The remaining diagnostic `print()` calls (``"No <x> data found"``,
+  ``"… not installed …"``, boundary-level progress lines) should become
+  ``logger.warning`` / ``logger.info`` on a module-level
+  ``logging.getLogger(__name__)`` so the ``PipelineHandler`` bridge captures
+  them during a report run.  Excluded from the sweep: CLI entry points
+  (`review.py`, `helper.py`), docstring ``>>>`` examples, subprocess streaming,
+  and the report-table functions (`diagnostics.py` / `checks.py` / `io.report`
+  tables) whose product *is* a table.
+
+  The GUI's progress log is already merged: `run_recipe(..., pipeline_log=...)`
+  routes `context.log` progress (step ``"workflow"``) and the structured
+  analysis events through one `PipelineLog`, which `MainWindow` sinks into its
+  message log.

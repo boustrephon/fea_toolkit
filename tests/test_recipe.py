@@ -527,6 +527,15 @@ class TestScaleSectionsVerb:
         run_recipe(Recipe(steps=[self._step(factor=1.0)]), _slab_model(), log=messages.append)
         assert any("no property changed" in message for message in messages)
 
+    def test_progress_routes_through_pipeline_log_when_log_is_absent(self):
+        """``run_recipe(..., pipeline_log=...)`` merges ``context.log`` into it."""
+        from fea_toolkit.io.log import PipelineLog
+
+        log = PipelineLog(verbose=False)
+        run_recipe(Recipe(steps=[self._step(factor=1.0)]), _slab_model(), pipeline_log=log)
+        assert any(e["step"] == "workflow" for e in log.entries)
+        assert any("no property changed" in e["msg"] for e in log.entries)
+
     def test_the_attributes_scaled_can_be_narrowed(self):
         step = Step("scale_sections", None, {"factor": 0.5, "attributes": "A"})
         scaled = run_recipe(Recipe(steps=[step]), _slab_model()).results[0].payload

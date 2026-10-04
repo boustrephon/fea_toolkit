@@ -281,7 +281,9 @@ def run_recipe(
         model: An already-prepared topology to start from, if there is one.
         cancel: Zero-argument predicate; ``True`` stops the run at the next step
             boundary.  Defaults to "never cancelled".
-        log: One-line sink for progress.  Defaults to discarding messages.
+        log: One-line sink for progress.  Defaults to discarding messages;
+            when ``None`` but *pipeline_log* is given, recipe progress is
+            routed through ``pipeline_log`` (step ``"workflow"``) instead.
         pipeline_log: Optional structured
             :class:`~fea_toolkit.io.log.PipelineLog` handed to analysis verbs;
             ``None`` leaves verbs to their own (``verbose``-derived) logging.
@@ -301,10 +303,15 @@ def run_recipe(
     context = StepContext(model_data=model_data, model=model)
     if cancel is not None:
         context.cancel = cancel
-    if log is not None:
-        context.log = log
     if pipeline_log is not None:
         context.pipeline_log = pipeline_log
+    if log is not None:
+        context.log = log
+    elif pipeline_log is not None:
+        # Merge: without an explicit one-line sink, route recipe progress
+        # through the structured log so it shares one stream with the events
+        # the analysis verbs emit (the GUI and the report both rely on this).
+        context.log = lambda msg: pipeline_log.info("workflow", msg)
 
     # A caller-supplied topology counts as produced geometry, so a recipe may
     # start with an analysis step when run_recipe is handed an already-prepared

@@ -25,7 +25,8 @@ def run_modal_analysis(
         mesh_model: Pre-processed topology from the Preprocessor.
         n_modes: Number of modes to extract (default 12).
         name: Result label (default ``"ModalAnalysis"``).
-        config: Optional config dict, recorded in the result metadata.
+        config: Optional builder config dict, forwarded to the modal builder
+            and recorded in the result metadata.
         log: Optional :class:`~fea_toolkit.io.log.PipelineLog` (or a ``bool``)
             forwarded to the modal builder.
 
@@ -35,7 +36,7 @@ def run_modal_analysis(
     """
     from fea_toolkit.opensees.analysis_builder import run_modal
 
-    result = run_modal(mesh_model, n_modes=n_modes, log=log)
+    result = run_modal(mesh_model, n_modes=n_modes, config=config, log=log)
     return AnalysisResult(
         name=name,
         analysis_type="ModalAnalysis",

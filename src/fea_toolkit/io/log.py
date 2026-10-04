@@ -39,6 +39,24 @@ def _escape_md_cell(text: str) -> str:
     return text.replace("|", "\\|").replace("\n", " ").replace("\r", "")
 
 
+def render_entry(entry: dict) -> str:
+    """Render one entry as the one-line string a text sink shows.
+
+    ``INFO`` → the bare message; ``DEBUG`` → ``[step] msg``; ``WARN`` →
+    ``⚠ [step] msg``; ``ERROR`` → ``✗ [step] msg``.  This is the shared format
+    for a text sink (console, GUI message log) so the same event renders the
+    same way everywhere.
+    """
+    level = entry["level"]
+    if level == "WARN":
+        return f"⚠ [{entry['step']}] {entry['msg']}"
+    if level == "ERROR":
+        return f"✗ [{entry['step']}] {entry['msg']}"
+    if level == "DEBUG":
+        return f"[{entry['step']}] {entry['msg']}"
+    return entry["msg"]
+
+
 class PipelineLog:
     """A structured pipeline event log: emit once, render via sinks.
 
@@ -111,15 +129,9 @@ class PipelineLog:
 
     def _stdout_sink(self, entry: dict) -> None:
         level = entry["level"]
-        if level in ("INFO", "DEBUG"):
-            if not self._verbose:
-                return
-            prefix = f"[{entry['step']}] " if level == "DEBUG" else ""
-            print(f"{prefix}{entry['msg']}")
-        elif level == "WARN":
-            print(f"⚠ [{entry['step']}] {entry['msg']}")
-        elif level == "ERROR":
-            print(f"✗ [{entry['step']}] {entry['msg']}")
+        if level in ("INFO", "DEBUG") and not self._verbose:
+            return
+        print(render_entry(entry))
 
     @property
     def entries(self) -> list[dict]:

@@ -14,6 +14,7 @@ from fea_toolkit.io.log import (
     _step_from_logger,
     coerce_log,
     console_log,
+    render_entry,
 )
 
 
@@ -114,3 +115,10 @@ def test_pipeline_handler_forwards_logging_records():
     assert [e["step"] for e in log.entries] == ["test_pipeline_handler", "test_pipeline_handler"]
     assert log.entries[0]["msg"] == "edge A ignored"
     assert log.entries[1]["msg"] == "control node OK"
+
+
+def test_render_entry_formats_each_level():
+    assert render_entry({"level": "INFO", "step": "static", "msg": "hello"}) == "hello"
+    assert render_entry({"level": "DEBUG", "step": "geo", "msg": "d"}) == "[geo] d"
+    assert render_entry({"level": "WARN", "step": "modal", "msg": "w"}) == "⚠ [modal] w"
+    assert render_entry({"level": "ERROR", "step": "rs", "msg": "e"}) == "✗ [rs] e"

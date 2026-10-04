@@ -2122,6 +2122,19 @@ class MainWindow(QMainWindow):
         label = getattr(self, "_pending_label", None) or f"Running recipe ({len(recipe)} steps)"
         self._pending_label = None
 
+        # One PipelineLog for the run: recipe progress (``context.log``) and the
+        # structured analysis events share it, and its sink collects them into
+        # ``messages`` for the GUI-thread flush in ``_recipe_finished``.
+        from ..io.log import PipelineLog, render_entry
+
+        pipeline_log = PipelineLog(verbose=True, collect=False, _stdout=False)
+
+        def _collect(entry: dict) -> None:
+            if entry["level"] != "DEBUG":
+                messages.append(render_entry(entry))
+
+        pipeline_log.add_sink(_collect)
+
         self._set_model_actions_enabled(False)
         self._progress.setRange(0, 0)  # busy: a recipe reports no fine-grained progress
         self._progress.setVisible(True)
@@ -2134,7 +2147,7 @@ class MainWindow(QMainWindow):
                 model_data,
                 model=starting_mesh,
                 cancel=should_cancel,
-                log=messages.append,
+                pipeline_log=pipeline_log,
             )
             return run, messages
 
