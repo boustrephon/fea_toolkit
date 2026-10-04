@@ -113,6 +113,7 @@ def run_pushover(context: StepContext, step: Step) -> list[StepResult]:
         name=params["name"],
         config=params["config"] or None,
         return_builders=params["return_builders"],
+        log=context.pipeline_log,
     )
     context.results["pushover"] = result
     context.log(f"Pushover ({params['directions']}): complete")

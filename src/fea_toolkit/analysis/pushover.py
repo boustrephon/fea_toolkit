@@ -33,6 +33,7 @@ from .base import (
 )
 
 if TYPE_CHECKING:
+    from fea_toolkit.io.log import PipelineLog
     from fea_toolkit.model.mesh_model import MeshModel
 
 
@@ -71,6 +72,7 @@ def run_pushover_analysis(
     name: str = "Pushover",
     config: Optional[dict] = None,
     return_builders: bool = False,
+    log: Optional["PipelineLog"] = None,
 ) -> AnalysisResult:
     """Run pushover analysis with CSM evaluation.
 
@@ -115,6 +117,9 @@ def run_pushover_analysis(
             is retained under ``all_out[label]["builder"]`` so per-step
             results can be exported (e.g. to a stage file via
             :func:`fea_toolkit.io.stage_writer.write_model_stages`).
+        log: Optional :class:`~fea_toolkit.io.log.PipelineLog` (or a ``bool``)
+            forwarded to the steel / RC OpenSeesPy paths to collect pushover
+            events; ``None`` lets them derive one from ``verbose``.
 
     Returns:
         :class:`AnalysisResult` whose ``data`` holds the pushover result
@@ -162,6 +167,7 @@ def run_pushover_analysis(
             verbose=rc_config.get("verbose", False),
             node_mass_overrides=rc_config.get("node_mass_overrides"),
             return_builders=return_builders,
+            log=log,
         )
         return AnalysisResult(
             name=name,
@@ -197,6 +203,7 @@ def run_pushover_analysis(
         verbose=config.get("verbose", False),
         config=config,
         return_builders=return_builders,
+        log=log,
     )
 
     return AnalysisResult(

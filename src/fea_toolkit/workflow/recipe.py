@@ -261,6 +261,7 @@ def run_recipe(
     model: Any = None,
     cancel: Any = None,
     log: Any = None,
+    pipeline_log: Any = None,
 ) -> RecipeRun:
     """Run a recipe's steps in order against *model_data*.
 
@@ -281,6 +282,9 @@ def run_recipe(
         cancel: Zero-argument predicate; ``True`` stops the run at the next step
             boundary.  Defaults to "never cancelled".
         log: One-line sink for progress.  Defaults to discarding messages.
+        pipeline_log: Optional structured
+            :class:`~fea_toolkit.io.log.PipelineLog` handed to analysis verbs;
+            ``None`` leaves verbs to their own (``verbose``-derived) logging.
 
     Returns:
         The :class:`RecipeRun` — its results, tolerated failures and whether it
@@ -299,6 +303,8 @@ def run_recipe(
         context.cancel = cancel
     if log is not None:
         context.log = log
+    if pipeline_log is not None:
+        context.pipeline_log = pipeline_log
 
     # A caller-supplied topology counts as produced geometry, so a recipe may
     # start with an analysis step when run_recipe is handed an already-prepared

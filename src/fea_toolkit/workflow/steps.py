@@ -19,10 +19,13 @@ implementation — and therefore without loading OpenSees.
 
 import copy
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from ..model.sap_data import SAPModelData
 from ..model.selection import Selection
+
+if TYPE_CHECKING:
+    from ..io.log import PipelineLog
 
 __all__ = [
     "CASES",
@@ -259,6 +262,9 @@ class StepContext:
         cancel: Zero-argument predicate — ``True`` asks the run to stop at the
             next step boundary.  Wired to the GUI worker's flag.
         log: One-line sink for progress, wired to the GUI message log.
+        pipeline_log: Optional structured
+            :class:`~fea_toolkit.io.log.PipelineLog` for analysis events —
+            distinct from *log* (the one-line progress sink).
         cancelled: Set by a step that observed its **own** cooperative
             cancellation (e.g. a solve stopped between cases).  ``run_recipe``
             reads it after each step, so a cancellation inside the *last* step
@@ -271,6 +277,7 @@ class StepContext:
     results: dict = field(default_factory=dict)
     cancel: Callable[[], bool] = _never_cancel
     log: Callable[[str], None] = _discard
+    pipeline_log: Optional["PipelineLog"] = None
     cancelled: bool = False
 
 

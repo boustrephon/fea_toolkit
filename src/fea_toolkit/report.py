@@ -542,7 +542,7 @@ def generate_report(
 
     # Run the verbs and re-key each result by its ``AnalysisResult.name``, so
     # the extraction below is unchanged.
-    _analysis_run = run_recipe(analysis_recipe, md, model=mesh_model)
+    _analysis_run = run_recipe(analysis_recipe, md, model=mesh_model, pipeline_log=log)
     for _step_result in _analysis_run.results:
         _man_results[_step_result.payload.name] = _step_result.payload
 
