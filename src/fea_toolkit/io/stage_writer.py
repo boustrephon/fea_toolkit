@@ -28,8 +28,11 @@ Usage::
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import json
+import os
+import tempfile
 import typing as t
 from pathlib import Path
 from typing import Optional
@@ -450,10 +453,19 @@ def write_model_file(
             raise ValueError("write_model_file requires 'sap' or 'mesh' for JSON output")
         from .model_codec import model_to_dict
 
-        resolved = str(Path(path).resolve())
-        Path(resolved).write_text(
-            json.dumps(model_to_dict(model), indent=2, sort_keys=True, allow_nan=False),
-            encoding="utf-8",
+        resolved = Path(path).resolve()
+        payload = json.dumps(model_to_dict(model), indent=2, sort_keys=True, allow_nan=False)
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(
+            dir=resolved.parent, prefix=f".{resolved.name}.", suffix=".tmp"
         )
-        return resolved
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+            os.replace(tmp_name, resolved)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_name)
+            raise
+        return str(resolved)
     return write_model_stages(path, sap=sap, mesh=mesh, fmt=fmt, **write_model_stages_options)
