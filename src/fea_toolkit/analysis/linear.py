@@ -304,6 +304,28 @@ def _mesh_has_shells(mesh_model) -> bool:
     return bool(getattr(mesh_model, "area_element_types", None))
 
 
+#: Build-once thresholds for :func:`run_static_cases`: one OpenSees domain is
+#: reused across the case set only when there are enough cases and/or enough
+#: nodes for the per-case domain rebuild to matter.  Below both, the per-case
+#: rebuild's simplicity and its failure isolation are preferred.
+_BUILD_ONCE_MIN_CASES = 3
+_BUILD_ONCE_MIN_NODES = 500
+
+
+def _should_build_once(ab_config: dict, n_cases: int, n_nodes: int) -> bool:
+    """Whether ``run_static_cases`` may reuse one domain across linear cases.
+
+    The build-once path assumes every case starts from a zero state, which only
+    holds for a linear-elastic build; it is gated to ``elasticBeamColumn``
+    without fiber sections.
+    """
+    if ab_config.get("element_type", "elasticBeamColumn") != "elasticBeamColumn":
+        return False
+    if ab_config.get("create_fiber_sections", False):
+        return False
+    return n_cases >= _BUILD_ONCE_MIN_CASES or n_nodes >= _BUILD_ONCE_MIN_NODES
+
+
 def run_static_cases(
     mesh_model,
     cases: dict[str, dict[str, float]],
@@ -372,6 +394,20 @@ def run_static_cases(
 
     rows: list[dict] = []
     total = len(cases)
+
+    # Reuse one OpenSees domain across the case set when the gate says the
+    # per-case rebuild matters.  Only valid for the linear path (see
+    # ``_should_build_once``).
+    build_once = _should_build_once(ab_config, len(cases), len(mesh_model.nodes))
+    ab = None
+    if build_once:
+        ab = AnalysisBuilder(mesh_model, ab_config)
+        ab.build_domain()
+        # A fresh builder has no saved edge constraints, so this is a no-op;
+        # kept for symmetry with the per-case rebuild path in
+        # ``_runner_static.py``.
+        ab._reapply_edge_constraints()
+
     for index, (case_name, patterns) in enumerate(cases.items(), start=1):
         if should_cancel is not None and should_cancel():
             break
@@ -380,9 +416,15 @@ def run_static_cases(
         if on_progress is not None:
             on_progress(index, case_name, total)
 
-        ab = AnalysisBuilder(mesh_model, ab_config)
         try:
-            results = ab.run_static_analysis(pattern_scales=patterns, extract_reactions=True)
+            if build_once:
+                ab.remove_load_patterns()
+                results = ab.run_static_analysis(
+                    pattern_scales=patterns, extract_reactions=True, rebuild=False
+                )
+            else:
+                ab = AnalysisBuilder(mesh_model, ab_config)
+                results = ab.run_static_analysis(pattern_scales=patterns, extract_reactions=True)
             # Use centralized overturning-moment computation (v1 match)
             rxn = results.get("reactions", {})
             summed = sum_reactions_with_overturning(rxn, mesh_model.nodes)
@@ -418,6 +460,10 @@ def run_static_cases(
         except Exception as e:
             fx = fy = fz = mx = my = mz = max_roof_disp = 0.0
             print(f"  Warning: {case_name} failed — {e}")
+        finally:
+            # A failed case must not leave its loads behind to poison the next.
+            if build_once:
+                ab.remove_load_patterns()
 
         rows.append(
             {

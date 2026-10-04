@@ -1,5 +1,6 @@
 """Analysis-builder mixin: loads and rigid diaphragms."""
 
+import contextlib
 import logging
 import math
 from typing import Any, Optional
@@ -41,6 +42,25 @@ class LoadMixin:
         """
         self._create_loads(pattern_scales=pattern_scales)
         self._apply_rigid_diaphragms()
+
+    def remove_load_patterns(self) -> None:
+        """Remove the load patterns (and time-series) of the last load pass.
+
+        Used by the build-once static-case runner: the OpenSees domain is
+        built once and each case swaps in its own loads.  Removing the
+        previous case's patterns before creating the next — and in a
+        ``finally`` so a failed case cannot leak its loads into the next —
+        keeps loads from accumulating across cases.  Idempotent: removing an
+        empty set is a no-op.
+        """
+        for ptag in list(getattr(self, "_created_pattern_tags", ()) or ()):
+            with contextlib.suppress(Exception):
+                ops.remove("loadPattern", ptag)
+        for ts_tag in list(getattr(self, "_created_ts_tags", ()) or ()):
+            with contextlib.suppress(Exception):
+                ops.remove("timeSeries", ts_tag)
+        self._created_pattern_tags = []
+        self._created_ts_tags = []
 
     @staticmethod
     def _is_gravity_pattern(pattern: Any) -> bool:
@@ -260,6 +280,10 @@ class LoadMixin:
         self._gravity_load_totals = {}
         self._joint_load_totals = {}
         self._dist_load_totals = {}
+        # Tags of the load patterns / time-series created by this pass, so
+        # remove_load_patterns() can delete them before the next build-once case.
+        self._created_pattern_tags: list[int] = []
+        self._created_ts_tags: list[int] = []
 
         # ── Pre-compute frame + area self-weight per-node ────────
         # Stored as a list of (node_tag, fz) tuples; applied per-pattern
@@ -353,6 +377,8 @@ class LoadMixin:
             ops.timeSeries("Linear", ts_tag)
             ops.pattern("Plain", ptag, ts_tag)
             patterns_created.add(pname)
+            self._created_ts_tags.append(ts_tag)
+            self._created_pattern_tags.append(ptag)
 
             load_total = 0.0
 

@@ -292,6 +292,18 @@ def wipeAnalysis() -> None:
     """
     ...
 
+def setTime(new_time: float) -> None:
+    """Set the current domain (pseudo‑)time.
+
+    Used to reset the pseudo‑time between independent static cases so a
+    ``Linear`` time‑series does not accumulate the previous case's load
+    factor.
+
+    Args:
+        new_time: The pseudo‑time to set (typically ``0.0``).
+    """
+    ...
+
 def analysis(analysis_type: str, *args: Any) -> None:
     """Create the Analysis object.
 

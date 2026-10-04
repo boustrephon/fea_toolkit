@@ -87,6 +87,60 @@ OpenSees `pattern` + constant time series.
 The toolkit mirrors the split exactly: routes A and B are both available and
 neither replaces the other.
 
+## Running many cases — the build-once optimisation
+
+`analysis.linear.run_static_cases()` solves a set of cases.  Historically each
+case rebuilt the OpenSees domain from scratch — `run_static_analysis(
+pattern_scales=…)` calls `build_domain()` (which runs `ops.wipe()`) before every
+solve — so a model with *N* cases reconstructed its nodes, materials, sections,
+elements, diaphragms and edge constraints *N* times.
+
+For **linear** cases that reconstruction is pure waste: the topology never
+changes, only the active load patterns do.  `run_static_cases` therefore reuses
+one domain when it is worthwhile, via `_should_build_once(ab_config, n_cases,
+n_nodes)`.  The domain is built **once**, the diaphragms / rigid bodies / edge
+constraints are applied once, and each case then swaps its loads in and
+re-solves.  The gate is deliberately conservative:
+
+| Criterion | Reason |
+|---|---|
+| `element_type == "elasticBeamColumn"` and no `create_fiber_sections` | build-once assumes every case starts from a zero state, which only holds for a **linear-elastic** build |
+| `len(cases) >= 3` **or** `len(mesh_model.nodes) >= 500` | below both, the per-case rebuild's simplicity and failure isolation beat a ~tens-of-milliseconds saving |
+
+The thresholds are the module constants `analysis.linear._BUILD_ONCE_MIN_CASES`
+and `_BUILD_ONCE_MIN_NODES`, and are tunable.
+
+### What `rebuild=False` does — the `wipeAnalysis` contract
+
+`run_static_analysis(..., rebuild=False)` is the per-case half.  It does **not**
+call `build_domain()`; instead it (1) `_create_loads(pattern_scales=…)` — this
+case's loads only, skipping the diaphragm re-application `create_loads`
+performs; (2) `ops.setTime(0.0)`; (3) `ops.wipeAnalysis()`, then re-creates the
+analysis objects in the solver setup that follows.  `run_static_cases`
+additionally calls `AnalysisBuilder.remove_load_patterns()` before each case
+**and** in a `finally`, so a failed case cannot leak its loads into the next.
+
+Steps (2) and (3) exist because of the OpenSees `wipeAnalysis` contract, which
+differs from `wipe`:
+
+| `wipe()` | `wipeAnalysis()` |
+|---|---|
+| destroys nodes, elements, materials, sections, **all SP and MP constraints**, loads, recorders, and analysis objects | destroys **only** the analysis objects — constraint handler, numberer, system, test, algorithm, integrator, analysis |
+| resets the pseudo-time | **does not** reset the pseudo-time |
+| — | keeps the domain's `fix`/`sp` and multipoint constraints (`rigidDiaphragm`, `rigidLink`/`equalDOF`, `equationConstraint`) **and** keeps the loads active |
+
+So after `wipeAnalysis()` everything the *analysis* owns must be re-created
+(which `run_static_analysis`'s solver setup does), while the *domain* — nodes,
+elements, and the SP/MP constraints — survives and must **not** be re-applied.
+The pseudo-time is the one trap: a `Linear` time-series scales loads by the
+accumulated time, so without `ops.setTime(0.0)` each case would apply its loads
+at an ever-growing factor.
+
+The two paths are numerically equivalent for linear cases; `test_case_listing`
+pins this for a plain frame and for a model whose tops are tied by a `rigidLink`
+MP constraint (the constraint survives `wipeAnalysis` and the re-solved case
+matches the rebuild).
+
 ## API summary
 
 | Call | Purpose |

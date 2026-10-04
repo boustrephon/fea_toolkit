@@ -294,3 +294,179 @@ def test_cancelling_before_the_first_case_runs_nothing(sample_mesh):
 
     assert rows == []
     assert raw == {}
+
+
+def test_build_once_reuse_matches_the_per_case_rebuild(sample_mesh, monkeypatch):
+    """One domain reused across cases gives the same results as rebuilding.
+
+    The build-once path (forced here by zeroing the gate thresholds) must
+    produce summary rows and raw results identical to the default per-case
+    rebuild.
+    """
+    import fea_toolkit.analysis.linear as linear_mod
+    from fea_toolkit.analysis.linear import run_static_cases
+
+    cases = {"DEAD": {"DEAD": 1.0}, "WIND": {"WIND": 1.0}}
+
+    raw_rebuild: dict = {}
+    rows_rebuild = run_static_cases(sample_mesh, cases, raw_out=raw_rebuild)
+
+    monkeypatch.setattr(linear_mod, "_BUILD_ONCE_MIN_CASES", 0)
+    monkeypatch.setattr(linear_mod, "_BUILD_ONCE_MIN_NODES", 0)
+    raw_once: dict = {}
+    rows_once = run_static_cases(sample_mesh, cases, raw_out=raw_once)
+
+    assert [r["Case"] for r in rows_once] == [r["Case"] for r in rows_rebuild]
+    for a, b in zip(rows_rebuild, rows_once):
+        for key in ("Fx", "Fy", "Fz", "Mx", "My", "Mz"):
+            assert a[key] == pytest.approx(b[key], rel=1e-9)
+
+    assert set(raw_once) == set(raw_rebuild)
+    for case in cases:
+        once = raw_once[case]["nodal_displacements"]
+        rebuilt = raw_rebuild[case]["nodal_displacements"]
+        assert set(once) == set(rebuilt)
+        for nid in once:
+            for a, b in zip(once[nid], rebuilt[nid]):
+                assert abs(a - b) < 1e-9, (case, nid, a, b)
+
+
+def test_build_once_is_linear_only():
+    """Build-once is refused for non-linear or fiber builds, and below the gate."""
+    from fea_toolkit.analysis.linear import _should_build_once
+
+    assert _should_build_once({"element_type": "elasticBeamColumn"}, 10, 10) is True
+    assert _should_build_once({"element_type": "dispBeamColumn"}, 10, 10) is False
+    assert (
+        _should_build_once(
+            {"element_type": "elasticBeamColumn", "create_fiber_sections": True}, 10, 10
+        )
+        is False
+    )
+    assert _should_build_once({"element_type": "elasticBeamColumn"}, 1, 1) is False
+
+
+def _portal_with_rigid_body_mesh():
+    """A two-column portal frame whose tops are tied by a 6-DOF rigid body.
+
+    Preprocesses the model and injects a ``rigid_body_components`` entry so the
+    AnalysisBuilder emits a ``rigidLink('beam')`` MP constraint tying node 4 to
+    node 3 — the multipoint constraint whose persistence across ``wipeAnalysis``
+    the build-once path must preserve.
+    """
+    from fea_toolkit.model.sap_data import (
+        FrameElement,
+        JointLoad,
+        LoadPattern,
+        Material,
+        Node,
+        Restraint,
+        SAPModelData,
+        Section,
+    )
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+
+    nodes = {
+        "1": Node("1", 1, 0.0, 0.0, 0.0),
+        "2": Node("2", 2, 4.0, 0.0, 0.0),
+        "3": Node("3", 3, 0.0, 0.0, 3.0),
+        "4": Node("4", 4, 4.0, 0.0, 3.0),
+    }
+    md = SAPModelData(
+        nodes=nodes,
+        restraints={"1": Restraint([1, 1, 1, 1, 1, 1]), "2": Restraint([1, 1, 1, 1, 1, 1])},
+        materials={
+            "Steel": Material(
+                name="Steel",
+                type="Steel",
+                E_mod=2.0e11,
+                G_mod=7.7e10,
+                nu=0.3,
+                unit_weight=7.85e4,
+                Fy=2.5e8,
+            )
+        },
+        sections={
+            "COL": Section(
+                name="COL",
+                shape="I/Wide Flange",
+                material="Steel",
+                A=0.00509434,
+                I33=8.3935e-5,
+                I22=7.6559e-6,
+                J=2.0e-6,
+            )
+        },
+        frame_elements={
+            "1": FrameElement(elem_id="1", elem_tag=1, node_i="1", node_j="3"),
+            "2": FrameElement(elem_id="2", elem_tag=2, node_i="2", node_j="4"),
+        },
+        area_elements={},
+        frame_assignments={"1": "COL", "2": "COL"},
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
+        load_patterns={
+            "DEAD": LoadPattern(name="DEAD", pattern_type="Dead", self_weight_factor=0),
+            "WIND": LoadPattern(name="WIND", pattern_type="Wind", self_weight_factor=0),
+        },
+        joint_loads=[
+            JointLoad(pattern="DEAD", node_id="3", fz=-500.0),
+            JointLoad(pattern="WIND", node_id="3", fx=1000.0),
+        ],
+    )
+    mm = preprocess_model(
+        md, {"element_type": "elasticBeamColumn", "split_elements": False, "verbose": False}
+    )
+    mm.rigid_body_components = [("Body", ["3", "4"], [True] * 6)]
+    return mm
+
+
+def test_build_once_preserves_rigid_body_constraints(monkeypatch):
+    """Build-once keeps ``rigidLink`` MP constraints across ``wipeAnalysis``.
+
+    Rigid-body (and diaphragm) multipoint constraints live in the domain and
+    survive ``wipeAnalysis``, but the build-once path must still re-create the
+    analysis objects and reset the pseudo-time so each case solves from a clean
+    state.  This pins that a model whose tops are tied by a 6-DOF rigid body
+    gives results identical to a per-case rebuild.
+    """
+    import openseespy.opensees as ops
+
+    import fea_toolkit.analysis.linear as linear_mod
+    from fea_toolkit.analysis.linear import run_static_cases
+
+    mesh = _portal_with_rigid_body_mesh()
+    cases = {"DEAD": {"DEAD": 1.0}, "WIND": {"WIND": 1.0}}
+
+    try:
+        raw_rebuild: dict = {}
+        rows_rebuild = run_static_cases(mesh, cases, raw_out=raw_rebuild)
+        # Sanity: the rigid body ties the two tops, so their X displacement
+        # under the lateral case is identical.
+        wind_rebuild = raw_rebuild["WIND"]["nodal_displacements"]
+        assert wind_rebuild["3"][0] == pytest.approx(wind_rebuild["4"][0], rel=1e-9)
+
+        monkeypatch.setattr(linear_mod, "_BUILD_ONCE_MIN_CASES", 0)
+        monkeypatch.setattr(linear_mod, "_BUILD_ONCE_MIN_NODES", 0)
+        raw_once: dict = {}
+        rows_once = run_static_cases(mesh, cases, raw_out=raw_once)
+
+        assert [r["Case"] for r in rows_once] == [r["Case"] for r in rows_rebuild]
+        for a, b in zip(rows_rebuild, rows_once):
+            for key in ("Fx", "Fy", "Fz", "Mx", "My", "Mz"):
+                assert a[key] == pytest.approx(b[key], rel=1e-9)
+        assert set(raw_once) == set(raw_rebuild)
+        for case in cases:
+            once = raw_once[case]["nodal_displacements"]
+            rebuilt = raw_rebuild[case]["nodal_displacements"]
+            assert set(once) == set(rebuilt)
+            for nid in once:
+                for a, b in zip(once[nid], rebuilt[nid]):
+                    # Transformation + rigidLink re-created after wipeAnalysis
+                    # leaves ~1e-7 rounding noise, so use an absolute tolerance
+                    # rather than pytest.approx (which cannot recurse into a
+                    # dict of lists).
+                    assert abs(a - b) < 1e-6, (case, nid, a, b)
+    finally:
+        ops.wipe()
