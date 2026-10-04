@@ -781,7 +781,7 @@ class TestResponseSpectrumWorkflow:
             f"base_shear_cqc is near zero ({results['base_shear_cqc']})"
         )
 
-    def test_rs_missing_mass_correction_when_enabled(self, sample_ab, spectrum):
+    def test_rs_missing_mass_correction_when_enabled(self, sample_ab, spectrum, monkeypatch):
         """``config["missing_mass"]`` adds the code-spectrum correction.
 
         The per-element CQC combines only the extracted modes; the residual
@@ -793,7 +793,7 @@ class TestResponseSpectrumWorkflow:
         sample_ab.compute_seismic_masses()
         modal = sample_ab.run_modal_analysis(num_modes=3)
         periods, accels = spectrum
-        sample_ab.config["missing_mass"] = True
+        monkeypatch.setitem(sample_ab.config, "missing_mass", True)
         results = sample_ab.run_response_spectrum_analysis(
             num_modes=3,
             modal_periods=modal["periods"],
