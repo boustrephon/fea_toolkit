@@ -97,39 +97,118 @@ def _point_uv_on_quad(
 ) -> Optional[tuple[float, float]]:
     """Estimate parametric (u, v) of *pt* on a bilinear quad.
 
-    Uses Newton iteration on the bilinear surface
+    Uses Gauss-Newton iteration on the bilinear surface
     ``p(u,v) = (1-v)[(1-u)c0 + u*c1] + v[(1-u)c3 + u*c2]``.
 
     Returns:
         ``(u, v)`` clamped to ``[0, 1]``, or ``None`` if the point is
         not on the quad (residual exceeds 1 % of the quad diagonal).
+
+    Notes:
+        This is a hot path — ``mesh_area_elements`` calls it once per
+        seeded candidate node, so it runs tens of thousands of times per
+        build.  The per-iteration 2×2 least-squares solve is therefore
+        evaluated in plain scalars (Cramer's rule on the normal equations)
+        rather than ``np.linalg.solve``: a 3×2 Jacobian's dispatch overhead
+        dwarfs the arithmetic, and the scalar form keeps the loop free of
+        NumPy's small-array machinery.
     """
     c0, c1, c2, c3 = corners
-    diag = float(np.linalg.norm(c2 - c0))
-    tol = max(1e-8, 0.01 * diag)
-    u, v = 0.5, 0.5
+
+    # Unpack to plain floats once — the inner loop is scalar arithmetic.
+    c0x, c0y, c0z = float(c0[0]), float(c0[1]), float(c0[2])
+    c1x, c1y, c1z = float(c1[0]), float(c1[1]), float(c1[2])
+    c2x, c2y, c2z = float(c2[0]), float(c2[1]), float(c2[2])
+    c3x, c3y, c3z = float(c3[0]), float(c3[1]), float(c3[2])
+    ptx, pty, ptz = float(pt[0]), float(pt[1]), float(pt[2])
+
+    # Diagonal (c2 - c0) sets the on-quad tolerance.
+    d_dx = c2x - c0x
+    d_dy = c2y - c0y
+    d_dz = c2z - c0z
+    tol = max(1e-8, 0.01 * math.sqrt(d_dx * d_dx + d_dy * d_dy + d_dz * d_dz))
+
+    # Differences that recur on every iteration.
+    e10x = c1x - c0x  # c1 - c0
+    e10y = c1y - c0y
+    e10z = c1z - c0z
+    e32x = c2x - c3x  # c2 - c3
+    e32y = c2y - c3y
+    e32z = c2z - c3z
+
+    u = 0.5
+    v = 0.5
     for _ in range(20):
-        top = c0 * (1.0 - u) + c1 * u
-        bot = c3 * (1.0 - u) + c2 * u
-        p = top * (1.0 - v) + bot * v
-        dp_du = (c1 - c0) * (1.0 - v) + (c2 - c3) * v
-        dp_dv = bot - top
-        r = p - pt
-        J = np.column_stack([dp_du, dp_dv])  # (3, 2)
-        JTJ = J.T @ J
-        try:
-            delta = np.linalg.solve(JTJ, -J.T @ r)
-        except np.linalg.LinAlgError:
+        omu = 1.0 - u
+        # top = c0*(1-u) + c1*u ; bot = c3*(1-u) + c2*u
+        topx = c0x * omu + c1x * u
+        topy = c0y * omu + c1y * u
+        topz = c0z * omu + c1z * u
+        botx = c3x * omu + c2x * u
+        boty = c3y * omu + c2y * u
+        botz = c3z * omu + c2z * u
+
+        omv = 1.0 - v
+        # p = top*(1-v) + bot*v
+        px = topx * omv + botx * v
+        py = topy * omv + boty * v
+        pz = topz * omv + botz * v
+
+        # dp_du = (c1-c0)*(1-v) + (c2-c3)*v ; dp_dv = bot - top
+        dudx = e10x * omv + e32x * v
+        dudy = e10y * omv + e32y * v
+        dudz = e10z * omv + e32z * v
+        dvdx = botx - topx
+        dvdy = boty - topy
+        dvdz = botz - topz
+
+        # residual r = p - pt
+        rx = px - ptx
+        ry = py - pty
+        rz = pz - ptz
+
+        # Normal equations JᵀJ = [[a, b], [b, c]] and rhs = -Jᵀr (2×2).
+        a = dudx * dudx + dudy * dudy + dudz * dudz
+        b = dudx * dvdx + dudy * dvdy + dudz * dvdz
+        c = dvdx * dvdx + dvdy * dvdy + dvdz * dvdz
+        g = -(dudx * rx + dudy * ry + dudz * rz)
+        h = -(dvdx * rx + dvdy * ry + dvdz * rz)
+
+        det = a * c - b * b
+        if det == 0.0:
             break
-        u = float(np.clip(u + delta[0], 0.0, 1.0))
-        v = float(np.clip(v + delta[1], 0.0, 1.0))
-        if float(np.linalg.norm(delta)) < 1e-8:
+        # Cramer's rule for [[a, b], [b, c]] · delta = (g, h).
+        du = (c * g - b * h) / det
+        dv = (a * h - b * g) / det
+
+        nu = u + du
+        if nu < 0.0:
+            nu = 0.0
+        elif nu > 1.0:
+            nu = 1.0
+        nv = v + dv
+        if nv < 0.0:
+            nv = 0.0
+        elif nv > 1.0:
+            nv = 1.0
+        u = nu
+        v = nv
+        if du * du + dv * dv < 1e-16:
             break
-    # Residual check: reject points that aren't actually on the quad
-    top = c0 * (1.0 - u) + c1 * u
-    bot = c3 * (1.0 - u) + c2 * u
-    p_final = top * (1.0 - v) + bot * v
-    if float(np.linalg.norm(p_final - pt)) > tol:
+
+    # Residual check: reject points that aren't actually on the quad.
+    omu = 1.0 - u
+    topx = c0x * omu + c1x * u
+    topy = c0y * omu + c1y * u
+    topz = c0z * omu + c1z * u
+    botx = c3x * omu + c2x * u
+    boty = c3y * omu + c2y * u
+    botz = c3z * omu + c2z * u
+    omv = 1.0 - v
+    fx = topx * omv + botx * v - ptx
+    fy = topy * omv + boty * v - pty
+    fz = topz * omv + botz * v - ptz
+    if fx * fx + fy * fy + fz * fz > tol * tol:
         return None
     return u, v
 
@@ -962,24 +1041,40 @@ def split_areas_at_frame_edges(
         for ei, ej, direction in edges:
             p_i = corner_coords[ei]
             p_j = corner_coords[ej]
-            edge_vec = p_j - p_i
-            edge_len_sq = float(np.dot(edge_vec, edge_vec))
+            # Scalar edge geometry — the collinearity test below runs once per
+            # candidate frame node (tens of thousands of times per build), so
+            # the cross/dot products are computed in plain floats rather than
+            # NumPy 3-vectors (see the note in ``_point_uv_on_quad``).
+            pix = float(p_i[0])
+            piy = float(p_i[1])
+            piz = float(p_i[2])
+            evx = float(p_j[0]) - pix
+            evy = float(p_j[1]) - piy
+            evz = float(p_j[2]) - piz
+            edge_len_sq = evx * evx + evy * evy + evz * evz
             if edge_len_sq < 1e-12:
                 continue
-            edge_len = float(np.sqrt(edge_len_sq))
-            edge_dir = edge_vec / edge_len
+            edge_len = math.sqrt(edge_len_sq)
+            edx = evx / edge_len
+            edy = evy / edge_len
+            edz = evz / edge_len
 
             for nid in local_frame_ids:
                 if nid in corners:
                     continue  # skip area corner nodes
                 npos = frame_node_coords[nid]
-                vec_ip = npos - p_i
-                # Collinearity: cross product near zero
-                cross_len = float(np.linalg.norm(np.cross(edge_vec, vec_ip)))
+                vx = float(npos[0]) - pix
+                vy = float(npos[1]) - piy
+                vz = float(npos[2]) - piz
+                # Collinearity: |edge_vec × vec_ip| / edge_len near zero.
+                cx = evy * vz - evz * vy
+                cy = evz * vx - evx * vz
+                cz = evx * vy - evy * vx
+                cross_len = math.sqrt(cx * cx + cy * cy + cz * cz)
                 if cross_len / edge_len > 1e-4:
                     continue
                 # Within segment: projection t between -tol and 1+tol
-                t = float(np.dot(vec_ip, edge_dir)) / edge_len
+                t = (vx * edx + vy * edy + vz * edz) / edge_len
                 if t < -1e-6 or t > 1 + 1e-6:
                     continue
                 # Store with adjustment for reversed edges
