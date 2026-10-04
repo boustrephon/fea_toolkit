@@ -183,8 +183,7 @@ class MaterialMixin:
                     tag += 1
                 created += 1
 
-        if self.config.get("verbose", False):
-            print(f"  Created {created} nD material(s)")
+        self._log.info("materials", f"Created {created} nD material(s)")
 
     def _create_fsam_materials(self) -> None:
         """Create FSAM (fixed-strut-angle model) nD materials.
@@ -298,8 +297,7 @@ class MaterialMixin:
             self._nd_material_tags[name] = current_tag
             created += 1
 
-        if self.config.get("verbose", False):
-            print(f"  Created {created} FSAM nD material(s)")
+        self._log.info("materials", f"Created {created} FSAM nD material(s)")
 
     def _create_mvlem3d_support_materials(self) -> None:
         """Create the MVLEM_3D shear-spring and interior-dummy materials.

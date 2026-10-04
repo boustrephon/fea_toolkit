@@ -9,20 +9,11 @@ and result extraction — no topology mutations occur here.
 import contextlib
 import logging
 import math
-from typing import TYPE_CHECKING, Any, ClassVar, Optional
+from typing import Any, ClassVar, Optional
 
 import openseespy.opensees as ops
 
-if TYPE_CHECKING:
-    from ..io.log import PipelineLog
-
-    # pandas is not a required dependency — only imported at runtime inside
-    # check_load_equilibrium().  The TYPE_CHECKING guard lets Ruff resolve
-    # the "pd.DataFrame" return annotation statically without adding pandas
-    # to the core dependencies.
-
-
-from ..io.log import coerce_log
+from ..io.log import PipelineLog, coerce_log
 from ..model.mesh_model import MeshModel
 
 logger = logging.getLogger(__name__)
@@ -141,12 +132,16 @@ class AnalysisBuilder(
     # explicitly — the builder defaults to ``UmfPack``.
     SPARSE_SOLVER_NODE_THRESHOLD: ClassVar[int] = 600
 
+    #: Fallback log for the ``__new__`` + ``_set_defaults()`` construction path
+    #: (some tests bypass ``__init__``); ``__init__`` overrides it per instance.
+    _log: PipelineLog = coerce_log(False)
+
     def __init__(
         self,
         mesh_model: MeshModel,
         config: Optional[dict[str, Any]] = None,
         *,
-        log: Optional["PipelineLog"] = None,
+        log: Optional[PipelineLog] = None,
     ):
         self.mesh_model = mesh_model
         self.units = mesh_model.units
@@ -161,9 +156,14 @@ class AnalysisBuilder(
         # solver for large models (SPARSE_SOLVER_NODE_THRESHOLD).
         self._user_set_solver_system = "solver_system" in self.config
         self._set_defaults()
-        # Narrative output routes through this log; the ``verbose`` config key
-        # (default False) maps to console output when no ``log`` is given.
-        self._log = coerce_log(log if log is not None else self.config.get("verbose", False))
+        # Narrative output routes through this log; when ``log`` is None the
+        # ``verbose`` config key (default False) sets its verbosity, so a quiet
+        # build still surfaces warnings.
+        self._log = (
+            coerce_log(log)
+            if log is not None
+            else PipelineLog(verbose=bool(self.config.get("verbose", False)), collect=False)
+        )
 
         # ── Elwood limit-state unit policy ──────────────────────────
         # The Elwood limitCurve equations are anchored to the kip-in-ksi

@@ -65,11 +65,10 @@ class ElementMixin:
             for nid in wall.node_ids:
                 node = self.mesh_model.nodes.get(nid)
                 if node is None:
-                    if self.config.get("verbose", False):
-                        print(
-                            f"  ⚠ Wall element '{wall.elem_id}': node "
-                            f"'{nid}' not found in mesh — skipping"
-                        )
+                    self._log.warning(
+                        "elements",
+                        f"Wall element '{wall.elem_id}': node '{nid}' not found in mesh — skipping",
+                    )
                     skip = True
                     break
                 node_tags.append(node.node_tag)
@@ -81,8 +80,7 @@ class ElementMixin:
             else:
                 created += self._create_fsam_wall(wall, node_tags, elem_type, _nd_tags)
 
-        if self.config.get("verbose", False):
-            print(f"  Created {created} wall element(s)")
+        self._log.info("elements", f"Created {created} wall element(s)")
 
     def _create_fsam_wall(self, wall, node_tags: list, elem_type: str, _nd_tags: dict) -> int:
         """Emit an SFI_MVLEM_3D / E_SFI_MVLEM_3D element (per-fibre FSAM)."""
@@ -120,8 +118,7 @@ class ElementMixin:
             args.extend(["-Density", wall.Density])
 
         ops.element(elem_type, *args)
-        if self.config.get("verbose", False):
-            print(f"  {elem_type} tag={wall.elem_tag} nodes={node_tags} m={wall.m}")
+        self._log.debug("elements", f"{elem_type} tag={wall.elem_tag} nodes={node_tags} m={wall.m}")
         return 1
 
     def _create_mvlem3d_wall(self, wall, node_tags: list, elem_type: str) -> int:
@@ -196,8 +193,7 @@ class ElementMixin:
             args.extend(["-Density", wall.Density])
 
         ops.element(elem_type, *args)
-        if self.config.get("verbose", False):
-            print(f"  {elem_type} tag={wall.elem_tag} nodes={node_tags} m={wall.m}")
+        self._log.debug("elements", f"{elem_type} tag={wall.elem_tag} nodes={node_tags} m={wall.m}")
         return 1
 
     def _build_frame_tag_map(self) -> None:
@@ -226,8 +222,7 @@ class ElementMixin:
         """Create OpenSees frame elements from MeshModel."""
         from ..model.geometry import subdivide_elements
 
-        if self.config["verbose"]:
-            print("Creating frame elements...")
+        self._log.info("elements", "Creating frame elements...")
 
         elements = self.mesh_model.frame_elements
         assignments = self.mesh_model.frame_assignments
@@ -434,9 +429,8 @@ class ElementMixin:
                 )
                 self._rigid_link_elems[_link_id] = link_tag
 
-        if self.config["verbose"]:
-            n = len([e for e in elements.values() if not getattr(e, "inactive", False)])
-            print(f"  Created {n} frame elements")
+        n = len([e for e in elements.values() if not getattr(e, "inactive", False)])
+        self._log.info("elements", f"Created {n} frame elements")
 
     def _add_beam_column(self, elem, tag, elements, assignments):
         """Add a single beam-column element to the OpenSees domain."""
@@ -1423,8 +1417,8 @@ class ElementMixin:
             elem.node_j = bond_j_id
             n_spring += 1
 
-        if n_spring and self.config.get("verbose", False):
-            print(f"  Inserted bond-slip springs on {n_spring} member(s)")
+        if n_spring:
+            self._log.info("elements", f"Inserted bond-slip springs on {n_spring} member(s)")
 
     def _derive_bond_slip_backbone(
         self,

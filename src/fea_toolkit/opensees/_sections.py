@@ -82,8 +82,7 @@ class SectionMixin:
         for name, lss in self.mesh_model.layered_shell_sections.items():
             n_layers = len(lss.layers)
             if n_layers == 0:
-                if self.config.get("verbose", False):
-                    print(f"  ⚠ Layered section '{name}' has no layers — skipping")
+                self._log.warning("sections", f"Layered section '{name}' has no layers — skipping")
                 continue
             flat_args = []
             skip_section = False
@@ -92,11 +91,11 @@ class SectionMixin:
                 # a previous build where a now-skipped material still has
                 # a tag in self.material_tags.
                 if layer.nd_material in self._skipped_nd_materials:
-                    print(
-                        f"  ⚠ nD material '{layer.nd_material}' for "
-                        f"layered section '{name}' was skipped during "
-                        f"material creation (unsupported type) — "
-                        f"skipping section '{name}'"
+                    self._log.warning(
+                        "sections",
+                        f"nD material '{layer.nd_material}' for layered section '{name}' "
+                        f"was skipped during material creation (unsupported type) — "
+                        f"skipping section '{name}'",
                     )
                     skip_section = True
                     break
@@ -106,11 +105,11 @@ class SectionMixin:
                     nd_tags = getattr(self, "_nd_material_tags", {})
                     mat_tag = nd_tags.get(layer.nd_material)
                 if mat_tag is None:
-                    if self.config.get("verbose", False):
-                        print(
-                            f"  ⚠ nD material '{layer.nd_material}' not found "
-                            f"for layered section '{name}' — skipping section"
-                        )
+                    self._log.warning(
+                        "sections",
+                        f"nD material '{layer.nd_material}' not found for layered section "
+                        f"'{name}' — skipping section",
+                    )
                     skip_section = True
                     break
                 # LayeredShell syntax: matTag, thickness only (nIP not accepted)
@@ -130,8 +129,7 @@ class SectionMixin:
             ops.section("LayeredShell", tag, n_layers, *flat_args)
             created += 1
 
-        if self.config.get("verbose", False):
-            print(f"  Created {created} layered shell section(s)")
+        self._log.info("sections", f"Created {created} layered shell section(s)")
 
     def _create_sections(self) -> None:
         """Create OpenSees sections from MeshModel sections.
@@ -139,8 +137,7 @@ class SectionMixin:
         Assigns section tags sequentially if they are not already
         populated in ``self.section_tags`` (from MeshModel).
         """
-        if self.config["verbose"]:
-            print("Creating sections...")
+        self._log.info("sections", "Creating sections...")
 
         # Ensure normal-section tags don't collide with layered-shell tags
         _max_sec = max(self.section_tags.values(), default=0)
@@ -371,17 +368,18 @@ class SectionMixin:
                         self._warned_shear_element = True
                     self._wrap_fiber_section_with_shear(tag, fiber_tag, G_mod, _A, sec=sec)
 
-                if self.config.get("verbose", False):
-                    print(f"  Section {tag}: {sec.name} (Fiber, {len(entries)} patches)")
+                self._log.debug(
+                    "sections", f"Section {tag}: {sec.name} (Fiber, {len(entries)} patches)"
+                )
                 return  # fiber path done
 
         # ── Elastic section path (including ShellSections) ──────
         mat = self.mesh_model.materials.get(sec.material)
         if mat is None:
-            if self.config.get("verbose", False):
-                print(
-                    f"  ⚠ Section {sec.name}: material '{sec.material}' not found, using defaults"
-                )
+            self._log.warning(
+                "sections",
+                f"Section {sec.name}: material '{sec.material}' not found, using defaults",
+            )
             # Missing material reference — generic steel SI defaults scaled
             # to model units (same convention as apply_material_defaults).
             _ssf = stress_scale_factor(self.units)
@@ -566,8 +564,7 @@ class SectionMixin:
         if not self.config.get("create_shells", False):
             return
 
-        if self.config["verbose"]:
-            print("Creating shell elements...")
+        self._log.info("sections", "Creating shell elements...")
 
         # Merge with existing _shell_sec_tags (from _create_layered_shell_sections)
         # so LayeredShell section tags are preserved, not overwritten.
@@ -678,8 +675,7 @@ class SectionMixin:
             self._shell_tag_map[aid] = elem_tag
             shell_count += 1
 
-        if self.config["verbose"]:
-            print(f"  Created {shell_count} shell elements")
+        self._log.info("sections", f"Created {shell_count} shell elements")
 
     def _create_single_shell_section(self, sec, mat, tag, etype=None):
         """Create a single ElasticMembranePlateSection in OpenSees."""

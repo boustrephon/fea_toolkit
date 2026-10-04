@@ -460,10 +460,12 @@ class StaticRunnerMixin:
         self.mass_components = components
         self._mass_g = g
 
-        if self.config.get("verbose"):
-            total = sum(node_mass.values())
-            print(f"  Total seismic mass: {total:.2f} tonnes")
-            print(f"  Total seismic weight: {total * g / 1000:.2f} MN")
+        total = sum(node_mass.values())
+        self._log.info(
+            "static",
+            f"Total seismic mass: {total:.2f} tonnes; "
+            f"total seismic weight: {total * g / 1000:.2f} MN",
+        )
 
         return node_mass
 

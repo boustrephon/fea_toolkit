@@ -60,8 +60,7 @@ class ModalRunnerMixin:
             * ``'nodal_masses'`` — dict of nodal masses ``{tag: (mx, my, mz)}``
                 in model units (tonnes for kN-m models).
         """
-        if self.config.get("verbose"):
-            print(f"Running modal analysis for {num_modes} modes...")
+        self._log.info("modal", f"Running modal analysis for {num_modes} modes...")
 
         # ── Ensure seismic masses are present ────────────────────
         _has_mass = False
@@ -79,8 +78,7 @@ class ModalRunnerMixin:
         # ── Ritz / pre-load nudge ────────────────────────────────
         _needs_nudge = eigen_solver in ("genBandArpack", "ritz")
         if _needs_nudge:
-            if self.config.get("verbose"):
-                print("  Ritz pre-step (static gravity)...")
+            self._log.info("modal", "Ritz pre-step (static gravity)...")
             # Run a self-weight gravity load step
             self.create_loads(pattern_scales={"Self weight": 1.0})
             try:
@@ -103,11 +101,13 @@ class ModalRunnerMixin:
                     _ok = ops.analyze(1)
                     if _ok == 0:
                         break
-                if _ok != 0 and self.config.get("verbose"):
-                    print("  ⚠ Ritz pre-step did not converge — continuing with zero initial state")
+                if _ok != 0:
+                    self._log.warning(
+                        "modal",
+                        "Ritz pre-step did not converge — continuing with zero initial state",
+                    )
             except Exception:
-                if self.config.get("verbose"):
-                    print("  ⚠ Ritz pre-step failed — continuing")
+                self._log.warning("modal", "Ritz pre-step failed — continuing")
 
         # ── Set constraint handler for eigen analysis ────────────
         try:
@@ -135,13 +135,13 @@ class ModalRunnerMixin:
             except Exception:
                 eigenvals_all = []
             if not eigenvals_all:
-                print(f"  ⚠ {eigen_solver} solver failed — falling back to ARPACK")
+                self._log.warning("modal", f"{eigen_solver} solver failed — falling back to ARPACK")
                 try:
                     eigenvals_all = ops.eigen(num_modes)
                 except Exception:
                     eigenvals_all = []
                 if not eigenvals_all:
-                    print("  ⚠ ARPACK also failed — falling back to fullGenLapack")
+                    self._log.warning("modal", "ARPACK also failed — falling back to fullGenLapack")
                     try:
                         eigenvals_all = ops.eigen("-fullGenLapack", num_modes)
                     except Exception:
@@ -152,7 +152,7 @@ class ModalRunnerMixin:
             except Exception:
                 eigenvals_all = []
             if not eigenvals_all:
-                print("  ⚠ ARPACK solver failed — falling back to fullGenLapack")
+                self._log.warning("modal", "ARPACK solver failed — falling back to fullGenLapack")
                 try:
                     eigenvals_all = ops.eigen("-fullGenLapack", num_modes)
                 except Exception:
@@ -165,10 +165,11 @@ class ModalRunnerMixin:
             ev for ev in eigenvals_all if math.isfinite(ev) and 1e-12 < ev < _MAX_EIGENVALUE
         ]
         n_modes = len(eigenvals)
-        if n_modes < num_modes and self.config.get("verbose"):
-            print(
-                f"  Warning: only {n_modes} positive eigenvalues out of "
-                f"{num_modes}.  Proceeding with {n_modes} modes."
+        if n_modes < num_modes:
+            self._log.warning(
+                "modal",
+                f"only {n_modes} positive eigenvalues out of {num_modes}. "
+                f"Proceeding with {n_modes} modes.",
             )
 
         periods = [2.0 * math.pi / math.sqrt(ev) for ev in eigenvals]

@@ -320,8 +320,7 @@ class RsRunnerMixin:
                 the fixed geometric centroid (bounding-box midpoint).
                 This fixed reference ensures CQC validity across modes.
         """
-        if self.config.get("verbose"):
-            print(f"Running response spectrum analysis (dir={direction})...")
+        self._log.info("rs", f"Running response spectrum analysis (dir={direction})...")
 
         num_modes = min(num_modes, len(modal_periods))
         if num_modes == 0:
@@ -597,8 +596,7 @@ class RsRunnerMixin:
         if extraction not in ("per_mode", "recorder"):
             raise ValueError(f"extraction must be 'per_mode' or 'recorder', got {extraction!r}")
 
-        if self.config.get("verbose"):
-            print("Extracting element RS forces...")
+        self._log.info("rs", "Extracting element RS forces...")
 
         # Mirror run_response_spectrum_analysis: a model can yield fewer
         # converged modes than requested, and the mode loop, ``omega`` /

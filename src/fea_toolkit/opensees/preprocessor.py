@@ -9,13 +9,9 @@ already applied.  No OpenSees domain objects are created.
 import copy
 import warnings
 from dataclasses import fields, replace
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
-from ..io.log import coerce_log
-
-if TYPE_CHECKING:
-    from ..io.log import PipelineLog
-
+from ..io.log import PipelineLog, coerce_log
 from ..model.geometry import (
     apply_frame_end_offsets,
     convert_area_loads_to_edge_loads,
@@ -251,10 +247,14 @@ class Preprocessor:
         self,
         config: Optional[dict[str, Any]] = None,
         *,
-        log: Optional["PipelineLog"] = None,
+        log: Optional[PipelineLog] = None,
     ):
         self.config = config or {}
-        self._log = coerce_log(log if log is not None else self.config.get("verbose", False))
+        self._log = (
+            coerce_log(log)
+            if log is not None
+            else PipelineLog(verbose=bool(self.config.get("verbose", False)), collect=False)
+        )
 
     # ── Public API ────────────────────────────────────────────────
 
