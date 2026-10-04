@@ -110,6 +110,11 @@ re-solves.  The gate is deliberately conservative:
 The thresholds are the module constants `analysis.linear._BUILD_ONCE_MIN_CASES`
 and `_BUILD_ONCE_MIN_NODES`, and are tunable.
 
+`run_static_cases` announces the path it takes on stdout, so a monitored run
+makes the decision visible: **`Build-once: reusing one OpenSees domain … —
+per-case rebuild skipped`** when the gate engages, or **`Rebuilding the
+OpenSees domain per case`** otherwise.
+
 ### What `rebuild=False` does — the `wipeAnalysis` contract
 
 `run_static_analysis(..., rebuild=False)` is the per-case half.  It does **not**

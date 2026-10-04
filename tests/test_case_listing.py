@@ -470,3 +470,25 @@ def test_build_once_preserves_rigid_body_constraints(monkeypatch):
                     assert abs(a - b) < 1e-6, (case, nid, a, b)
     finally:
         ops.wipe()
+
+
+def test_run_static_cases_announces_domain_reuse(sample_mesh, monkeypatch, capsys):
+    """The run announces whether the domain is rebuilt per case or built once.
+
+    A monitored run must show when the per-case rebuild is skipped, so a
+    problem can be traced to the right path.
+    """
+    import fea_toolkit.analysis.linear as linear_mod
+    from fea_toolkit.analysis.linear import run_static_cases
+
+    cases = {"DEAD": {"DEAD": 1.0}}
+
+    # Default (below the gate): the domain is rebuilt per case.
+    run_static_cases(sample_mesh, cases)
+    assert "Rebuilding the OpenSees domain per case" in capsys.readouterr().out
+
+    # Forced build-once: the per-case rebuild is skipped.
+    monkeypatch.setattr(linear_mod, "_BUILD_ONCE_MIN_CASES", 0)
+    monkeypatch.setattr(linear_mod, "_BUILD_ONCE_MIN_NODES", 0)
+    run_static_cases(sample_mesh, cases)
+    assert "per-case rebuild skipped" in capsys.readouterr().out

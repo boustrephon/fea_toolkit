@@ -399,6 +399,18 @@ def run_static_cases(
     # per-case rebuild matters.  Only valid for the linear path (see
     # ``_should_build_once``).
     build_once = _should_build_once(ab_config, len(cases), len(mesh_model.nodes))
+    # Announce the domain-reuse decision so a monitored run shows whether the
+    # domain is rebuilt per case or built once and reused across the case set.
+    if build_once:
+        print(
+            f"  Build-once: reusing one OpenSees domain for {total} static "
+            f"case(s) ({len(mesh_model.nodes)} node(s)) — per-case rebuild skipped"
+        )
+    else:
+        print(
+            f"  Rebuilding the OpenSees domain per case "
+            f"({total} static case(s), {len(mesh_model.nodes)} node(s))"
+        )
     ab = None
     if build_once:
         ab = AnalysisBuilder(mesh_model, ab_config)
