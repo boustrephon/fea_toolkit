@@ -34,6 +34,39 @@ _ARC_DEGREES = 270.0
 _ARC_RADIUS = 0.5
 _ARC_RESOLUTION = 24
 
+#: Cached unit-arrow geometry per translation axis (built once).  ``pv.Arrow``
+#: constructs a fresh VTK source pipeline on every call, and
+#: :func:`render_restraints` draws one arrow per restrained translation DOF —
+#: on a real model that is hundreds of arrows, each followed by a
+#: translate/transform/merge.  Caching the numpy ``(points, faces)`` and
+#: rebuilding with :class:`pyvista.PolyData` keeps the per-glyph cost to a
+#: broadcast-multiply-and-add plus one small mesh.
+_UNIT_ARROW: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+
+
+def _unit_arrow(axis: int) -> tuple[np.ndarray, np.ndarray]:
+    """Return cached ``(points, faces)`` of a unit arrow pointing at the origin.
+
+    The tail sits one unit along the positive *axis* and the tip at the origin,
+    matching :func:`translation_glyph`'s ``start`` / ``direction`` convention.
+    """
+    cached = _UNIT_ARROW.get(axis)
+    if cached is None:
+        import pyvista as pv
+
+        direction = np.asarray(_AXES[axis], dtype=float)
+        mesh = pv.Arrow(
+            start=direction,
+            direction=-direction,
+            scale=1.0,
+            tip_length=_TIP_LENGTH,
+            tip_radius=_TIP_RADIUS,
+            shaft_radius=_SHAFT_RADIUS,
+        )
+        cached = (np.array(mesh.points, copy=True), np.array(mesh.faces, copy=True))
+        _UNIT_ARROW[axis] = cached
+    return cached
+
 
 def _perpendicular(axis: np.ndarray) -> tuple:
     """Two orthonormal vectors spanning the plane normal to *axis*."""
@@ -52,15 +85,9 @@ def translation_glyph(position: np.ndarray, axis: int, size: float) -> object:
     """
     import pyvista as pv
 
-    direction = np.asarray(_AXES[axis], dtype=float)
-    return pv.Arrow(
-        start=np.asarray(position, dtype=float) + direction * size,
-        direction=-direction,
-        scale=size,
-        tip_length=_TIP_LENGTH,
-        tip_radius=_TIP_RADIUS,
-        shaft_radius=_SHAFT_RADIUS,
-    )
+    pts, faces = _unit_arrow(axis)
+    new_pts = pts * size + np.asarray(position, dtype=float)
+    return pv.PolyData(new_pts, faces=faces.copy())
 
 
 def rotation_glyph(position: np.ndarray, axis: int, size: float) -> object:
@@ -114,7 +141,8 @@ def support_glyph(position: np.ndarray, dofs, size: float) -> Optional[object]:
         )
     if not parts:
         return None
-    merged = parts[0]
-    for part in parts[1:]:
-        merged = merged.merge(part)
-    return merged
+    if len(parts) == 1:
+        return parts[0]
+    import pyvista as pv
+
+    return pv.merge(parts)

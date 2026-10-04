@@ -517,9 +517,9 @@ class PyVistaRenderer(RenderBackend):
         ]
         if not glyphs:
             return
-        merged = glyphs[0]
-        for glyph in glyphs[1:]:
-            merged = merged.merge(glyph)
+        import pyvista as pv
+
+        merged = glyphs[0] if len(glyphs) == 1 else pv.merge(glyphs)
 
         actor = p.add_mesh(
             merged,
