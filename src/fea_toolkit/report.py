@@ -551,7 +551,7 @@ def generate_report(
                 "lateral_load_type": pattern,
                 "max_disp_val": push_cfg["max_disp"],
                 "num_steps": push_cfg["num_steps"],
-                "brace_type": push_cfg.get("brace_type", "beam"),
+                "brace_type": push_cfg.get("brace_type", "truss"),
                 "name": f"Pushover-{pattern}",
                 "return_builders": bool(
                     export_cfg.get("enabled", False) and export_cfg.get("pushover", False)
