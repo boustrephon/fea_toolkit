@@ -25,8 +25,9 @@ persists the event list as a machine-readable ``.log.json`` file.
 from __future__ import annotations
 
 import json
+import logging
 import time
-from typing import Callable, Union
+from typing import Callable, ClassVar, Union
 
 # ═══════════════════════════════════════════════════════════════════
 # PipelineLog — structured pipeline event log (one event, many sinks)
@@ -213,3 +214,58 @@ def coerce_log(log: Union[PipelineLog, bool, None]) -> PipelineLog:
     if log is False:
         return _silent_log
     return console_log
+
+
+# ═══════════════════════════════════════════════════════════════════
+# PipelineHandler — bridge stdlib ``logging`` records into a PipelineLog
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _step_from_logger(name: str) -> str:
+    """Map a logger name to a :class:`PipelineLog` step tag.
+
+    ``fea_toolkit.opensees._constraints`` → ``constraints``: the leaf module
+    name with a leading ``_`` / ``_runner_`` stripped.  A name with no dotted
+    leaf is returned unchanged.
+    """
+    leaf = name.rsplit(".", 1)[-1]
+    leaf = leaf.removeprefix("_runner_").removeprefix("_")
+    return leaf or name
+
+
+class PipelineHandler(logging.Handler):
+    """Bridge stdlib :mod:`logging` records into a :class:`PipelineLog`.
+
+    The toolkit's module-level ``logger = logging.getLogger(__name__)`` calls
+    (builder Tcl-export wall warnings, the constraint narrative, limit-state
+    skips, …) are the last ``logging``-based output.  Attach one of these to
+    the ``fea_toolkit`` logger during a run (see
+    :func:`fea_toolkit.report.generate_report`) so those warnings/infos become
+    ``PipelineLog`` events instead of going to stderr.
+
+    Level mapping: ``DEBUG→debug``, ``INFO→info``, ``WARNING→warn``,
+    ``ERROR/CRITICAL→error``.  The ``step`` tag is derived from the record's
+    logger name via :func:`_step_from_logger`.
+    """
+
+    _LEVEL_METHODS: ClassVar[dict[int, str]] = {
+        logging.DEBUG: "debug",
+        logging.INFO: "info",
+        logging.WARNING: "warn",
+        logging.ERROR: "error",
+        logging.CRITICAL: "error",
+    }
+
+    def __init__(self, log: PipelineLog, level: int = logging.INFO) -> None:
+        super().__init__(level=level)
+        self._log = log
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """Forward one record to the wrapped :class:`PipelineLog`."""
+        method = self._LEVEL_METHODS.get(record.levelno)
+        if method is None:
+            return
+        try:
+            getattr(self._log, method)(_step_from_logger(record.name), record.getMessage())
+        except Exception:  # a sink must never break the emit path
+            self.handleError(record)

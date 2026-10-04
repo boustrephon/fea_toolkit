@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Optional
 from .base import AnalysisResult
 
 if TYPE_CHECKING:
+    from fea_toolkit.io.log import PipelineLog
     from fea_toolkit.model.mesh_model import MeshModel
 
 
@@ -22,6 +23,7 @@ def run_response_spectrum_analysis(
     n_modes: int = 12,
     name: str = "ResponseSpectrum",
     config: Optional[dict] = None,
+    log: Optional["PipelineLog"] = None,
 ) -> AnalysisResult:
     """Run response spectrum analysis for one direction.
 
@@ -35,6 +37,8 @@ def run_response_spectrum_analysis(
         n_modes: Number of modes to include (default 12).
         name: Result label (default ``"ResponseSpectrum"``).
         config: Optional config dict, recorded in the result metadata.
+        log: Optional :class:`~fea_toolkit.io.log.PipelineLog` (or a ``bool``)
+            forwarded to the :class:`AnalysisBuilder` that runs the RS pass.
 
     Returns:
         :class:`AnalysisResult` whose ``data`` holds the RS result dict,
@@ -59,7 +63,7 @@ def run_response_spectrum_analysis(
 
     builder_config = {"element_type": "elasticBeamColumn", "verbose": False}
     builder_config.update(config or {})
-    ab = AnalysisBuilder(mesh_model, builder_config)
+    ab = AnalysisBuilder(mesh_model, builder_config, log=log)
     ab.build_domain()
     ab.compute_seismic_masses()
     # Must run modal on the builder's domain before RS

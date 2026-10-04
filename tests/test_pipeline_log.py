@@ -6,8 +6,15 @@ semantics, the ``coerce_log`` helper, and JSON persistence.
 """
 
 import json
+import logging
 
-from fea_toolkit.io.log import PipelineLog, coerce_log, console_log
+from fea_toolkit.io.log import (
+    PipelineHandler,
+    PipelineLog,
+    _step_from_logger,
+    coerce_log,
+    console_log,
+)
 
 
 def test_info_prints_plain_and_warn_error_are_prefixed(capsys):
@@ -79,3 +86,31 @@ def test_to_json_round_trip(tmp_path):
     assert data["n_entries"] == 1
     assert data["entries"][0]["step"] == "static"
     assert data["entries"][0]["msg"] == "hello"
+
+
+def test_step_from_logger_strips_runner_and_underscore():
+    assert _step_from_logger("fea_toolkit.opensees._constraints") == "constraints"
+    assert _step_from_logger("fea_toolkit.opensees._runner_static") == "static"
+    assert _step_from_logger("fea_toolkit.opensees.pushover") == "pushover"
+    assert _step_from_logger("fea_toolkit.analysis.combinations") == "combinations"
+
+
+def test_pipeline_handler_forwards_logging_records():
+    log = PipelineLog(verbose=False)
+    handler = PipelineHandler(log)
+    logger = logging.getLogger("fea_toolkit.test_pipeline_handler")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    logger.addHandler(handler)
+    try:
+        logger.warning("edge %s ignored", "A")
+        logger.info("control node OK")
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(logging.NOTSET)
+        logger.propagate = True
+
+    assert [e["level"] for e in log.entries] == ["WARN", "INFO"]
+    assert [e["step"] for e in log.entries] == ["test_pipeline_handler", "test_pipeline_handler"]
+    assert log.entries[0]["msg"] == "edge A ignored"
+    assert log.entries[1]["msg"] == "control node OK"

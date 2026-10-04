@@ -102,3 +102,34 @@ Events are O(phases + cases + warnings) — a 1:1 swap of the old boundary-level
 elements, or solver iterations; a log call in a hot path turns a cheap
 format-string into millions of allocations.  Per-iteration detail belongs at
 `DEBUG` and even then only when it is not in the innermost loop.
+
+## stdlib `logging` bridge
+
+A few modules still emit through the stdlib `logging` module
+(`logger = logging.getLogger(__name__)` — the builder's Tcl-export wall
+warnings, the constraint narrative, limit-state skips, …).  Rather than
+converting them one-by-one, `generate_report` attaches a `PipelineHandler` (a
+`logging.Handler`) to the `fea_toolkit` logger for the duration of the run, so
+those `logger.warning` / `logger.info` calls become `PipelineLog` events with
+the same level mapping (`WARNING→WARN`, `INFO→INFO`) and a `step` tag derived
+from the logger's leaf module name (`_constraints` → `constraints`,
+`_runner_static` → `static`, `builder` → `builder`).
+
+The bridge is installed only while `generate_report` runs; a bare analysis call
+does not install it, so a stray `logger.warning` there still reaches stderr.
+Fully converting such a call means replacing the `logger.*` line with a
+`self._log.*` line (or threading a `log` through) — not leaving it to the
+bridge.
+
+## Future work
+
+* **Merge the GUI's progress log into `PipelineLog`.**  The recipe/GUI layer
+  still runs on a one-line `Callable[[str], None]` (`StepContext.log`, wired to
+  `MainWindow`'s message list via `run_recipe(..., log=messages.append)`),
+  separate from the `pipeline_log` channel now threaded through the same
+  context.  The plan is to have the GUI hand `run_recipe` a `PipelineLog`
+  carrying a Qt-signal sink, so `context.log` progress and the structured
+  analysis events share one stream — the GUI message log and the report's
+  Analysis Log table then render the *same* events, each through its own sink.
+  `StepContext.log` and `StepContext.pipeline_log` stay separate until that
+  merge lands.

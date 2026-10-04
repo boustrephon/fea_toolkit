@@ -621,16 +621,25 @@ class AnalysisBuilder(
             self._reapply_edge_constraints(scale=pushover_spring_scale)
 
 
-def run_modal(mesh_model, n_modes: int = 12, config: dict = None):
+def run_modal(
+    mesh_model,
+    n_modes: int = 12,
+    config: dict = None,
+    log: Optional[PipelineLog] = None,
+):
     """Run modal analysis through the two-stage path.
 
     Returns the same dict as :meth:`AnalysisBuilder.run_modal_analysis`.
+
+    Args:
+        log: Optional :class:`~fea_toolkit.io.log.PipelineLog` forwarded to the
+            :class:`AnalysisBuilder`; ``None`` derives one from ``config["verbose"]``.
     """
     from .analysis_builder import AnalysisBuilder
 
     if config is None:
         config = {"verbose": False}
-    ab = AnalysisBuilder(mesh_model, config)
+    ab = AnalysisBuilder(mesh_model, config, log=log)
     ab.build_domain()
     ab.compute_seismic_masses()
     modal = ab.run_modal_analysis(num_modes=n_modes, print_results=False)

@@ -82,6 +82,7 @@ def run_response_spectrum(context: StepContext, step: Step) -> list[StepResult]:
         damping=params["damping"],
         n_modes=params["n_modes"],
         name=params["name"],
+        log=context.pipeline_log,
     )
     context.results["rs"] = result
     context.log(f"Response spectrum ({params['direction']}): complete")

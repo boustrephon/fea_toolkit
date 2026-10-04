@@ -50,7 +50,12 @@ def run_modal(context: StepContext, step: Step) -> list[StepResult]:
     from ...analysis.modal import run_modal_analysis
 
     params: dict[str, Any] = validate_params("modal", MODAL_PARAMS, step.params)
-    result = run_modal_analysis(context.model, n_modes=params["n_modes"], name=params["name"])
+    result = run_modal_analysis(
+        context.model,
+        n_modes=params["n_modes"],
+        name=params["name"],
+        log=context.pipeline_log,
+    )
     context.results["modal"] = result
     context.log(f"Modal: {params['n_modes']} modes requested")
     return [StepResult(kind=MODAL, label="Modal", payload=result)]

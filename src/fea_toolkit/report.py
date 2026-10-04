@@ -29,6 +29,7 @@ Typical usage::
 from __future__ import annotations
 
 import copy
+import logging
 import pickle
 from pathlib import Path
 from typing import Any, Optional
@@ -57,7 +58,7 @@ except ImportError:  # pragma: no cover — pandas is optional (Rhino 8 CPython)
 
 from .analysis import run_static_analysis
 from .analysis.linear import static_load_verification, wind_sanity_check
-from .io.log import PipelineLog
+from .io.log import PipelineHandler, PipelineLog
 from .io.report import (
     bounding_box,
     material_summary,
@@ -226,6 +227,36 @@ def _merge_report_config(config: Optional[dict] = None, overrides: Optional[dict
     return cfg
 
 
+def _attach_pipeline_logging(log: PipelineLog):
+    """Route the toolkit's stdlib ``logger`` calls into *log* for one run.
+
+    Attaches a :class:`PipelineHandler` to the ``fea_toolkit`` logger, raises
+    its level so ``logger.info`` records reach the handler, and stops
+    propagation so a captured record does not also reach stderr.  Returns a
+    zero-argument detach callable that restores the logger's default state.
+
+    Attaching is idempotent: a handler left behind by an exception-aborted run
+    is removed first, and ``detach`` restores the known defaults (the
+    ``fea_toolkit`` logger's level/propagate are not changed elsewhere), so
+    repeated :func:`generate_report` calls never stack handlers.
+    """
+    fea_logger = logging.getLogger("fea_toolkit")
+    for existing in list(fea_logger.handlers):
+        if isinstance(existing, PipelineHandler):
+            fea_logger.removeHandler(existing)
+    handler = PipelineHandler(log)
+    fea_logger.addHandler(handler)
+    fea_logger.setLevel(logging.INFO)
+    fea_logger.propagate = False
+
+    def detach() -> None:
+        fea_logger.removeHandler(handler)
+        fea_logger.setLevel(logging.NOTSET)
+        fea_logger.propagate = True
+
+    return detach
+
+
 def generate_report(
     md: SAPModelData,
     mesh_model: Optional[MeshModel] = None,
@@ -305,6 +336,7 @@ def generate_report(
 
     log_enabled = log_cfg.get("enabled", True)
     log = PipelineLog(verbose=verbose, collect=log_enabled)
+    _detach_logging = _attach_pipeline_logging(log)
 
     resolved_out = Path(out_dir or "output")
     resolved_out.mkdir(parents=True, exist_ok=True)
@@ -351,6 +383,7 @@ def generate_report(
                     "were reused — set general.force_recompute=True to "
                     "regenerate it.",
                 )
+        _detach_logging()
         return cached
 
     log.info("config", f"Model: {model_stem}")
@@ -873,4 +906,5 @@ def generate_report(
         pickle.dump(results, f)
     log.info("cache", f"Results cached to {cache_path}")
 
+    _detach_logging()
     return results
