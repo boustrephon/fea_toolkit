@@ -15,9 +15,13 @@ message log and two-way selection between the tree and the 3-D view.
 **Status: partially complete.**  Milestones 1–4 of the
 [Desktop GUI Roadmap](gui_roadmap.md) have landed — viewport, application
 chrome, lazy Model Tree + inspector, and bidirectional selection with
-configurable mouse interaction — and milestone 5's **static-linear** slice is
-in: **Analysis ▸ Run…** solves the model's own load cases in the application and
-shows each as a results view, and **File ▸ Save results…** writes one out.  Load
+configurable mouse interaction — and milestone 5's **analysis** slice is in:
+**Analysis ▸ Run…** solves the model's own load cases in the application and
+shows each as a results view, and **File ▸ Save
+results…** writes one out.  The **Modal analysis** / **Response spectrum** /
+**Pushover** entries are wired up as recipe presets but are **still in
+process** — they run, yet modal analysis fails to complete (see
+[What is still missing](#what-is-still-missing)).  Load
 glyphs, storey and pushover plots, persistence and the quad view are still
 ahead; see [What is still missing](#what-is-still-missing).
 
@@ -196,8 +200,13 @@ different case is added beside it.
 wanted — always asking for a path, with a suggested name, so variants that differ
 by a small change can be kept side by side.
 
-Modal, response-spectrum and pushover runs are not in this slice; their menu
-entries stay greyed.
+**Analysis ▸ Modal analysis**, **Response spectrum** and **Pushover** are also
+wired as **presets over the recipe** (like **Model ▸ Mesh…**): each opens the
+step dialog for its verb and, on OK, appends the step and runs the recipe — a
+spectrum or pushover run prepends a default `modal` step first, since those
+verbs need its result.  These three are **still in process**: the presets run,
+but the underlying analyses are not yet reliable — modal analysis starts and
+then fails to complete (see [What is still missing](#what-is-still-missing)).
 
 ### A view is a lens
 
@@ -509,7 +518,7 @@ jarring than a greyed-out one.
 | **Edit** | Duplicate view, Edit view selection… | Copy, Preferences |
 | **View** | Zoom to fit, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show beams, Show shells, Show restraints, Clear highlights) | Show element labels, Show loads, Show force diagrams, Reset layout |
 | **Model** | Mesh… (composes a `mesh` step in a dialog and runs it on OK) | Selections, Units |
-| **Analysis** | Run… (`Ctrl+R`), Stop | Modal analysis, Response spectrum, Pushover |
+| **Analysis** | Run… (`Ctrl+R`), Stop, Modal analysis, Response spectrum, Pushover | — |
 | **Recipe** | Run recipe (`Ctrl+Shift+R`), Open recipe…, Save recipe…, Export as Python…, Clear recipe | — |
 | **Results** | Deformed shape (+ Deform %), Force diagrams (+ Force selector + Flags %), Clear results | Storey response, Pushover curve |
 | **Help** | Documentation, About | — |
@@ -533,7 +542,7 @@ drives a *separately installed* OpenSees is the recorded route
 
 | Missing | Effect today |
 |---|---|
-| Modal / spectrum / pushover runs (milestone 5, the rest) | `Analysis ▸ Run…` does static-linear cases and combinations; those three menu entries are greyed |
+| Modal / spectrum / pushover analyses (milestone 5, the rest) | The three menu entries are wired as recipe presets and run, but the underlying analyses are not yet reliable — modal analysis starts and then fails to complete |
 | Loads, storey and pushover plots (milestones 6–7) | A case's deformed shape *and* its member end forces **are** drawn in the GUI; load glyphs, storey plots and pushover curves still need the [Visualisation Toolkit](viewer.md) and the `plot_*` functions |
 | Element labels, the Property Tree tab, explicit interaction modes ([P23](_pending_work.md)) | The corresponding menu item and tab are greyed |
 | Window-layout persistence (milestone 8) | The mouse policy and the display-quality knobs **are** remembered (see the settings file above); dock positions and window geometry are not |
