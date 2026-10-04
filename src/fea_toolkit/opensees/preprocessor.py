@@ -446,10 +446,10 @@ class Preprocessor:
                 )
                 _after = len(new_elems)
                 if _after > _before:
-                    print(
-                        f"    _split_frames_at_shell_subdiv: "
-                        f"split {_after - _before} new frame(s) "
-                        f"({_before} → {_after})"
+                    self._log.debug(
+                        "preprocessor",
+                        f"_split_frames_at_shell_subdiv: split {_after - _before} "
+                        f"new frame(s) ({_before} → {_after})",
                     )
                 self._merge_coincident_nodes(md)
 
@@ -556,12 +556,11 @@ class Preprocessor:
                     base_mat_name = base_sec.material
                     base_mat = md.materials.get(base_mat_name)
                     if base_mat is None or base_mat.type.lower() != "concrete":
-                        if self.config.get("verbose", False):
-                            print(
-                                f"  ⚠ Section '{sec_name}' material "
-                                f"'{base_mat_name}' is not concrete — "
-                                f"skipping stiffness factor for {etype}"
-                            )
+                        self._log.warning(
+                            "preprocessor",
+                            f"Section '{sec_name}' material '{base_mat_name}' is not concrete — "
+                            f"skipping stiffness factor for {etype}",
+                        )
                         continue
                     variant_mat_name = f"{base_mat_name}__{etype}"
                     if variant_mat_name not in material_tags:
@@ -839,7 +838,9 @@ class Preprocessor:
                     md.area_elements = areas_ws
                     md.area_assignments = assign_ws
                     md.nodes = nodes_ws
-                    print(f"    → Split at {len(ws_findings)} wall intersection(s)")
+                    self._log.info(
+                        "preprocessor", f"Split at {len(ws_findings)} wall intersection(s)"
+                    )
 
         # ── Area meshing ─────────────────────────────────────────
         area_mesh = getattr(md, "area_mesh", {})
@@ -1272,12 +1273,11 @@ class Preprocessor:
             new_edge_loads.append(ld)
 
         _mesh_ids = len([n for n in sub_nodes if "_mesh_" in n])
-        print(
-            f"    [_split_frames_at_shell_subdiv] "
-            f"{len(sub_nodes)} total sub-nodes ({_mesh_ids} mesh-created), "
-            f"{_at_joints_count} frames with AtJoints=True, "
+        self._log.debug(
+            "preprocessor",
+            f"[_split_frames_at_shell_subdiv] {len(sub_nodes)} total sub-nodes "
+            f"({_mesh_ids} mesh-created), {_at_joints_count} frames with AtJoints=True, "
             f"{_split_count} frames split into children",
-            flush=True,
         )
         return new_frames, new_assigns, new_loads, updated_types, new_edge_loads
 
@@ -1541,10 +1541,10 @@ class Preprocessor:
                 if nd is not None:
                     zs.append(nd.z)
             z_mean = round(sum(zs) / len(zs), 4) if zs else 0.0
-            if self.config.get("verbose", False):
-                print(
-                    f"  [diaphragm] explicit group '{name}': {len(node_ids)} node(s) @ z={z_mean}"
-                )
+            self._log.info(
+                "preprocessor",
+                f"[diaphragm] explicit group '{name}': {len(node_ids)} node(s) @ z={z_mean}",
+            )
             components.append((z_mean, node_ids))
         return components
 
@@ -1678,14 +1678,13 @@ class Preprocessor:
                 n in mesh_model.materials
                 for n in (concrete_name, steel_name, dummy_name, shear_name)
             ):
-                if self.config.get("verbose", False):
-                    print(
-                        "  ⚠ [wall_elements] MVLEM_3D requested but one of "
-                        f"concrete/steel/dummy/shear materials "
-                        f"({concrete_name}, {steel_name}, {dummy_name}, "
-                        f"{shear_name}) is missing from the model materials — "
-                        "skipping wall element generation"
-                    )
+                self._log.warning(
+                    "preprocessor",
+                    "[wall_elements] MVLEM_3D requested but one of "
+                    f"concrete/steel/dummy/shear materials ({concrete_name}, {steel_name}, "
+                    f"{dummy_name}, {shear_name}) is missing from the model materials — "
+                    "skipping wall element generation",
+                )
                 return
         else:
             # FSAM family: resolve explicit or cycled FSAM nD names.
@@ -1694,12 +1693,11 @@ class Preprocessor:
                 name for name, nd in mesh_model.nd_materials.items() if nd.material_type == "FSAM"
             ]
             if not fsam_names_in_order and not explicit_mats:
-                if self.config.get("verbose", False):
-                    print(
-                        f"  ⚠ [wall_elements] {elem_type} requested but no "
-                        "FSAM nD materials configured — skipping wall "
-                        "element generation"
-                    )
+                self._log.warning(
+                    "preprocessor",
+                    f"[wall_elements] {elem_type} requested but no FSAM nD materials "
+                    "configured — skipping wall element generation",
+                )
                 return
             if explicit_mats:
                 fiber_mats = [explicit_mats[i % len(explicit_mats)] for i in range(n_fibers)]
@@ -1834,12 +1832,12 @@ class Preprocessor:
             # objects with the caller's SAPModelData.
             mesh_model.area_elements[aid] = replace(area, inactive=True)
 
-            if self.config.get("verbose", False):
-                print(
-                    f"  [wall_elements] {elem_id}: {elem_type} from area '{aid}' "
-                    f"(W={wall_width:.4g}, t={thickness:.4g}, m={n_fibers}, "
-                    f"material={material_type})"
-                )
+            self._log.debug(
+                "preprocessor",
+                f"[wall_elements] {elem_id}: {elem_type} from area '{aid}' "
+                f"(W={wall_width:.4g}, t={thickness:.4g}, m={n_fibers}, "
+                f"material={material_type})",
+            )
 
     def _resolve_element_properties(
         self,
@@ -1861,7 +1859,6 @@ class Preprocessor:
         ``mesh_model.layered_shell_sections``.
         """
         config = self.config
-        verbose = config.get("verbose", False)
 
         # ── Default element strategies per role ──────────────────
         role_defaults = config.get("element_strategies", {})
@@ -1972,8 +1969,9 @@ class Preprocessor:
                 )
                 mesh_model.frame_element_properties[eid] = props
                 _frame_group_matched_ids.add(eid)
-                if verbose:
-                    print(f"  [elem_props] {eid}: per-ID → {props.element_type}")
+                self._log.debug(
+                    "preprocessor", f"[elem_props] {eid}: per-ID → {props.element_type}"
+                )
                 continue
 
             # Level 2: selection-based groups
@@ -1981,8 +1979,10 @@ class Preprocessor:
                 if sel._frame_matches(model_data, eid):
                     mesh_model.frame_element_properties[eid] = copy.deepcopy(sel_props)
                     _frame_group_matched_ids.add(eid)
-                    if verbose:
-                        print(f"  [elem_props] {eid}: group {sel_idx} → {sel_props.element_type}")
+                    self._log.debug(
+                        "preprocessor",
+                        f"[elem_props] {eid}: group {sel_idx} → {sel_props.element_type}",
+                    )
                     break
 
             if eid not in _frame_group_matched_ids:
@@ -2058,8 +2058,9 @@ class Preprocessor:
                 )
                 mesh_model.area_element_properties[aid] = props
                 _area_group_matched_ids.add(aid)
-                if verbose:
-                    print(f"  [area_props] {aid}: per-ID → {props.element_type}")
+                self._log.debug(
+                    "preprocessor", f"[area_props] {aid}: per-ID → {props.element_type}"
+                )
                 continue
 
             # Level 2: selection-based groups
@@ -2067,10 +2068,10 @@ class Preprocessor:
                 if sel._area_matches(model_data, aid):
                     mesh_model.area_element_properties[aid] = sel_props
                     _area_group_matched_ids.add(aid)
-                    if verbose:
-                        print(
-                            f"  [area_props] {aid}: group '{group_name}' → {sel_props.element_type}"
-                        )
+                    self._log.debug(
+                        "preprocessor",
+                        f"[area_props] {aid}: group '{group_name}' → {sel_props.element_type}",
+                    )
                     break
 
             if aid not in _area_group_matched_ids:
@@ -2088,12 +2089,11 @@ class Preprocessor:
                 else:
                     mesh_model.area_element_properties[aid] = AreaElementProperties()
 
-        if verbose:
-            print(
-                f"  Resolved element properties: "
-                f"{len(mesh_model.frame_element_properties)} frames, "
-                f"{len(mesh_model.area_element_properties)} areas"
-            )
+        self._log.info(
+            "preprocessor",
+            f"Resolved element properties: {len(mesh_model.frame_element_properties)} frames, "
+            f"{len(mesh_model.area_element_properties)} areas",
+        )
 
 
 def preprocess_model(md, config: dict = None, selection: Optional["Selection"] = None):
