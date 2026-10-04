@@ -14,6 +14,7 @@ PyVista window with:
 """
 
 import contextlib
+import logging
 import math
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -21,6 +22,8 @@ import numpy as np
 
 from ..utils import compute_flag_parts
 from .viz import _set_isometric_view
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ..model.selection import Selection
@@ -321,7 +324,7 @@ def plot_interactive_viewer(
     try:
         import pyvista as pv
     except ImportError:
-        print("Warning: pyvista not installed.  Install with: pip install pyvista")
+        logger.warning("Warning: pyvista not installed.  Install with: pip install pyvista")
         return None
 
     pv.set_plot_theme("document")
@@ -391,7 +394,7 @@ def plot_interactive_viewer(
     # Structure tubes (pickable)
     tube_result = _build_structure_tubes(builder, active_elems, assignments, model)
     if tube_result is None:
-        print("No elements to display.")
+        logger.warning("No elements to display.")
         return None
     tube_mesh, sec_names, cmap = tube_result
 

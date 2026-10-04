@@ -63,11 +63,14 @@ keys such as ``My_i`` / ``My_j`` (CQC-combined).  ``plot_force_diagram``
 normalises both the ``'My_i'`` and ``'My'`` key styles internally.
 """
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # ── Quantity key helpers ─────────────────────────────────────────────
 
@@ -1001,10 +1004,10 @@ def _render_rs(
     try:
         import matplotlib.pyplot as plt
     except ImportError:
-        print("Warning: matplotlib not installed.  Install with: pip install matplotlib")
+        logger.warning("Warning: matplotlib not installed.  Install with: pip install matplotlib")
         return None
     if not series:
-        print("No element results to plot.")
+        logger.warning("No element results to plot.")
         return None
 
     q_upper = quantity.upper()
@@ -1075,10 +1078,10 @@ def _render_static_2d(
     try:
         import matplotlib.pyplot as plt
     except ImportError:
-        print("Warning: matplotlib not installed.  Install with: pip install matplotlib")
+        logger.warning("Warning: matplotlib not installed.  Install with: pip install matplotlib")
         return None
     if not series and not storey_series:
-        print("No force data to plot.")
+        logger.warning("No force data to plot.")
         return None
 
     q_upper = quantity.upper()
@@ -1177,10 +1180,10 @@ def _render_static_3d(
     try:
         import pyvista as pv
     except ImportError:
-        print("pyvista is required.  pip install pyvista")
+        logger.warning("pyvista is required.  pip install pyvista")
         return None
     if not data.force_map:
-        print(f"No {quantity} data to plot.")
+        logger.warning("No %s data to plot.", quantity)
         return None
 
     pv.set_plot_theme("document")
@@ -1199,7 +1202,7 @@ def _render_static_3d(
     )
 
     if max_abs_val < 1e-15 and model_height < 1e-15:
-        print(f"No {quantity} data to plot.")
+        logger.warning("No %s data to plot.", quantity)
         return None
 
     plotter.add_text(f"{quantity}  (red = +ve, blue = −ve)", position="lower_edge", font_size=10)
@@ -1360,7 +1363,7 @@ def plot_force_diagram(
     q = _normalise_quantity(quantity)
     _is_shear_alias = q in ("Vz", "Vy")
     if kind != "rs" and (q is None or not (q.startswith(("M", "F")) or _is_shear_alias)):
-        print(f"Unsupported quantity '{quantity}'.  Use 'M*', 'F*', 'Vz', or 'Vy'.")
+        logger.warning("Unsupported quantity '%s'.  Use 'M*', 'F*', 'Vz', or 'Vy'.", quantity)
         return None
 
     data = _resolve_source(
@@ -1379,9 +1382,9 @@ def plot_force_diagram(
     )
     if data is None or data.empty:
         if data is not None and data.kind == "rs":
-            print("No element results to plot.")
+            logger.warning("No element results to plot.")
         else:
-            print("No force data to plot.")
+            logger.warning("No force data to plot.")
         return None
 
     eff_kind = kind or data.kind

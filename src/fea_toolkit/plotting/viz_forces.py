@@ -4,6 +4,7 @@ The unified 2D/RS/3D force-diagram dispatcher lives in
 :mod:`fea_toolkit.plotting.force_diagram`; this module provides the 3D
 renderer and the NPZ element-data loader."""
 
+import logging
 from typing import Optional
 
 import numpy as np
@@ -11,6 +12,8 @@ import numpy as np
 from ..model.geometry import get_local_axes
 from ..utils import compute_flag_parts
 from .viz_model import _resolve_frame_node
+
+logger = logging.getLogger(__name__)
 
 
 def _render_frame_force_diagram(
@@ -39,7 +42,7 @@ def _render_frame_force_diagram(
     try:
         import pyvista as pv
     except ImportError:
-        print("pyvista not installed — install with: pip install pyvista")
+        logger.warning("pyvista not installed — install with: pip install pyvista")
         return 0.0, 0.0
 
     model_height = 0.0

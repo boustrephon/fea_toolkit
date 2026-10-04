@@ -1,6 +1,7 @@
 """PyVista render backend for ModelViewer."""
 
 import contextlib
+import logging
 from typing import Any, Optional
 
 import numpy as np
@@ -16,6 +17,8 @@ from .base import (
     ShellGeom,
     polygon_face_count,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _unit_vec(v: np.ndarray) -> np.ndarray:
@@ -787,5 +790,7 @@ class PyVistaRenderer(RenderBackend):
         try:
             p.export_html(path)
         except ImportError:
-            print("Warning: install 'nest_asyncio2' for HTML export: pip install nest_asyncio2")
+            logger.warning(
+                "Warning: install 'nest_asyncio2' for HTML export: pip install nest_asyncio2"
+            )
             raise

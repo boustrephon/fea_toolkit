@@ -23,6 +23,7 @@ Usage::
     viewer.export_html("report.html")
 """
 
+import logging
 import warnings
 from typing import Any, Optional, Union
 
@@ -30,6 +31,8 @@ import numpy as np
 
 from .renderers import AnnotationDef, FrameGeom, HighlightDef, NodeGeom, RenderBackend, ShellGeom
 from .renderers.base import RestraintGeom
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_backend(backend: str, **kwargs) -> RenderBackend:
@@ -472,7 +475,7 @@ class ModelViewer:
                     if raw_d is not None:
                         displacements[nid] = np.array(raw_d[:3], dtype=float)
         if displacements is None:
-            print("Warning: no displacement data available for deformed overlay.")
+            logger.warning("Warning: no displacement data available for deformed overlay.")
             return self
 
         if scale is None:
@@ -556,11 +559,11 @@ class ModelViewer:
             try:
                 elem_forces = self._builder.extract_static_element_forces()
             except Exception as exc:  # pragma: no cover - defensive
-                print(f"Warning: could not read element forces from builder: {exc}")
+                logger.warning("Warning: could not read element forces from builder: %s", exc)
                 elem_forces = None
 
         if not elem_forces:
-            print("Warning: no element force data available.")
+            logger.warning("Warning: no element force data available.")
             return self
 
         tag_map = getattr(self._builder, "frame_tag_map", {}) if self._builder else {}
@@ -585,7 +588,7 @@ class ModelViewer:
             vals.extend([abs(vi), abs(vj)])
 
         if not forces:
-            print(f"Warning: no {quantity} data found.")
+            logger.warning("Warning: no %s data found.", quantity)
             return self
 
         if not use_local:
@@ -814,7 +817,7 @@ class ModelViewer:
         if node_id is not None:
             nd = self._model.nodes.get(node_id)
             if nd is None:
-                print(f"Warning: node {node_id} not found.")
+                logger.warning("Warning: node %s not found.", node_id)
                 return self
             position = np.array([nd.x, nd.y, nd.z], dtype=float)
         elif position is None:
