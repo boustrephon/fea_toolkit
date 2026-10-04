@@ -8,6 +8,13 @@
 #   1. ruff check --fix   (auto-fix safe lint issues; fail on remaining)
 #   2. ruff format        (format the code)
 #
+# Agent / tool-driven commits: this hook stashes unstaged changes, runs ruff,
+# then restores them — if the process is killed in that window (e.g. a 30 s
+# tool timeout), the unstaged changes are lost.  Agent commits therefore run
+# `ruff check --fix` + `ruff format` by hand and commit with `--no-verify`;
+# the hook stays installed for interactive use.  See docs/dev_notes.md →
+# "Pre-commit hook and agent commits" and guardrail §6.6 in .clinerules.
+#
 # Upgrade the hook revision by bumping `rev:` to a newer tagged release
 # of ruff (keep in sync with the version pinned in pyproject.toml).
 
