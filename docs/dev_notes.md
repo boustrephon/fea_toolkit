@@ -1188,13 +1188,6 @@ instead); and VTK stores colours at **8-bit** precision, so a colour assertion n
 `abs=0.01`, not the default tolerance.
 
 
-Two smaller lessons from the same work, both of which bit here and are now pinned
-in tests: PyVista's `mapper.dataset` returns a **new Python wrapper** on every
-access, so mesh identity cannot be asserted with `is` (assert the *actor* identity
-instead); and VTK stores colours at **8-bit** precision, so a colour assertion needs
-`abs=0.01`, not the default tolerance.
-
-
 ## Pre-commit hook and agent commits
 
 ### What happened (2026-10-04)
