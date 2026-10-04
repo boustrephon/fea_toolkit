@@ -14,13 +14,15 @@ from typing import TYPE_CHECKING, Any, ClassVar, Optional
 import openseespy.opensees as ops
 
 if TYPE_CHECKING:
+    from ..io.log import PipelineLog
+
     # pandas is not a required dependency — only imported at runtime inside
     # check_load_equilibrium().  The TYPE_CHECKING guard lets Ruff resolve
     # the "pd.DataFrame" return annotation statically without adding pandas
     # to the core dependencies.
-    pass
 
 
+from ..io.log import coerce_log
 from ..model.mesh_model import MeshModel
 
 logger = logging.getLogger(__name__)
@@ -67,6 +69,8 @@ class AnalysisBuilder(
         config: Flat builder-scoped configuration dict — the same keys
             accepted by :class:`~fea_toolkit.opensees.preprocessor.Preprocessor`
             and the analysis runners (see ``docs/builder_reference.md``).
+        log: Optional :class:`~fea_toolkit.io.log.PipelineLog` (or a ``bool``)
+            for narrative progress; ``None`` follows the ``verbose`` config key.
     """
 
     # ── Solver defaults for pushover / nonlinear analysis ────────────
@@ -137,7 +141,13 @@ class AnalysisBuilder(
     # explicitly — the builder defaults to ``UmfPack``.
     SPARSE_SOLVER_NODE_THRESHOLD: ClassVar[int] = 600
 
-    def __init__(self, mesh_model: MeshModel, config: Optional[dict[str, Any]] = None):
+    def __init__(
+        self,
+        mesh_model: MeshModel,
+        config: Optional[dict[str, Any]] = None,
+        *,
+        log: Optional["PipelineLog"] = None,
+    ):
         self.mesh_model = mesh_model
         self.units = mesh_model.units
         self.config = config or {}
@@ -151,6 +161,9 @@ class AnalysisBuilder(
         # solver for large models (SPARSE_SOLVER_NODE_THRESHOLD).
         self._user_set_solver_system = "solver_system" in self.config
         self._set_defaults()
+        # Narrative output routes through this log; the ``verbose`` config key
+        # (default False) maps to console output when no ``log`` is given.
+        self._log = coerce_log(log if log is not None else self.config.get("verbose", False))
 
         # ── Elwood limit-state unit policy ──────────────────────────
         # The Elwood limitCurve equations are anchored to the kip-in-ksi

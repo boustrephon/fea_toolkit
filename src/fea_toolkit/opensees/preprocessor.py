@@ -9,7 +9,12 @@ already applied.  No OpenSees domain objects are created.
 import copy
 import warnings
 from dataclasses import fields, replace
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+from ..io.log import coerce_log
+
+if TYPE_CHECKING:
+    from ..io.log import PipelineLog
 
 from ..model.geometry import (
     apply_frame_end_offsets,
@@ -238,10 +243,18 @@ class Preprocessor:
             nodes to a detected diaphragm elevation in the AnalysisBuilder.
             The latter is stored on the ``MeshModel`` as
             ``diaphragm_z_tolerance`` for the builder to consume.
+        log: Optional :class:`~fea_toolkit.io.log.PipelineLog` (or a ``bool``)
+            for narrative progress; ``None`` follows the ``verbose`` config key.
     """
 
-    def __init__(self, config: Optional[dict[str, Any]] = None):
+    def __init__(
+        self,
+        config: Optional[dict[str, Any]] = None,
+        *,
+        log: Optional["PipelineLog"] = None,
+    ):
         self.config = config or {}
+        self._log = coerce_log(log if log is not None else self.config.get("verbose", False))
 
     # ── Public API ────────────────────────────────────────────────
 
