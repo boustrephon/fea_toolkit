@@ -1,29 +1,35 @@
-"""Structured analysis-pipeline event log.
+"""Structured pipeline event log.
 
-:class:`AnalysisLog` records analysis-pipeline warnings / errors / skipped
-steps for the report workflow (:func:`fea_toolkit.report.generate_report`)
-and renders them as a summary table and markdown block.
+:class:`PipelineLog` is the toolkit's single structured log: sources *emit*
+``(level, step, msg)`` events once, and *sinks* render them (stdout, JSON, a
+Qt signal, …).  :func:`fea_toolkit.report.generate_report` collects one for the
+report's "Analysis Log" table, while a bare analysis call falls back to
+:func:`console_log` — a stdout-only log that retains nothing.
 
 Usage::
 
-    from fea_toolkit.io.log import AnalysisLog
+    from fea_toolkit.io.log import PipelineLog
 
-    log = AnalysisLog()
+    log = PipelineLog()
+    log.info("static", "build-once: reusing one OpenSees domain")
     log.warn("modal", "fewer than 3 modes converged")
     print(log.summary())
     print(log.markdown())
+    log.to_json("analysis.log.json")
 
-The ``to_json`` method persists the event list as a machine-readable
-``.log.json`` file.
+Levels are ``DEBUG`` < ``INFO`` < ``WARN`` < ``ERROR``; ``step`` is the
+scoping key (the subpackage/phase that emitted the event).  ``to_json``
+persists the event list as a machine-readable ``.log.json`` file.
 """
 
 from __future__ import annotations
 
 import json
 import time
+from typing import Callable, Union
 
 # ═══════════════════════════════════════════════════════════════════
-# AnalysisLog — structured analysis-pipeline event log
+# PipelineLog — structured pipeline event log (one event, many sinks)
 # ═══════════════════════════════════════════════════════════════════
 
 
@@ -32,59 +38,97 @@ def _escape_md_cell(text: str) -> str:
     return text.replace("|", "\\|").replace("\n", " ").replace("\r", "")
 
 
-class AnalysisLog:
-    """A simple structured log for analysis pipeline events."""
+class PipelineLog:
+    """A structured pipeline event log: emit once, render via sinks.
 
-    def __init__(self):
+    Every ``info``/``warn``/``error``/``debug`` call appends one entry (when
+    ``collect``) and passes it to every registered sink.  The default stdout
+    sink prints ``INFO``/``DEBUG`` only when ``verbose``, and always prints
+    ``WARN``/``ERROR`` so a warning is never silently swallowed.
+
+    Args:
+        verbose: Gate the default stdout sink's ``INFO``/``DEBUG`` lines.
+        collect: Retain entries (for ``summary``/``markdown``/``to_json``).
+        _stdout: Install the default stdout sink (internal; ``False`` makes a
+            fully silent log — see :func:`coerce_log`).
+    """
+
+    def __init__(
+        self,
+        *,
+        verbose: bool = True,
+        collect: bool = True,
+        _stdout: bool = True,
+    ) -> None:
         self._entries: list[dict] = []
+        self._sinks: list[Callable[[dict], None]] = []
         self._start = time.monotonic()
+        self._verbose = verbose
+        self._collect = collect
+        if _stdout:
+            self.add_sink(self._stdout_sink)
+
+    # ── Emission (single entry point) ──────────────────────────────
+
+    def _emit(self, level: str, step: str, msg: str) -> None:
+        entry = {
+            "level": level,
+            "step": step,
+            "msg": msg,
+            "time": time.monotonic(),
+        }
+        if self._collect:
+            self._entries.append(entry)
+        for sink in self._sinks:
+            sink(entry)
 
     def info(self, step: str, msg: str) -> None:
         """Record an informational message."""
-        self._entries.append(
-            {
-                "level": "INFO",
-                "step": step,
-                "msg": msg,
-                "time": time.monotonic(),
-            }
-        )
+        self._emit("INFO", step, msg)
+
+    def debug(self, step: str, msg: str) -> None:
+        """Record a diagnostic message (printed only when verbose)."""
+        self._emit("DEBUG", step, msg)
 
     def warn(self, step: str, msg: str) -> None:
         """Record a warning."""
-        self._entries.append(
-            {
-                "level": "WARN",
-                "step": step,
-                "msg": msg,
-                "time": time.monotonic(),
-            }
-        )
+        self._emit("WARN", step, msg)
 
     def warning(self, step: str, msg: str) -> None:
-        """Record a warning (alias of :meth:`warn` for ``generate_report()``)."""
+        """Record a warning (alias of :meth:`warn`)."""
         self.warn(step, msg)
 
     def error(self, step: str, msg: str) -> None:
         """Record an error (analysis step failed or was skipped)."""
-        self._entries.append(
-            {
-                "level": "ERROR",
-                "step": step,
-                "msg": msg,
-                "time": time.monotonic(),
-            }
-        )
+        self._emit("ERROR", step, msg)
+
+    # ── Sinks ──────────────────────────────────────────────────────
+
+    def add_sink(self, fn: Callable[[dict], None]) -> None:
+        """Register a renderer called with each emitted entry dict."""
+        self._sinks.append(fn)
+
+    def _stdout_sink(self, entry: dict) -> None:
+        level = entry["level"]
+        if level in ("INFO", "DEBUG"):
+            if not self._verbose:
+                return
+            prefix = f"[{entry['step']}] " if level == "DEBUG" else ""
+            print(f"{prefix}{entry['msg']}")
+        elif level == "WARN":
+            print(f"⚠ [{entry['step']}] {entry['msg']}")
+        elif level == "ERROR":
+            print(f"✗ [{entry['step']}] {entry['msg']}")
 
     @property
     def entries(self) -> list[dict]:
         return list(self._entries)
 
     def summary(self) -> str:
-        """Return a plain-text summary of all entries (INFO excluded)."""
+        """Return a plain-text summary of warnings and errors (INFO/DEBUG excluded)."""
         lines = []
         for e in self._entries:
-            if e["level"] == "INFO":
+            if e["level"] in ("INFO", "DEBUG"):
                 continue
             icon = {"WARN": "⚠", "ERROR": "✗"}.get(e["level"], "·")
             lines.append(f"  {icon} [{e['step']}] {e['msg']}")
@@ -132,7 +176,7 @@ class AnalysisLog:
         ]
         prev_t = self._start
         for idx, e in enumerate(self._entries):
-            icon = {"INFO": "ℹ", "WARN": "⚠", "ERROR": "✗"}[e["level"]]
+            icon = {"INFO": "ℹ", "WARN": "⚠", "ERROR": "✗", "DEBUG": "🐞"}[e["level"]]
             t = e["time"] - self._start
             dur = 0.0 if idx == 0 else t - (prev_t - self._start)
             lines.append(
@@ -142,3 +186,30 @@ class AnalysisLog:
             prev_t = e["time"]
         lines.append("</details>")
         return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Module helpers — the default logs and the ``log`` coercion
+# ═══════════════════════════════════════════════════════════════════
+
+#: Shared stdout-only log for callers that pass no ``log``: prints progress to
+#: stdout and retains nothing, so a bare ``run_static_cases(...)`` still reports
+#: without accumulating entries nobody reads.
+console_log = PipelineLog(verbose=True, collect=False)
+
+#: Shared fully-silent log for ``log=False`` (the old ``verbose=False``).
+_silent_log = PipelineLog(verbose=False, collect=False, _stdout=False)
+
+
+def coerce_log(log: Union[PipelineLog, bool, None]) -> PipelineLog:
+    """Normalise the public ``log`` parameter to a :class:`PipelineLog`.
+
+    ``None`` / ``True`` → :data:`console_log` (stdout, no retention);
+    ``False`` → a fully silent log (no output, no retention); a
+    :class:`PipelineLog` is returned unchanged.
+    """
+    if isinstance(log, PipelineLog):
+        return log
+    if log is False:
+        return _silent_log
+    return console_log

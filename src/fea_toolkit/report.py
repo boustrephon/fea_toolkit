@@ -57,7 +57,7 @@ except ImportError:  # pragma: no cover — pandas is optional (Rhino 8 CPython)
 
 from .analysis import run_static_analysis
 from .analysis.linear import static_load_verification, wind_sanity_check
-from .io.log import AnalysisLog
+from .io.log import PipelineLog
 from .io.report import (
     bounding_box,
     material_summary,
@@ -285,7 +285,7 @@ def generate_report(
         * ``fig_storey_forces`` / ``fig_storey_disp`` — storey figures
         * ``df_load_verify`` — static load verification table
         * ``brace_ids`` — list of brace-element IDs
-        * ``analysis_log`` — :class:`~fea_toolkit.io.log.AnalysisLog`
+        * ``analysis_log`` — :class:`~fea_toolkit.io.log.PipelineLog`
           instance (only present when logging was enabled)
     """
     # ── Config merging ───────────────────────────────────────────
@@ -303,7 +303,8 @@ def generate_report(
     log_cfg = cfg.get("analysis_log", {"enabled": True})
     export_cfg = cfg.get("export") or {}
 
-    log = AnalysisLog() if log_cfg.get("enabled", True) else None
+    log_enabled = log_cfg.get("enabled", True)
+    log = PipelineLog(verbose=verbose, collect=log_enabled)
 
     resolved_out = Path(out_dir or "output")
     resolved_out.mkdir(parents=True, exist_ok=True)
@@ -313,10 +314,7 @@ def generate_report(
     cache_path = resolved_out / f"{model_stem}_results.pkl"
 
     if not force_recompute and cache_path.exists():
-        if verbose:
-            print(f"Loading cached results from {cache_path}")
-        if log:
-            log.info("cache", "reusing cached results")
+        log.info("cache", f"Loading cached results from {cache_path}")
         with open(cache_path, "rb") as f:
             cached = dict(pickle.load(f))
         # A cache hit must be config-aware: warn when the cached results were
@@ -326,38 +324,36 @@ def generate_report(
         if isinstance(cached_cfg, dict):
             diffs = _config_differences(cached_cfg, cfg)
             if diffs:
-                print(
-                    f"WARNING: cached results at {cache_path} were computed with a "
-                    "different configuration; reusing them may be wrong — set "
-                    "general.force_recompute=True to regenerate."
+                preview = ", ".join(diffs[:5])
+                more = f" — and {len(diffs) - 5} more" if len(diffs) > 5 else ""
+                log.warning(
+                    "cache",
+                    f"cached results at {cache_path} were computed with a "
+                    f"different configuration ({preview}{more}); set "
+                    "general.force_recompute=True to regenerate.",
                 )
-                for d in diffs[:20]:
-                    print(f"    - {d}")
-                if len(diffs) > 20:
-                    print(f"    - … and {len(diffs) - 20} more differences")
-                if log:
-                    log.warning("cache", f"config mismatch: {', '.join(diffs[:5])}")
         # A cache hit must not silently skip a requested export: if the
         # previous run exported a file that is now missing — or never
         # exported at all — the cache is stale w.r.t. the deliverable.
         if export_cfg.get("enabled") and not cached.get("export_path"):
-            print(
-                "WARNING: export is enabled but the cached results contain no "
+            log.warning(
+                "cache",
+                "export is enabled but the cached results contain no "
                 "export_path (cache predates the unified export) — set "
-                "general.force_recompute=True to generate the export file."
+                "general.force_recompute=True to generate the export file.",
             )
         elif export_cfg.get("enabled") and cached.get("export_path"):
             ep = Path(cached["export_path"])
             if not ep.exists():
-                print(
-                    f"WARNING: results export file {ep} is missing but cached "
-                    "results were reused — set general.force_recompute=True "
-                    "to regenerate it."
+                log.warning(
+                    "cache",
+                    f"results export file {ep} is missing but cached results "
+                    "were reused — set general.force_recompute=True to "
+                    "regenerate it.",
                 )
         return cached
 
-    if log:
-        log.info("config", f"Model: {model_stem}")
+    log.info("config", f"Model: {model_stem}")
 
     # ── Auto-detect loads ────────────────────────────────────────
     raw_tables = getattr(md, "_raw_tables", {})
@@ -371,27 +367,16 @@ def generate_report(
 
     # ── Preprocessor (runs ONCE) ─────────────────────────────────
     if mesh_model is None:
-        if verbose:
-            print("Running Preprocessor (topology work)...")
+        log.info("preprocessor", "Running Preprocessor (topology work)...")
         mesh_model = preprocess_model(md, cfg.get("builder", {}))
-        if log:
-            log.info(
-                "preprocessor",
-                f"{len(mesh_model.nodes)} nodes, "
-                f"{len(mesh_model.frame_elements)} frames, "
-                f"{len(mesh_model.area_elements)} areas",
-            )
-        if verbose:
-            print(
-                f"  MeshModel created: {len(mesh_model.nodes)} nodes, "
-                f"{len(mesh_model.frame_elements)} frames, "
-                f"{len(mesh_model.area_elements)} areas"
-            )
+        log.info(
+            "preprocessor",
+            f"MeshModel created: {len(mesh_model.nodes)} nodes, "
+            f"{len(mesh_model.frame_elements)} frames, "
+            f"{len(mesh_model.area_elements)} areas",
+        )
     else:
-        if verbose:
-            print("Using pre-computed MeshModel (skipping Preprocessor)")
-        if log:
-            log.info("preprocessor", "reused existing MeshModel")
+        log.info("preprocessor", "Using pre-computed MeshModel (skipping Preprocessor)")
 
     # ── Brace summary ────────────────────────────────────────────
     sel = Selection.from_brace_sections(md)
@@ -400,48 +385,38 @@ def generate_report(
     # ── Static load verification ─────────────────────────────────
     df_load_verify = pd.DataFrame()
     if cfg.get("static_verification", {}).get("run", True):
-        if verbose:
-            print("Running static load verification...")
+        log.info("load_verify", "Running static load verification...")
         try:
             df_load_verify = static_load_verification(md, mesh_model)
             _lv_patterns = cfg.get("static_verification", {}).get("patterns")
             if _lv_patterns and not df_load_verify.empty:
                 df_load_verify = df_load_verify[df_load_verify["Load Pattern"].isin(_lv_patterns)]
-            if log:
-                log.info("load_verify", f"{len(df_load_verify)} patterns")
-            if verbose:
-                print(f"  Verified {len(df_load_verify)} load patterns")
+            log.info("load_verify", f"Verified {len(df_load_verify)} load patterns")
         except Exception as e:
-            if log:
-                log.error("load_verify", str(e))
-            print(f"  Static load verification failed: {e}")
+            log.error("load_verify", f"Static load verification failed: {e}")
 
     # ── Connectivity check ───────────────────────────────────────
     connectivity = None
     self_weight = None
     if cfg.get("checks", {}).get("run", True):
-        if verbose:
-            print("Running connectivity check...")
+        log.info("connectivity", "Running connectivity check...")
         try:
             from fea_toolkit.model.checks import check_model_connectivity
 
             connectivity = check_model_connectivity(md)
-            if verbose:
-                print(f"  {connectivity['summary']}")
-                if connectivity.get("orphan_nodes"):
-                    print(f"  ⚠ {len(connectivity['orphan_nodes'])} orphan node(s)")
-                if connectivity.get("shell_only_base_nodes"):
-                    print(
-                        f"  ⚠ {len(connectivity['shell_only_base_nodes'])} shell-only base node(s)"
-                    )
+            log.info("connectivity", connectivity["summary"])
+            if connectivity.get("orphan_nodes"):
+                log.warning("connectivity", f"{len(connectivity['orphan_nodes'])} orphan node(s)")
+            if connectivity.get("shell_only_base_nodes"):
+                log.warning(
+                    "connectivity",
+                    f"{len(connectivity['shell_only_base_nodes'])} shell-only base node(s)",
+                )
         except Exception as e:
-            if log:
-                log.warning("connectivity", str(e))
-            print(f"  Connectivity check failed: {e}")
+            log.warning("connectivity", f"Connectivity check failed: {e}")
 
         # ── Self-weight check ────────────────────────────────────
-        if verbose:
-            print("Checking self-weight consistency...")
+        log.info("self_weight", "Checking self-weight consistency...")
         try:
             fu_md = md.units.get("F", "N")
             applied = 0.0
@@ -459,14 +434,14 @@ def generate_report(
                 "passed": passed,
                 "by_section": {},
             }
-            if verbose:
-                print(f"  Expected: {expected:.0f} {fu_md}")
-                print(f"  Applied:  {applied:.0f} {fu_md}")
-                print(f"  Status:   {'✓ PASS' if passed else '✗ FAIL'}")
+            log.info(
+                "self_weight",
+                f"Expected: {expected:.0f} {fu_md}; "
+                f"Applied: {applied:.0f} {fu_md}; "
+                f"Status: {'✓ PASS' if passed else '✗ FAIL'}",
+            )
         except Exception as e:
-            if log:
-                log.warning("self_weight", str(e))
-            print(f"  Self-weight check failed: {e}")
+            log.warning("self_weight", f"Self-weight check failed: {e}")
 
     # ── Build spectrum (common to both paths) ────────────────────
     # g is derived from the model's length unit so the spectral
@@ -498,8 +473,7 @@ def generate_report(
     # storage / presentation stages below stay report-only (a write or a render
     # is not a model operation).  ``generate_report`` is therefore a shorthand
     # for a recipe, not a second spelling of one.
-    if verbose:
-        print("Running analyses...")
+    log.info("analyses", "Running analyses...")
 
     _man_results: dict = {}
 
@@ -574,12 +548,10 @@ def generate_report(
     modal_result = _man_results["ModalAnalysis"].data
     modal = modal_result["modal"]
 
-    if log:
-        log.info("analyses", f"ran {len(_man_results)} analyses")
+    log.info("analyses", f"ran {len(_man_results)} analyses")
 
     # ── Extract results ──────────────────────────────────────
-    if log:
-        log.info("modal", f"{n_modes} modes, T1={modal['periods'][0]:.3f}s")
+    log.info("modal", f"{n_modes} modes, T1={modal['periods'][0]:.3f}s")
 
     # Build participation DataFrame (same format as inline path)
     mp = modal["modal_props"]
@@ -636,8 +608,7 @@ def generate_report(
     # deliverable.
     export_path = None
     if export_cfg.get("enabled"):
-        if verbose:
-            print("Exporting unified results file...")
+        log.info("export", "Exporting unified results file...")
         try:
             from fea_toolkit.io.stage_writer import write_model_stages
 
@@ -689,19 +660,15 @@ def generate_report(
                 fmt=_fmt,
             )
             export_path = _path
-            if verbose:
-                print(f"  Export written: {export_path}")
-                print(
-                    f"    stages={_stages}; static cases={len(static_raw or {})}; "
-                    f"pushover directions={sorted(po_export)}; "
-                    f"RS directions={sorted(rs_export)}"
-                )
-            if log:
-                log.info("export", f"wrote {export_path}")
+            log.info(
+                "export",
+                f"Export written: {export_path}; stages={_stages}; "
+                f"static cases={len(static_raw or {})}; "
+                f"pushover directions={sorted(po_export)}; "
+                f"RS directions={sorted(rs_export)}",
+            )
         except Exception as exc:
-            print(f"  Results export failed: {exc}")
-            if log:
-                log.error("export", str(exc))
+            log.error("export", f"Results export failed: {exc}")
 
     # AnalysisBuilders hold live OpenSees state and are not picklable —
     # strip them from the manager results before the cache is written.
@@ -716,14 +683,11 @@ def generate_report(
     fig_csm_plots: dict = {}
     df_compare = pd.DataFrame()
     if all_out:
-        if log:
-            log.info("pushover", "done")
-        if verbose:
-            print("Generating CSM plots...")
+        log.info("pushover", "done")
+        log.info("csm_plot", "Generating CSM plots...")
         for pat in push_cfg.get("patterns", []):
             if pat in all_out:
-                if log:
-                    log.info("csm_plot", f"{pat} — generating")
+                log.info("csm_plot", f"{pat} — generating")
                 fig_csm_plots[pat] = plot_csm_4panel(
                     all_out[pat],
                     modal,
@@ -734,16 +698,12 @@ def generate_report(
                     units=md.units,
                     out_dir=str(resolved_out),
                 )
-                if log:
-                    log.info("csm_plot", f"{pat} — done")
+                log.info("csm_plot", f"{pat} — done")
         df_compare = pushover_comparison_table(
             all_out, df_linear, patterns=push_cfg.get("patterns", [])
         )
     else:
-        if verbose:
-            print("Pushover: skipped (no manager results)")
-        if log:
-            log.info("pushover", "skipped")
+        log.info("pushover", "Pushover: skipped (no manager results)")
 
     # ── Summary tables (common) ──────────────────────────────────
     df_sections = section_summary(md)
@@ -754,8 +714,7 @@ def generate_report(
     viewer_cfg = cfg.get("model_viewer", {"enabled": False})
     model_comparison = None
     if viewer_cfg.get("enabled", False):
-        if verbose:
-            print("Generating model comparison views...")
+        log.info("model_viewer", "Generating model comparison views...")
         viewer_out = viewer_cfg.get("out_dir") or str(resolved_out)
         model_comparison = plot_model_comparison(
             md,
@@ -770,8 +729,7 @@ def generate_report(
     df_stories = None
     stories_png = None
     if story_cfg.get("run", True):
-        if verbose:
-            print("Detecting storey levels...")
+        log.info("stories", "Detecting storey levels...")
         try:
             model_stories = identify_stories(md, raw_tables=raw_tables)
             if model_stories:
@@ -780,12 +738,9 @@ def generate_report(
                 if fig:
                     stories_png = str(resolved_out / "model_stories.png")
                     fig.savefig(stories_png, dpi=150, bbox_inches="tight")
-                    if verbose:
-                        print(f"  Saved storey visualisation to {stories_png}")
+                    log.info("stories", f"Saved storey visualisation to {stories_png}")
         except Exception as e:
-            if log:
-                log.warning("storey_detection", str(e))
-            print(f"  Storey detection failed: {e}")
+            log.warning("storey_detection", f"Storey detection failed: {e}")
 
     # ── Storey response ──────────────────────────────────────────
     story_response_cfg = cfg.get("storey_response", {"run": True})
@@ -796,8 +751,7 @@ def generate_report(
     fig_storey_forces = None
     fig_storey_disp = None
     if story_response_cfg.get("run", True) and model_stories:
-        if verbose:
-            print("Computing storey-level structural responses...")
+        log.info("storey_response", "Computing storey-level structural responses...")
         try:
             sr = compute_linear_storey_responses(
                 md,
@@ -839,36 +793,22 @@ def generate_report(
                         _df.drop(columns=_drop, inplace=True, errors="ignore")
 
             if not df_storey_disp.empty and not df_storey_drift.empty:
-                if log:
-                    log.info("storey_fig", "displacement — generating")
+                log.info("storey_fig", "displacement — generating")
                 fig_storey_disp = plot_storey_displacements(df_storey_disp, df_storey_drift)
-                if log:
-                    log.info("storey_fig", "displacement — done")
+                log.info("storey_fig", "displacement — done")
             if not df_storey_shear.empty and not df_storey_moment.empty:
-                if log:
-                    log.info("storey_fig", "forces — generating")
+                log.info("storey_fig", "forces — generating")
                 fig_storey_forces = plot_storey_forces(df_storey_shear, df_storey_moment)
-                if log:
-                    log.info("storey_fig", "forces — done")
-            if log:
-                log.info(
-                    "storey_response",
-                    f"disp={len(df_storey_disp)}, "
-                    f"drift={len(df_storey_drift)}, "
-                    f"shear={len(df_storey_shear)}, "
-                    f"moment={len(df_storey_moment)}",
-                )
-            if verbose:
-                print(
-                    f"  Storey response: disp={len(df_storey_disp)}, "
-                    f"drift={len(df_storey_drift)}, "
-                    f"shear={len(df_storey_shear)}, "
-                    f"moment={len(df_storey_moment)}"
-                )
+                log.info("storey_fig", "forces — done")
+            log.info(
+                "storey_response",
+                f"disp={len(df_storey_disp)}, "
+                f"drift={len(df_storey_drift)}, "
+                f"shear={len(df_storey_shear)}, "
+                f"moment={len(df_storey_moment)}",
+            )
         except Exception as e:
-            if log:
-                log.error("storey_response", str(e))
-            print(f"  Storey response failed: {e}")
+            log.error("storey_response", f"Storey response failed: {e}")
             import traceback
 
             traceback.print_exc()
@@ -924,15 +864,12 @@ def generate_report(
     else:
         results["fig_csm"] = None
 
-    if log:
+    if log_enabled:
         results["analysis_log"] = log
 
     # ── Cache ────────────────────────────────────────────────────
     with open(cache_path, "wb") as f:
         pickle.dump(results, f)
-    if verbose:
-        print(f"Results cached to {cache_path}")
-    if log:
-        log.info("cache", f"saved to {cache_path.name}")
+    log.info("cache", f"Results cached to {cache_path}")
 
     return results

@@ -1,0 +1,81 @@
+"""Tests for :class:`fea_toolkit.io.log.PipelineLog` and its helpers.
+
+The log is the toolkit's single structured event source: emit once, render via
+sinks.  These tests cover the default stdout sink, ``verbose``/``collect``
+semantics, the ``coerce_log`` helper, and JSON persistence.
+"""
+
+import json
+
+from fea_toolkit.io.log import PipelineLog, coerce_log, console_log
+
+
+def test_info_prints_plain_and_warn_error_are_prefixed(capsys):
+    log = PipelineLog()
+    log.info("static", "hello")
+    log.warning("modal", "few modes")
+    log.error("rs", "boom")
+    out = capsys.readouterr().out
+    assert "hello\n" in out
+    assert "⚠ [modal] few modes\n" in out
+    assert "✗ [rs] boom\n" in out
+
+
+def test_verbose_false_suppresses_info_but_not_warnings(capsys):
+    log = PipelineLog(verbose=False)
+    log.info("static", "hidden")
+    log.warning("modal", "shown")
+    out = capsys.readouterr().out
+    assert "hidden" not in out
+    assert "⚠ [modal] shown" in out
+
+
+def test_collect_false_prints_but_retains_nothing(capsys):
+    log = PipelineLog(collect=False)
+    log.info("static", "hello")
+    assert capsys.readouterr().out == "hello\n"
+    assert log.entries == []
+
+
+def test_summary_excludes_info_and_debug_but_markdown_includes_all():
+    log = PipelineLog(verbose=False)
+    log.info("static", "INFO_MSG")
+    log.debug("geo", "DEBUG_MSG")
+    log.warning("modal", "WARN_MSG")
+    log.error("rs", "ERROR_MSG")
+    summary = log.summary()
+    assert "INFO_MSG" not in summary
+    assert "DEBUG_MSG" not in summary
+    assert "WARN_MSG" in summary and "ERROR_MSG" in summary
+    md = log.markdown()
+    assert "🐞" in md and "⚠" in md and "✗" in md and "ℹ" in md
+
+
+def test_entries_are_recorded_in_emission_order():
+    log = PipelineLog(verbose=False)
+    log.info("a", "1")
+    log.warning("b", "2")
+    assert [e["step"] for e in log.entries] == ["a", "b"]
+    assert log.entries[0]["level"] == "INFO"
+
+
+def test_coerce_log():
+    log = PipelineLog()
+    assert coerce_log(None) is console_log
+    assert coerce_log(True) is console_log
+    assert coerce_log(log) is log
+    silent = coerce_log(False)
+    assert silent is coerce_log(False)  # shared singleton
+    assert silent._collect is False
+    assert silent._sinks == []
+
+
+def test_to_json_round_trip(tmp_path):
+    log = PipelineLog(verbose=False)
+    log.info("static", "hello")
+    path = tmp_path / "log.json"
+    log.to_json(str(path))
+    data = json.loads(path.read_text())
+    assert data["n_entries"] == 1
+    assert data["entries"][0]["step"] == "static"
+    assert data["entries"][0]["msg"] == "hello"
