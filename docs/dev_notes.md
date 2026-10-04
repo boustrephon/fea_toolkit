@@ -1194,3 +1194,59 @@ access, so mesh identity cannot be asserted with `is` (assert the *actor* identi
 instead); and VTK stores colours at **8-bit** precision, so a colour assertion needs
 `abs=0.01`, not the default tolerance.
 
+
+## Pre-commit hook and agent commits
+
+### What happened (2026-10-04)
+
+An agent-driven commit pass chained eight `git commit`s in a single tool call.
+The installed pre-commit hook (`.pre-commit-config.yaml` → `ruff check --fix`
++ `ruff format`) runs on every commit, and when a commit is made while unstaged
+changes are present it **stashes** those uncommitted edits, runs ruff, then
+**restores** them.  The tool's 30 s timeout killed the process inside that
+stash→restore window, and four still-unstaged files silently reverted.  They
+were recovered from the Cline checkpoint `refs/cline/checkpoints/*` — the only
+reason the loss was not permanent.
+
+### Why it is slow *and* dangerous — not ruff
+
+Measured on a warm cache:
+
+| Step | Time |
+|---|---|
+| `ruff check --fix` on one file | ≈ 0.37 s |
+| `ruff format` on one file | ≈ 0.17 s |
+| `pre-commit run` on one file (framework + ruff) | ≈ 1.1 s |
+
+So ruff is fast.  The cost is pre-commit's **framework overhead** (~0.7 s of
+Python startup / environment resolution per invocation) plus the
+**unstaged-changes stash/restore**, whose cost grows with the number of
+unstaged files.  That stash/restore is also the dangerous part: kill the process
+mid-cycle and the stash is never restored.  The mechanism leaves `patch*` files
+behind in `~/.cache/pre-commit/` on every interrupted run (422 orphans were
+present after the incident).
+
+### The rule
+
+- **Agent / tool-driven commits** run the hook's exact equivalent by hand, then
+  commit with `--no-verify`, in one tool call so the two cannot drift apart:
+
+  ```bash
+  ruff check --fix <files…> && ruff format <files…> && git commit --no-verify -m "…"
+  ```
+
+  `--no-verify` skips only that commit; the hook remains installed and keeps
+  guarding interactive `git commit`s.  This is also recorded as guardrail §6.6
+  in `.clinerules`.
+- **Do not** let the hook run inside an agent tool call that commits while
+  unstaged changes remain — that is the exact stash→restore window that loses
+  work when the 30 s timeout fires.
+
+### Open items (not yet actioned)
+
+- The orphaned `patch*` files in `~/.cache/pre-commit/` can be deleted (they are
+  temporary artifacts), but that is a cache-dir cleanup outside the repo.
+- Whether to harden the hook itself (e.g. cache the ruff environment, or make
+  the stash/restore less fragile) is a separate tooling decision — see
+  `.pre-commit-config.yaml`.
+

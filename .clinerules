@@ -498,6 +498,38 @@ needed to finish.
   no git process still holds it; never delete it while another command may be
   running.
 
+### 6.6 Agent commits skip the pre-commit hook — run ruff manually first
+
+The repo installs a pre-commit hook (`.pre-commit-config.yaml`) that runs
+`ruff check --fix` and `ruff format` on every `git commit`.  That hook is
+**safe for interactive use** but **unsafe inside an agent tool call**: when a
+commit is made while unstaged changes are still present, the hook *stashes*
+those uncommitted edits, runs ruff, then *restores* them.  If the tool's 30 s
+timeout kills the process in that stash→restore window, the unstaged changes
+are lost — observed 2026-10-04, four files silently reverted and recovered only
+from `refs/cline/checkpoints/*`.  The same stash/restore also leaks `patch*`
+files into `~/.cache/pre-commit/` (422 orphans counted 2026-10-04).
+
+- **Agent / tool-driven commits:** run the hook's exact equivalent manually,
+  then commit with `--no-verify`, in the *same* tool call so the two cannot
+  drift apart:
+
+  ```bash
+  ruff check --fix <files…> && ruff format <files…> && \
+  git commit --no-verify -m "…"
+  ```
+
+  `--no-verify` skips only that one commit; the hook stays installed and keeps
+  guarding interactive `git commit`s.
+- **Do not** let the hook run inside a `run_commands` call that commits while
+  unstaged changes remain — the stash/restore is both slow (proportional to the
+  number of unstaged files) and the exact thing that loses work when killed.
+
+Rationale: ruff itself is fast (≈0.4 s per file, measured); the cost and the
+danger are pre-commit's framework overhead (~0.7 s per invocation) plus the
+unstaged-changes stash/restore.  See `docs/dev_notes.md` → *Pre-commit hook and
+agent commits*.
+
 
 ## 7. Documentation Rules
 
