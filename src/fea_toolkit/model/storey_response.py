@@ -83,6 +83,7 @@ References
 
 from __future__ import annotations
 
+import logging
 import math
 import warnings
 from collections.abc import Sequence
@@ -114,6 +115,8 @@ except ImportError:  # pragma: no cover — pandas is optional (Rhino 8 CPython)
     pd = _MissingPandas()  # type: ignore[assignment]
 
 from .sap_data import patterns_from_case
+
+logger = logging.getLogger(__name__)
 
 # ========================================================================
 # Dataclasses
@@ -1368,7 +1371,7 @@ def compute_linear_storey_responses(
             if drift_rows:
                 all_drift[key] = pd.DataFrame(drift_rows)
         except Exception as e:
-            print(f"  Storey response for {cname} failed: {e}")
+            logger.warning("Storey response for %s failed: %s", cname, e)
 
     # --- RS cases via modal shapes -----------------------------------
     if T_spec and Sa_spec and len(T_spec) > 1:
@@ -1433,7 +1436,7 @@ def compute_linear_storey_responses(
                     if dr_rows:
                         all_drift[key] = pd.DataFrame(dr_rows)
             except Exception as e:
-                print(f"  Storey response for {key} failed: {e}")
+                logger.warning("Storey response for %s failed: %s", key, e)
 
     # --- Shear / moment from trapezoidal load -------------------------
     H = total_height

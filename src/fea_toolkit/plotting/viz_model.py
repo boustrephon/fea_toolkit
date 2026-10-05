@@ -3,6 +3,7 @@
 PyVista-based scene rendering from ``MeshModel`` / ``AnalysisBuilder`` /
 NPZ inputs.  Re-exported by :mod:`fea_toolkit.plotting.viz`."""
 
+import logging
 import math
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
@@ -11,6 +12,8 @@ import numpy as np
 
 from ..model.sap_data import SAPModelData
 from .viz_common import _NPZ_TYPES, _add_animation_timer, _set_isometric_view
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ..model.selection import Selection
@@ -1568,7 +1571,7 @@ def plot_deformed_displacement_3d(
     try:
         import pyvista as pv
     except ImportError:
-        print("pyvista not installed — install with: pip install pyvista")
+        logger.warning("pyvista not installed — install with: pip install pyvista")
         return None
 
     # ── Resolve mesh data ──────────────────────────────────────────
@@ -1585,13 +1588,13 @@ def plot_deformed_displacement_3d(
             ]
             data["frames"] = frames  # also used by _render_scene
         except AttributeError:
-            print(
+            logger.warning(
                 "Warning: selection requires a builder/analysis-builder "
                 "source with a .model attribute — ignoring selection."
             )
 
     if not displacements:
-        print("No displacement data provided.")
+        logger.warning("No displacement data provided.")
         return None
 
     pv.set_plot_theme("document")
@@ -1911,7 +1914,7 @@ def plot_mode_animation(
     try:
         import pyvista as pv
     except ImportError:
-        print("pyvista not installed — install with: pip install pyvista")
+        logger.warning("pyvista not installed — install with: pip install pyvista")
         return None
 
     _SECTION_COLORS = [
@@ -1944,7 +1947,7 @@ def plot_mode_animation(
         dy = source.get("modal/mode_dy")
         dz = source.get("modal/mode_dz")
         if dx is None or mode >= dx.shape[1]:
-            print(f"No mode shape data for mode {mode} in NPZ.")
+            logger.warning("No mode shape data for mode %s in NPZ.", mode)
             return None
         # Row alignment: the N_node × N_mode mode arrays are written in
         # SORTED node-tag order (see npz_writer._collect_modal), which does
@@ -1964,7 +1967,7 @@ def plot_mode_animation(
         pass
 
     if mode not in mode_shapes or not mode_shapes.get(mode):
-        print(f"No mode shape data for mode {mode}.")
+        logger.warning("No mode shape data for mode %s.", mode)
         return None
 
     disp = mode_shapes[mode]

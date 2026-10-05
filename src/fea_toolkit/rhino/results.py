@@ -34,7 +34,11 @@ Example inside Rhino's Python editor::
     )
 """
 
+import logging
+
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # ═══════════════════════════════════════════════════════════════
 # Data extraction (pure NumPy — unit-testable outside Rhino)
@@ -270,7 +274,7 @@ def colour_shells_from_results(
         aggregate_parents=aggregate_parents,
     )
     if not values:
-        print(f"No {quantity} data found for shells in {source}")
+        logger.warning("No %s data found for shells in %s", quantity, source)
         return 0
 
     if verbose:
@@ -418,7 +422,7 @@ def colour_frames_from_results(
         aggregate_parents=aggregate_parents,
     )
     if not values:
-        print(f"No {quantity} data found for frames in {source}")
+        logger.warning("No %s data found for frames in %s", quantity, source)
         return 0
 
     if verbose:
@@ -501,7 +505,7 @@ def create_deformed_geometry(
         step=step,
     )
     if loaded is None:
-        print(f"No {source_type} displacements found in {source}")
+        logger.warning("No %s displacements found in %s", source_type, source)
         return 0
     dx, dy, dz, disp_tags, label = loaded
 
@@ -518,7 +522,7 @@ def create_deformed_geometry(
 
     n = len(node_x)
     if len(dx) != n or len(dy) != n or len(dz) != n:
-        print("Displacement arrays do not match the geometry node count")
+        logger.warning("Displacement arrays do not match the geometry node count")
         return 0
 
     # ── Node tag ↔ geometry-row mapping ─────────────────────────────

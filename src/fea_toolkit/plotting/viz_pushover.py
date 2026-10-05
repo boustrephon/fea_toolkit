@@ -3,6 +3,7 @@
 Plastic-hinge formation/heatmaps, shell damage maps, envelopes, step
 animations, force evolution, and capacity-curve plots."""
 
+import logging
 import math
 import warnings
 from typing import Any, Optional
@@ -23,6 +24,8 @@ from .viz_common import (
 )
 from .viz_forces import _render_frame_force_diagram
 from .viz_model import _render_scene, _resolve_mesh_data
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_pushover_data(
@@ -385,7 +388,7 @@ def plot_plastic_hinge_formation(
     try:
         import pyvista as pv
     except ImportError:
-        print("pyvista not installed — install with: pip install pyvista")
+        logger.warning("pyvista not installed — install with: pip install pyvista")
         return None
 
     pv.set_plot_theme("document")
@@ -396,12 +399,12 @@ def plot_plastic_hinge_formation(
     )
 
     if not step_results:
-        print("No pushover step results found.")
+        logger.warning("No pushover step results found.")
         return None
 
     # Raw list data has no mesh geometry, so 3D rendering is not possible
     if isinstance(data, list):
-        print(
+        logger.warning(
             "Raw list data is not supported for 3D animation — use an NPZ dict or Builder instead."
         )
         return None
@@ -617,7 +620,7 @@ def plot_plastic_hinge_heatmap(
         import matplotlib.pyplot as plt
         from matplotlib.colors import BoundaryNorm, ListedColormap
     except ImportError:
-        print("Warning: matplotlib not available.  pip install matplotlib")
+        logger.warning("Warning: matplotlib not available.  pip install matplotlib")
         return None
     import numpy as np
 
@@ -626,7 +629,7 @@ def plot_plastic_hinge_heatmap(
     # frame mid-height elevations for NPZ inputs.
     push_data, node_coords, _, frame_eid_to_nodes = _resolve_pushover_data(data, direction)
     if not push_data:
-        print("No pushover data found.")
+        logger.warning("No pushover data found.")
         return None
 
     n_step = len(push_data)
@@ -655,7 +658,7 @@ def plot_plastic_hinge_heatmap(
         per_step_ratios.append(max_ratios)
 
     if not all_eids:
-        print("No frame element data to plot in heatmap.")
+        logger.warning("No frame element data to plot in heatmap.")
         return None
 
     # ── Step 3 – Determine elevation per element ───────────────────
@@ -972,7 +975,7 @@ def plot_shell_damage_map(
     try:
         import pyvista as pv
     except ImportError:
-        print("pyvista not installed — install with: pip install pyvista")
+        logger.warning("pyvista not installed — install with: pip install pyvista")
         return None
 
     pv.set_plot_theme("document")
@@ -983,12 +986,12 @@ def plot_shell_damage_map(
     )
 
     if not step_results:
-        print("No pushover step results found.")
+        logger.warning("No pushover step results found.")
         return None
 
     # Raw list data has no mesh geometry, so 3D rendering is not possible
     if isinstance(data, list):
-        print(
+        logger.warning(
             "Raw list data is not supported for 3D animation — use an NPZ dict or Builder instead."
         )
         return None
@@ -1004,7 +1007,7 @@ def plot_shell_damage_map(
         per_step_indices.append(_compute_shell_damage(sf))
 
     if not all_shell_ids:
-        print(
+        logger.warning(
             "No shell element data found. Use pushover_record_selection "
             "with element_types=['Area'] or include areas in the analysis."
         )
@@ -1013,7 +1016,7 @@ def plot_shell_damage_map(
     # ── Build shell geometry ──────────────────────────────────────
     shell_verts, shell_node_tags = _resolve_shell_data(data, all_shell_ids)
     if not shell_verts:
-        print("No shell geometry found in model source.")
+        logger.warning("No shell geometry found in model source.")
         return None
 
     # Build a single PolyData for all shells (one face per shell)
@@ -1208,7 +1211,7 @@ def plot_pushover_envelope(
     import numpy as np
 
     if not data:
-        print("No pushover data provided.")
+        logger.warning("No pushover data provided.")
         return None
 
     # ── Resolve pushover data ───────────────────────────────────
@@ -1217,7 +1220,7 @@ def plot_pushover_envelope(
     )
 
     if not step_results:
-        print("No pushover step results found.")
+        logger.warning("No pushover step results found.")
         return None
 
     # ── Build envelope: for each frame element, find peak force step ──
@@ -1277,7 +1280,7 @@ def plot_pushover_envelope(
     try:
         import pyvista as pv
     except ImportError:
-        print("pyvista not installed — install with: pip install pyvista")
+        logger.warning("pyvista not installed — install with: pip install pyvista")
         return None
 
     mesh_data = _resolve_mesh_data(data, collapse_to_parents=False)
@@ -1399,7 +1402,7 @@ def animate_pushover_deformation(
     try:
         import pyvista as pv
     except ImportError:
-        print("pyvista not installed — install with: pip install pyvista")
+        logger.warning("pyvista not installed — install with: pip install pyvista")
         return None
 
     pv.set_plot_theme("document")
@@ -1410,12 +1413,12 @@ def animate_pushover_deformation(
     )
 
     if not step_results:
-        print("No pushover step results found.")
+        logger.warning("No pushover step results found.")
         return None
 
     # Raw list data has no mesh geometry, so 3D rendering is not possible
     if isinstance(data, list):
-        print(
+        logger.warning(
             "Raw list data is not supported for 3D animation — use an NPZ dict or Builder instead."
         )
         return None
@@ -1722,7 +1725,7 @@ def animate_pushover_deformation(
             plotter.export_html(save_html)
             print(f"  Interactive animation saved: {save_html}")
         except Exception as e:
-            print(f"  Warning: could not export HTML — {e}")
+            logger.warning("Warning: could not export HTML — %s", e)
 
     # ── Add colour legends ───────────────────────────────────────
     if show_frames and frame_segs_per_step and frame_segs_per_step[0]:
@@ -1790,14 +1793,14 @@ def plot_frame_force_evolution(
     try:
         import matplotlib.pyplot as plt
     except ImportError:
-        print("Warning: matplotlib not available.  pip install matplotlib")
+        logger.warning("Warning: matplotlib not available.  pip install matplotlib")
         return None
     import numpy as np
 
     # ── Resolve data ─────────────────────────────────────────────
     step_results, _, _, _ = _resolve_pushover_data(data, direction=direction)
     if not step_results:
-        print("No pushover step results found.")
+        logger.warning("No pushover step results found.")
         return None
 
     n_step = len(step_results)
@@ -1837,14 +1840,14 @@ def plot_frame_force_evolution(
             force_history[eid].append((v_i, v_j))
 
     if not force_history:
-        print("No frame element data found.")
+        logger.warning("No frame element data found.")
         return None
 
     # Filter by element_ids if provided
     if element_ids is not None:
         selected = {eid: force_history[eid] for eid in element_ids if eid in force_history}
         if not selected:
-            print(f"No data for requested element_ids: {element_ids}")
+            logger.warning("No data for requested element_ids: %s", element_ids)
             return None
         force_history = selected
 
@@ -1931,14 +1934,14 @@ def plot_pushover_curve(
     try:
         import matplotlib.pyplot as plt
     except ImportError:
-        print("Warning: matplotlib not installed.  Install with: pip install matplotlib")
+        logger.warning("Warning: matplotlib not installed.  Install with: pip install matplotlib")
         return None
 
     disp = pushover_results.get("control_disp", [])
     shear = pushover_results.get("base_shear", [])
 
     if not disp or not shear:
-        print("No pushover data to plot.")
+        logger.warning("No pushover data to plot.")
         return None
 
     fig, ax = plt.subplots(figsize=figsize)
@@ -1989,7 +1992,7 @@ def plot_pushover_curve_enhanced(
         import matplotlib.pyplot as plt
         import numpy as np
     except ImportError:
-        print("Warning: matplotlib not installed.  Install with: pip install matplotlib")
+        logger.warning("Warning: matplotlib not installed.  Install with: pip install matplotlib")
         return None
 
     disp = np.asarray(pushover_results.get("control_disp", []), dtype=float)
@@ -1997,7 +2000,7 @@ def plot_pushover_curve_enhanced(
     shear = shear * unit_conversion
 
     if len(disp) < 2 or len(shear) < 2 or len(disp) != len(shear):
-        print("No pushover data to plot.")
+        logger.warning("No pushover data to plot.")
         return None
 
     # Robust tangent stiffness via local regression over end segments
@@ -2106,18 +2109,18 @@ def plot_capacity_spectrum(
     try:
         import matplotlib.pyplot as plt
     except ImportError:
-        print("Warning: matplotlib not installed.  Install with: pip install matplotlib")
+        logger.warning("Warning: matplotlib not installed.  Install with: pip install matplotlib")
         return None
 
     S_d = np.array(capacity_adrs.get("S_d", []))
     S_a = np.array(capacity_adrs.get("S_a", []))
 
     if len(S_d) < 2 or len(S_a) < 2 or len(S_d) != len(S_a):
-        print("Insufficient or mismatched ADRS data to plot.")
+        logger.warning("Insufficient or mismatched ADRS data to plot.")
         return None
 
     if len(spectrum_periods) != len(spectrum_accels):
-        print("spectrum_periods and spectrum_accels have different lengths.")
+        logger.warning("spectrum_periods and spectrum_accels have different lengths.")
         return None
 
     fig, ax = plt.subplots(figsize=figsize)

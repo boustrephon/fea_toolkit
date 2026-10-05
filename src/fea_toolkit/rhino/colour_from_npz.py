@@ -31,9 +31,12 @@ Each Rhino object with a ``SAP_FrameID`` UserString (matching a
 based on the force/moment magnitude at the element's I‑end.
 """
 
+import logging
 from typing import Optional
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # Strategy battery version.  Bump whenever the colour-apply strategy changes
 # so Rhino smoke tests can detect a stale loaded module unambiguously.
@@ -613,10 +616,12 @@ def _colour_doc_objects(
 
     if failed_apply:
         sample = ", ".join(str(s) for s in failed_ids_sample) if failed_ids_sample else "(none)"
-        print(
-            f"WARNING: {failed_apply} object colour(s) could not be applied "
-            f"(read-back mismatch after ModifyAttributes + Recreate).  "
-            f"Sample SAP IDs: {sample}."
+        logger.warning(
+            "WARNING: %s object colour(s) could not be applied "
+            "(read-back mismatch after ModifyAttributes + Recreate).  "
+            "Sample SAP IDs: %s.",
+            failed_apply,
+            sample,
         )
 
     doc.Views.Redraw()
@@ -688,7 +693,7 @@ def colour_from_npz(
         aggregate_parents=aggregate_parents,
     )
     if not sap_values:
-        print(f"No {quantity} data found in {npz_path}")
+        logger.warning("No %s data found in %s", quantity, npz_path)
         return 0
 
     if verbose:

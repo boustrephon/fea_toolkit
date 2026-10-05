@@ -23,11 +23,14 @@ Usage from cached NPZ::
     plot_disconnected_nodes(data, report)
 """
 
+import logging
 from typing import Any, Optional
 
 import numpy as np
 
 from .viz import _set_isometric_view
+
+logger = logging.getLogger(__name__)
 
 
 def find_disconnected_nodes(
@@ -71,7 +74,7 @@ def find_disconnected_nodes(
     dy = data.get("modal/mode_dy")
     dz = data.get("modal/mode_dz")
     if dx is None or dy is None or dz is None:
-        print("No mode shape data found (keys 'modal/mode_dx/y/z').")
+        logger.warning("No mode shape data found (keys 'modal/mode_dx/y/z').")
         return []
 
     n_modes = dx.shape[1] if dx.ndim > 1 else 1
@@ -182,13 +185,13 @@ def plot_disconnected_nodes(
         for an interactive clipping plane.  Requires PyVista ≥ 0.50.
     """
     if not report:
-        print("No disconnected nodes to plot.")
+        logger.warning("No disconnected nodes to plot.")
         return None
 
     try:
         import pyvista as pv
     except ImportError:
-        print("pyvista not installed.")
+        logger.warning("pyvista not installed.")
         return None
 
     pv.set_plot_theme("document")
@@ -330,13 +333,13 @@ def plot_wall_slab_intersections(
         plotter.show()
     """
     if not findings:
-        print("No wall‑slab intersections to plot.")
+        logger.warning("No wall‑slab intersections to plot.")
         return None
 
     try:
         import pyvista as pv
     except ImportError:
-        print("pyvista not installed.")
+        logger.warning("pyvista not installed.")
         return None
 
     pv.set_plot_theme("document")
@@ -346,7 +349,7 @@ def plot_wall_slab_intersections(
     if slab_id is not None:
         relevant = [f for f in findings if f["slab_id"] == slab_id]
         if not relevant:
-            print(f"Slab {slab_id} not found in findings.")
+            logger.warning("Slab %s not found in findings.", slab_id)
             return None
     else:
         relevant = findings
