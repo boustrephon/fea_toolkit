@@ -13,7 +13,9 @@ verb manifest — does not load OpenSees.
 
 from typing import Any
 
+from ..config_keys import BUILDER_CONFIG_KEYS
 from ..steps import MODAL, ParamSpec, Step, StepContext, StepResult, validate_params
+from ._tcl import EXPORT_TCL_PARAMS, maybe_export_tcl
 
 __all__ = ["MODAL_PARAMS", "run_modal"]
 
@@ -28,6 +30,16 @@ MODAL_PARAMS: dict[str, ParamSpec] = {
         type=str,
         help="Result label.",
     ),
+    "config": ParamSpec(
+        default={},
+        type=dict,
+        help=(
+            "OpenSees builder overrides, e.g. {'fix_shell_only_base': True} to "
+            "fully fix shell-only base nodes during the build only."
+        ),
+        manifest=BUILDER_CONFIG_KEYS,
+    ),
+    **EXPORT_TCL_PARAMS,
 }
 
 
@@ -50,10 +62,12 @@ def run_modal(context: StepContext, step: Step) -> list[StepResult]:
     from ...analysis.modal import run_modal_analysis
 
     params: dict[str, Any] = validate_params("modal", MODAL_PARAMS, step.params)
+    maybe_export_tcl(context, "modal", params)
     result = run_modal_analysis(
         context.model,
         n_modes=params["n_modes"],
         name=params["name"],
+        config=params["config"] or None,
         log=context.pipeline_log,
     )
     context.results["modal"] = result

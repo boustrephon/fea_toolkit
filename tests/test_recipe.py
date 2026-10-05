@@ -143,6 +143,7 @@ class TestManifest:
             "member_shear_capacity",
             "wall_shear_check",
             "scale_sections",
+            "fix_shell_only_base",
             "mesh",
             "save_model",
             "run_static",
@@ -213,6 +214,30 @@ class TestManifest:
         assert config.type is dict
         assert config.manifest is BUILDER_CONFIG_KEYS
 
+    def test_modal_declares_its_config_manifest(self):
+        """The ``modal`` step exposes the builder config, including the shell-only fix."""
+        from fea_toolkit.workflow import BUILDER_CONFIG_KEYS, STEP_SPECS
+
+        config = STEP_SPECS["modal"].params["config"]
+        assert config.type is dict
+        assert config.manifest is BUILDER_CONFIG_KEYS
+        assert config.default == {}
+
+    def test_the_shell_only_base_fix_is_a_config_key_off_by_default(self):
+        from fea_toolkit.workflow import BUILDER_CONFIG_KEYS
+
+        key = BUILDER_CONFIG_KEYS["fix_shell_only_base"]
+        assert key.type is bool
+        assert key.default is False
+
+    def test_response_spectrum_n_modes_defaults_to_all(self):
+        from fea_toolkit.workflow import STEP_SPECS
+
+        n_modes = STEP_SPECS["response_spectrum"].params["n_modes"]
+        assert n_modes.type is int
+        assert n_modes.default is None
+        assert n_modes.allow_none is True
+
 
 # ── Recipes as data ───────────────────────────────────────────────────
 
@@ -258,6 +283,53 @@ class TestAnalysisVerbs:
         assert captured["brace_type"] == "beam"
         assert captured["brace_sections"] == ["BRACE-1"]
         assert captured["return_builders"] is True
+
+    def test_response_spectrum_resolves_each_source(self):
+        """``resolve_spectrum`` maps source → (T, Sa) from the right place."""
+        from fea_toolkit.model.sap_data import LoadPattern, ResponseSpectrumFunction
+        from fea_toolkit.workflow.steps import StepContext
+        from fea_toolkit.workflow.verbs.response_spectrum import resolve_spectrum
+
+        md = _slab_model()
+        md.response_spectrum_functions = {
+            "UNIFRS": ResponseSpectrumFunction("UNIFRS", [0.0, 1.0], [1.0, 2.0])
+        }
+        md.load_patterns = {
+            "SLX": LoadPattern(
+                "SLX",
+                "Quake",
+                auto_data={
+                    "AUTO SEISMIC - CHINESE 2010": {
+                        "AlphaMax": 0.16,
+                        "Tg": 0.4,
+                        "DampRatio": 0.05,
+                    }
+                },
+            )
+        }
+        context = StepContext(model_data=md, model=object(), results={})
+
+        T, Sa = resolve_spectrum(context, source="model", name="UNIFRS", T_spec=[], Sa_spec=[])
+        assert T == [0.0, 1.0]
+        assert Sa == [1.0, 2.0]
+
+        T, Sa = resolve_spectrum(context, source="auto_seismic", name="", T_spec=[], Sa_spec=[])
+        assert T[0] == 0.0
+        assert len(T) == len(Sa)
+
+        with pytest.raises(ValueError):
+            resolve_spectrum(context, source="model", name="NOPE", T_spec=[], Sa_spec=[])
+        with pytest.raises(ValueError):
+            resolve_spectrum(context, source="explicit", name="", T_spec=[], Sa_spec=[])
+
+    def test_response_spectrum_auto_seismic_requires_a_table(self):
+        """A model without an AUTO SEISMIC table cannot supply that source."""
+        from fea_toolkit.workflow.steps import StepContext
+        from fea_toolkit.workflow.verbs.response_spectrum import resolve_spectrum
+
+        context = StepContext(model_data=_slab_model(), model=object(), results={})
+        with pytest.raises(ValueError):
+            resolve_spectrum(context, source="auto_seismic", name="", T_spec=[], Sa_spec=[])
 
 
 class TestRecipeSerialisation:
@@ -436,6 +508,102 @@ class TestSaveModelVerb:
         recipe = Recipe(steps=[Step("save_model", params={"path": "out.h5"})])
         with pytest.raises(StepError):
             run_recipe(recipe, _slab_model())
+
+
+class TestExportTclCheckbox:
+    """Analysis verbs carry an ``export_tcl`` QC checkbox instead of a step."""
+
+    def test_every_analysis_verb_declares_the_checkbox(self):
+        for verb in ("run_static", "modal", "response_spectrum", "pushover"):
+            spec = STEP_SPECS[verb]
+            assert "export_tcl" in spec.params, verb
+            assert "export_tcl_path" in spec.params, verb
+            assert spec.params["export_tcl"].default is False, verb
+
+    def test_default_tcl_path_derives_from_the_source(self):
+        from types import SimpleNamespace
+
+        from fea_toolkit.workflow.verbs._tcl import default_tcl_path
+
+        ctx = SimpleNamespace(model_data=SimpleNamespace(source="/data/Admin_0.7E.s2k"))
+        assert default_tcl_path(ctx, "modal") == "/data/Admin_0.7E_model.tcl"
+
+    def test_default_tcl_path_falls_back_to_the_verb_name(self):
+        from types import SimpleNamespace
+
+        from fea_toolkit.workflow.verbs._tcl import default_tcl_path
+
+        ctx = SimpleNamespace(model_data=SimpleNamespace())  # no source
+        assert default_tcl_path(ctx, "modal") == "modal_model.tcl"
+
+    def test_checkbox_writes_the_model_tcl(self, tmp_path):
+        from examples.sample_model import make_sample_model
+
+        target = tmp_path / "run_static_model.tcl"
+        recipe = Recipe(
+            steps=[
+                Step("mesh"),
+                Step(
+                    "run_static",
+                    params={
+                        "cases": {"DEAD": {"DEAD": 1.0}},
+                        "export_tcl": True,
+                        "export_tcl_path": str(target),
+                    },
+                ),
+            ]
+        )
+        run_recipe(recipe, make_sample_model())
+
+        assert target.exists()
+        text = target.read_text(encoding="utf-8")
+        assert "node" in text and "fix" in text  # a domain script, not an empty file
+
+
+class TestFixShellOnlyBase:
+    """The ``fix_shell_only_base`` verb upgrades shell-only base restraints."""
+
+    def _model(self):
+        from fea_toolkit.model.sap_data import (
+            AreaElement,
+            FrameElement,
+            Node,
+            Restraint,
+            SAPModelData,
+        )
+
+        return SAPModelData(
+            nodes={
+                "1": Node("1", 1, 0.0, 0.0, 0.0),  # shell-only base, pinned
+                "2": Node("2", 2, 4.0, 0.0, 0.0),  # frame-connected base, pinned
+                "3": Node("3", 3, 0.0, 0.0, 3.0),  # top
+            },
+            restraints={
+                "1": Restraint([1, 1, 1, 0, 0, 0]),
+                "2": Restraint([1, 1, 1, 0, 0, 0]),
+            },
+            materials={},
+            sections={},
+            frame_elements={"F1": FrameElement("F1", 11, "2", "3")},
+            area_elements={"A1": AreaElement("A1", 21, ["1", "3"])},
+            frame_assignments={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+        )
+
+    def test_upgrades_only_shell_only_base_nodes_and_copies(self):
+        from fea_toolkit.workflow.steps import StepContext
+
+        md = self._model()
+        context = StepContext(model_data=md, model=None, results={})
+        results = STEP_SPECS["fix_shell_only_base"].run(context, Step("fix_shell_only_base"))
+
+        assert results[0].label == "Shell-only base fixed"
+        assert context.model_data.restraints["1"].dofs == [1, 1, 1, 1, 1, 1]
+        assert context.model_data.restraints["2"].dofs == [1, 1, 1, 0, 0, 0]  # frame base untouched
+        # The caller's model is left untouched (copy-on-write).
+        assert md.restraints["1"].dofs == [1, 1, 1, 0, 0, 0]
 
 
 class TestPerStepState:
@@ -821,4 +989,20 @@ class TestEndToEnd:
     def test_a_chart_step_without_solved_cases_fails_clearly(self):
         with pytest.raises(StepError) as info:
             run_recipe(Recipe(steps=[Step("chart")]), _slab_model())
-        assert "needs 'cases'" in str(info.value.cause)
+        assert "has no solved case" in str(info.value.cause)
+
+    def test_a_chart_step_plots_model_response_spectra_without_solving(self):
+        """'response_spectra' reads the model's parsed functions, no solve needed."""
+        from matplotlib.figure import Figure
+
+        from fea_toolkit.model.sap_data import ResponseSpectrumFunction
+
+        md = _slab_model()
+        md.response_spectrum_functions = {
+            "UNIFRS": ResponseSpectrumFunction("UNIFRS", [0.0, 1.0], [1.0, 1.0])
+        }
+        run = run_recipe(Recipe(steps=[Step("chart", params={"chart": "response_spectra"})]), md)
+
+        assert [result.kind for result in run.results] == ["figure"]
+        figure = run.results[-1].payload
+        assert isinstance(figure, Figure)

@@ -18,6 +18,7 @@ from .verbs import (
     CHART_PARAMS,
     COMBINE_PARAMS,
     CONNECTIVITY_PARAMS,
+    FIX_SHELL_ONLY_BASE_PARAMS,
     HINGE_LENGTH_PARAMS,
     MEMBER_SHEAR_CAPACITY_PARAMS,
     MESH_CHECKS_PARAMS,
@@ -35,6 +36,7 @@ from .verbs import (
     run_check_connectivity,
     run_check_self_weight,
     run_combine,
+    run_fix_shell_only_base,
     run_hinge_length,
     run_member_shear_capacity,
     run_mesh,
@@ -115,6 +117,16 @@ STEP_SPECS: dict[str, StepSpec] = {
             "'soften the wall' option, keeping its elements, loads and mass."
         ),
     ),
+    "fix_shell_only_base": StepSpec(
+        verb="fix_shell_only_base",
+        run=run_fix_shell_only_base,
+        params=FIX_SHELL_ONLY_BASE_PARAMS,
+        kind=MODEL,
+        help=(
+            "Upgrade the model's shell-only base nodes to full fixity before "
+            "meshing (pinned → fixed rotations)."
+        ),
+    ),
     "mesh": StepSpec(
         verb="mesh",
         run=run_mesh,
@@ -175,8 +187,11 @@ STEP_SPECS: dict[str, StepSpec] = {
         run=run_chart,
         params=CHART_PARAMS,
         kind=FIGURE,
-        needs=("cases",),
-        help="Plot the solved cases' storey displacement and drift profiles.",
+        needs=(),
+        help=(
+            "Plot a figure — 'storey_displacements' needs solved cases; "
+            "'response_spectra' plots the model's parsed spectra directly."
+        ),
     ),
 }
 

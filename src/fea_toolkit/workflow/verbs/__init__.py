@@ -30,6 +30,7 @@ from .checks import (
     run_wall_shear_check,
 )
 from .combine import COMBINE_PARAMS, run_combine
+from .fix_shell_only_base import FIX_SHELL_ONLY_BASE_PARAMS, run_fix_shell_only_base
 from .mesh import MESH_PARAMS, run_mesh
 from .modal import MODAL_PARAMS, run_modal
 from .pushover import PUSHOVER_PARAMS, run_pushover
@@ -43,6 +44,7 @@ __all__ = [
     "CHART_PARAMS",
     "COMBINE_PARAMS",
     "CONNECTIVITY_PARAMS",
+    "FIX_SHELL_ONLY_BASE_PARAMS",
     "HINGE_LENGTH_PARAMS",
     "MEMBER_SHEAR_CAPACITY_PARAMS",
     "MESH_CHECKS_PARAMS",
@@ -60,6 +62,7 @@ __all__ = [
     "run_check_connectivity",
     "run_check_self_weight",
     "run_combine",
+    "run_fix_shell_only_base",
     "run_hinge_length",
     "run_member_shear_capacity",
     "run_mesh",

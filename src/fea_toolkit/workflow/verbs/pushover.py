@@ -15,6 +15,7 @@ from typing import Any
 
 from ..config_keys import BUILDER_CONFIG_KEYS
 from ..steps import PUSHOVER, ParamSpec, Step, StepContext, StepResult, validate_params
+from ._tcl import EXPORT_TCL_PARAMS, maybe_export_tcl
 
 __all__ = ["PUSHOVER_PARAMS", "run_pushover"]
 
@@ -78,6 +79,7 @@ PUSHOVER_PARAMS: dict[str, ParamSpec] = {
         type=bool,
         help="Retain each direction's builder for stage-file export.",
     ),
+    **EXPORT_TCL_PARAMS,
 }
 
 
@@ -99,6 +101,7 @@ def run_pushover(context: StepContext, step: Step) -> list[StepResult]:
     from ...analysis.pushover import run_pushover_analysis
 
     params: dict[str, Any] = validate_params("pushover", PUSHOVER_PARAMS, step.params)
+    maybe_export_tcl(context, "pushover", params)
     result = run_pushover_analysis(
         context.model,
         context.results["modal"],

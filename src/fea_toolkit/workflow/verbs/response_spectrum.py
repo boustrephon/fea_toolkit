@@ -3,10 +3,12 @@
 Wraps :func:`~fea_toolkit.analysis.rs.run_response_spectrum_analysis`, which
 requires the modal result a preceding
 :mod:`~fea_toolkit.workflow.verbs.modal` step stored on the context.  The
-demand spectrum is supplied as its raw ``T_spec`` / ``Sa_spec`` pair; building
-a code spectrum (GB 50011, EC8) is the caller's job
-(:class:`~fea_toolkit.spectrum.ResponseSpectrum`), so this verb stays a thin
-wrapper.
+demand spectrum can come from three places, selected by ``spectrum_source``:
+
+* ``"explicit"`` — the raw ``T_spec`` / ``Sa_spec`` pair the step declares;
+* ``"model"`` — a named ``FUNCTION - RESPONSE SPECTRUM`` parsed from the .s2k;
+* ``"auto_seismic"`` — rebuilt from the model's ``AUTO SEISMIC`` table
+  (:func:`~fea_toolkit.spectrum.spectrum_from_auto_seismic`).
 
 The heavy import lives inside the function, so importing this module — and the
 verb manifest — does not load OpenSees.
@@ -15,8 +17,9 @@ verb manifest — does not load OpenSees.
 from typing import Any
 
 from ..steps import RS, ParamSpec, Step, StepContext, StepResult, validate_params
+from ._tcl import EXPORT_TCL_PARAMS, maybe_export_tcl
 
-__all__ = ["RS_PARAMS", "run_response_spectrum"]
+__all__ = ["RS_PARAMS", "resolve_spectrum", "run_response_spectrum"]
 
 RS_PARAMS: dict[str, ParamSpec] = {
     "direction": ParamSpec(
@@ -25,10 +28,25 @@ RS_PARAMS: dict[str, ParamSpec] = {
         choices=("X", "Y"),
         help="Spectrum direction to combine.",
     ),
+    "spectrum_source": ParamSpec(
+        default="explicit",
+        type=str,
+        choices=("explicit", "model", "auto_seismic"),
+        help=(
+            "Where the demand spectrum comes from — 'explicit' (T_spec/Sa_spec), "
+            "'model' (a named 'FUNCTION - RESPONSE SPECTRUM'), or 'auto_seismic' "
+            "(rebuilt from the model's AUTO SEISMIC table)."
+        ),
+    ),
+    "spectrum": ParamSpec(
+        default="",
+        type=str,
+        help="Model response-spectrum function name (used when source is 'model').",
+    ),
     "T_spec": ParamSpec(
         default=[],
         type=list,
-        help="Period axis of the demand spectrum.",
+        help="Period axis of the demand spectrum (used when source is 'explicit').",
     ),
     "Sa_spec": ParamSpec(
         default=[],
@@ -41,16 +59,70 @@ RS_PARAMS: dict[str, ParamSpec] = {
         help="Damping ratio for the CQC combination.",
     ),
     "n_modes": ParamSpec(
-        default=12,
+        default=None,
         type=int,
-        help="Number of modes to include.",
+        help="Number of modes to include; leave at 'all' to use every mode.",
+        allow_none=True,
     ),
     "name": ParamSpec(
         default="ResponseSpectrum",
         type=str,
         help="Result label.",
     ),
+    **EXPORT_TCL_PARAMS,
 }
+
+
+def _find_auto_seismic_record(model_data) -> tuple[dict, str]:
+    """The first ``AUTO SEISMIC`` record among the model's load patterns.
+
+    Returns:
+        ``(record, table_name)``, or ``({}, "")`` when the model defines none.
+    """
+    for lp in (getattr(model_data, "load_patterns", None) or {}).values():
+        for table_name, record in (getattr(lp, "auto_data", None) or {}).items():
+            if "SEISMIC" in table_name.upper():
+                return record, table_name
+    return {}, ""
+
+
+def resolve_spectrum(
+    context: StepContext,
+    *,
+    source: str,
+    name: str,
+    T_spec: list,
+    Sa_spec: list,
+) -> tuple[list, list]:
+    """Resolve the demand spectrum ``(T, Sa)`` for the given *source*.
+
+    Pure — no OpenSees — so it is unit-tested without the analysis engine.
+
+    Raises:
+        ValueError: If the chosen source cannot provide a spectrum (unknown
+            function name, no ``AUTO SEISMIC`` table, or an empty explicit pair).
+    """
+    if source == "model":
+        functions = getattr(context.model_data, "response_spectrum_functions", None) or {}
+        function = functions.get(name)
+        if function is None:
+            raise ValueError(
+                f"response_spectrum: no model spectrum named {name!r}; known: {sorted(functions)}"
+            )
+        return function.periods, function.accels
+
+    if source == "auto_seismic":
+        from ...spectrum import spectrum_from_auto_seismic
+
+        record, _table_name = _find_auto_seismic_record(context.model_data)
+        if not record:
+            raise ValueError("response_spectrum: the model defines no AUTO SEISMIC table")
+        T, Sa = spectrum_from_auto_seismic(record, units=context.model_data.units)
+        return T, Sa
+
+    if not T_spec or not Sa_spec:
+        raise ValueError("response_spectrum needs a T_spec / Sa_spec spectrum")
+    return T_spec, Sa_spec
 
 
 def run_response_spectrum(context: StepContext, step: Step) -> list[StepResult]:
@@ -71,14 +143,22 @@ def run_response_spectrum(context: StepContext, step: Step) -> list[StepResult]:
     from ...analysis.rs import run_response_spectrum_analysis
 
     params: dict[str, Any] = validate_params("response_spectrum", RS_PARAMS, step.params)
-    if not params["T_spec"] or not params["Sa_spec"]:
-        raise ValueError("response_spectrum needs a T_spec / Sa_spec spectrum")
+    maybe_export_tcl(context, "response_spectrum", params)
+
+    T_spec, Sa_spec = resolve_spectrum(
+        context,
+        source=params["spectrum_source"],
+        name=params["spectrum"],
+        T_spec=params["T_spec"],
+        Sa_spec=params["Sa_spec"],
+    )
+
     result = run_response_spectrum_analysis(
         context.model,
         context.results["modal"],
         direction=params["direction"],
-        T_spec=params["T_spec"],
-        Sa_spec=params["Sa_spec"],
+        T_spec=T_spec,
+        Sa_spec=Sa_spec,
         damping=params["damping"],
         n_modes=params["n_modes"],
         name=params["name"],

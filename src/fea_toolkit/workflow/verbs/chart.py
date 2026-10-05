@@ -22,10 +22,11 @@ CHART_PARAMS: dict[str, ParamSpec] = {
     "chart": ParamSpec(
         default="storey_displacements",
         type=str,
-        choices=("storey_displacements",),
+        choices=("storey_displacements", "response_spectra"),
         help=(
             "Which chart to draw — 'storey_displacements' is the storey "
-            "displacement / drift profile."
+            "displacement / drift profile, 'response_spectra' plots the model's "
+            "parsed response-spectrum functions (T vs Sa)."
         ),
     ),
     "case": ParamSpec(
@@ -34,6 +35,20 @@ CHART_PARAMS: dict[str, ParamSpec] = {
         help="Solved case to plot.  Empty plots every case the run solved.",
     ),
 }
+
+
+def _run_spectra_chart(context: StepContext, params: dict[str, Any]) -> list[StepResult]:
+    """Plot the model's parsed response-spectrum functions — nothing is solved."""
+    from ...plotting.seismic_spectrum import plot_response_spectra
+
+    functions = getattr(context.model_data, "response_spectrum_functions", None) or {}
+    if not functions:
+        context.log("chart: the model defines no response-spectrum functions")
+        return [StepResult(kind=FIGURE, label="Response spectra", payload=None)]
+
+    figure = plot_response_spectra(functions, units=context.model_data.units)
+    context.log(f"Chart: response spectra for {', '.join(functions)}")
+    return [StepResult(kind=FIGURE, label="Response spectra", payload=figure)]
 
 
 def run_chart(context: StepContext, step: Step) -> list[StepResult]:
@@ -68,6 +83,10 @@ def run_chart(context: StepContext, step: Step) -> list[StepResult]:
     from ...plotting.report import plot_storey_displacements
 
     params: dict[str, Any] = validate_params("chart", CHART_PARAMS, step.params)
+
+    # The spectra chart reads the model directly; it needs no solved case.
+    if params["chart"] == "response_spectra":
+        return _run_spectra_chart(context, params)
 
     # Rebuild the archive from the raw results, exactly as ``combine`` does, so
     # the chart reads the same object a results view would.

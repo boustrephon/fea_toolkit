@@ -16,6 +16,7 @@ from typing import Any
 
 from ..config_keys import BUILDER_CONFIG_KEYS
 from ..steps import CASES, ParamSpec, Step, StepContext, StepResult, validate_params
+from ._tcl import EXPORT_TCL_PARAMS, maybe_export_tcl
 
 __all__ = ["RUN_STATIC_PARAMS", "run_static"]
 
@@ -38,6 +39,7 @@ RUN_STATIC_PARAMS: dict[str, ParamSpec] = {
         ),
         manifest=BUILDER_CONFIG_KEYS,
     ),
+    **EXPORT_TCL_PARAMS,
 }
 
 
@@ -62,6 +64,7 @@ def run_static(context: StepContext, step: Step) -> list[StepResult]:
     from ...analysis.linear import run_case_set
 
     params: dict[str, Any] = validate_params("run_static", RUN_STATIC_PARAMS, step.params)
+    maybe_export_tcl(context, "run_static", params)
 
     cases = params["cases"] or list_static_cases(context.model_data, context.model)
     case_names = ", ".join(cases)
