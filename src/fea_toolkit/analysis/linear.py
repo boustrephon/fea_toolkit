@@ -645,6 +645,10 @@ def run_linear_cases(
     rows = []
     config = {"element_type": "elasticBeamColumn", "verbose": False}
 
+    from ..io.log import coerce_log
+
+    log = coerce_log(log)
+
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
     # ── Static cases: auto-detect LinStatic, merge overrides, drop empty ──
@@ -743,7 +747,7 @@ def run_linear_cases(
         except Exception as e:
             v_srss = m_srss = roof_disp_rs = roof_disp_srss = 0.0
             r_cqc = {}
-            print(f"  Warning: RS-{rs_dir} failed — {e}")
+            log.warning("linear", f"RS-{rs_dir} failed — {e}")
 
         rows.append(
             {

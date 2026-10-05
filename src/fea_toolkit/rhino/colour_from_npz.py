@@ -1179,9 +1179,10 @@ def _create_flag_meshes(
             continue
 
     if failed_ids:
-        print(
-            f"WARNING: {len(failed_ids)} flag mesh(es) rejected by Rhino — "
-            f"skipped SAP IDs: {', '.join(sorted(set(failed_ids)))}"
+        logger.warning(
+            "WARNING: %s flag mesh(es) rejected by Rhino — skipped SAP IDs: %s",
+            len(failed_ids),
+            ", ".join(sorted(set(failed_ids))),
         )
 
     return created
