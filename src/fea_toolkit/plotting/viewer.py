@@ -350,6 +350,9 @@ class ModelViewer:
         shrink: float = 1.0,
         shell_opacity: Optional[float] = None,
         show_restraints: bool = True,
+        restraint_style: str = "block",
+        show_extruded: bool = False,
+        extruded_detail: str = "plates",
     ) -> "ModelViewer":
         """Display the structural model.
 
@@ -372,6 +375,13 @@ class ModelViewer:
                 :mod:`fea_toolkit.plotting.restraint_glyphs`).  Models without
                 restraints, and results archives (which carry none), simply draw
                 nothing.
+            restraint_style: Support-symbol style — ``"block"`` (plates and
+                discs, the default) or ``"arrow"`` (arrows and curls).
+            show_extruded: When True, draw each frame as an extruded solid
+                (its cross-section swept along the member) *in addition to* the
+                line skeleton, which remains the pickable layer.
+            extruded_detail: ``"plates"`` (the efficient open-surface
+                representation) or ``"solid"`` (the closed perimeter with caps).
 
         Returns:
             ``self`` for chaining.
@@ -385,7 +395,20 @@ class ModelViewer:
 
         self._shrink = shrink
         self._shell_opacity = opacity if shell_opacity is None else shell_opacity
+        self._restraint_style = restraint_style
 
+        if show_extruded:
+            # The extruded solids are pure decoration (non-pickable); the line
+            # skeleton below stays the pickable frame layer, so selection and
+            # highlighting work exactly as they do for the line view.
+            self._backend.render_extruded_frames(
+                self._frames,
+                getattr(self._model, "sections", {}) or {},
+                colors,
+                opacity=opacity,
+                shrink=shrink,
+                detail=extruded_detail,
+            )
         self._backend.render_frames(self._frames, colors, opacity=opacity, shrink=shrink)
 
         if show_shells:
@@ -413,7 +436,9 @@ class ModelViewer:
                 )
 
         if show_restraints and self._restraints:
-            self._backend.render_restraints(self._restraints, size=self.restraint_size())
+            self._backend.render_restraints(
+                self._restraints, size=self.restraint_size(), style=self._restraint_style
+            )
 
         return self
 
@@ -669,9 +694,19 @@ class ModelViewer:
         """Glyph length for support symbols, in model units.
 
         Scaled to the model exactly as :meth:`highlight_radius` is: a fixed length
-        would be invisible on a bridge and swamp a small frame.
+        would be invisible on a bridge and swamp a small frame.  Capped at
+        :meth:`_restraint_size_cap` (500 mm in the model's length unit), so a
+        support symbol never grows past a legible real-world size.
         """
-        return max(_RESTRAINT_SIZE_FRACTION * self._model_diagonal(), _RESTRAINT_SIZE_MIN)
+        scaled = max(_RESTRAINT_SIZE_FRACTION * self._model_diagonal(), _RESTRAINT_SIZE_MIN)
+        return min(scaled, self._restraint_size_cap())
+
+    def _restraint_size_cap(self) -> float:
+        """The support-glyph maximum size: 500 mm in the model's length unit."""
+        from .._unit_scaling import length_scale_factor
+
+        units = getattr(self._model, "units", None) or {}
+        return 0.5 * length_scale_factor(units)
 
     def highlight_elements(
         self,

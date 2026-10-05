@@ -135,6 +135,30 @@ class RenderBackend(ABC):
         ...
 
     @abstractmethod
+    def render_extruded_frames(
+        self,
+        frames: list[FrameGeom],
+        sections: dict,
+        colors: dict[str, tuple[float, float, float]],
+        opacity: float = 1.0,
+        shrink: float = 1.0,
+        detail: str = "plates",
+    ) -> None:
+        """Draw frame elements as extruded solids (their cross-section swept
+        along each member axis).
+
+        Args:
+            frames: List of frame geometries.
+            sections: ``{section_name: Section}`` — the model's sections.
+            colors: ``{section_name: (r, g, b)}`` — RGB in 0..1 range.
+            opacity: Opacity (0 = transparent, 1 = opaque).
+            shrink: Display shrink factor toward each element's midpoint.
+            detail: ``"plates"`` (the efficient open-surface representation) or
+                ``"solid"`` (the closed perimeter, with end caps).
+        """
+        ...
+
+    @abstractmethod
     def render_shells(
         self,
         shells: list[ShellGeom],
@@ -184,18 +208,21 @@ class RenderBackend(ABC):
         restraints: list[RestraintGeom],
         size: float = 1.0,
         color: tuple[float, float, float] = (0.1, 0.4, 0.6),
+        style: str = "block",
     ) -> None:
         """Draw support symbols at restrained nodes.
 
-        One glyph per restrained DOF — an arrow for a translation, a curl for a
-        rotation — so **any** restraint set is drawn, not only the textbook ones
-        (:mod:`fea_toolkit.plotting.restraint_glyphs`).
+        One glyph per restrained DOF — by default a plate for a translation and
+        a disc for a rotation — so **any** restraint set is drawn, not only the
+        textbook ones (:mod:`fea_toolkit.plotting.restraint_glyphs`).
 
         Args:
             restraints: The restrained nodes to draw.
             size: Glyph length in **model units** — the caller scales it to the
                 model, as it does the highlight radius.
             color: Glyph colour, RGB in 0..1 range.
+            style: ``"block"`` (plates and discs) or ``"arrow"`` (arrows and
+                curls, the earlier representation).
         """
         ...
 

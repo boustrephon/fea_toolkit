@@ -1,19 +1,22 @@
-"""Support-restraint glyph geometry — per-DOF arrows and rotation arcs.
+"""Support-restraint glyph geometry — per-DOF squares, circles, arrows and curls.
 
 Pure numpy plus PyVista primitives: no Qt and no plotter, so the shapes can be
 measured without a render window.
 
 **One glyph per restrained DOF** is what makes this right for any restraint set,
-rather than only the textbook ones:
+rather than only the textbook ones.  Two styles cover the same DOFs:
 
-* a restrained **translation** (U1/U2/U3) draws an arrow pointing at the joint
-  along that global axis — a fixed base reads as three arrows converging on it, a
-  roller along X as a single arrow;
-* a restrained **rotation** (R1/R2/R3) draws a curved arrow about that axis.
+* ``"block"`` (the default) — a restrained **translation** (U1/U2/U3) draws a
+  square **wireframe outline** whose face normal points along that global axis,
+  and a restrained **rotation** (R1/R2/R3) draws a circular **wireframe
+  outline** whose face normal points along the rotation axis.  The circle is
+  larger than the square, and both are centred on the node.  No fill is used, so
+  a square and a circle that share a plane both stay visible.
+* ``"arrow"`` (the fallback, kept as a config option) — an arrow pointing at the
+  joint per translation and a curl per rotation, the earlier representation.
 
-The planned refinement — classic hatched-ground / pin-triangle / roller symbols —
-replaces these only for the patterns it recognises and keeps these arrows as the
-fallback, so no restraint set is ever left undrawn.
+Every glyph is centred on the node, so a fixed base reads as three squares and
+three circles stacked at the joint rather than a symbol offset from it.
 """
 
 from typing import Optional
@@ -33,6 +36,14 @@ _SHAFT_RADIUS = 0.03
 _ARC_DEGREES = 270.0
 _ARC_RADIUS = 0.5
 _ARC_RESOLUTION = 24
+
+#: Block-style glyph proportions, as fractions of *size* (the caller's glyph
+#: length).  The square is the translation symbol and the circle the rotation
+#: one; the circle is deliberately larger so the two kinds cannot be mistaken.
+#: Both are wireframe outlines, so no thickness is needed.
+_PLATE_HALF_WIDTH = 0.7
+_DISC_RADIUS = 1.0
+_CIRCLE_RESOLUTION = 32
 
 #: Cached unit-arrow geometry per translation axis (built once).  ``pv.Arrow``
 #: constructs a fresh VTK source pipeline on every call, and
@@ -117,28 +128,93 @@ def rotation_glyph(position: np.ndarray, axis: int, size: float) -> object:
     return arc.merge(head)
 
 
-def support_glyph(position: np.ndarray, dofs, size: float) -> Optional[object]:
+def translation_block_glyph(position: np.ndarray, axis: int, size: float) -> object:
+    """A square wireframe outline centred on *position*, face normal along *axis*.
+
+    The square's normal is the direction of the restrained translation (U1 → X,
+    U2 → Y, U3 → Z), so a fixed base reads as three mutually perpendicular
+    squares stacked at the joint.  It is an outline (no fill), so a rotational
+    circle drawn in the same plane does not hide it.
+    """
+    import pyvista as pv
+
+    direction = np.asarray(_AXES[axis], dtype=float)
+    u, v = _perpendicular(direction)
+    position = np.asarray(position, dtype=float)
+    w = _PLATE_HALF_WIDTH * size
+    du, dv = u * w, v * w
+
+    corners = np.array(
+        [
+            position - du - dv,
+            position + du - dv,
+            position + du + dv,
+            position - du + dv,
+        ]
+    )
+    # Four closed segments: 0→1, 1→2, 2→3, 3→0.
+    lines = np.array([2, 0, 1, 2, 1, 2, 2, 2, 3, 2, 3, 0])
+    return pv.PolyData(corners, lines=lines)
+
+
+def rotation_disc_glyph(position: np.ndarray, axis: int, size: float) -> object:
+    """A circular wireframe outline centred on *position*, normal along *axis*.
+
+    Larger than the translation square, so a rotational restraint reads as a
+    different shape than a translational one.  It is an outline (no fill), so
+    the square and circle remain distinguishable when both are drawn for a node.
+    """
+    import pyvista as pv
+
+    direction = np.asarray(_AXES[axis], dtype=float)
+    u, v = _perpendicular(direction)
+    position = np.asarray(position, dtype=float)
+    radius = _DISC_RADIUS * size
+
+    angles = np.linspace(0.0, 2.0 * np.pi, _CIRCLE_RESOLUTION, endpoint=False)
+    pts = np.array([position + radius * (np.cos(a) * u + np.sin(a) * v) for a in angles])
+    n = len(pts)
+    lines = np.hstack([[2, i, (i + 1) % n] for i in range(n)])
+    return pv.PolyData(pts, lines=lines)
+
+
+def support_glyph(
+    position: np.ndarray,
+    dofs,
+    size: float,
+    style: str = "block",
+) -> Optional[object]:
     """One merged glyph for the restrained DOFs in *dofs*, or ``None``.
 
     Args:
         position: Node coordinates, shape ``(3,)``.
         dofs: ``[U1, U2, U3, R1, R2, R3]`` flags; ``1`` = fixed.
         size: Glyph length in model units — the caller scales it to the model.
+        style: ``"block"`` (plates and discs, the default) or ``"arrow"``
+            (arrows and curls, the earlier representation).
 
     Returns:
-        A ``PolyData`` holding one glyph per restrained DOF (arrows and curls
-        together), or ``None`` when nothing is restrained.
+        A ``PolyData`` holding one glyph per restrained DOF, or ``None`` when
+        nothing is restrained.
     """
     position = np.asarray(position, dtype=float)
+    block = style == "block"
     parts = []
     for index, flag in enumerate(list(dofs)[:6]):
         if not flag:
             continue
-        parts.append(
-            translation_glyph(position, index, size)
-            if index < 3
-            else rotation_glyph(position, index - 3, size)
-        )
+        if index < 3:
+            parts.append(
+                translation_block_glyph(position, index, size)
+                if block
+                else translation_glyph(position, index, size)
+            )
+        else:
+            parts.append(
+                rotation_disc_glyph(position, index - 3, size)
+                if block
+                else rotation_glyph(position, index - 3, size)
+            )
     if not parts:
         return None
     if len(parts) == 1:

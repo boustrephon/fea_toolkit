@@ -431,6 +431,44 @@ class PyVistaRenderer(RenderBackend):
         )
         self._add_actor(actor, "frames")
 
+    def render_extruded_frames(
+        self,
+        frames: list[FrameGeom],
+        sections: dict,
+        colors: dict[str, tuple[float, float, float]],
+        opacity: float = 1.0,
+        shrink: float = 1.0,
+        detail: str = "plates",
+    ) -> None:
+        """Draw frames as extruded solids — one batched, **non-pickable** actor.
+
+        The line skeleton drawn by :meth:`render_frames` remains the pickable
+        frame layer, so selection, highlighting and hide/isolate keep working
+        exactly as they do for the line view; this actor is pure decoration.
+        """
+        if not frames:
+            return
+        from ..extruded_frames import build_extruded_frame_mesh
+
+        mesh = build_extruded_frame_mesh(frames, sections, colors, detail=detail, shrink=shrink)
+        if mesh.points.size == 0:
+            return
+
+        import pyvista as pv
+
+        pv_mesh = pv.PolyData(mesh.points, faces=mesh.faces)
+        pv_mesh.cell_data["rgb"] = mesh.face_colors
+        actor = self.plotter.add_mesh(
+            pv_mesh,
+            scalars="rgb",
+            rgb=True,
+            opacity=opacity,
+            lighting=False,  # unlit: no normal/orientation ambiguity on open surfaces
+            show_scalar_bar=False,
+        )
+        actor.SetPickable(False)
+        self._add_actor(actor, "frames")
+
     # ── Shell elements ───────────────────────────────────────────────
 
     def render_shells(
@@ -506,6 +544,7 @@ class PyVistaRenderer(RenderBackend):
         restraints: list[RestraintGeom],
         size: float = 1.0,
         color: tuple[float, float, float] = (0.1, 0.4, 0.6),
+        style: str = "block",
     ) -> None:
         if not restraints:
             return
@@ -515,7 +554,7 @@ class PyVistaRenderer(RenderBackend):
         # something the model has, not a thing to pick, so it is an overlay.
         glyphs = [
             glyph
-            for glyph in (support_glyph(r.position, r.dofs, size) for r in restraints)
+            for glyph in (support_glyph(r.position, r.dofs, size, style=style) for r in restraints)
             if glyph is not None
         ]
         if not glyphs:

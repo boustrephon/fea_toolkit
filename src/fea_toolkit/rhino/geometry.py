@@ -19,85 +19,17 @@ try:
 except ImportError:
     Rhino = sc = rd = rg = None  # type: ignore
 
-from ..model.sap_data import (
-    BoxSection,
-    ChannelSection,
-    CircularSection,
-    ISection,
-    PipeSection,
-    RectangularSection,
-    SAPModelData,
-)
+from ..model.sap_data import SAPModelData
 
 # ========================================================================
-# Section profile builders (XY plane for Extrusion.Create)
+# Section profile curves (Rhino wrapper over the shared geometry)
 # ========================================================================
-# Extrusion.Create() extrudes along Z, so profiles are in the XY plane.
-# The convention: x = width (→ element y_axis), y = depth (→ element z_axis)
-
-
-def _profile_rect(depth: float, bf: float) -> list[tuple[float, float]]:
-    """Solid rectangular profile in the XY plane."""
-    h, w = depth / 2.0, bf / 2.0
-    return [(-w, -h), (-w, h), (w, h), (w, -h)]
-
-
-def _profile_i(depth: float, bf: float, tf: float, tw: float) -> list[tuple[float, float]]:
-    """I/Wide-flange profile in the XY plane."""
-    h = depth / 2.0
-    w = bf / 2.0
-    wi = tw / 2.0
-    fi = h - tf
-    return [
-        (-w, -h),
-        (w, -h),
-        (w, -fi),
-        (wi, -fi),
-        (wi, fi),
-        (w, fi),
-        (w, h),
-        (-w, h),
-        (-w, fi),
-        (-wi, fi),
-        (-wi, -fi),
-        (-w, -fi),
-    ]
-
-
-def _profile_box(depth: float, bf: float, tf: float, tw: float) -> list[tuple[float, float]]:
-    """Box/RHS profile in the XY plane."""
-    h = depth / 2.0
-    w = bf / 2.0
-    hi = h - tf
-    wi = w - tw
-    return [
-        (-w, -h),
-        (w, -h),
-        (w, h),
-        (-w, h),
-        (-w, hi),
-        (wi, hi),
-        (wi, -hi),
-        (-w, -hi),
-    ]
-
-
-def _profile_channel(depth: float, bf: float, tf: float, tw: float) -> list[tuple[float, float]]:
-    """Channel/C-section profile in the XY plane (CW winding)."""
-    h = depth / 2.0
-    w = bf / 2.0
-    fi = h - tf
-    wi = tw / 2.0
-    return [
-        (-w, -h),
-        (-w, h),
-        (w, h),
-        (w, fi),
-        (wi, fi),
-        (wi, -fi),
-        (w, -fi),
-        (w, -h),
-    ]
+# The profile polygons themselves live in
+# :mod:`fea_toolkit.model.section_profiles` so a section can be extruded to a
+# solid in Rhino *and* a PyVista viewport from one source of truth.  This module
+# only turns those outlines into ``rg`` curves for ``Extrusion.Create``, which
+# extrudes along Z — so a profile is built in the XY plane, with the convention
+# x = width (→ element y_axis), y = depth (→ element z_axis).
 
 
 def _build_profile_curve(sec) -> t.Optional[t.Any]:
@@ -108,42 +40,17 @@ def _build_profile_curve(sec) -> t.Optional[t.Any]:
         a ``("circle", radius)`` tuple for circular sections,
         or ``None`` if the section cannot be profiled.
     """
-    pts_2d = None
-    is_circle = False
-    radius = 0.0
+    from ..model.section_profiles import section_profile_outline
 
-    if isinstance(sec, RectangularSection):
-        pts_2d = _profile_rect(sec.depth, sec.bf)
-    elif isinstance(sec, CircularSection):
-        is_circle = True
-        radius = sec.diameter / 2.0
-    elif isinstance(sec, ISection):
-        if sec.depth > 0 and sec.bf > 0:
-            pts_2d = _profile_i(sec.depth, sec.bf, sec.tf, sec.tw)
-    elif isinstance(sec, PipeSection):
-        if sec.od > 0:
-            is_circle = True
-            radius = sec.od / 2.0
-    elif isinstance(sec, BoxSection):
-        if sec.depth > 0 and sec.bf > 0:
-            pts_2d = _profile_box(sec.depth, sec.bf, sec.tf, sec.tw)
-    elif isinstance(sec, ChannelSection) and sec.depth > 0 and sec.bf > 0:
-        pts_2d = _profile_channel(sec.depth, sec.bf, sec.tf, sec.tw)
-
-    # Fallback for catalogue sections with zero dimensions
-    if pts_2d is None and not is_circle:
-        side = (sec.A**0.5) if sec.A > 0 else 0.1
-        pts_2d = _profile_rect(side, side)
-
-    if is_circle:
-        if radius <= 0:
-            radius = ((sec.A / 3.14159) ** 0.5) if sec.A > 0 else 0.05
-        return ("circle", radius)
-
-    if pts_2d is None:
+    outline = section_profile_outline(sec)
+    if outline is None:
         return None
 
-    pts_3d = [rg.Point3d(x, y, 0) for x, y in pts_2d]
+    kind, value = outline
+    if kind == "circle":
+        return ("circle", value)
+
+    pts_3d = [rg.Point3d(x, y, 0) for x, y in value]
     pl = rg.Polyline(pts_3d)
     pl.Add(pts_3d[0])
     return rg.PolylineCurve(pl)

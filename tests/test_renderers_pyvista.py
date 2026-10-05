@@ -90,6 +90,29 @@ class TestRenderForceFlags:
                 renderer.plotter.close()
 
 
+class TestRenderExtrudedFrames:
+    """``PyVistaRenderer.render_extruded_frames`` builds one non-pickable actor."""
+
+    def test_render_extruded_frames_builds_one_non_pickable_actor(self):
+        from fea_toolkit.model.sap_data import RectangularSection
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            sections = {
+                "UB300": RectangularSection("UB300", "Rectangular", "C", depth=0.3, bf=0.15)
+            }
+            renderer.render_extruded_frames([_frame()], sections, {"UB300": (0.5, 0.5, 0.5)})
+            assert len(renderer._actors) == 1
+            assert len(renderer._categories["frames"]) == 1
+            # Decoration only — the line skeleton stays the pickable frame layer.
+            assert renderer._actors[0].GetPickable() == 0
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+        assert renderer._actors == []
+
+
 class TestModelViewerOverlayForces:
     """``ModelViewer.overlay_forces`` reaches the fixed renderer path."""
 
@@ -767,57 +790,91 @@ def _restraint(node_id="1", position=(0.0, 0.0, 0.0), dofs=(1, 1, 1, 0, 0, 0)):
 class TestRestraintGlyphs:
     """Support symbols: one glyph per restrained DOF.
 
-    Arrows for translations and curls for rotations, which is what makes **any**
-    restraint set drawable — not only the textbook patterns — and what the
-    classic-symbol refinement will keep as its fallback.
+    By default a wireframe square for a translation and a wireframe circle for a
+    rotation — the block style — with arrows/curls kept as the ``style="arrow"``
+    fallback.
     """
 
-    def test_a_translation_is_an_arrow_pointing_at_the_joint(self):
+    def test_a_translation_is_a_square_normal_to_its_axis(self):
         from fea_toolkit.plotting.restraint_glyphs import support_glyph
 
         glyph = support_glyph(np.zeros(3), [1, 0, 0, 0, 0, 0], 1.0)
         xmin, xmax, ymin, ymax, _zmin, _zmax = glyph.bounds
-        assert (xmin, xmax) == pytest.approx((0.0, 1.0))  # tail a size away, head on it
-        # Thin about its own axis, so three of them read as three DOFs.
-        assert abs(ymin) < 0.2
-        assert abs(ymax) < 0.2
+        assert (xmin, xmax) == pytest.approx((0.0, 0.0), abs=0.02)  # zero thickness along X
+        assert ymin == pytest.approx(-0.7, abs=0.02) and ymax == pytest.approx(0.7, abs=0.02)
 
     def test_a_y_translation_uses_the_y_axis(self):
         from fea_toolkit.plotting.restraint_glyphs import support_glyph
 
         glyph = support_glyph(np.zeros(3), [0, 1, 0, 0, 0, 0], 1.0)
-        assert glyph.bounds[2:4] == pytest.approx((0.0, 1.0))
-        assert glyph.bounds[0:2] == pytest.approx((-0.12, 0.12), abs=0.02)
+        assert glyph.bounds[2:4] == pytest.approx((0.0, 0.0), abs=0.02)  # zero thickness along Y
+        assert glyph.bounds[0:2] == pytest.approx((-0.7, 0.7), abs=0.02)  # wide along X
 
-    def test_a_rotation_curls_about_its_axis(self):
-        """R1 turns about X, so the glyph spans Y and Z, not X."""
+    def test_a_rotation_is_a_circle_about_its_axis(self):
+        """R1 turns about X, so the circle spans Y and Z, not X."""
         from fea_toolkit.plotting.restraint_glyphs import support_glyph
 
         glyph = support_glyph(np.zeros(3), [0, 0, 0, 1, 0, 0], 1.0)
         xmin, xmax, ymin, ymax, zmin, zmax = glyph.bounds
-        assert ymin == pytest.approx(-0.5, abs=0.02) and ymax == pytest.approx(0.5, abs=0.02)
-        assert zmin <= -0.4 and zmax >= 0.4
-        assert abs(xmin) < 0.2 and abs(xmax) < 0.2
+        assert (xmin, xmax) == pytest.approx((0.0, 0.0), abs=0.02)
+        assert ymin == pytest.approx(-1.0, abs=0.02) and ymax == pytest.approx(1.0, abs=0.02)
+        assert zmin == pytest.approx(-1.0, abs=0.02) and zmax == pytest.approx(1.0, abs=0.02)
 
-    def test_a_pinned_node_draws_three_arrows(self):
+    def test_the_rotation_circle_is_larger_than_the_translation_square(self):
+        from fea_toolkit.plotting.restraint_glyphs import (
+            rotation_disc_glyph,
+            translation_block_glyph,
+        )
+
+        square = translation_block_glyph(np.zeros(3), 0, 1.0)
+        circle = rotation_disc_glyph(np.zeros(3), 0, 1.0)
+        square_extent = max(
+            square.bounds[1] - square.bounds[0], square.bounds[3] - square.bounds[2]
+        )
+        circle_extent = max(
+            circle.bounds[1] - circle.bounds[0], circle.bounds[3] - circle.bounds[2]
+        )
+        assert circle_extent > square_extent
+
+    def test_the_block_glyphs_are_wireframe_not_filled(self):
+        """No faces — the square and circle are outlines, so they never occlude."""
+        from fea_toolkit.plotting.restraint_glyphs import (
+            rotation_disc_glyph,
+            translation_block_glyph,
+        )
+
+        square = translation_block_glyph(np.zeros(3), 0, 1.0)
+        circle = rotation_disc_glyph(np.zeros(3), 0, 1.0)
+        assert square.lines.size > 0 and square.faces.size == 0
+        assert circle.lines.size > 0 and circle.faces.size == 0
+
+    def test_a_pinned_node_draws_three_squares(self):
         from fea_toolkit.plotting.restraint_glyphs import support_glyph
 
         glyph = support_glyph(np.zeros(3), [1, 1, 1, 0, 0, 0], 1.0)
         bounds = glyph.bounds
         for low, high in ((0, 1), (2, 3), (4, 5)):
-            assert bounds[high] == pytest.approx(1.0)
-            assert bounds[low] == pytest.approx(-0.12, abs=0.02)
+            assert bounds[high] == pytest.approx(0.7, abs=0.02)
+            assert bounds[low] == pytest.approx(-0.7, abs=0.02)
+
+    def test_the_arrow_style_is_still_available(self):
+        """The earlier representation survives as a config option."""
+        from fea_toolkit.plotting.restraint_glyphs import support_glyph
+
+        glyph = support_glyph(np.zeros(3), [1, 0, 0, 0, 0, 0], 1.0, style="arrow")
+        assert glyph.bounds[0:2] == pytest.approx((0.0, 1.0))
 
     def test_a_free_node_draws_nothing(self):
         from fea_toolkit.plotting.restraint_glyphs import support_glyph
 
         assert support_glyph(np.zeros(3), [0, 0, 0, 0, 0, 0], 1.0) is None
 
-    def test_the_glyph_follows_the_node(self):
+    def test_the_glyph_is_centred_on_the_node(self):
         from fea_toolkit.plotting.restraint_glyphs import support_glyph
 
         glyph = support_glyph(np.array([10.0, 0.0, 0.0]), [1, 0, 0, 0, 0, 0], 1.0)
-        assert glyph.bounds[0:2] == pytest.approx((10.0, 11.0))
+        centre = (glyph.bounds[0] + glyph.bounds[1]) / 2
+        assert centre == pytest.approx(10.0)
 
     def test_render_restraints_adds_a_non_pickable_overlay(self):
         """A support is not a thing to pick — the click belongs to the node."""
@@ -970,6 +1027,34 @@ class TestNodeMarkersAndSelection:
         try:
             diagonal = viewer._model_diagonal()
             assert 0.03 * diagonal < viewer.restraint_size() < 0.05 * diagonal
+        finally:
+            viewer._backend.plotter.close()
+
+    def test_the_restraint_size_cap_is_500mm_in_model_units(self):
+        """The glyph's maximum is a fixed real-world size, converted per unit."""
+        viewer = self._viewer(restraints={"1": [1, 0, 0, 0, 0, 0]})
+        try:
+            viewer._model.units = {"F": "N", "L": "m", "T": "C"}
+            assert viewer._restraint_size_cap() == pytest.approx(0.5)
+            viewer._model.units = {"F": "N", "L": "mm", "T": "C"}
+            assert viewer._restraint_size_cap() == pytest.approx(500.0)
+        finally:
+            viewer._backend.plotter.close()
+
+    def test_restraint_size_is_capped_at_500mm_for_a_large_model(self):
+        """4 % of a 100 m model would be ~4 m; the cap keeps it at 500 mm."""
+        from fea_toolkit.io.results_repository import mesh_model_from_geometry
+        from fea_toolkit.plotting.viewer import ModelViewer
+
+        geometry = _quad_geometry()
+        geometry["node_x"] = np.array([0.0, 100.0, 100.0, 0.0])
+        geometry["node_y"] = np.array([0.0, 0.0, 50.0, 50.0])
+        viewer = ModelViewer(
+            mesh_model=mesh_model_from_geometry(geometry), backend="pyvista", off_screen=True
+        )
+        try:
+            viewer.show_model(show_shells=False)
+            assert viewer.restraint_size() == pytest.approx(0.5)
         finally:
             viewer._backend.plotter.close()
 
