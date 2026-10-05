@@ -45,6 +45,11 @@ BUILDER_CONFIG_KEYS: dict[str, ParamSpec] = {
     "apply_rigid_bodies": ParamSpec(
         True, bool, help="Apply SAP2000 BODY constraints as rigid links."
     ),
+    "fix_shell_only_base": ParamSpec(
+        False,
+        bool,
+        help="Upgrade shell-only base nodes to full fixity during the build (model untouched).",
+    ),
     "simplify_distributed_loads": ParamSpec(
         False, bool, help="Decompose non-uniform member loads into uniform segments."
     ),

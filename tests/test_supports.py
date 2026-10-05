@@ -9,9 +9,11 @@ from fea_toolkit.model.mesh_model import MeshModel
 from fea_toolkit.model.sap_data import Constraint, Restraint
 from fea_toolkit.model.supports import (
     constraint_label,
+    fix_shell_only_base_restraints,
     fixed_dofs,
     restraint_dofs,
     restraint_label,
+    shell_only_base_node_ids,
     support_rows,
 )
 
@@ -37,6 +39,102 @@ def _model(*, restraints=None, assignments=None, constraints=None):
     model.constraint_assignments = assignments if assignments is not None else {}
     model.constraints = constraints if constraints is not None else {}
     return model
+
+
+def test_fix_shell_only_base_restraints_upgrades_only_shell_only_bases():
+    """A pinned shell-only base becomes fixed; a frame-connected base is left."""
+    from fea_toolkit.model.sap_data import AreaElement, FrameElement, Node, Restraint, SAPModelData
+
+    md = SAPModelData(
+        nodes={
+            "1": Node("1", 1, 0.0, 0.0, 0.0),  # base, frame-connected
+            "2": Node("2", 2, 4.0, 0.0, 0.0),  # base, shell-only
+            "3": Node("3", 3, 0.0, 0.0, 3.0),  # top
+        },
+        restraints={
+            "1": Restraint([1, 1, 1, 0, 0, 0]),
+            "2": Restraint([1, 1, 1, 0, 0, 0]),
+        },
+        materials={},
+        sections={},
+        frame_elements={"F1": FrameElement("F1", 11, "1", "3")},
+        area_elements={"A1": AreaElement("A1", 21, ["2", "3", "1"])},
+        frame_assignments={},
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
+    )
+
+    count, fixed = fix_shell_only_base_restraints(md)
+
+    assert fixed == ["2"]
+    assert count == 1
+    assert md.restraints["2"].dofs == [1, 1, 1, 1, 1, 1]
+    assert md.restraints["1"].dofs == [1, 1, 1, 0, 0, 0]  # frame-connected base untouched
+
+
+def test_shell_only_base_node_ids_is_read_only():
+    """The lookup reports the set without mutating the model's restraints."""
+    from fea_toolkit.model.sap_data import AreaElement, FrameElement, Node, Restraint, SAPModelData
+
+    md = SAPModelData(
+        nodes={
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 4.0, 0.0, 0.0),
+            "3": Node("3", 3, 0.0, 0.0, 3.0),
+        },
+        restraints={
+            "1": Restraint([1, 1, 1, 0, 0, 0]),
+            "2": Restraint([1, 1, 1, 0, 0, 0]),
+        },
+        materials={},
+        sections={},
+        frame_elements={"F1": FrameElement("F1", 11, "1", "3")},
+        area_elements={"A1": AreaElement("A1", 21, ["2", "3", "1"])},
+        frame_assignments={},
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
+    )
+
+    assert shell_only_base_node_ids(md) == {"2"}
+    # Read-only: the pinned restraint on node 2 is untouched.
+    assert md.restraints["2"].dofs == [1, 1, 1, 0, 0, 0]
+
+
+def test_modal_runner_flags_only_free_rotation_shell_base_nodes():
+    """The modal pre-check reports pinned shell-only bases, not fixed/framed ones."""
+    from fea_toolkit.model.sap_data import AreaElement, FrameElement, Node, Restraint, SAPModelData
+    from fea_toolkit.opensees._runner_modal import ModalRunnerMixin
+
+    class _Runner(ModalRunnerMixin):
+        def __init__(self, mesh_model):
+            self.mesh_model = mesh_model
+
+    md = SAPModelData(
+        nodes={
+            "1": Node("1", 1, 0.0, 0.0, 0.0),  # shell-only base, pinned
+            "2": Node("2", 2, 4.0, 0.0, 0.0),  # shell-only base, fixed
+            "3": Node("3", 3, 8.0, 0.0, 0.0),  # frame-connected base, pinned
+            "4": Node("4", 4, 0.0, 0.0, 3.0),  # top
+        },
+        restraints={
+            "1": Restraint([1, 1, 1, 0, 0, 0]),
+            "2": Restraint([1, 1, 1, 1, 1, 1]),
+            "3": Restraint([1, 1, 1, 0, 0, 0]),
+        },
+        materials={},
+        sections={},
+        frame_elements={"F1": FrameElement("F1", 11, "3", "4")},
+        area_elements={"A1": AreaElement("A1", 21, ["1", "2", "4"])},
+        frame_assignments={},
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
+    )
+
+    runner = _Runner(md)
+    assert runner._free_rotation_shell_base_nodes() == ["1"]
 
 
 class TestRestraintLabels:

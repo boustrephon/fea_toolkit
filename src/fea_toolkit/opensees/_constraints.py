@@ -828,3 +828,23 @@ class ConstraintMixin:
                     if np.linalg.norm(p - proj) > 0.01:
                         continue
                     ops.fix(nd.node_tag, *combined)
+
+        # ── Shell-only base drilling fix (build-time, opt-in) ──────
+        # ``fix_shell_only_base`` upgrades shell-only base nodes to full fixity
+        # *here, in the OpenSees domain*, so the MeshModel (and every other
+        # analysis built from it) keeps the original pinned restraints.  Only
+        # the currently-free DOFs are constrained, so a pinned node gains its
+        # rotations without re-constraining its translations (which OpenSees
+        # would reject as a duplicate SP constraint).
+        if self.config.get("fix_shell_only_base"):
+            from ..model.supports import shell_only_base_node_ids
+
+            for node_id in sorted(shell_only_base_node_ids(self.mesh_model)):
+                nd = self.mesh_model.nodes.get(node_id)
+                if nd is None:
+                    continue
+                current = self.mesh_model.restraints.get(node_id)
+                dofs = list(current.dofs[:6]) if current is not None else [0, 0, 0, 0, 0, 0]
+                additions = [1 if flag == 0 else 0 for flag in dofs]
+                if any(additions):
+                    ops.fix(nd.node_tag, *additions)

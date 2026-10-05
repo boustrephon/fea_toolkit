@@ -24,6 +24,61 @@ _MAX_EIGENVALUE = 1.0e30
 class ModalRunnerMixin:
     """Modal (eigenvalue) analysis and mode-shape extraction."""
 
+    def _free_rotation_shell_base_nodes(self) -> list[str]:
+        """Shell-only base nodes whose restraint leaves a rotation free.
+
+        A shell-only base node is a bottom node referenced by an area element but
+        no frame element (see
+        :func:`~fea_toolkit.model.supports.shell_only_base_node_ids`).  When such
+        a node's restraint pins translations but not rotations (``[1,1,1,0,0,0]``,
+        or no restraint at all), the shell it anchors can rotate freely — a
+        drilling mechanism that makes the stiffness matrix singular.  The set
+        returned is what :func:`~fea_toolkit.model.supports.fix_shell_only_base_restraints`
+        (and the build-time ``fix_shell_only_base`` option) would upgrade.
+
+        Returns:
+            The offending node ids, in sorted order.
+        """
+        from ..model.supports import restraint_dofs, shell_only_base_node_ids
+
+        nodes = []
+        for nid in sorted(shell_only_base_node_ids(self.mesh_model)):
+            dofs = restraint_dofs(self.mesh_model, nid)
+            if not dofs or not all(dofs[3:6]):
+                nodes.append(nid)
+        return nodes
+
+    def _static_gravity_ok(self) -> bool:
+        """Cheap static self-weight step — ``True`` if the solve converged.
+
+        The eigensolver (ARPACK) loops forever on a singular stiffness matrix,
+        so the modal runner probes solvability *first*: a non-convergent static
+        step means the model is a mechanism, and it is reported as a clean error
+        rather than a hung worker.  A healthy model converges in one step, so
+        the cost is negligible.
+        """
+        self.create_loads(pattern_scales={"Self weight": 1.0})
+        try:
+            if self._edge_constraint_method == "penalty":
+                ops.constraints("Penalty", 1.0e12, 1.0e12)
+            else:
+                ops.constraints("Transformation")
+            ops.numberer("RCM")
+            ops.system(self.config.get("solver_system", "BandGen"))
+            ops.test("NormDispIncr", 1e-3, 5, 0)
+            for alg in ("Newton", "NewtonLineSearch", "ModifiedNewton", "KrylovNewton"):
+                try:
+                    ops.algorithm(alg)
+                except Exception:
+                    continue
+                ops.integrator("LoadControl", 1.0)
+                ops.analysis("Static")
+                if ops.analyze(1) == 0:
+                    return True
+        except Exception:
+            pass
+        return False
+
     def run_modal_analysis(
         self, num_modes: int = 30, print_results: bool = True, eigen_solver: str = "default"
     ) -> dict[str, Any]:
@@ -75,39 +130,46 @@ class ModalRunnerMixin:
         if not _has_mass:
             self.compute_seismic_masses()
 
+        # ── Fail fast on a singular stiffness matrix ─────────────
+        # The eigensolver (ARPACK) loops forever on a singular stiffness matrix,
+        # so probe solvability *first* with a cheap static self-weight step.  A
+        # non-convergent step means the model is a mechanism; report it as a clean
+        # error instead of hanging the worker (and the GUI's busy cursor).  When
+        # the likely cause is a shell-only base node whose rotation is free, name
+        # it — but only trust that hint when the build-time fix is off, because
+        # with it on the base is already fixed in the domain and the mechanism is
+        # elsewhere.
+        if not self._static_gravity_ok():
+            if not self.config.get("fix_shell_only_base"):
+                singular_nodes = self._free_rotation_shell_base_nodes()
+                if singular_nodes:
+                    raise RuntimeError(
+                        "Modal analysis skipped: the model has "
+                        f"{len(singular_nodes)} shell-only base node(s) whose rotation "
+                        "is free (a shell has no drilling stiffness), so the stiffness "
+                        "matrix is singular and the eigenvalue solver cannot converge.  "
+                        "Fix them with a fix_shell_only_base step before meshing, or "
+                        f"set fix_shell_only_base: True in this step's config, then "
+                        f"retry.  Nodes: {', '.join(singular_nodes[:10])}"
+                        + ("…" if len(singular_nodes) > 10 else "")
+                    )
+            raise RuntimeError(
+                "Modal analysis skipped: a static self-weight solve did not "
+                "converge, so the stiffness matrix is singular — the model has a "
+                "mechanism (an unconstrained DOF or a free-floating part).  Run "
+                "check_model_connectivity() to locate it, fix the support / "
+                "connectivity, then retry."
+            )
+
         # ── Ritz / pre-load nudge ────────────────────────────────
         _needs_nudge = eigen_solver in ("genBandArpack", "ritz")
         if _needs_nudge:
             self._log.info("modal", "Ritz pre-step (static gravity)...")
-            # Run a self-weight gravity load step
-            self.create_loads(pattern_scales={"Self weight": 1.0})
-            try:
-                if self._edge_constraint_method == "penalty":
-                    ops.constraints("Penalty", 1.0e12, 1.0e12)
-                else:
-                    ops.constraints("Transformation")
-                ops.numberer("RCM")
-                ops.system(self.config.get("solver_system", "BandGen"))
-                ops.test("NormDispIncr", 1e-3, 5, 0)
-                _algorithms = ["Newton", "NewtonLineSearch", "ModifiedNewton", "KrylovNewton"]
-                _ok = -1
-                for _alg in _algorithms:
-                    try:
-                        ops.algorithm(_alg)
-                    except Exception:
-                        continue
-                    ops.integrator("LoadControl", 1.0)
-                    ops.analysis("Static")
-                    _ok = ops.analyze(1)
-                    if _ok == 0:
-                        break
-                if _ok != 0:
-                    self._log.warning(
-                        "modal",
-                        "Ritz pre-step did not converge — continuing with zero initial state",
-                    )
-            except Exception:
-                self._log.warning("modal", "Ritz pre-step failed — continuing")
+            if not self._static_gravity_ok():
+                self._log.warning(
+                    "modal",
+                    "Ritz pre-step did not converge — continuing with zero initial state",
+                )
 
         # ── Set constraint handler for eigen analysis ────────────
         try:
@@ -165,6 +227,16 @@ class ModalRunnerMixin:
             ev for ev in eigenvals_all if math.isfinite(ev) and 1e-12 < ev < _MAX_EIGENVALUE
         ]
         n_modes = len(eigenvals)
+        if n_modes == 0:
+            raise RuntimeError(
+                "Modal analysis found no positive eigenvalues — the stiffness "
+                "matrix is singular, which means the model has a mechanism (an "
+                "unconstrained DOF).  A common cause is a shell-only base node "
+                "pinned [1,1,1,0,0,0]: a shell (e.g. ShellMITC4) has no drilling "
+                "stiffness, so a shell-only pinned base can rotate freely.  Use "
+                "check_model_connectivity() to locate them, and "
+                "fix_shell_only_base_restraints() to fix them, before retrying."
+            )
         if n_modes < num_modes:
             self._log.warning(
                 "modal",

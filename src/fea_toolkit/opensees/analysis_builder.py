@@ -279,6 +279,12 @@ class AnalysisBuilder(
             # default — omitting it leaves those joints free and makes the
             # model softer.  Set False to disable.
             "apply_rigid_bodies": True,
+            # ── Shell-only base drilling fix (build-time, opt-in) ──
+            # Upgrade shell-only base nodes (bottom nodes referenced by a
+            # shell but no frame) to full fixity *in the OpenSees domain
+            # only*, so the shared MeshModel is untouched and other analyses
+            # keep the original pinned restraints.  Off by default.
+            "fix_shell_only_base": False,
             # Rigidity factor for the retained (non-released) DOFs on the
             # release element — must be much stiffer than the member it
             # terminates so the release does not soften the member.

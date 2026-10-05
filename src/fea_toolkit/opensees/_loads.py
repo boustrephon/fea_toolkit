@@ -771,8 +771,11 @@ class LoadMixin:
         # pressure here as consistent nodal loads on the panel's own nodes
         # (P·A/n_c per node), mirroring the area-gravity path above.
         # Loads-only panels (loads_only_area_ids) and explicit ``to_frame``
-        # loads are handled by the edge-load conversion instead.
-        if self.config.get("create_shells", False):
+        # loads are handled by the edge-load conversion instead.  Shells exist
+        # when the preprocessor meshed areas (the analysis verbs do not carry
+        # the preprocessor's ``create_shells`` flag), so derive it from the mesh
+        # rather than the builder config.
+        if self.mesh_model.area_elements:
             loads_only = set(getattr(self.mesh_model, "loads_only_area_ids", set()))
             for aul in getattr(self.mesh_model, "area_uniform_loads", []):
                 if getattr(aul, "to_frame", False):

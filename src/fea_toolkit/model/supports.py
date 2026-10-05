@@ -94,3 +94,68 @@ def support_rows(model: Any, node_id: str) -> list:
     if constraint:
         rows.append(("Constraint", constraint))
     return rows
+
+
+def shell_only_base_node_ids(md: Any) -> set[str]:
+    """The model's shell-only base node ids — read-only.
+
+    A shell-only base node is a bottom node (``min z``) referenced by an area
+    element but no frame element.  These are the nodes whose pinned
+    ``[1,1,1,0,0,0]`` restraint is a rotational mechanism for shells (which
+    carry no drilling stiffness), and so the set that both
+    :func:`fix_shell_only_base_restraints` and the build-time
+    ``fix_shell_only_base`` option upgrade to full fixity.
+
+    Args:
+        md: A ``SAPModelData`` or ``MeshModel`` — anything with ``nodes``,
+            ``frame_elements`` and ``area_elements``.
+
+    Returns:
+        The node ids (a set), possibly empty.
+    """
+    nodes = getattr(md, "nodes", None) or {}
+    if not nodes:
+        return set()
+    min_z = min(nd.z for nd in nodes.values())
+    base_ids = {nid for nid, nd in nodes.items() if abs(nd.z - min_z) < 0.01}
+    frame_conn: set = set()
+    for element in (getattr(md, "frame_elements", None) or {}).values():
+        if getattr(element, "node_i", None) in base_ids:
+            frame_conn.add(element.node_i)
+        if getattr(element, "node_j", None) in base_ids:
+            frame_conn.add(element.node_j)
+    area_nodes: set = set()
+    for area in (getattr(md, "area_elements", None) or {}).values():
+        area_nodes.update(area.node_ids)
+    return {nid for nid in (base_ids - frame_conn) if nid in area_nodes}
+
+
+def fix_shell_only_base_restraints(md: Any) -> tuple[int, list[str]]:
+    """Apply full fixity to the model's shell-only base nodes, in place.
+
+    A shell-only base node is a bottom node referenced by an area element but no
+    frame element.  SAP2000 exports every base node as pinned ``[1,1,1,0,0,0]``,
+    but a shell (e.g. ``ShellMITC4``) has no drilling stiffness, so a shell-only
+    pinned base is a rotational mechanism that makes the stiffness matrix
+    singular — the ``matrix singular U(i,i)=0`` modal failure.  This upgrades
+    exactly those nodes (see :func:`shell_only_base_node_ids`) to
+    ``[1,1,1,1,1,1]``, the set
+    :func:`~fea_toolkit.model.checks.check_model_connectivity` reports under
+    ``shell_only_base_nodes``.
+
+    Args:
+        md: A ``SAPModelData`` (or anything with ``nodes``, ``frame_elements``,
+            ``area_elements`` and ``restraints``).
+
+    Returns:
+        ``(number of nodes fixed, their node ids)``.
+    """
+    from .sap_data import Restraint
+
+    restraints = getattr(md, "restraints", None)
+    fixed: list[str] = []
+    for nid in sorted(shell_only_base_node_ids(md)):
+        if restraints is not None and nid in restraints:
+            restraints[nid] = Restraint([1, 1, 1, 1, 1, 1])
+            fixed.append(nid)
+    return len(fixed), fixed

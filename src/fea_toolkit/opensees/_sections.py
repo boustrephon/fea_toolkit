@@ -561,7 +561,10 @@ class SectionMixin:
 
     def _create_shell_elements(self) -> None:
         """Create ShellMITC4 elements from MeshModel area elements."""
-        if not self.config.get("create_shells", False):
+        # The preprocessor decides whether areas become shells; the builder just
+        # mirrors the frozen mesh.  The analysis verbs do not carry the
+        # preprocessor's ``create_shells`` flag, so derive it from the mesh.
+        if not self.mesh_model.area_elements:
             return
 
         self._log.info("sections", "Creating shell elements...")
