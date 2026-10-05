@@ -215,6 +215,23 @@ def test_plot_seismic_spectrum_threads_units():
     assert "mm/s" in ylabel
 
 
+def test_plot_response_spectra_draws_named_functions():
+    """plot_response_spectra draws one line per named model spectrum."""
+    import matplotlib.pyplot as plt
+
+    from fea_toolkit.model.sap_data import ResponseSpectrumFunction
+    from fea_toolkit.plotting.seismic_spectrum import plot_response_spectra
+
+    fig = plot_response_spectra(
+        {"UNIFRS": ResponseSpectrumFunction("UNIFRS", [0.0, 1.0], [1.0, 1.0])},
+        units={"F": "N", "L": "m", "T": "C"},
+    )
+    assert fig is not None
+    ax = fig.axes[0]
+    assert len(ax.lines) == 1
+    plt.close(fig)
+
+
 def test_interp_sa():
     """Interpolation should return known values at input points."""
     T = [0.0, 0.5, 1.0]
@@ -222,6 +239,40 @@ def test_interp_sa():
     result = _interp_sa([0.25, 0.75], T, Sa)
     expected = np.interp([0.25, 0.75], T, Sa)
     np.testing.assert_array_almost_equal(result, expected)
+
+
+def test_spectrum_from_auto_seismic_uses_record_fields():
+    """AlphaMax / Tg / DampRatio from an AUTO SEISMIC record drive the spectrum."""
+    from fea_toolkit.spectrum import spectrum_from_auto_seismic
+
+    T, Sa = spectrum_from_auto_seismic(
+        {"AlphaMax": 0.16, "Tg": 0.4, "DampRatio": 0.05},
+        g=DEFAULT_GRAVITY_MS2,
+    )
+    assert T[0] == 0.0
+    assert len(T) == len(Sa)
+    # T=0.2 sits on the plateau (Tg=0.4), so Sa = η₂·α_max·g = 0.16·g.
+    sa_plateau = _interp_sa([0.2], T, Sa)[0]
+    assert abs(sa_plateau - 0.16 * DEFAULT_GRAVITY_MS2) < 1e-9
+
+
+def test_spectrum_from_auto_seismic_needs_alpha_and_tg():
+    from fea_toolkit.spectrum import spectrum_from_auto_seismic
+
+    with pytest.raises(ValueError):
+        spectrum_from_auto_seismic({"Tg": 0.4})
+    with pytest.raises(ValueError):
+        spectrum_from_auto_seismic({"AlphaMax": 0.16})
+
+
+def test_spectrum_from_auto_seismic_units_argument():
+    """units= scales Sa into the model's unit system."""
+    from fea_toolkit.spectrum import spectrum_from_auto_seismic
+
+    record = {"AlphaMax": 0.16, "Tg": 0.4, "DampRatio": 0.05}
+    _, sa_si = spectrum_from_auto_seismic(record, g=DEFAULT_GRAVITY_MS2)
+    _, sa_mm = spectrum_from_auto_seismic(record, units={"F": "N", "L": "mm", "T": "C"})
+    np.testing.assert_allclose(np.asarray(sa_mm), np.asarray(sa_si) * 1000.0, rtol=1e-12)
 
 
 # ── IEC 62271-207 spectrum tests ───────────────────────────────────────

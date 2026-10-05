@@ -2513,3 +2513,14 @@ class TestLoadCombinationParser:
             ("DEAD", 1.0),
             ("DEAD", -0.9),
         ]
+
+
+def test_response_spectrum_functions_parsed():
+    """``FUNCTION - RESPONSE SPECTRUM`` rows are grouped into named T/Sa pairs."""
+    md = SAP2000Parser(SAMPLE_S2K).parse().get_model_data()
+
+    function = md.response_spectrum_functions["UNIFRS"]
+    assert function.name == "UNIFRS"
+    assert function.periods == [0.0, 1.0]
+    assert function.accels == [1.0, 1.0]
+    assert function.damping == pytest.approx(0.05)

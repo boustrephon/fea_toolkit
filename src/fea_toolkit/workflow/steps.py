@@ -117,6 +117,9 @@ class ParamSpec:
             renders a structured editor from it instead of a raw literal, so the
             parameter's sub-options are discoverable and type-checked.  ``None``
             means the dict is edited as a free-form literal.
+        allow_none: When ``True``, ``None`` is an accepted value in addition to
+            :attr:`type` — used for an optional limit whose absence means "no
+            limit" (e.g. ``n_modes`` = use every available mode).
     """
 
     default: Any
@@ -124,6 +127,7 @@ class ParamSpec:
     help: str = ""
     choices: Optional[tuple] = None
     manifest: Optional[dict] = None
+    allow_none: bool = False
 
     def coerce(self, value: Any, *, verb: str, name: str) -> Any:
         """Return *value* as :attr:`type`, rejecting a wrong value.
@@ -140,6 +144,8 @@ class ParamSpec:
             ValueError: If *value* has the wrong type, or is not one of
                 :attr:`choices`.
         """
+        if value is None and self.allow_none:
+            return None
         expected = self.type
         if expected is bool:
             if not isinstance(value, bool):

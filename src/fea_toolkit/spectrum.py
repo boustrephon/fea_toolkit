@@ -1045,6 +1045,58 @@ def _interp_sa(T_query, T_spec, Sa_spec):
     return np.interp(np.asarray(T_query), np.asarray(T_spec), np.asarray(Sa_spec))
 
 
+def spectrum_from_auto_seismic(
+    record: dict,
+    *,
+    g: Optional[float] = None,
+    units: Optional[dict] = None,
+    n_pts: int = 300,
+    T_max: float = 6.0,
+) -> tuple[list[float], list[float]]:
+    """Build a GB 50011 spectrum from an ``AUTO SEISMIC`` table record.
+
+    SAP2000's ``AUTO SEISMIC - CHINESE 2010`` load pattern stores the design
+    spectrum as three numbers — ``AlphaMax`` (the seismic influence coefficient
+    maximum), ``Tg`` (the characteristic period) and ``DampRatio`` (the damping
+    ratio) — so the spectrum the source model actually defines can be rebuilt
+    without re-typing intensity / site class.  The record is read verbatim: no
+    code re-derives ``AlphaMax`` from an intensity, so this honours whatever
+    earthquake level the model author selected.
+
+    Args:
+        record: One value of ``LoadPattern.auto_data`` — the dict stored under
+            the ``"AUTO SEISMIC - …"`` table name.
+        g: Gravitational acceleration in the model's acceleration unit.  When
+            given it is used verbatim; ``None`` falls back to *units*, then the
+            shared SI constant — exactly :func:`_resolve_g`.
+        units: Model units dict, used to derive *g* when it is not supplied.
+        n_pts: Number of period ordinates on the uniform grid.
+        T_max: Upper period bound (s).
+
+    Returns:
+        ``(T, Sa)`` — period axis (s) and spectral accelerations in the model's
+        acceleration unit.
+
+    Raises:
+        ValueError: If the record lacks the ``AlphaMax`` or ``Tg`` fields.
+    """
+    alpha_max = record.get("AlphaMax")
+    tg = record.get("Tg")
+    if alpha_max is None or tg is None:
+        raise ValueError(
+            "spectrum_from_auto_seismic: record needs 'AlphaMax' and 'Tg' "
+            f"(got keys {sorted(record)})"
+        )
+    zeta = record.get("DampRatio", 0.05)
+    g = _resolve_g(g, units)
+    gamma = 0.9 + (0.05 - zeta) / (0.3 + 6.0 * zeta)
+    eta1 = max(0.0, 0.02 + (0.05 - zeta) / (4.0 + 32.0 * zeta))
+    eta2 = max(0.55, 1.0 + (0.05 - zeta) / (0.08 + 1.6 * zeta))
+    T = np.linspace(0.0, T_max, n_pts)
+    Sa = _gb50011_spectrum(T, float(alpha_max), float(tg), gamma, eta1, eta2, g)
+    return T.tolist(), Sa.tolist()
+
+
 def cqc_base_shear(
     eff_masses: list[float],
     periods: list[float],

@@ -153,6 +153,8 @@ HANDLED_PREFIXES: tuple[str, ...] = (
     "MATERIAL PROPERTIES",  # 01/02/03A/03B/03E/03F/03J/06/09 merged in _get_all_materials()
     "CONSTRAINT DEFINITIONS - ",  # BODY / DIAPHRAGM / EQUAL / BEAM / ROD / PLATE / WELD / LOCAL
     "CASE -",  # every load-case table, merged into LoadCase.case_data
+    # Response-spectrum functions, read into SAPModelData.response_spectrum_functions.
+    "FUNCTION - RESPONSE SPECTRUM - ",
     # The AUTO load-pattern generators, *by family*.  SAP2000 suffixes these
     # with the design code — ``AUTO SEISMIC - CHINESE 2010``, ``… - IBC 2018``,
     # ``AUTO WIND - USER``, ``… - ASCE 7-16`` … — and every member carrying a

@@ -33,6 +33,7 @@ from ..model.sap_data import (
     MassSource,
     Material,
     Node,
+    ResponseSpectrumFunction,
     Restraint,
     SAPModelData,
     Section,
@@ -357,6 +358,7 @@ class SAP2000Parser:
         area_uniform_loads, area_gravity_loads = self._get_area_loads()
         load_cases = self.get_load_cases()
         load_combinations = self._get_load_combinations(load_cases)
+        response_spectrum_functions = self._get_response_spectrum_functions()
 
         # ── Populate area element thickness from assigned sections ──
         for aid, a_elem in area_elements.items():
@@ -421,7 +423,9 @@ class SAP2000Parser:
             area_gravity_loads=area_gravity_loads,
             load_cases=load_cases,
             load_combinations=load_combinations,
+            response_spectrum_functions=response_spectrum_functions,
             units=model_units,
+            source=str(self.file_path),
         )
 
         # ── Apply material defaults in-place ──────────────────────
@@ -2009,6 +2013,47 @@ class SAP2000Parser:
         from .table_registry import classify
 
         return classify(table_name) == "ignored"
+
+    def _get_response_spectrum_functions(self) -> dict[str, ResponseSpectrumFunction]:
+        """Parse ``FUNCTION - RESPONSE SPECTRUM - *`` tables into named spectra.
+
+        SAP2000 writes one row per ``(function, period)`` pair, with ``FuncDamp``
+        only on the first row of each function.  Rows are grouped by ``Name`` and
+        kept in file order (periods ascend in SAP's output).
+
+        Returns:
+            ``{function name: ResponseSpectrumFunction}``.
+        """
+        periods: dict[str, list[float]] = {}
+        accels: dict[str, list[float]] = {}
+        damping: dict[str, float] = {}
+        for table_name, records in self._raw_tables.items():
+            if not table_name.startswith("FUNCTION - RESPONSE SPECTRUM - "):
+                continue
+            for rec in records:
+                name = rec.get("Name")
+                if not name:
+                    continue
+                name = str(name)
+                try:
+                    period = float(rec.get("Period", 0.0))
+                    accel = float(rec.get("Accel", 0.0))
+                except (TypeError, ValueError):
+                    continue
+                periods.setdefault(name, []).append(period)
+                accels.setdefault(name, []).append(accel)
+                if "FuncDamp" in rec:
+                    damping[name] = float(rec.get("FuncDamp", 0.05))
+
+        return {
+            name: ResponseSpectrumFunction(
+                name=name,
+                periods=periods[name],
+                accels=accels[name],
+                damping=damping.get(name, 0.05),
+            )
+            for name in periods
+        }
 
     def _get_load_patterns(self) -> dict[str, LoadPattern]:
         patterns = {}

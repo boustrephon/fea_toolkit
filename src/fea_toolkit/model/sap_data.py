@@ -1892,6 +1892,23 @@ def apply_material_defaults(materials: dict[str, Material], units: dict[str, str
 
 
 @dataclass
+class ResponseSpectrumFunction:
+    """A response-spectrum function from the ``FUNCTION - RESPONSE SPECTRUM`` table.
+
+    Attributes:
+        name: SAP function name (e.g. ``"UNIFRS"``).
+        periods: Period ordinates (s), ascending.
+        accels: Spectral accelerations (model acceleration units), one per period.
+        damping: Function damping ratio (``FuncDamp``), default 0.05.
+    """
+
+    name: str
+    periods: list[float]
+    accels: list[float]
+    damping: float = 0.05
+
+
+@dataclass
 class SAPModelData:
     """Complete SAP2000 model data for export to OpenSees or Rhino."""
 
@@ -1918,6 +1935,9 @@ class SAPModelData:
     # Loads (to be expanded later)
     load_cases: dict[str, LoadCase] = field(default_factory=dict)
     load_patterns: dict[str, LoadPattern] = field(default_factory=dict)
+    # Response-spectrum functions ("FUNCTION - RESPONSE SPECTRUM" table), keyed
+    # by name — a named demand spectrum the ``response_spectrum`` verb imports.
+    response_spectrum_functions: dict[str, ResponseSpectrumFunction] = field(default_factory=dict)
     # Named load combinations ("COMBINATION DEFINITIONS" table), keyed by
     # combination name.
     load_combinations: dict[str, LoadCombination] = field(default_factory=dict)
@@ -1931,6 +1951,10 @@ class SAPModelData:
     nd_materials: dict[str, NDMaterial] = field(default_factory=dict)
     # Layered shell sections for nonlinear shear walls
     layered_shell_sections: dict[str, LayeredShellSection] = field(default_factory=dict)
+    # Provenance — the file path the model was parsed from (empty for a model
+    # built in code).  Used by the analysis verbs' Tcl-export QC checkbox to
+    # place the dump next to its source.
+    source: str = ""
     # Default units used for all coordinates and section properties
     units: dict[str, str] = field(default_factory=lambda: {"F": "N", "L": "m", "T": "C"})
 

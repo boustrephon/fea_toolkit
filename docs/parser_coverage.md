@@ -179,6 +179,7 @@ registry below.  Three things about how they are matched:
 - `MATERIAL PROPERTIES*`
 - `CONSTRAINT DEFINITIONS - *`
 - `CASE -*`
+- `FUNCTION - RESPONSE SPECTRUM - *`
 - `AUTO SEISMIC - *`
 - `AUTO WIND - *`
 

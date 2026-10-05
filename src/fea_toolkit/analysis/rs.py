@@ -20,7 +20,7 @@ def run_response_spectrum_analysis(
     T_spec: list[float],
     Sa_spec: list[float],
     damping: float = 0.05,
-    n_modes: int = 12,
+    n_modes: Optional[int] = None,
     name: str = "ResponseSpectrum",
     config: Optional[dict] = None,
     log: Optional["PipelineLog"] = None,
@@ -34,7 +34,8 @@ def run_response_spectrum_analysis(
         T_spec: Period axis of the demand spectrum.
         Sa_spec: Spectral accelerations corresponding to *T_spec*.
         damping: Damping ratio for CQC (default 0.05).
-        n_modes: Number of modes to include (default 12).
+        n_modes: Number of modes to include; ``None`` (the default) uses every
+            mode the modal result provides.
         name: Result label (default ``"ResponseSpectrum"``).
         config: Optional config dict, recorded in the result metadata.
         log: Optional :class:`~fea_toolkit.io.log.PipelineLog` (or a ``bool``)
@@ -57,9 +58,10 @@ def run_response_spectrum_analysis(
             "run_modal_analysis before run_response_spectrum_analysis."
         )
 
-    # Clamp the mode count to the periods actually available so the RS
-    # analysis never requests more modes than the modal result provides.
-    n_modes = min(n_modes, len(periods))
+    # ``None`` means every mode the modal result provides; otherwise clamp to
+    # the periods actually available so the RS analysis never requests more
+    # modes than the modal result provides.
+    n_modes = len(periods) if n_modes is None else min(n_modes, len(periods))
 
     builder_config = {"element_type": "elasticBeamColumn", "verbose": False}
     builder_config.update(config or {})

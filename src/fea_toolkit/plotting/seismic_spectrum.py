@@ -102,3 +102,48 @@ def plot_seismic_spectrum(
     ax.legend(fontsize=8)
     fig.tight_layout()
     return fig
+
+
+def plot_response_spectra(
+    functions: dict[str, Any],
+    *,
+    units: Optional[dict] = None,
+) -> Optional[Any]:
+    """Plot named response-spectrum functions (period vs spectral acceleration).
+
+    Draws every :class:`~fea_toolkit.model.sap_data.ResponseSpectrumFunction`
+    (or any object exposing ``periods`` / ``accels``) on one axes, so the
+    spectra a model defines can be compared side by side.
+
+    Args:
+        functions: ``{name: function}`` — each function supplies ``periods``
+            and ``accels`` (s and acceleration, in the model's own units).
+        units: Model units dict; the length unit labels the acceleration axis.
+
+    Returns:
+        The matplotlib figure, or ``None`` when matplotlib is unavailable.
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return None
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    plotted = 0
+    for name, fn in functions.items():
+        T = getattr(fn, "periods", None)
+        Sa = getattr(fn, "accels", None)
+        if not T or not Sa or len(T) != len(Sa):
+            continue
+        ax.plot(T, Sa, marker="o", markersize=3, label=name)
+        plotted += 1
+
+    ax.set_xlabel("Period T (s)")
+    _length_unit = (units or {}).get("L") or "m"
+    ax.set_ylabel(f"Spectral acceleration S\u2090 ({_length_unit}/s\u00b2)")
+    ax.set_title("Response spectra")
+    ax.grid(True, alpha=0.3)
+    if plotted:
+        ax.legend(fontsize=8)
+    fig.tight_layout()
+    return fig
