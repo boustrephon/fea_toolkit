@@ -124,15 +124,29 @@ bridge.
 
 ## Future work
 
-* **Finish the `print()` sweep** in `rhino/`, `plotting/`, `io/` and `model/`.
-  The remaining diagnostic `print()` calls (``"No <x> data found"``,
-  ``"… not installed …"``, boundary-level progress lines) should become
-  ``logger.warning`` / ``logger.info`` on a module-level
-  ``logging.getLogger(__name__)`` so the ``PipelineHandler`` bridge captures
-  them during a report run.  Excluded from the sweep: CLI entry points
-  (`review.py`, `helper.py`), docstring ``>>>`` examples, subprocess streaming,
-  and the report-table functions (`diagnostics.py` / `checks.py` / `io.report`
-  tables) whose product *is* a table.
+* **Diagnostic `print()` → `logger` sweep is done** across `plotting/`,
+  `rhino/`, `io/` and `model/`: the diagnostic warnings (`"No <x> data found"`,
+  `"… not installed …"`, `"Warning: …"`, `"WARNING: …"`, `"Storey response …
+  failed"`) now go through module-level `logging.getLogger(__name__)` loggers
+  (or the `log` channel where one is already threaded), so the
+  ``PipelineHandler`` bridge captures them during a report run.
+
+  What remains as plain `print()` is the deliberate carve-out — the *product*
+  of a function, not an event:
+
+  * report tables (`diagnostics.py` modal-disconnect table, `checks.py`
+    buckling/self-weight, `io/report.py` participation summary, `geometry_mesh.py`
+    wall–slab report),
+  * CLI entry points (`model/review.py`, `io/helper.py`, `io/table_registry.py`),
+  * docstring ``>>>`` examples,
+  * boundary-level **success/progress** lines — `"… saved …"`, `"Loaded N …"`,
+    `"Coloured N …"`, `"Created N …"`, the Rhino importer's verbose-gated
+    `"Creating …"`, and `geometry_frames.py`'s verbose split summaries.
+
+  The progress lines are the one open judgement call: they could become
+  `logger.info` (silent unless the logger is configured), but that would hide
+  user-facing feedback in standalone use — so they stay `print()` for now,
+  matching the `print_progress` carve-out.
 
   The GUI's progress log is already merged: `run_recipe(..., pipeline_log=...)`
   routes `context.log` progress (step ``"workflow"``) and the structured
