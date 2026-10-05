@@ -55,6 +55,7 @@ _DICT_GROUPS = (
     ("load_cases", "Load Cases"),
     ("load_combinations", "Load Combinations"),
     ("mass_sources", "Mass Sources"),
+    ("response_spectrum_functions", "Response Spectra"),
 )
 
 # List-valued groups need a labeller (they carry no dictionary key).

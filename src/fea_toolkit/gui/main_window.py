@@ -254,6 +254,11 @@ class MainWindow(QMainWindow):
             self._store = InMemoryModelStore(model, source=source)
             self._views = ViewRegistry(self._store)
             self._views.add_geometry("unprocessed", "Unprocessed", model, source=source)
+            # Let the recipe step dialog seed the ``run_static`` cases editor
+            # from this model's own static cases.
+            panel = getattr(self, "_recipe_panel", None)
+            if panel is not None:
+                panel.set_model_data(model)
         elif isinstance(model, MeshModel):
             self._views.add_geometry("processed", "Processed", model, source=source)
 
@@ -751,6 +756,15 @@ class MainWindow(QMainWindow):
         a["view.show_frames"] = self._toggle_action(
             "Show beams", self._on_show_frames, tip="Show or hide frame elements"
         )
+        a["view.show_extruded"] = self._toggle_action(
+            "Extruded shapes",
+            self._on_show_extruded,
+            tip=(
+                "Draw each frame as an extruded solid (its cross-section swept "
+                "along the member) instead of a thin line"
+            ),
+            checked=self._display.show_extruded,
+        )
         a["view.show_restraints"] = self._toggle_action(
             "Show restraints",
             self._on_show_restraints,
@@ -758,7 +772,13 @@ class MainWindow(QMainWindow):
         )
         a["view.show_labels"] = self._placeholder("Show element labels", "P23")
         a["view.show_loads"] = self._placeholder("Show loads", "Milestone 6")
-        a["view.show_forces"] = self._placeholder("Show force diagrams", "Milestone 7")
+        a["view.show_forces"] = self._toggle_action(
+            "Show force diagrams",
+            self._on_forces_toggled,
+            tip="Toggle the active load case's member end forces",
+            checked=False,
+            enabled=False,
+        )
         a["view.clear_highlights"] = self._real_action(
             "Clear highlights", self._on_clear_highlights, tip="Drop the selection highlight"
         )
@@ -904,6 +924,7 @@ class MainWindow(QMainWindow):
             "view.show_nodes",
             "view.show_shells",
             "view.show_frames",
+            "view.show_extruded",
             "view.show_restraints",
             "view.show_labels",
             "view.show_loads",
@@ -1370,6 +1391,9 @@ class MainWindow(QMainWindow):
             shell_opacity=float(self._shell_opacity.value()),
             shrink=float(self._shrink.value()),
             show_restraints=self._actions["view.show_restraints"].isChecked(),
+            restraint_style=self._display.restraint_style,
+            show_extruded=self._actions["view.show_extruded"].isChecked(),
+            extruded_detail=self._display.extruded_detail,
         )
         self._viewer = viewer
         self._model = model
@@ -1410,6 +1434,13 @@ class MainWindow(QMainWindow):
             action.blockSignals(True)
             action.setChecked(True)
             action.blockSignals(False)
+
+        # Extruded shapes is a user preference, not a per-model default: it
+        # keeps the state the settings file loaded (off unless the user asked).
+        extruded = self._actions["view.show_extruded"]
+        extruded.blockSignals(True)
+        extruded.setChecked(self._display.show_extruded)
+        extruded.blockSignals(False)
 
     def _update_units_label(self) -> None:
         """Show the model's unit system in the status bar."""
@@ -1627,6 +1658,7 @@ class MainWindow(QMainWindow):
         # something the archive has none of.
         has_forces = repository is not None and bool(case) and repository.has_forces(case)
         self._actions["results.forces"].setEnabled(has_forces)
+        self._actions["view.show_forces"].setEnabled(has_forces)
         self._force_quantity.setEnabled(has_forces)
         # Saving needs a result to write — the active view decides.
         self._actions["file.save_results"].setEnabled(repository is not None)
@@ -1709,7 +1741,7 @@ class MainWindow(QMainWindow):
         self._clear_deformed()
         self._set_toggle_checked("results.deformed", False)
         self._clear_forces()
-        self._set_toggle_checked("results.forces", False)
+        self._sync_force_toggles(False)
         self.log("Cleared the results overlay.")
 
     def _active_results_source(self) -> tuple[Any, str]:
@@ -1736,8 +1768,25 @@ class MainWindow(QMainWindow):
         if self._viewer is not None:
             self._viewer.clear_deformed()
 
+    def _sync_force_toggles(self, checked: bool) -> None:
+        """Keep the two force-diagram toggles in lockstep.
+
+        ``Results ▸ Force diagrams`` and ``View ▸ Display ▸ Show force
+        diagrams`` are one operation with two menu spellings, so neither can
+        drift out of step with the other (see :meth:`_set_toggle_checked`,
+        which sets a toggle without re-entering its handler).
+
+        Args:
+            checked: The state both toggles should hold.
+        """
+        self._set_toggle_checked("results.forces", checked)
+        self._set_toggle_checked("view.show_forces", checked)
+
     def _on_forces_toggled(self, checked: bool) -> None:
         """**Results ▸ Force diagrams**: flag the active case's end forces.
+
+        Also the handler for **View ▸ Display ▸ Show force diagrams**, so the
+        two spellings of the one toggle always agree.
 
         The chosen quantity is a *label*: the selector shows SAP's local-DOF
         names and this reads the schema key underneath, so ``"M3"`` becomes
@@ -1749,6 +1798,7 @@ class MainWindow(QMainWindow):
         Args:
             checked: Whether the diagram should now be drawn.
         """
+        self._sync_force_toggles(checked)
         if not checked:
             self._clear_forces()
             return
@@ -1756,7 +1806,7 @@ class MainWindow(QMainWindow):
         forces = self._active_element_forces()
         if not forces:
             self.log("No element forces in this view — nothing to draw.", "error")
-            self._set_toggle_checked("results.forces", False)
+            self._sync_force_toggles(False)
             return
 
         from ..model.sap_data import FORCE_QUANTITY_LABELS
@@ -1826,7 +1876,7 @@ class MainWindow(QMainWindow):
         clear an actor that is gone.
         """
         self._set_toggle_checked("results.deformed", False)
-        self._set_toggle_checked("results.forces", False)
+        self._sync_force_toggles(False)
 
     def _on_show_nodes(self, checked: bool) -> None:
         """Show or hide the node-marker overlay."""
@@ -1839,6 +1889,13 @@ class MainWindow(QMainWindow):
     def _on_show_frames(self, checked: bool) -> None:
         """Show or hide the frame-element overlay."""
         self._backend.set_category_visible("frames", checked)
+
+    def _on_show_extruded(self, checked: bool) -> None:
+        """Toggle extruded-solid frames; a geometry change, so re-render."""
+        from dataclasses import replace
+
+        self._display = replace(self._display, show_extruded=checked)
+        self._refresh_display()
 
     def _on_show_restraints(self, checked: bool) -> None:
         """Show or hide the support symbols."""
@@ -2141,23 +2198,47 @@ class MainWindow(QMainWindow):
         self._actions["analysis.stop"].setEnabled(True)
         self.log(f"{label} \u2026")
 
+        # Per-step status flows back to the panel through the worker's existing
+        # ``progress`` signal (current=step index, label="<verb>:<status>"), so
+        # the Status column updates live without the worker touching widgets.
+        self._recipe_panel.reset_statuses()
+        reporter: list = [None]
+
         def task(should_cancel):
+            def on_step(index, verb, status):
+                if reporter[0] is not None:
+                    reporter[0](index, len(recipe), f"{verb}:{status}")
+
             run = run_recipe(
                 recipe,
                 model_data,
                 model=starting_mesh,
                 cancel=should_cancel,
                 pipeline_log=pipeline_log,
+                on_step=on_step,
             )
             return run, messages
 
         _freeze_gc_once()
         worker = TaskWorker(task, parent=self)
+        reporter[0] = worker.report_progress
+        worker.progress.connect(self._on_recipe_step_progress)
         worker.succeeded.connect(self._recipe_finished)
         worker.failed.connect(self._preprocess_failed)
         worker.finished.connect(self._preprocess_ended)
         self._worker = worker
         worker.start()
+
+    def _on_recipe_step_progress(self, index: int, _total: int, label: str) -> None:
+        """Update the Recipe panel's Status column for the step reporting in.
+
+        Args:
+            index: Zero-based step position in the recipe.
+            _total: The number of steps (unused — the panel already knows it).
+            label: ``"<verb>:<status>"``, as encoded by the run's ``on_step``.
+        """
+        _verb, _sep, status = label.partition(":")
+        self._recipe_panel.set_step_status(index, status or "running")
 
     def _recipe_finished(self, payload: Any) -> None:
         """Report what the recipe produced and register each result as a view.
@@ -2902,6 +2983,9 @@ class MainWindow(QMainWindow):
             "deformed_scale": float(self._deformed_scale.value()),
             "force_scale": float(self._force_scale.value()),
             "force_quantity": self._force_quantity.currentText(),
+            "restraint_style": self._display.restraint_style,
+            "show_extruded": self._display.show_extruded,
+            "extruded_detail": self._display.extruded_detail,
         }
         for note in save_display_settings(default_config_path(), values):
             self.log(note, "warn")

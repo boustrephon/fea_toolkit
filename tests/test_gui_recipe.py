@@ -100,8 +100,8 @@ class TestPanel:
         panel = window._recipe_panel
         panel.add_step("mesh")
         panel.add_step("run_static")
-        assert panel._list.count() == 2
-        assert panel._list.item(1).text() == "2. run_static"
+        assert panel._table.rowCount() == 2
+        assert panel._table.item(1, 0).text() == "2. run_static"
 
     def test_an_edit_via_the_dialog_reaches_the_step(self, window, monkeypatch):
         from fea_toolkit.workflow import Step
@@ -111,7 +111,7 @@ class TestPanel:
         monkeypatch.setattr(
             "fea_toolkit.gui.views.step_dialog.StepDialog.edit",
             staticmethod(
-                lambda step, parent=None: Step(
+                lambda step, parent=None, model_data=None: Step(
                     verb=step.verb, params={"split_slabs_at_walls": True}
                 )
             ),
@@ -123,7 +123,7 @@ class TestPanel:
         panel = window._recipe_panel
         panel.add_step("mesh", optional=True)
         assert panel.recipe.steps[0].optional is True
-        assert "(optional)" in panel._list.item(0).text()
+        assert "(optional)" in panel._table.item(0, 0).text()
 
     def test_a_step_carries_the_selection_it_was_given(self, window):
         from fea_toolkit.model.selection import Selection
@@ -156,7 +156,7 @@ class TestPanel:
             {"name": "t", "steps": [{"verb": "mesh", "params": {"split_slabs_at_walls": True}}]}
         )
         window._recipe_panel.set_recipe(recipe)
-        assert window._recipe_panel._list.count() == 1
+        assert window._recipe_panel._table.rowCount() == 1
         assert window._recipe_panel.recipe.steps[0].params == {"split_slabs_at_walls": True}
 
 
@@ -175,6 +175,17 @@ class TestRunOrder:
             "processed",
             "meshed",
         ]
+
+    def test_a_run_marks_each_step_with_a_success_tick(self, window):
+        panel = window._recipe_panel
+        panel.add_step("mesh", params={"create_shells": False})
+        panel.add_step("mesh", params={"create_shells": True})
+        window._actions["recipe.run"].trigger()
+        _await(window)
+
+        assert panel._table.columnCount() == 2
+        assert panel._table.item(0, 1).text() == "\u2713"  # green tick
+        assert panel._table.item(1, 1).text() == "\u2713"
 
     def test_an_empty_recipe_warns_rather_than_running(self, window):
         window._on_recipe_run()
@@ -389,7 +400,7 @@ def test_the_step_list_has_a_help_context_menu(window):
     """Right-click help is wired to the recipe step list."""
     from qtpy.QtCore import Qt
 
-    assert window._recipe_panel._list.contextMenuPolicy() == Qt.ContextMenuPolicy.CustomContextMenu
+    assert window._recipe_panel._table.contextMenuPolicy() == Qt.ContextMenuPolicy.CustomContextMenu
 
 
 def test_the_verb_help_dialog_shows_the_verbs_surface(qapp):
@@ -452,6 +463,15 @@ class TestStepDialog:
         dialog._optional_box.setChecked(True)
         assert dialog.edited_step().optional is True
 
+    def test_an_optional_int_reads_none_for_all(self, qapp):
+        """``n_modes`` defaults to 'all' (None); a chosen value reads back as an int."""
+        dialog = self._dialog("response_spectrum")
+        widget = dialog._widgets["n_modes"]
+        assert widget.value() == 0  # 'all'
+        assert dialog._param_value("n_modes") is None
+        widget.setValue(5)
+        assert dialog._param_value("n_modes") == 5
+
     def test_float_precision_survives_an_unrelated_edit(self, qapp):
         """A high-precision float keeps its full value when only the optional flag changes."""
         from fea_toolkit.gui.views.step_dialog import StepDialog
@@ -486,6 +506,47 @@ class TestStepDialog:
         assert value == 3
         assert type(value) is int
 
+    def test_run_static_cases_uses_the_structured_editor_when_a_model_is_open(self, qapp):
+        """With a model, the ``cases`` param is a structured editor, not a literal."""
+        from fea_toolkit.gui.views.cases_editor import CasesEditor
+        from fea_toolkit.gui.views.step_dialog import StepDialog
+        from fea_toolkit.workflow import Step
+
+        dialog = StepDialog(Step(verb="run_static"), model_data=_model())
+        assert isinstance(dialog._widgets["cases"], CasesEditor)
+
+
+class TestCasesEditor:
+    """The ``run_static`` cases picker — check cases, edit per-pattern factors."""
+
+    @staticmethod
+    def _editor(current=None):
+        from fea_toolkit.gui.views.cases_editor import CasesEditor
+
+        static = {"DEAD": {"DEAD": 1.0}, "WIND": {"WIND": 1.2}}
+        return CasesEditor(static, current)
+
+    def test_untouched_returns_the_solve_all_default(self, qapp):
+        """Every case checked, factors unchanged → ``{}`` (the verb's sentinel)."""
+        assert self._editor().value() == {}
+
+    def test_unchecking_a_case_narrows_the_solve(self, qapp):
+        from qtpy.QtCore import Qt
+
+        editor = self._editor()
+        editor._list.item(1).setCheckState(Qt.CheckState.Unchecked)  # drop WIND
+        assert editor.value() == {"DEAD": {"DEAD": 1.0}}
+
+    def test_an_edited_factor_survives(self, qapp):
+        editor = self._editor()
+        editor._list.setCurrentRow(1)  # WIND
+        editor._table.cellWidget(0, 1).setValue(1.5)
+        assert editor.value() == {"DEAD": {"DEAD": 1.0}, "WIND": {"WIND": 1.5}}
+
+    def test_a_seeded_subset_is_preserved(self, qapp):
+        editor = self._editor({"WIND": {"WIND": 1.2}})
+        assert editor.value() == {"WIND": {"WIND": 1.2}}
+
 
 def test_show_beams_toggle_hides_frames(window):
     """P33: a frame-visibility toggle joins Show nodes and Show shells."""
@@ -494,3 +555,16 @@ def test_show_beams_toggle_hides_frames(window):
     assert action.isChecked() is True
     action.setChecked(False)
     assert action.isChecked() is False  # toggling does not raise on a live view
+
+
+def test_extruded_shapes_toggle_is_off_by_default_and_re_renders(window):
+    """P34: 'Extruded shapes' starts unchecked and toggling updates the display."""
+    action = window._actions["view.show_extruded"]
+    assert action.isCheckable() is True
+    assert action.isChecked() is False
+
+    action.setChecked(True)
+    assert window._display.show_extruded is True
+
+    action.setChecked(False)
+    assert window._display.show_extruded is False

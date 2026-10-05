@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 __all__ = [
     "DISPLAY_DEFAULTS",
     "DISPLAY_FIELDS",
+    "RESTRAINT_STYLES",
     "DisplaySettings",
     "load_gui_settings",
     "resolve_display",
@@ -55,9 +56,24 @@ _DISPLAY_RANGES = {
     "force_scale": (0.1, 1000.0),
 }
 
+#: Support-symbol styles ``restraint_style`` may name.
+RESTRAINT_STYLES = ("block", "arrow")
+
+#: Extruded-frame detail levels ``extruded_detail`` may name.
+EXTRUDED_DETAILS = ("plates", "solid")
+
 #: Every field a ``display`` section may name (the numeric knobs plus the
-#: force-diagram quantity label).
-DISPLAY_FIELDS = frozenset((*_DISPLAY_NUMERIC_FIELDS, "force_quantity"))
+#: force-diagram quantity label, the restraint style and the extruded-frame
+#: toggle / detail).
+DISPLAY_FIELDS = frozenset(
+    (
+        *_DISPLAY_NUMERIC_FIELDS,
+        "force_quantity",
+        "restraint_style",
+        "show_extruded",
+        "extruded_detail",
+    )
+)
 
 
 @dataclass(frozen=True)
@@ -73,6 +89,13 @@ class DisplaySettings:
         force_scale: Force-diagram size as % of the model diagonal, 0.1–1000.0.
         force_quantity: SAP local-DOF label for the drawn end-force component
             (a key of :data:`fea_toolkit.model.sap_data.FORCE_QUANTITY_LABELS`).
+        restraint_style: Support-symbol style — ``"block"`` (plates and discs,
+            the default) or ``"arrow"`` (arrows and curls).
+        show_extruded: Draw each frame as an extruded solid (its cross-section
+            swept along the member) in addition to the line skeleton.
+        extruded_detail: How an extruded frame is drawn — ``"plates"`` (the
+            efficient open-surface representation) or ``"solid"`` (the closed
+            perimeter with end caps).
     """
 
     shell_opacity: float = 0.7
@@ -80,6 +103,9 @@ class DisplaySettings:
     deformed_scale: float = 10.0
     force_scale: float = 10.0
     force_quantity: str = "M3"
+    restraint_style: str = "block"
+    show_extruded: bool = False
+    extruded_detail: str = "plates"
 
 
 #: The defaults, as a reusable constant (callers may ``replace`` over it).
@@ -132,6 +158,36 @@ def resolve_display(config: Any = None) -> "tuple[DisplaySettings, list[str]]":
             )
         else:
             overrides["force_quantity"] = label
+
+    if "restraint_style" in settings:
+        style = str(settings["restraint_style"])
+        if style not in RESTRAINT_STYLES:
+            notes.append(
+                f"display setting 'restraint_style' {style!r} is not one of "
+                f"{RESTRAINT_STYLES}; using {DISPLAY_DEFAULTS.restraint_style!r}"
+            )
+        else:
+            overrides["restraint_style"] = style
+
+    if "show_extruded" in settings:
+        value = settings["show_extruded"]
+        if not isinstance(value, bool):
+            notes.append(
+                f"display setting 'show_extruded' {value!r} is not a boolean; "
+                f"using {DISPLAY_DEFAULTS.show_extruded!r}"
+            )
+        else:
+            overrides["show_extruded"] = value
+
+    if "extruded_detail" in settings:
+        detail = str(settings["extruded_detail"])
+        if detail not in EXTRUDED_DETAILS:
+            notes.append(
+                f"display setting 'extruded_detail' {detail!r} is not one of "
+                f"{EXTRUDED_DETAILS}; using {DISPLAY_DEFAULTS.extruded_detail!r}"
+            )
+        else:
+            overrides["extruded_detail"] = detail
 
     if not overrides:
         return DISPLAY_DEFAULTS, notes

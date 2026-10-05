@@ -46,6 +46,22 @@ __all__ = ["StepDialog"]
 #: spot rather than given a bespoke editor.
 _LITERAL_TYPES = (dict, list)
 
+#: A verb-specific note shown under the selection field, where the selection's
+#: *meaning* differs from "the elements this step acts on".  Most verbs use the
+#: selection generically; a handful need the reminder spelled out so a user
+#: does not have to read the verb's help to know what the scope does.
+_SELECTION_HINTS = {
+    "mesh": (
+        "Selection = areas held back as loads-only: no shell elements are "
+        "created for them, and their loads become edge loads on the "
+        "supporting frames.  Empty means every area is meshed."
+    ),
+    "scale_sections": (
+        "Selection = the elements whose assigned sections are softened.  Empty "
+        "means every referenced section."
+    ),
+}
+
 
 class StepDialog(QDialog):
     """Edit a step's selection, parameters and optional flag.
@@ -54,12 +70,24 @@ class StepDialog(QDialog):
         step: The step to edit.  For a newly added step, pass a template
             ``Step(verb=...)`` whose parameters fall back to the verb's defaults.
         parent: Optional Qt parent widget.
+        model_data: Optional parsed source model; when set, the ``run_static``
+            ``cases`` parameter renders as a structured editor seeded from the
+            model's own static cases.
     """
 
-    def __init__(self, step: Step, parent: Optional[QWidget] = None):
+    def __init__(
+        self,
+        step: Step,
+        parent: Optional[QWidget] = None,
+        model_data: Optional[Any] = None,
+    ):
         super().__init__(parent)
         self._verb = step.verb
         self._spec = STEP_SPECS[self._verb]
+        #: Parsed source model, when available — lets the ``cases`` editor seed
+        #: itself from the model's own static cases.  ``None`` falls back to the
+        #: literal dict editor.
+        self._model_data = model_data
         self._widgets: dict[str, Any] = {}
         #: The value seeded into each parameter field, before any rounding a
         #: spin box applies — returned verbatim when the user leaves it untouched.
@@ -117,6 +145,13 @@ class StepDialog(QDialog):
         keys = QLabel(f"Keys: {SELECT_KEYS_HELP}", group)
         keys.setEnabled(False)
         layout.addWidget(keys)
+
+        hint = _SELECTION_HINTS.get(self._verb)
+        if hint:
+            label = QLabel(hint, group)
+            label.setWordWrap(True)
+            label.setStyleSheet("color: #555555;")
+            layout.addWidget(label)
         return group
 
     def _on_compose_selection(self) -> None:
@@ -139,7 +174,10 @@ class StepDialog(QDialog):
         for name, spec in self._spec.params.items():
             value = step.params.get(name, spec.default)
             self._originals[name] = value
-            editor = self._param_editor(spec, value)
+            if name == "cases" and self._verb == "run_static" and self._model_data is not None:
+                editor = self._cases_editor(value)
+            else:
+                editor = self._param_editor(spec, value)
             self._widgets[name] = editor
             if spec.type is float and not spec.choices:
                 self._seeded[name] = float(editor.value())
@@ -164,8 +202,13 @@ class StepDialog(QDialog):
             widget.setCurrentText(str(value))
         elif kind is int:
             widget = QSpinBox(self)
-            widget.setRange(-1_000_000, 1_000_000)
-            widget.setValue(int(value))
+            if spec.allow_none:
+                widget.setRange(0, 1_000_000)
+                widget.setSpecialValueText("all")
+                widget.setValue(0 if value is None else int(value))
+            else:
+                widget.setRange(-1_000_000, 1_000_000)
+                widget.setValue(int(value))
         elif kind is float:
             widget = QDoubleSpinBox(self)
             widget.setRange(-1e12, 1e12)
@@ -183,10 +226,22 @@ class StepDialog(QDialog):
             widget.setToolTip(spec.help)
         return widget
 
+    def _cases_editor(self, value: Any) -> QWidget:
+        """A structured cases picker seeded from the model's own static cases."""
+        from ...analysis.case_listing import list_static_cases
+        from .cases_editor import CasesEditor
+
+        static_cases = list_static_cases(self._model_data)
+        editor = CasesEditor(static_cases, value or None, self)
+        editor.setToolTip(self._spec.params["cases"].help)
+        return editor
+
     def _param_value(self, name: str) -> Any:
         """Read one parameter back from its widget."""
         spec = self._spec.params[name]
         if spec.manifest is not None:
+            return self._widgets[name].value()
+        if name == "cases" and self._verb == "run_static" and self._model_data is not None:
             return self._widgets[name].value()
         widget = self._widgets[name]
         if spec.type is bool:
@@ -194,6 +249,8 @@ class StepDialog(QDialog):
         if spec.choices:
             return spec.choices[widget.currentIndex()]
         if spec.type is int:
+            if spec.allow_none and widget.value() == 0:
+                return None
             return int(widget.value())
         if spec.type is float:
             current = float(widget.value())
@@ -232,7 +289,11 @@ class StepDialog(QDialog):
             except ValueError as exc:
                 errors.append(f"selection: {exc}")
         for name, spec in self._spec.params.items():
-            if spec.manifest is None and spec.type in _LITERAL_TYPES:
+            if (
+                spec.manifest is None
+                and spec.type in _LITERAL_TYPES
+                and isinstance(self._widgets[name], QLineEdit)
+            ):
                 try:
                     self._literal_value(name)
                     self._widgets[name].setStyleSheet("")
@@ -262,18 +323,24 @@ class StepDialog(QDialog):
     # ── Entry point ──────────────────────────────────────────────────
 
     @staticmethod
-    def edit(step: Step, parent: Optional[Any] = None) -> Optional[Step]:
+    def edit(
+        step: Step,
+        parent: Optional[Any] = None,
+        model_data: Optional[Any] = None,
+    ) -> Optional[Step]:
         """Run the dialog modally and return the edited step, or ``None``.
 
         Args:
             step: The step to edit.
             parent: Optional Qt parent widget.
+            model_data: Optional parsed source model, used to seed the
+                ``run_static`` cases editor from the model's own static cases.
 
         Returns:
             The edited :class:`~fea_toolkit.workflow.steps.Step`, or ``None``
             when the dialog is cancelled.
         """
-        dialog = StepDialog(step, parent)
+        dialog = StepDialog(step, parent, model_data)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return None
         return dialog.edited_step()

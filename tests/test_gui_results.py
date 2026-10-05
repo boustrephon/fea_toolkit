@@ -294,7 +294,24 @@ class TestForceDiagrams:
         window.open_results_path(str(_write_archive(tmp_path, with_forces=True)))
 
         assert window._actions["results.forces"].isEnabled() is True
+        assert window._actions["view.show_forces"].isEnabled() is True
         assert window._force_quantity.isEnabled() is True
+
+    def test_the_display_toggle_is_the_same_operation_as_the_results_toggle(self, window, tmp_path):
+        """View ▸ Display ▸ Show force diagrams draws the diagram, and the two
+        toggles stay in lockstep — one operation, two menu spellings."""
+        window.open_results_path(str(_write_archive(tmp_path, with_forces=True)))
+        window._actions["view.show_forces"].trigger()
+
+        assert _flag_offset(window) == pytest.approx(1.0)
+        assert window._actions["view.show_forces"].isChecked() is True
+        assert window._actions["results.forces"].isChecked() is True
+
+        window._actions["results.forces"].trigger()  # toggle off from the other menu
+
+        assert _flag_offset(window) is None
+        assert window._actions["view.show_forces"].isChecked() is False
+        assert window._actions["results.forces"].isChecked() is False
 
     def test_the_selector_opens_on_m3(self, window, tmp_path):
         """Bending is what a diagram is usually read for: M3 is the ``Mz`` key."""
@@ -392,6 +409,7 @@ class TestForceDiagrams:
         assert window._select_entity_in_tree("views", "COMB1") is True
         assert _flag_offset(window) is None
         assert window._actions["results.forces"].isChecked() is False
+        assert window._actions["view.show_forces"].isChecked() is False
 
     def test_clear_results_removes_the_overlay(self, window, tmp_path):
         window.open_results_path(str(_write_archive(tmp_path, with_forces=True)))
@@ -400,6 +418,7 @@ class TestForceDiagrams:
 
         assert _flag_offset(window) is None
         assert window._actions["results.forces"].isChecked() is False
+        assert window._actions["view.show_forces"].isChecked() is False
 
     def test_the_shape_and_the_diagram_are_independent(self, window, tmp_path):
         """Two overlays on one scene: toggling one off must not drop the other."""

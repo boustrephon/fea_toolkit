@@ -53,3 +53,15 @@ def test_load_label_falls_back_to_the_class_name():
         pass
 
     assert load_label(Opaque()) == "Opaque"
+
+
+def test_response_spectrum_functions_appear_as_a_group():
+    from fea_toolkit.model.sap_data import ResponseSpectrumFunction
+
+    md = make_sample_model()
+    md.response_spectrum_functions = {
+        "UNIFRS": ResponseSpectrumFunction("UNIFRS", [0.0, 1.0], [1.0, 1.0])
+    }
+    groups = _by_label(md)
+    items = groups["Response Spectra"].load_items()
+    assert [label for label, _ in items] == ["UNIFRS"]

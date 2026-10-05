@@ -53,6 +53,46 @@ def test_unknown_force_quantity_falls_back_to_the_default():
     assert any("force_quantity" in note for note in notes)
 
 
+def test_restraint_style_defaults_to_block():
+    assert DISPLAY_DEFAULTS.restraint_style == "block"
+
+
+def test_restraint_style_is_applied():
+    settings, notes = resolve_display({"restraint_style": "arrow"})
+    assert settings.restraint_style == "arrow"
+    assert notes == []
+
+
+def test_unknown_restraint_style_falls_back_to_the_default():
+    settings, notes = resolve_display({"restraint_style": "nope"})
+    assert settings.restraint_style == DISPLAY_DEFAULTS.restraint_style
+    assert any("restraint_style" in note for note in notes)
+
+
+def test_show_extruded_defaults_to_false():
+    assert DISPLAY_DEFAULTS.show_extruded is False
+    assert DISPLAY_DEFAULTS.extruded_detail == "plates"
+
+
+def test_show_extruded_and_detail_are_applied():
+    settings, notes = resolve_display({"show_extruded": True, "extruded_detail": "solid"})
+    assert settings.show_extruded is True
+    assert settings.extruded_detail == "solid"
+    assert notes == []
+
+
+def test_bad_show_extruded_falls_back_to_the_default():
+    settings, notes = resolve_display({"show_extruded": "yes"})
+    assert settings.show_extruded is DISPLAY_DEFAULTS.show_extruded
+    assert any("show_extruded" in note for note in notes)
+
+
+def test_unknown_extruded_detail_falls_back_to_the_default():
+    settings, notes = resolve_display({"extruded_detail": "wireframe"})
+    assert settings.extruded_detail == DISPLAY_DEFAULTS.extruded_detail
+    assert any("extruded_detail" in note for note in notes)
+
+
 def test_non_finite_numeric_value_falls_back_to_the_default():
     for value in (float("nan"), float("inf"), float("-inf")):
         settings, notes = resolve_display({"shell_opacity": value})

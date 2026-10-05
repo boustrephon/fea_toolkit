@@ -16,13 +16,16 @@ recipe object is the single source of truth.
 from typing import Any, Optional
 
 from qtpy.QtCore import Qt, Signal
+from qtpy.QtGui import QBrush, QColor
 from qtpy.QtWidgets import (
+    QAbstractItemView,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
-    QListWidget,
-    QListWidgetItem,
     QMenu,
     QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -32,6 +35,17 @@ from ...model.selection import Selection
 from ...workflow import STEP_SPECS, Recipe, Step
 from .step_dialog import StepDialog
 from .verb_help_dialog import VerbHelpDialog
+
+#: Status cell → (glyph, colour) for the Recipe panel's Status column.  Empty
+#: (pending) is deliberately no glyph; the rest follow the project's green/red
+#: pass/fail vocabulary.
+_STATUS_GLYPHS = {
+    "": ("", None),
+    "running": ("\u2026", "#808080"),
+    "ok": ("\u2713", "#1a7f37"),
+    "failed": ("\u2717", "#b00020"),
+    "skipped": ("\u2014", "#aaaaaa"),
+}
 
 
 class RecipePanel(QWidget):
@@ -48,8 +62,23 @@ class RecipePanel(QWidget):
         super().__init__(parent)
         self._recipe = Recipe()
         self._selected = -1
+        self._statuses: dict[int, str] = {}
+        #: Parsed source model, set by :meth:`set_model_data` when a model opens;
+        #: handed to the step dialog so the ``cases`` editor can seed itself.
+        self._model_data: Any = None
         self._build_ui()
         self._reload_list()
+
+    def set_model_data(self, model_data: Any) -> None:
+        """Provide the parsed source model for the step dialog to seed from.
+
+        Called by the main window when a ``SAPModelData`` opens; ``None`` clears
+        it (the dialog then falls back to a literal dict editor for ``cases``).
+
+        Args:
+            model_data: The parsed source model, or ``None``.
+        """
+        self._model_data = model_data
 
     # ── Construction ─────────────────────────────────────────────────
 
@@ -59,13 +88,22 @@ class RecipePanel(QWidget):
         outer.setContentsMargins(4, 4, 4, 4)
 
         row = QHBoxLayout()
-        self._list = QListWidget(self)
-        self._list.setObjectName("list_recipe_steps")
-        self._list.currentRowChanged.connect(self._on_row_changed)
-        self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._list.customContextMenuRequested.connect(self._on_step_context_menu)
-        self._list.itemDoubleClicked.connect(lambda _item: self._edit_step_interactive())
-        row.addWidget(self._list, 1)
+        self._table = QTableWidget(0, 2, self)
+        self._table.setObjectName("table_recipe_steps")
+        self._table.setHorizontalHeaderLabels(["Step", "Status"])
+        self._table.verticalHeader().setVisible(False)
+        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self._table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self._table.currentCellChanged.connect(self._on_current_cell_changed)
+        self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._table.customContextMenuRequested.connect(self._on_step_context_menu)
+        self._table.cellDoubleClicked.connect(lambda _row, _col: self._edit_step_interactive())
+        row.addWidget(self._table, 1)
 
         buttons = QVBoxLayout()
         self._add_button = QToolButton(self)
@@ -181,7 +219,7 @@ class RecipePanel(QWidget):
 
     def _add_step_interactive(self, verb: str) -> None:
         """Open the step dialog for *verb* and append the edited step."""
-        edited = StepDialog.edit(Step(verb=verb), self)
+        edited = StepDialog.edit(Step(verb=verb), self, self._model_data)
         if edited is not None:
             self.add_step(edited.verb, edited.selection, edited.params, optional=edited.optional)
 
@@ -190,7 +228,7 @@ class RecipePanel(QWidget):
         step = self._selected_step()
         if step is None:
             return
-        edited = StepDialog.edit(step, self)
+        edited = StepDialog.edit(step, self, self._model_data)
         if edited is None:
             return
         self._recipe.steps[self._selected] = edited
@@ -206,28 +244,64 @@ class RecipePanel(QWidget):
         return None
 
     def _reload_list(self) -> None:
-        """Rebuild the step list from the recipe, keeping the selection."""
-        self._list.blockSignals(True)
-        self._list.clear()
+        """Rebuild the step table from the recipe, keeping the selection."""
+        self._statuses = {}  # the recipe changed; run status no longer applies
+        self._table.blockSignals(True)
+        self._table.setRowCount(len(self._recipe))
         for index, step in enumerate(self._recipe):
-            item = QListWidgetItem(f"{index + 1}. {step.verb}", self._list)
+            label = f"{index + 1}. {step.verb}"
+            if step.optional:
+                label += "  (optional)"
+            item = QTableWidgetItem(label)
             if step.selection is not None:
                 item.setToolTip(f"selection: {step.selection}")
-            if step.optional:
-                item.setText(f"{item.text()}  (optional)")
-        self._list.blockSignals(False)
+            self._table.setItem(index, 0, item)
+            self._refresh_status_cell(index)
+        self._table.blockSignals(False)
         if 0 <= self._selected < len(self._recipe):
-            self._list.setCurrentRow(self._selected)
+            self._table.selectRow(self._selected)
         self._update_summary()
 
-    def _on_row_changed(self, row: int) -> None:
-        """Track the newly selected step and refresh its summary.
-
-        Args:
-            row: The newly current row, or ``-1`` when the list is emptied.
-        """
+    def _on_current_cell_changed(self, row: int, _col: int, _prev_row: int, _prev_col: int) -> None:
+        """Track the newly selected step and refresh its summary."""
         self._selected = row
         self._update_summary()
+
+    # ── Run status ───────────────────────────────────────────────────
+
+    def reset_statuses(self) -> None:
+        """Clear every step's run status (pending), e.g. before a new run."""
+        self._statuses = {}
+        self._table.blockSignals(True)
+        for index in range(len(self._recipe)):
+            self._refresh_status_cell(index)
+        self._table.blockSignals(False)
+
+    def set_step_status(self, index: int, status: str) -> None:
+        """Set the status shown beside step *index* (live, without a rebuild).
+
+        Args:
+            index: Zero-based step position in the recipe.
+            status: One of ``"running"``, ``"ok"``, ``"failed"`` or ``"skipped"``.
+        """
+        if not (0 <= index < len(self._recipe)):
+            return
+        self._statuses[index] = status
+        self._refresh_status_cell(index)
+
+    def _refresh_status_cell(self, index: int) -> None:
+        """Render the status glyph for step *index* into the Status column."""
+        glyph, color = _STATUS_GLYPHS.get(self._statuses.get(index, ""), ("", None))
+        item = self._table.item(index, 1)
+        if item is None:
+            item = QTableWidgetItem()
+            self._table.setItem(index, 1, item)
+        item.setText(glyph)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        if color is not None:
+            item.setForeground(QBrush(QColor(color)))
+        else:
+            item.setForeground(QBrush())
 
     def _update_summary(self) -> None:
         """Show a one-line summary of the selected step, or the empty hint."""
@@ -243,16 +317,17 @@ class RecipePanel(QWidget):
 
     def _on_step_context_menu(self, pos) -> None:
         """Right-click a step: offer per-verb help for the step under the cursor."""
-        item = self._list.itemAt(pos)
+        item = self._table.itemAt(pos)
         if item is None:
             return
-        self._list.setCurrentItem(item)
-        index = self._list.row(item)
+        index = item.row()
         if not (0 <= index < len(self._recipe)):
             return
-        menu = QMenu(self._list)
+        self._table.selectRow(index)
+        self._selected = index
+        menu = QMenu(self._table)
         help_action = menu.addAction("Help\u2026")
-        chosen = menu.exec(self._list.viewport().mapToGlobal(pos))
+        chosen = menu.exec(self._table.viewport().mapToGlobal(pos))
         if chosen is help_action:
             self._show_verb_help(index)
 

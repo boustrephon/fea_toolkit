@@ -340,12 +340,13 @@ menu appears only when the right button is *not* the selecting button — under 
 |---|---|
 | **View ▸ Display ▸ Show nodes** | Live — show or hide the node markers |
 | **View ▸ Display ▸ Show beams** | Live — show or hide frame elements |
+| **View ▸ Display ▸ Extruded shapes** | Live — draw each frame as an extruded solid (its cross-section swept along the member) instead of a thin line; off by default.  The detail level (`plates` or `solid`) is a display setting |
 | **View ▸ Display ▸ Show shells** | Live — show or hide area elements |
 | **View ▸ Display ▸ Show restraints** | Live — support symbols at restrained nodes (one glyph per restrained DOF) |
 | **View ▸ Display ▸ Clear highlights** | Live — drop the selection highlight |
 | **View ▸ Display ▸ Show element labels** | Not yet — nothing draws labels, so the toggle waits for that renderer ([P23](_pending_work.md)) |
 | **View ▸ Display ▸ Show loads** | Pending the load-rendering milestone (6) |
-| **View ▸ Display ▸ Show force diagrams** | Pending the results milestone (7) |
+| **View ▸ Display ▸ Show force diagrams** | Live — the same toggle as **Results ▸ Force diagrams**, kept in lockstep |
 
 ### Display quality
 
@@ -516,14 +517,14 @@ jarring than a greyed-out one.
 |---|---|---|
 | **File** | Open (`Ctrl+O`), Open results…, Save model…, Save results…, Quit | Export Tcl, Export screenshot |
 | **Edit** | Duplicate view, Edit view selection… | Copy, Preferences |
-| **View** | Zoom to fit, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show beams, Show shells, Show restraints, Clear highlights) | Show element labels, Show loads, Show force diagrams, Reset layout |
+| **View** | Zoom to fit, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show beams, Show shells, Show restraints, Show force diagrams, Clear highlights) | Show element labels, Show loads, Reset layout |
 | **Model** | Mesh… (composes a `mesh` step in a dialog and runs it on OK) | Selections, Units |
 | **Analysis** | Run… (`Ctrl+R`), Stop, Modal analysis, Response spectrum, Pushover | — |
 | **Recipe** | Run recipe (`Ctrl+Shift+R`), Open recipe…, Save recipe…, Export as Python…, Clear recipe | — |
 | **Results** | Deformed shape (+ Deform %), Force diagrams (+ Force selector + Flags %), Clear results | Storey response, Pushover curve |
 | **Help** | Documentation, About | — |
 | Toolbars | Open; Save results; Run / Stop; Mesh | Save results (until a result is shown), Export Tcl / screenshot |
-| View toolbar | Zoom/camera; display toggles (nodes, beams, shells, restraints); Deformed shape + Deform %; Force diagrams + Force selector + Flags %; **Shells** opacity and **Shrink** | Show labels, Show loads, Show force diagrams |
+| View toolbar | Zoom/camera; display toggles (nodes, beams, shells, restraints, force diagrams); Deformed shape + Deform %; Force diagrams + Force selector + Flags %; **Shells** opacity and **Shrink** | Show labels, Show loads |
 
 ## Application identity
 
