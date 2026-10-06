@@ -243,6 +243,10 @@ def build_extruded_frame_mesh(
     for sec_name, member_idx in groups.items():
         idxs = np.asarray(member_idx, dtype=int)
         section = sections.get(sec_name)
+        if section is None:
+            # A section referenced by a frame but absent from the model's section
+            # dict has nothing to sweep — skip it so rendering continues.
+            continue
         sweeps = _sweeps(section, detail, circle_segments)
         if not sweeps:
             continue
