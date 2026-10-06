@@ -31,6 +31,7 @@ from __future__ import annotations
 import copy
 import logging
 import pickle
+import threading
 from pathlib import Path
 from typing import Any, Optional
 
@@ -227,32 +228,48 @@ def _merge_report_config(config: Optional[dict] = None, overrides: Optional[dict
     return cfg
 
 
+#: Serialises :func:`_attach_pipeline_logging` across overlapping runs, and
+#: remembers the ``fea_toolkit`` logger's level/propagate *before* the first
+#: attach so only the last detach restores them.
+_LOGGING_LOCK = threading.Lock()
+#: ``[level, propagate]`` before the first attach.  A list (not a tuple/None) so
+#: mutating it needs no ``global`` rebind — the same idiom as ``_GC_FROZEN``.
+_LOGGING_PRIOR_STATE: list = []
+
+
 def _attach_pipeline_logging(log: PipelineLog):
     """Route the toolkit's stdlib ``logger`` calls into *log* for one run.
 
     Attaches a :class:`PipelineHandler` to the ``fea_toolkit`` logger, raises
     its level so ``logger.info`` records reach the handler, and stops
     propagation so a captured record does not also reach stderr.  Returns a
-    zero-argument detach callable that restores the logger's default state.
+    zero-argument detach callable that removes **only this run's** handler and
+    restores the logger's prior level/propagate once the last active run has
+    detached.
 
-    Attaching is idempotent: a handler left behind by an exception-aborted run
-    is removed first, and ``detach`` restores the known defaults (the
-    ``fea_toolkit`` logger's level/propagate are not changed elsewhere), so
-    repeated :func:`generate_report` calls never stack handlers.
+    Overlapping runs are coordinated through :data:`_LOGGING_LOCK` and
+    :data:`_LOGGING_PRIOR_STATE`: the original level/propagate are captured
+    once (before the first attach), each detach removes only the handler it
+    created, and the logger's original state is restored only when no
+    ``PipelineHandler`` remains.
     """
     fea_logger = logging.getLogger("fea_toolkit")
-    for existing in list(fea_logger.handlers):
-        if isinstance(existing, PipelineHandler):
-            fea_logger.removeHandler(existing)
     handler = PipelineHandler(log)
-    fea_logger.addHandler(handler)
-    fea_logger.setLevel(logging.INFO)
-    fea_logger.propagate = False
+    with _LOGGING_LOCK:
+        if not _LOGGING_PRIOR_STATE:
+            _LOGGING_PRIOR_STATE[:] = [fea_logger.level, fea_logger.propagate]
+        fea_logger.addHandler(handler)
+        fea_logger.setLevel(logging.INFO)
+        fea_logger.propagate = False
 
     def detach() -> None:
-        fea_logger.removeHandler(handler)
-        fea_logger.setLevel(logging.NOTSET)
-        fea_logger.propagate = True
+        with _LOGGING_LOCK:
+            fea_logger.removeHandler(handler)
+            if not any(isinstance(h, PipelineHandler) for h in fea_logger.handlers):
+                level, propagate = _LOGGING_PRIOR_STATE
+                fea_logger.setLevel(level)
+                fea_logger.propagate = propagate
+                _LOGGING_PRIOR_STATE.clear()
 
     return detach
 
@@ -337,574 +354,601 @@ def generate_report(
     log_enabled = log_cfg.get("enabled", True)
     log = PipelineLog(verbose=verbose, collect=log_enabled)
     _detach_logging = _attach_pipeline_logging(log)
+    try:
+        resolved_out = Path(out_dir or "output")
+        resolved_out.mkdir(parents=True, exist_ok=True)
 
-    resolved_out = Path(out_dir or "output")
-    resolved_out.mkdir(parents=True, exist_ok=True)
+        # ── Cache check ──────────────────────────────────────────────
+        model_stem = Path(cfg.get("model", {}).get("path", "")).stem
+        cache_path = resolved_out / f"{model_stem}_results.pkl"
 
-    # ── Cache check ──────────────────────────────────────────────
-    model_stem = Path(cfg.get("model", {}).get("path", "")).stem
-    cache_path = resolved_out / f"{model_stem}_results.pkl"
-
-    if not force_recompute and cache_path.exists():
-        log.info("cache", f"Loading cached results from {cache_path}")
-        with open(cache_path, "rb") as f:
-            cached = dict(pickle.load(f))
-        # A cache hit must be config-aware: warn when the cached results were
-        # computed with a different analysis configuration so a stale pickle
-        # can never silently stand in for a changed analysis.
-        cached_cfg = cached.get("config")
-        if isinstance(cached_cfg, dict):
-            diffs = _config_differences(cached_cfg, cfg)
-            if diffs:
-                preview = ", ".join(diffs[:5])
-                more = f" — and {len(diffs) - 5} more" if len(diffs) > 5 else ""
+        if not force_recompute and cache_path.exists():
+            log.info("cache", f"Loading cached results from {cache_path}")
+            with open(cache_path, "rb") as f:
+                cached = dict(pickle.load(f))
+            # A cache hit must be config-aware: warn when the cached results were
+            # computed with a different analysis configuration so a stale pickle
+            # can never silently stand in for a changed analysis.
+            cached_cfg = cached.get("config")
+            if isinstance(cached_cfg, dict):
+                diffs = _config_differences(cached_cfg, cfg)
+                if diffs:
+                    preview = ", ".join(diffs[:5])
+                    more = f" — and {len(diffs) - 5} more" if len(diffs) > 5 else ""
+                    log.warning(
+                        "cache",
+                        f"cached results at {cache_path} were computed with a "
+                        f"different configuration ({preview}{more}); set "
+                        "general.force_recompute=True to regenerate.",
+                    )
+            # A cache hit must not silently skip a requested export: if the
+            # previous run exported a file that is now missing — or never
+            # exported at all — the cache is stale w.r.t. the deliverable.
+            if export_cfg.get("enabled") and not cached.get("export_path"):
                 log.warning(
                     "cache",
-                    f"cached results at {cache_path} were computed with a "
-                    f"different configuration ({preview}{more}); set "
-                    "general.force_recompute=True to regenerate.",
+                    "export is enabled but the cached results contain no "
+                    "export_path (cache predates the unified export) — set "
+                    "general.force_recompute=True to generate the export file.",
                 )
-        # A cache hit must not silently skip a requested export: if the
-        # previous run exported a file that is now missing — or never
-        # exported at all — the cache is stale w.r.t. the deliverable.
-        if export_cfg.get("enabled") and not cached.get("export_path"):
-            log.warning(
-                "cache",
-                "export is enabled but the cached results contain no "
-                "export_path (cache predates the unified export) — set "
-                "general.force_recompute=True to generate the export file.",
-            )
-        elif export_cfg.get("enabled") and cached.get("export_path"):
-            ep = Path(cached["export_path"])
-            if not ep.exists():
-                log.warning(
-                    "cache",
-                    f"results export file {ep} is missing but cached results "
-                    "were reused — set general.force_recompute=True to "
-                    "regenerate it.",
-                )
-        _detach_logging()
-        return cached
+            elif export_cfg.get("enabled") and cached.get("export_path"):
+                ep = Path(cached["export_path"])
+                if not ep.exists():
+                    log.warning(
+                        "cache",
+                        f"results export file {ep} is missing but cached results "
+                        "were reused — set general.force_recompute=True to "
+                        "regenerate it.",
+                    )
+            # A cache hit must reflect the current run's collection setting, not
+            # the cached run's log — so update (or drop) ``analysis_log`` rather
+            # than returning the cached log unchanged.
+            if log_enabled:
+                cached["analysis_log"] = log
+            elif "analysis_log" in cached:
+                del cached["analysis_log"]
+            return cached
 
-    log.info("config", f"Model: {model_stem}")
+        log.info("config", f"Model: {model_stem}")
 
-    # ── Auto-detect loads ────────────────────────────────────────
-    raw_tables = getattr(md, "_raw_tables", {})
-    inferred = infer_loads(raw_tables) if load_cfg.get("auto_detect", True) else {}
-    if load_cfg.get("gravity") is None and inferred:
-        load_cfg["gravity"] = build_gravity_patterns(inferred)
-    if load_cfg.get("wind_x") is None and inferred.get("wind"):
-        load_cfg["wind_x"] = pick_wind(inferred, "+X")
-    if load_cfg.get("wind_y") is None and inferred.get("wind"):
-        load_cfg["wind_y"] = pick_wind(inferred, "+Y")
+        # ── Auto-detect loads ────────────────────────────────────────
+        raw_tables = getattr(md, "_raw_tables", {})
+        inferred = infer_loads(raw_tables) if load_cfg.get("auto_detect", True) else {}
+        if load_cfg.get("gravity") is None and inferred:
+            load_cfg["gravity"] = build_gravity_patterns(inferred)
+        if load_cfg.get("wind_x") is None and inferred.get("wind"):
+            load_cfg["wind_x"] = pick_wind(inferred, "+X")
+        if load_cfg.get("wind_y") is None and inferred.get("wind"):
+            load_cfg["wind_y"] = pick_wind(inferred, "+Y")
 
-    # ── Preprocessor (runs ONCE) ─────────────────────────────────
-    if mesh_model is None:
-        log.info("preprocessor", "Running Preprocessor (topology work)...")
-        mesh_model = preprocess_model(md, cfg.get("builder", {}))
-        log.info(
-            "preprocessor",
-            f"MeshModel created: {len(mesh_model.nodes)} nodes, "
-            f"{len(mesh_model.frame_elements)} frames, "
-            f"{len(mesh_model.area_elements)} areas",
-        )
-    else:
-        log.info("preprocessor", "Using pre-computed MeshModel (skipping Preprocessor)")
-
-    # ── Brace summary ────────────────────────────────────────────
-    sel = Selection.from_brace_sections(md)
-    brace_ids = sel.get_frame_ids(md)
-
-    # ── Static load verification ─────────────────────────────────
-    df_load_verify = pd.DataFrame()
-    if cfg.get("static_verification", {}).get("run", True):
-        log.info("load_verify", "Running static load verification...")
-        try:
-            df_load_verify = static_load_verification(md, mesh_model)
-            _lv_patterns = cfg.get("static_verification", {}).get("patterns")
-            if _lv_patterns and not df_load_verify.empty:
-                df_load_verify = df_load_verify[df_load_verify["Load Pattern"].isin(_lv_patterns)]
-            log.info("load_verify", f"Verified {len(df_load_verify)} load patterns")
-        except Exception as e:
-            log.error("load_verify", f"Static load verification failed: {e}")
-
-    # ── Connectivity check ───────────────────────────────────────
-    connectivity = None
-    self_weight = None
-    if cfg.get("checks", {}).get("run", True):
-        log.info("connectivity", "Running connectivity check...")
-        try:
-            from fea_toolkit.model.checks import check_model_connectivity
-
-            connectivity = check_model_connectivity(md)
-            log.info("connectivity", connectivity["summary"])
-            if connectivity.get("orphan_nodes"):
-                log.warning("connectivity", f"{len(connectivity['orphan_nodes'])} orphan node(s)")
-            if connectivity.get("shell_only_base_nodes"):
-                log.warning(
-                    "connectivity",
-                    f"{len(connectivity['shell_only_base_nodes'])} shell-only base node(s)",
-                )
-        except Exception as e:
-            log.warning("connectivity", f"Connectivity check failed: {e}")
-
-        # ── Self-weight check ────────────────────────────────────
-        log.info("self_weight", "Checking self-weight consistency...")
-        try:
-            fu_md = md.units.get("F", "N")
-            applied = 0.0
-            expected = 0.0
-            if not df_load_verify.empty:
-                dead = df_load_verify[df_load_verify["Load Pattern"] == "DEAD"]
-                if len(dead):
-                    r = dead.iloc[0]
-                    applied = abs(r.get(f"Reaction Fz ({fu_md})", 0))
-                    expected = abs(r.get(f"Applied Fz ({fu_md})", 0))
-            passed = abs(expected - applied) / max(expected, 1.0) < 0.02
-            self_weight = {
-                "expected": expected,
-                "applied": applied,
-                "passed": passed,
-                "by_section": {},
-            }
+        # ── Preprocessor (runs ONCE) ─────────────────────────────────
+        if mesh_model is None:
+            log.info("preprocessor", "Running Preprocessor (topology work)...")
+            mesh_model = preprocess_model(md, cfg.get("builder", {}))
             log.info(
-                "self_weight",
-                f"Expected: {expected:.0f} {fu_md}; "
-                f"Applied: {applied:.0f} {fu_md}; "
-                f"Status: {'✓ PASS' if passed else '✗ FAIL'}",
+                "preprocessor",
+                f"MeshModel created: {len(mesh_model.nodes)} nodes, "
+                f"{len(mesh_model.frame_elements)} frames, "
+                f"{len(mesh_model.area_elements)} areas",
             )
-        except Exception as e:
-            log.warning("self_weight", f"Self-weight check failed: {e}")
+        else:
+            log.info("preprocessor", "Using pre-computed MeshModel (skipping Preprocessor)")
 
-    # ── Build spectrum (common to both paths) ────────────────────
-    # g is derived from the model's length unit so the spectral
-    # accelerations come back in the model's own unit system (mm/s² for a
-    # millimetre model), not the SI 9.80665 m/s² the builder would
-    # otherwise fall back to.
-    _gravity = g_from_units(md.units)
-    if spec_cfg:
-        T_spec, Sa_spec, alpha_max, tg, zeta, spec_label = _build_spectrum(spec_cfg, g=_gravity)
-    else:
-        T_spec, Sa_spec, alpha_max, tg, zeta, spec_label = (
-            [],
-            [],
-            0.0,
-            0.25,
-            zeta_cfg,
-            "",
-        )
+        # ── Brace summary ────────────────────────────────────────────
+        sel = Selection.from_brace_sections(md)
+        brace_ids = sel.get_frame_ids(md)
 
-    if push_spec_cfg:
-        (_, _, push_alpha_max, push_tg, push_zeta, _) = _build_spectrum(push_spec_cfg, g=_gravity)
-    else:
-        push_alpha_max, push_tg, push_zeta = alpha_max, tg, zeta
-
-    # ── Core analyses (static, modal, RS, pushover) ──────────────
-    # The modal / response-spectrum / pushover analyses are composed from the
-    # workflow verbs — the same vocabulary a Recipe or the GUI runs — while the
-    # static-linear pass stays a direct call (there is no verb for it) and the
-    # storage / presentation stages below stay report-only (a write or a render
-    # is not a model operation).  ``generate_report`` is therefore a shorthand
-    # for a recipe, not a second spelling of one.
-    log.info("analyses", "Running analyses...")
-
-    _man_results: dict = {}
-
-    # Static linear (if enabled) — a direct call, as there is no verb for it.
-    if cfg.get("linear", {}).get("run", True):
-        # Propagate the resolved n_modes (general.n_modes, default 12) into
-        # linear_cfg so run_linear_cases' RS pass stays consistent with the
-        # report-level RS pass when linear.n_modes is absent.  linear.n_modes
-        # remains the higher-priority override.
-        linear_cfg = dict(cfg.get("linear") or {})
-        linear_cfg.setdefault("n_modes", n_modes)
-        _man_results["StaticAnalysis"] = run_static_analysis(
-            mesh_model,
-            md,
-            spec_cfg=spec_cfg,
-            linear_cfg=linear_cfg,
-            name="StaticAnalysis",
-            collect_raw=bool(export_cfg.get("static", False)),
-            log=log,
-        )
-
-    # Modal → response spectrum → pushover, authored as a recipe of verbs.  The
-    # ``kind``/``needs`` chain (Decision 0) validates the order; each verb is a
-    # thin wrapper over the same analysis function the report used to call.
-    analysis_recipe = Recipe(name="report")
-    analysis_recipe.add("modal", params={"n_modes": n_modes, "name": "ModalAnalysis"})
-    if T_spec and Sa_spec:
-        for rs_dir in ("X", "Y"):
-            analysis_recipe.add(
-                "response_spectrum",
-                params={
-                    "direction": rs_dir,
-                    "T_spec": T_spec,
-                    "Sa_spec": Sa_spec,
-                    "damping": zeta,
-                    "n_modes": n_modes,
-                    "name": f"RS-{rs_dir}",
-                },
-            )
-    # Note: rs_modal_base_shear is not available until after modal + RS run, so
-    # it is omitted here (the mode1 diagnostic is skipped).
-    if cfg.get("pushover") and push_cfg.get("patterns") and push_cfg.get("directions"):
-        for pattern in push_cfg["patterns"]:
-            # The report's pushover is the steel path, where the ``directions``
-            # list is a no-op (``run_pushover_4dir`` always pushes all four), so
-            # it stays at the verb's ``"4dir"`` default.  ``gravity_patterns`` and
-            # ``brace_sections`` are optional, so they are omitted when unset —
-            # the verb's declared types (a mapping / a list) must hold.
-            push_params: dict = {
-                "lateral_load_type": pattern,
-                "max_disp_val": push_cfg["max_disp"],
-                "num_steps": push_cfg["num_steps"],
-                "brace_type": push_cfg.get("brace_type", "truss"),
-                "name": f"Pushover-{pattern}",
-                "return_builders": bool(
-                    export_cfg.get("enabled", False) and export_cfg.get("pushover", False)
-                ),
-            }
-            if load_cfg.get("gravity"):
-                push_params["gravity_patterns"] = load_cfg["gravity"]
-            if push_cfg.get("brace_sections"):
-                push_params["brace_sections"] = push_cfg["brace_sections"]
-            if export_cfg.get("enabled", False) and export_cfg.get("pushover", False):
-                push_params["config"] = {"record_pushover_steps": True}
-            analysis_recipe.add("pushover", params=push_params)
-
-    # Run the verbs and re-key each result by its ``AnalysisResult.name``, so
-    # the extraction below is unchanged.
-    _analysis_run = run_recipe(analysis_recipe, md, model=mesh_model, pipeline_log=log)
-    for _step_result in _analysis_run.results:
-        _man_results[_step_result.payload.name] = _step_result.payload
-
-    modal_result = _man_results["ModalAnalysis"].data
-    modal = modal_result["modal"]
-
-    log.info("analyses", f"ran {len(_man_results)} analyses")
-
-    # ── Extract results ──────────────────────────────────────
-    log.info("modal", f"{n_modes} modes, T1={modal['periods'][0]:.3f}s")
-
-    # Build participation DataFrame (same format as inline path)
-    mp = modal["modal_props"]
-    pct_cols = ["Mx (%)", "My (%)", "Mz (%)", "Rx (%)", "Ry (%)", "Rz (%)"]
-    _mp_keys = {
-        "Mx (%)": "partiMassRatiosMX",
-        "My (%)": "partiMassRatiosMY",
-        "Mz (%)": "partiMassRatiosMZ",
-        "Rx (%)": "partiMassRatiosRMX",
-        "Ry (%)": "partiMassRatiosRMY",
-        "Rz (%)": "partiMassRatiosRMZ",
-    }
-    modal_rows = []
-    for i in range(modal["num_modes"]):
-        row = {
-            "Mode": i + 1,
-            "Period (s)": round(modal["periods"][i], 4),
-            "Freq (Hz)": round(modal["frequencies"][i], 4),
-        }
-        for col, key in _mp_keys.items():
-            row[col] = round(mp.get(key, [0])[i], 2)
-        modal_rows.append(row)
-    df_modal = pd.DataFrame(modal_rows)
-    for c in pct_cols:
-        df_modal[c] = df_modal[c].apply(lambda v: f"{v:.2f}")
-    sum_row = {"Mode": "<strong>SUM</strong>", "Period (s)": "\u2014", "Freq (Hz)": "\u2014"}
-    for col in pct_cols:
-        sum_row[col] = f"{df_modal[col].astype(float).sum():.2f}"
-    df_modal = pd.concat([df_modal, pd.DataFrame([sum_row])], ignore_index=True)
-
-    # Static linear
-    _static_ar = _man_results.get("StaticAnalysis")
-    df_linear = _static_ar.data.get("df_linear", pd.DataFrame()) if _static_ar else pd.DataFrame()
-
-    # RS per-mode base shear
-    rs_modal_x = (
-        _man_results["RS-X"].data.get("modal_base_shear", []) if "RS-X" in _man_results else []
-    )
-    rs_modal_y = (
-        _man_results["RS-Y"].data.get("modal_base_shear", []) if "RS-Y" in _man_results else []
-    )
-
-    # Pushover
-    all_out = {}
-    for _name, _ar in _man_results.items():
-        if _name.startswith("Pushover-"):
-            all_out[_name.split("-", 1)[1]] = _ar.data
-
-    # ── Unified results export (single self-contained file) ──────
-    # Bundles sap/mesh stages + modal + static + pushover results so
-    # RhinoImporter / apply_results consume one file.  Must run while the
-    # AnalysisBuilders are still in scope (they cannot be pickled), and
-    # before downstream plotting so a plot failure never loses the
-    # deliverable.
-    export_path = None
-    if export_cfg.get("enabled"):
-        log.info("export", "Exporting unified results file...")
-        try:
-            from fea_toolkit.io.stage_writer import write_model_stages
-
-            _static_ar = _man_results.get("StaticAnalysis")
-            static_raw = _static_ar.data.get("static_raw") if _static_ar else None
-
-            po_export: dict = {}
-            if export_cfg.get("pushover", True):
-                for _pat, _dirs in all_out.items():
-                    for label, out in _dirs.items():
-                        ab = out.get("builder")
-                        if ab is not None and getattr(ab, "pushover_step_results", None):
-                            po_export[label] = (
-                                ab.pushover_step_results,
-                                out.get("results", {}),
-                            )
-
-            # Response-spectrum results (one entry per direction), so the
-            # exported file carries the same RS arrays a review writes.
-            rs_export: dict = {}
-            if export_cfg.get("response_spectrum", True):
-                for _dir in ("X", "Y"):
-                    _rs_ar = _man_results.get(f"RS-{_dir}")
-                    _rs = (_rs_ar.data or {}).get("rs_result") if _rs_ar is not None else None
-                    if _rs:
-                        rs_export[f"rs_{_dir.lower()}"] = _rs
-
-            _fmt = export_cfg.get("fmt", "h5")
-            _stages = export_cfg.get("stages") or ["sap", "mesh"]
-            _path = export_cfg.get("path")
-            if not _path:
-                _path = str(resolved_out / f"{model_stem}_results.{_fmt}")
-            _modal_flat = modal_result.get("modal") if isinstance(modal_result, dict) else None
-            write_model_stages(
-                _path,
-                sap=md if "sap" in _stages else None,
-                mesh=mesh_model if "mesh" in _stages else None,
-                static_results=static_raw if export_cfg.get("static", True) else None,
-                modal_result=_modal_flat if export_cfg.get("modal", True) else None,
-                mode_shapes=(
-                    modal_result.get("shapes")
-                    if export_cfg.get("modal", True) and isinstance(modal_result, dict)
-                    else None
-                ),
-                pushover_results=po_export,
-                rs_results=rs_export or None,
-                config=cfg.get("builder") or cfg.get("preprocessor") or {},
-                source_file=cfg.get("model", {}).get("path"),
-                fmt=_fmt,
-            )
-            export_path = _path
-            log.info(
-                "export",
-                f"Export written: {export_path}; stages={_stages}; "
-                f"static cases={len(static_raw or {})}; "
-                f"pushover directions={sorted(po_export)}; "
-                f"RS directions={sorted(rs_export)}",
-            )
-        except Exception as exc:
-            log.error("export", f"Results export failed: {exc}")
-
-    # AnalysisBuilders hold live OpenSees state and are not picklable —
-    # strip them from the manager results before the cache is written.
-    for _ar in _man_results.values():
-        _data = getattr(_ar, "data", None)
-        if isinstance(_data, dict):
-            for _v in _data.values():
-                if isinstance(_v, dict):
-                    _v.pop("builder", None)
-
-    # CSM plots + comparison table
-    fig_csm_plots: dict = {}
-    df_compare = pd.DataFrame()
-    if all_out:
-        log.info("pushover", "done")
-        log.info("csm_plot", "Generating CSM plots...")
-        for pat in push_cfg.get("patterns", []):
-            if pat in all_out:
-                log.info("csm_plot", f"{pat} — generating")
-                fig_csm_plots[pat] = plot_csm_4panel(
-                    all_out[pat],
-                    modal,
-                    tg=push_tg,
-                    zeta=push_zeta,
-                    alpha_max_rare=push_alpha_max,
-                    g=_gravity,
-                    units=md.units,
-                    out_dir=str(resolved_out),
-                )
-                log.info("csm_plot", f"{pat} — done")
-        df_compare = pushover_comparison_table(
-            all_out, df_linear, patterns=push_cfg.get("patterns", [])
-        )
-    else:
-        log.info("pushover", "Pushover: skipped (no manager results)")
-
-    # ── Summary tables (common) ──────────────────────────────────
-    df_sections = section_summary(md)
-    df_materials = material_summary(md)
-    fig_spec = plot_seismic_spectrum(spec_cfg, modal, g=_gravity, units=md.units)
-
-    # ── Model viewer ─────────────────────────────────────────────
-    viewer_cfg = cfg.get("model_viewer", {"enabled": False})
-    model_comparison = None
-    if viewer_cfg.get("enabled", False):
-        log.info("model_viewer", "Generating model comparison views...")
-        viewer_out = viewer_cfg.get("out_dir") or str(resolved_out)
-        model_comparison = plot_model_comparison(
-            md,
-            mesh_model=mesh_model,
-            out_dir=viewer_out,
-            off_screen=viewer_cfg.get("off_screen", True),
-        )
-
-    # ── Storey detection ─────────────────────────────────────────
-    story_cfg = cfg.get("stories", {"run": True})
-    model_stories = None
-    df_stories = None
-    stories_png = None
-    if story_cfg.get("run", True):
-        log.info("stories", "Detecting storey levels...")
-        try:
-            model_stories = identify_stories(md, raw_tables=raw_tables)
-            if model_stories:
-                df_stories = stories_dataframe(model_stories)
-                fig = plot_stories(md, model_stories, off_screen=True, window_size=(1400, 900))
-                if fig:
-                    stories_png = str(resolved_out / "model_stories.png")
-                    fig.savefig(stories_png, dpi=150, bbox_inches="tight")
-                    log.info("stories", f"Saved storey visualisation to {stories_png}")
-        except Exception as e:
-            log.warning("storey_detection", f"Storey detection failed: {e}")
-
-    # ── Storey response ──────────────────────────────────────────
-    story_response_cfg = cfg.get("storey_response", {"run": True})
-    df_storey_disp = pd.DataFrame()
-    df_storey_drift = pd.DataFrame()
-    df_storey_shear = pd.DataFrame()
-    df_storey_moment = pd.DataFrame()
-    fig_storey_forces = None
-    fig_storey_disp = None
-    if story_response_cfg.get("run", True) and model_stories:
-        log.info("storey_response", "Computing storey-level structural responses...")
-        try:
-            sr = compute_linear_storey_responses(
-                md,
-                mesh_model,
-                model_stories,
-                cfg.get("linear", {}),
-                df_linear,
-                modal_result,
-                T_spec if spec_cfg else None,
-                Sa_spec if spec_cfg else None,
-                n_modes=n_modes,
-                damping=zeta,
-            )
-            df_storey_disp = sr["df_disp"]
-            df_storey_drift = sr["df_drift"]
-            df_storey_shear = sr["df_shear"]
-            df_storey_moment = sr["df_moment"]
-
-            # Filter to only specified cases
-            linear_cases = set()
-            for entry in cfg.get("linear", {}).get("cases", []):
-                if isinstance(entry, dict):
-                    linear_cases.update(entry.keys())
-                elif isinstance(entry, str):
-                    linear_cases.add(entry)
-            keep_cases = linear_cases | {"RS-X", "RS-Y"}
-            _struct_cols = {"Storey", "Elevation", "Elevation (m)"}
-            if keep_cases:
-                for _df in [
-                    df_storey_disp,
-                    df_storey_drift,
-                    df_storey_shear,
-                    df_storey_moment,
-                ]:
-                    _drop = [
-                        c for c in _df.columns if c not in keep_cases and c not in _struct_cols
+        # ── Static load verification ─────────────────────────────────
+        df_load_verify = pd.DataFrame()
+        if cfg.get("static_verification", {}).get("run", True):
+            log.info("load_verify", "Running static load verification...")
+            try:
+                df_load_verify = static_load_verification(md, mesh_model)
+                _lv_patterns = cfg.get("static_verification", {}).get("patterns")
+                if _lv_patterns and not df_load_verify.empty:
+                    df_load_verify = df_load_verify[
+                        df_load_verify["Load Pattern"].isin(_lv_patterns)
                     ]
-                    if _drop:
-                        _df.drop(columns=_drop, inplace=True, errors="ignore")
+                log.info("load_verify", f"Verified {len(df_load_verify)} load patterns")
+            except Exception as e:
+                log.error("load_verify", f"Static load verification failed: {e}")
 
-            if not df_storey_disp.empty and not df_storey_drift.empty:
-                log.info("storey_fig", "displacement — generating")
-                fig_storey_disp = plot_storey_displacements(df_storey_disp, df_storey_drift)
-                log.info("storey_fig", "displacement — done")
-            if not df_storey_shear.empty and not df_storey_moment.empty:
-                log.info("storey_fig", "forces — generating")
-                fig_storey_forces = plot_storey_forces(df_storey_shear, df_storey_moment)
-                log.info("storey_fig", "forces — done")
-            log.info(
-                "storey_response",
-                f"disp={len(df_storey_disp)}, "
-                f"drift={len(df_storey_drift)}, "
-                f"shear={len(df_storey_shear)}, "
-                f"moment={len(df_storey_moment)}",
+        # ── Connectivity check ───────────────────────────────────────
+        connectivity = None
+        self_weight = None
+        if cfg.get("checks", {}).get("run", True):
+            log.info("connectivity", "Running connectivity check...")
+            try:
+                from fea_toolkit.model.checks import check_model_connectivity
+
+                connectivity = check_model_connectivity(md)
+                log.info("connectivity", connectivity["summary"])
+                if connectivity.get("orphan_nodes"):
+                    log.warning(
+                        "connectivity", f"{len(connectivity['orphan_nodes'])} orphan node(s)"
+                    )
+                if connectivity.get("shell_only_base_nodes"):
+                    log.warning(
+                        "connectivity",
+                        f"{len(connectivity['shell_only_base_nodes'])} shell-only base node(s)",
+                    )
+            except Exception as e:
+                log.warning("connectivity", f"Connectivity check failed: {e}")
+
+            # ── Self-weight check ────────────────────────────────────
+            log.info("self_weight", "Checking self-weight consistency...")
+            try:
+                fu_md = md.units.get("F", "N")
+                applied = 0.0
+                expected = 0.0
+                if not df_load_verify.empty:
+                    dead = df_load_verify[df_load_verify["Load Pattern"] == "DEAD"]
+                    if len(dead):
+                        r = dead.iloc[0]
+                        applied = abs(r.get(f"Reaction Fz ({fu_md})", 0))
+                        expected = abs(r.get(f"Applied Fz ({fu_md})", 0))
+                passed = abs(expected - applied) / max(expected, 1.0) < 0.02
+                self_weight = {
+                    "expected": expected,
+                    "applied": applied,
+                    "passed": passed,
+                    "by_section": {},
+                }
+                log.info(
+                    "self_weight",
+                    f"Expected: {expected:.0f} {fu_md}; "
+                    f"Applied: {applied:.0f} {fu_md}; "
+                    f"Status: {'✓ PASS' if passed else '✗ FAIL'}",
+                )
+            except Exception as e:
+                log.warning("self_weight", f"Self-weight check failed: {e}")
+
+        # ── Build spectrum (common to both paths) ────────────────────
+        # g is derived from the model's length unit so the spectral
+        # accelerations come back in the model's own unit system (mm/s² for a
+        # millimetre model), not the SI 9.80665 m/s² the builder would
+        # otherwise fall back to.
+        _gravity = g_from_units(md.units)
+        if spec_cfg:
+            T_spec, Sa_spec, alpha_max, tg, zeta, spec_label = _build_spectrum(spec_cfg, g=_gravity)
+        else:
+            T_spec, Sa_spec, alpha_max, tg, zeta, spec_label = (
+                [],
+                [],
+                0.0,
+                0.25,
+                zeta_cfg,
+                "",
             )
-        except Exception as e:
-            log.error("storey_response", f"Storey response failed: {e}")
-            import traceback
 
-            traceback.print_exc()
+        if push_spec_cfg:
+            (_, _, push_alpha_max, push_tg, push_zeta, _) = _build_spectrum(
+                push_spec_cfg, g=_gravity
+            )
+        else:
+            push_alpha_max, push_tg, push_zeta = alpha_max, tg, zeta
 
-    # ── Assemble results dict ────────────────────────────────────
-    # Determine first pattern for convenience references
-    patterns = push_cfg.get("patterns", [])
-    first_pattern = patterns[0] if patterns else None
+        # ── Core analyses (static, modal, RS, pushover) ──────────────
+        # The modal / response-spectrum / pushover analyses are composed from the
+        # workflow verbs — the same vocabulary a Recipe or the GUI runs — while the
+        # static-linear pass stays a direct call (there is no verb for it) and the
+        # storage / presentation stages below stay report-only (a write or a render
+        # is not a model operation).  ``generate_report`` is therefore a shorthand
+        # for a recipe, not a second spelling of one.
+        log.info("analyses", "Running analyses...")
 
-    results: dict = {
-        "config": cfg,
-        "md": md,
-        "mesh_model": mesh_model,
-        "connectivity": connectivity,
-        "self_weight": self_weight,
-        "modal": modal_result,
-        "df_modal": df_modal,
-        "df_linear": df_linear,
-        "rs_modal_x": rs_modal_x,
-        "rs_modal_y": rs_modal_y,
-        "all_out": all_out,
-        "fig_csm_plots": fig_csm_plots,
-        "fig_spec": fig_spec,
-        "df_compare": df_compare,
-        "df_sections": df_sections,
-        "df_materials": df_materials,
-        "brace_ids": brace_ids,
-        "bounding_box": bounding_box(md),
-        "wind_check": (
-            wind_sanity_check(md, df_linear) if not df_linear.empty else "Linear analysis skipped"
-        ),
-        "inferred_loads": inferred,
-        "spec_label": spec_label,
-        "alpha_max": alpha_max,
-        "tg": tg,
-        "out_dir": str(resolved_out),
-        "export_path": export_path,
-        "model_comparison": model_comparison,
-        "model_stories": model_stories,
-        "df_stories": df_stories,
-        "stories_png": stories_png,
-        "df_load_verify": df_load_verify,
-        "df_storey_disp": df_storey_disp,
-        "df_storey_drift": df_storey_drift,
-        "df_storey_shear": df_storey_shear,
-        "df_storey_moment": df_storey_moment,
-        "fig_storey_forces": fig_storey_forces,
-        "fig_storey_disp": fig_storey_disp,
-    }
-    # Convenience: a single fig_csm for the first pattern
-    if first_pattern and first_pattern in fig_csm_plots:
-        results["fig_csm"] = fig_csm_plots[first_pattern]
-    else:
-        results["fig_csm"] = None
+        _man_results: dict = {}
 
-    if log_enabled:
-        results["analysis_log"] = log
+        # Static linear (if enabled) — a direct call, as there is no verb for it.
+        if cfg.get("linear", {}).get("run", True):
+            # Propagate the resolved n_modes (general.n_modes, default 12) into
+            # linear_cfg so run_linear_cases' RS pass stays consistent with the
+            # report-level RS pass when linear.n_modes is absent.  linear.n_modes
+            # remains the higher-priority override.
+            linear_cfg = dict(cfg.get("linear") or {})
+            linear_cfg.setdefault("n_modes", n_modes)
+            _man_results["StaticAnalysis"] = run_static_analysis(
+                mesh_model,
+                md,
+                spec_cfg=spec_cfg,
+                linear_cfg=linear_cfg,
+                name="StaticAnalysis",
+                collect_raw=bool(export_cfg.get("static", False)),
+                log=log,
+            )
 
-    # ── Cache ────────────────────────────────────────────────────
-    with open(cache_path, "wb") as f:
-        pickle.dump(results, f)
-    log.info("cache", f"Results cached to {cache_path}")
+        # Modal → response spectrum → pushover, authored as a recipe of verbs.  The
+        # ``kind``/``needs`` chain (Decision 0) validates the order; each verb is a
+        # thin wrapper over the same analysis function the report used to call.
+        analysis_recipe = Recipe(name="report")
+        analysis_recipe.add("modal", params={"n_modes": n_modes, "name": "ModalAnalysis"})
+        if T_spec and Sa_spec:
+            for rs_dir in ("X", "Y"):
+                analysis_recipe.add(
+                    "response_spectrum",
+                    params={
+                        "direction": rs_dir,
+                        "T_spec": T_spec,
+                        "Sa_spec": Sa_spec,
+                        "damping": zeta,
+                        "n_modes": n_modes,
+                        "name": f"RS-{rs_dir}",
+                    },
+                )
+        # Note: rs_modal_base_shear is not available until after modal + RS run, so
+        # it is omitted here (the mode1 diagnostic is skipped).
+        if cfg.get("pushover") and push_cfg.get("patterns") and push_cfg.get("directions"):
+            # The report's pushover runs the steel path (``run_pushover_4dir``),
+            # which honors only the full four-direction set — a configured subset
+            # cannot be expressed, so it is rejected here rather than silently
+            # pushed as all four directions.
+            push_dirs = list(push_cfg["directions"])
+            if sorted(push_dirs) != sorted(["+X", "-X", "+Y", "-Y"]):
+                raise ValueError(
+                    "report pushover.directions must be the full four-direction "
+                    "set [+X, -X, +Y, -Y]; run_pushover_4dir cannot honor a "
+                    f"subset (got {push_dirs})"
+                )
+            for pattern in push_cfg["patterns"]:
+                # ``gravity_patterns`` and ``brace_sections`` are optional, so
+                # they are omitted when unset — the verb's declared types (a
+                # mapping / a list) must hold.
+                push_params: dict = {
+                    "lateral_load_type": pattern,
+                    "max_disp_val": push_cfg["max_disp"],
+                    "num_steps": push_cfg["num_steps"],
+                    "brace_type": push_cfg.get("brace_type", "truss"),
+                    "directions": "4dir",
+                    "name": f"Pushover-{pattern}",
+                    "return_builders": bool(
+                        export_cfg.get("enabled", False) and export_cfg.get("pushover", False)
+                    ),
+                }
+                if load_cfg.get("gravity"):
+                    push_params["gravity_patterns"] = load_cfg["gravity"]
+                if push_cfg.get("brace_sections"):
+                    push_params["brace_sections"] = push_cfg["brace_sections"]
+                if export_cfg.get("enabled", False) and export_cfg.get("pushover", False):
+                    push_params["config"] = {"record_pushover_steps": True}
+                analysis_recipe.add("pushover", params=push_params)
 
-    _detach_logging()
-    return results
+        # Run the verbs and re-key each result by its ``AnalysisResult.name``, so
+        # the extraction below is unchanged.
+        _analysis_run = run_recipe(analysis_recipe, md, model=mesh_model, pipeline_log=log)
+        for _step_result in _analysis_run.results:
+            _man_results[_step_result.payload.name] = _step_result.payload
+
+        modal_result = _man_results["ModalAnalysis"].data
+        modal = modal_result["modal"]
+
+        log.info("analyses", f"ran {len(_man_results)} analyses")
+
+        # ── Extract results ──────────────────────────────────────
+        log.info("modal", f"{n_modes} modes, T1={modal['periods'][0]:.3f}s")
+
+        # Build participation DataFrame (same format as inline path)
+        mp = modal["modal_props"]
+        pct_cols = ["Mx (%)", "My (%)", "Mz (%)", "Rx (%)", "Ry (%)", "Rz (%)"]
+        _mp_keys = {
+            "Mx (%)": "partiMassRatiosMX",
+            "My (%)": "partiMassRatiosMY",
+            "Mz (%)": "partiMassRatiosMZ",
+            "Rx (%)": "partiMassRatiosRMX",
+            "Ry (%)": "partiMassRatiosRMY",
+            "Rz (%)": "partiMassRatiosRMZ",
+        }
+        modal_rows = []
+        for i in range(modal["num_modes"]):
+            row = {
+                "Mode": i + 1,
+                "Period (s)": round(modal["periods"][i], 4),
+                "Freq (Hz)": round(modal["frequencies"][i], 4),
+            }
+            for col, key in _mp_keys.items():
+                row[col] = round(mp.get(key, [0])[i], 2)
+            modal_rows.append(row)
+        df_modal = pd.DataFrame(modal_rows)
+        for c in pct_cols:
+            df_modal[c] = df_modal[c].apply(lambda v: f"{v:.2f}")
+        sum_row = {"Mode": "<strong>SUM</strong>", "Period (s)": "\u2014", "Freq (Hz)": "\u2014"}
+        for col in pct_cols:
+            sum_row[col] = f"{df_modal[col].astype(float).sum():.2f}"
+        df_modal = pd.concat([df_modal, pd.DataFrame([sum_row])], ignore_index=True)
+
+        # Static linear
+        _static_ar = _man_results.get("StaticAnalysis")
+        df_linear = (
+            _static_ar.data.get("df_linear", pd.DataFrame()) if _static_ar else pd.DataFrame()
+        )
+
+        # RS per-mode base shear
+        rs_modal_x = (
+            _man_results["RS-X"].data.get("modal_base_shear", []) if "RS-X" in _man_results else []
+        )
+        rs_modal_y = (
+            _man_results["RS-Y"].data.get("modal_base_shear", []) if "RS-Y" in _man_results else []
+        )
+
+        # Pushover
+        all_out = {}
+        for _name, _ar in _man_results.items():
+            if _name.startswith("Pushover-"):
+                all_out[_name.split("-", 1)[1]] = _ar.data
+
+        # ── Unified results export (single self-contained file) ──────
+        # Bundles sap/mesh stages + modal + static + pushover results so
+        # RhinoImporter / apply_results consume one file.  Must run while the
+        # AnalysisBuilders are still in scope (they cannot be pickled), and
+        # before downstream plotting so a plot failure never loses the
+        # deliverable.
+        export_path = None
+        if export_cfg.get("enabled"):
+            log.info("export", "Exporting unified results file...")
+            try:
+                from fea_toolkit.io.stage_writer import write_model_stages
+
+                _static_ar = _man_results.get("StaticAnalysis")
+                static_raw = _static_ar.data.get("static_raw") if _static_ar else None
+
+                po_export: dict = {}
+                if export_cfg.get("pushover", True):
+                    for _pat, _dirs in all_out.items():
+                        for label, out in _dirs.items():
+                            ab = out.get("builder")
+                            if ab is not None and getattr(ab, "pushover_step_results", None):
+                                po_export[label] = (
+                                    ab.pushover_step_results,
+                                    out.get("results", {}),
+                                )
+
+                # Response-spectrum results (one entry per direction), so the
+                # exported file carries the same RS arrays a review writes.
+                rs_export: dict = {}
+                if export_cfg.get("response_spectrum", True):
+                    for _dir in ("X", "Y"):
+                        _rs_ar = _man_results.get(f"RS-{_dir}")
+                        _rs = (_rs_ar.data or {}).get("rs_result") if _rs_ar is not None else None
+                        if _rs:
+                            rs_export[f"rs_{_dir.lower()}"] = _rs
+
+                _fmt = export_cfg.get("fmt", "h5")
+                _stages = export_cfg.get("stages") or ["sap", "mesh"]
+                _path = export_cfg.get("path")
+                if not _path:
+                    _path = str(resolved_out / f"{model_stem}_results.{_fmt}")
+                _modal_flat = modal_result.get("modal") if isinstance(modal_result, dict) else None
+                write_model_stages(
+                    _path,
+                    sap=md if "sap" in _stages else None,
+                    mesh=mesh_model if "mesh" in _stages else None,
+                    static_results=static_raw if export_cfg.get("static", True) else None,
+                    modal_result=_modal_flat if export_cfg.get("modal", True) else None,
+                    mode_shapes=(
+                        modal_result.get("shapes")
+                        if export_cfg.get("modal", True) and isinstance(modal_result, dict)
+                        else None
+                    ),
+                    pushover_results=po_export,
+                    rs_results=rs_export or None,
+                    config=cfg.get("builder") or cfg.get("preprocessor") or {},
+                    source_file=cfg.get("model", {}).get("path"),
+                    fmt=_fmt,
+                )
+                export_path = _path
+                log.info(
+                    "export",
+                    f"Export written: {export_path}; stages={_stages}; "
+                    f"static cases={len(static_raw or {})}; "
+                    f"pushover directions={sorted(po_export)}; "
+                    f"RS directions={sorted(rs_export)}",
+                )
+            except Exception as exc:
+                log.error("export", f"Results export failed: {exc}")
+
+        # AnalysisBuilders hold live OpenSees state and are not picklable —
+        # strip them from the manager results before the cache is written.
+        for _ar in _man_results.values():
+            _data = getattr(_ar, "data", None)
+            if isinstance(_data, dict):
+                for _v in _data.values():
+                    if isinstance(_v, dict):
+                        _v.pop("builder", None)
+
+        # CSM plots + comparison table
+        fig_csm_plots: dict = {}
+        df_compare = pd.DataFrame()
+        if all_out:
+            log.info("pushover", "done")
+            log.info("csm_plot", "Generating CSM plots...")
+            for pat in push_cfg.get("patterns", []):
+                if pat in all_out:
+                    log.info("csm_plot", f"{pat} — generating")
+                    fig_csm_plots[pat] = plot_csm_4panel(
+                        all_out[pat],
+                        modal,
+                        tg=push_tg,
+                        zeta=push_zeta,
+                        alpha_max_rare=push_alpha_max,
+                        g=_gravity,
+                        units=md.units,
+                        out_dir=str(resolved_out),
+                    )
+                    log.info("csm_plot", f"{pat} — done")
+            df_compare = pushover_comparison_table(
+                all_out, df_linear, patterns=push_cfg.get("patterns", [])
+            )
+        else:
+            log.info("pushover", "Pushover: skipped (no manager results)")
+
+        # ── Summary tables (common) ──────────────────────────────────
+        df_sections = section_summary(md)
+        df_materials = material_summary(md)
+        fig_spec = plot_seismic_spectrum(spec_cfg, modal, g=_gravity, units=md.units)
+
+        # ── Model viewer ─────────────────────────────────────────────
+        viewer_cfg = cfg.get("model_viewer", {"enabled": False})
+        model_comparison = None
+        if viewer_cfg.get("enabled", False):
+            log.info("model_viewer", "Generating model comparison views...")
+            viewer_out = viewer_cfg.get("out_dir") or str(resolved_out)
+            model_comparison = plot_model_comparison(
+                md,
+                mesh_model=mesh_model,
+                out_dir=viewer_out,
+                off_screen=viewer_cfg.get("off_screen", True),
+            )
+
+        # ── Storey detection ─────────────────────────────────────────
+        story_cfg = cfg.get("stories", {"run": True})
+        model_stories = None
+        df_stories = None
+        stories_png = None
+        if story_cfg.get("run", True):
+            log.info("stories", "Detecting storey levels...")
+            try:
+                model_stories = identify_stories(md, raw_tables=raw_tables)
+                if model_stories:
+                    df_stories = stories_dataframe(model_stories)
+                    fig = plot_stories(md, model_stories, off_screen=True, window_size=(1400, 900))
+                    if fig:
+                        stories_png = str(resolved_out / "model_stories.png")
+                        fig.savefig(stories_png, dpi=150, bbox_inches="tight")
+                        log.info("stories", f"Saved storey visualisation to {stories_png}")
+            except Exception as e:
+                log.warning("storey_detection", f"Storey detection failed: {e}")
+
+        # ── Storey response ──────────────────────────────────────────
+        story_response_cfg = cfg.get("storey_response", {"run": True})
+        df_storey_disp = pd.DataFrame()
+        df_storey_drift = pd.DataFrame()
+        df_storey_shear = pd.DataFrame()
+        df_storey_moment = pd.DataFrame()
+        fig_storey_forces = None
+        fig_storey_disp = None
+        if story_response_cfg.get("run", True) and model_stories:
+            log.info("storey_response", "Computing storey-level structural responses...")
+            try:
+                sr = compute_linear_storey_responses(
+                    md,
+                    mesh_model,
+                    model_stories,
+                    cfg.get("linear", {}),
+                    df_linear,
+                    modal_result,
+                    T_spec if spec_cfg else None,
+                    Sa_spec if spec_cfg else None,
+                    n_modes=n_modes,
+                    damping=zeta,
+                )
+                df_storey_disp = sr["df_disp"]
+                df_storey_drift = sr["df_drift"]
+                df_storey_shear = sr["df_shear"]
+                df_storey_moment = sr["df_moment"]
+
+                # Filter to only specified cases
+                linear_cases = set()
+                for entry in cfg.get("linear", {}).get("cases", []):
+                    if isinstance(entry, dict):
+                        linear_cases.update(entry.keys())
+                    elif isinstance(entry, str):
+                        linear_cases.add(entry)
+                keep_cases = linear_cases | {"RS-X", "RS-Y"}
+                _struct_cols = {"Storey", "Elevation", "Elevation (m)"}
+                if keep_cases:
+                    for _df in [
+                        df_storey_disp,
+                        df_storey_drift,
+                        df_storey_shear,
+                        df_storey_moment,
+                    ]:
+                        _drop = [
+                            c for c in _df.columns if c not in keep_cases and c not in _struct_cols
+                        ]
+                        if _drop:
+                            _df.drop(columns=_drop, inplace=True, errors="ignore")
+
+                if not df_storey_disp.empty and not df_storey_drift.empty:
+                    log.info("storey_fig", "displacement — generating")
+                    fig_storey_disp = plot_storey_displacements(df_storey_disp, df_storey_drift)
+                    log.info("storey_fig", "displacement — done")
+                if not df_storey_shear.empty and not df_storey_moment.empty:
+                    log.info("storey_fig", "forces — generating")
+                    fig_storey_forces = plot_storey_forces(df_storey_shear, df_storey_moment)
+                    log.info("storey_fig", "forces — done")
+                log.info(
+                    "storey_response",
+                    f"disp={len(df_storey_disp)}, "
+                    f"drift={len(df_storey_drift)}, "
+                    f"shear={len(df_storey_shear)}, "
+                    f"moment={len(df_storey_moment)}",
+                )
+            except Exception as e:
+                log.error("storey_response", f"Storey response failed: {e}")
+                import traceback
+
+                traceback.print_exc()
+
+        # ── Assemble results dict ────────────────────────────────────
+        # Determine first pattern for convenience references
+        patterns = push_cfg.get("patterns", [])
+        first_pattern = patterns[0] if patterns else None
+
+        results: dict = {
+            "config": cfg,
+            "md": md,
+            "mesh_model": mesh_model,
+            "connectivity": connectivity,
+            "self_weight": self_weight,
+            "modal": modal_result,
+            "df_modal": df_modal,
+            "df_linear": df_linear,
+            "rs_modal_x": rs_modal_x,
+            "rs_modal_y": rs_modal_y,
+            "all_out": all_out,
+            "fig_csm_plots": fig_csm_plots,
+            "fig_spec": fig_spec,
+            "df_compare": df_compare,
+            "df_sections": df_sections,
+            "df_materials": df_materials,
+            "brace_ids": brace_ids,
+            "bounding_box": bounding_box(md),
+            "wind_check": (
+                wind_sanity_check(md, df_linear)
+                if not df_linear.empty
+                else "Linear analysis skipped"
+            ),
+            "inferred_loads": inferred,
+            "spec_label": spec_label,
+            "alpha_max": alpha_max,
+            "tg": tg,
+            "out_dir": str(resolved_out),
+            "export_path": export_path,
+            "model_comparison": model_comparison,
+            "model_stories": model_stories,
+            "df_stories": df_stories,
+            "stories_png": stories_png,
+            "df_load_verify": df_load_verify,
+            "df_storey_disp": df_storey_disp,
+            "df_storey_drift": df_storey_drift,
+            "df_storey_shear": df_storey_shear,
+            "df_storey_moment": df_storey_moment,
+            "fig_storey_forces": fig_storey_forces,
+            "fig_storey_disp": fig_storey_disp,
+        }
+        # Convenience: a single fig_csm for the first pattern
+        if first_pattern and first_pattern in fig_csm_plots:
+            results["fig_csm"] = fig_csm_plots[first_pattern]
+        else:
+            results["fig_csm"] = None
+
+        if log_enabled:
+            results["analysis_log"] = log
+
+        # ── Cache ────────────────────────────────────────────────────
+        with open(cache_path, "wb") as f:
+            pickle.dump(results, f)
+        log.info("cache", f"Results cached to {cache_path}")
+
+        return results
+    finally:
+        _detach_logging()
