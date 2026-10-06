@@ -5,6 +5,11 @@ results, figures, the ordered view list and the viewport — to a **directory**
 named `<name>.fea`.  `File ▸ Open project…` reads it back and rebuilds the
 session **without re-running any analysis**.
 
+The save dialog asks for a name and creates a directory, so **Open project…
+presents a folder picker** — select the `<name>.fea` folder itself (not the
+`project.json` inside it, and no need to compress it first).  The bundle is not
+a single file unless you pass it through `zip_project`.
+
 The directory is the canonical form; the loader also accepts a `.fea`/`.zip`
 of it (see `zip_project`).  The bundle's members are all canonical formats, so
 each is independently usable.
@@ -112,6 +117,10 @@ slot) because the context's `results["rs"]` is overwritten per direction.
   savable — they previously were logged and dropped.
 - `_show_pushover_result` and the loader share `figure_identity` (one spelling
   for the figure view key/name).
+- Table and figure views (modal/RS tables, pushover ADRS figures) are now added
+  to the Model Tree when a recipe registers them — `show_model` repopulates the
+  tree only when it draws geometry, so `_show_view` rebuilds it explicitly for
+  table/figure views via `_rebuild_tree`.
 
 ## What a load restores
 

@@ -1534,13 +1534,31 @@ class MainWindow(QMainWindow):
                 selection=view.selection,
             )
         elif view.kind == TABLE:
+            if rebuild_tree:
+                self._rebuild_tree()
             self._show_table_view(view)
         elif view.kind == FIGURE:
+            if rebuild_tree:
+                self._rebuild_tree()
             self._show_figure_view(view)
         else:
             return
         self._inspector.show_object(self._views.get(view.key))
         self.log(f"Showing view: {view.name}.")
+
+    def _rebuild_tree(self) -> None:
+        """Refresh the Model Tree for the current model and registered views.
+
+        ``show_model`` repopulates the tree as a side effect of drawing geometry,
+        so a geometry or results view keeps it current.  A table or figure view
+        raises its own central page and never calls ``show_model``, which left
+        every table/figure registered by a recipe run invisible in the **Views**
+        group.  This repopulates the tree without touching the viewport.
+        """
+        model = self._model
+        if model is None and self._store is not None:
+            model = self._store.preprocessed() or self._store.raw()
+        self._tree_model.set_model(model, self._views.views())
 
     def _show_table_view(self, view: View) -> None:
         """Render a ``table`` view — a check's findings as a read-only grid.
@@ -2969,15 +2987,17 @@ class MainWindow(QMainWindow):
         self.log(f"Saved project to {directory}.")
 
     def _on_open_project(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Open project",
-            "",
-            "FEA project (*.fea *.zip);;Project directory (*);;All files (*)",
-        )
-        if path and not self.open_project_path(path):
+        # A project is a *directory* (``<name>.fea/``) — the canonical form the
+        # save action writes.  ``getOpenFileName`` is a file picker, so selecting
+        # a bundle folder with it just navigates *into* the folder instead of
+        # choosing it.  Use the directory picker; ``open_project_path`` still
+        # accepts a ``.fea`` zip when handed a path directly.
+        directory = QFileDialog.getExistingDirectory(self, "Open project", "")
+        if directory and not self.open_project_path(directory):
             QMessageBox.critical(
-                self, "Open failed", f"Could not open project:\n{path}\n\nSee the message log."
+                self,
+                "Open failed",
+                f"Could not open project:\n{directory}\n\nSee the message log.",
             )
 
     def open_project_path(self, path: str) -> bool:

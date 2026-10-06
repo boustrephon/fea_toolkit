@@ -312,6 +312,20 @@ class TestTableAndFigureViews:
         assert window._stack.currentWidget() is window._figure_page
         assert window._figure_layout.count() == 1
 
+    def test_table_and_figure_views_appear_in_the_tree(self, window):
+        """A table/figure view registers in the **Views** group, not only its page."""
+        from matplotlib.figure import Figure
+
+        from fea_toolkit.workflow import Table
+
+        window._show_table_result("Probe", Table(title="Probe", columns=("a",), rows=(("1",),)))
+        assert window._tree_model.index_for("views", "Probe") is not None
+
+        figure = Figure()
+        figure.gca().plot([0.0, 1.0], [0.0, 1.0])
+        window._show_figure_result("Storey displacements", figure)
+        assert window._tree_model.index_for("views", "Storey displacements") is not None
+
 
 def test_the_config_editor_emits_only_the_keys_a_user_changes(qapp):
     """The structured config editor writes back a minimal override dict."""
