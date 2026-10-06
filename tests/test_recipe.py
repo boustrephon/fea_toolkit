@@ -504,8 +504,8 @@ class TestSaveModelVerb:
         with pytest.raises(StepError):
             run_recipe(recipe, _slab_model())
 
-    def test_needs_a_prepared_topology(self):
-        recipe = Recipe(steps=[Step("save_model", params={"path": "out.h5"})])
+    def test_needs_a_prepared_topology(self, tmp_path):
+        recipe = Recipe(steps=[Step("save_model", params={"path": str(tmp_path / "out.h5")})])
         with pytest.raises(StepError):
             run_recipe(recipe, _slab_model())
 
