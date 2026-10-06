@@ -427,7 +427,7 @@ def run_static_cases(
         )
     ab = None
     if build_once:
-        ab = AnalysisBuilder(mesh_model, ab_config)
+        ab = AnalysisBuilder(mesh_model, ab_config, log=log)
         ab.build_domain()
         # A fresh builder has no saved edge constraints, so this is a no-op;
         # kept for symmetry with the per-case rebuild path in
@@ -449,7 +449,7 @@ def run_static_cases(
                     pattern_scales=patterns, extract_reactions=True, rebuild=False
                 )
             else:
-                ab = AnalysisBuilder(mesh_model, ab_config)
+                ab = AnalysisBuilder(mesh_model, ab_config, log=log)
                 results = ab.run_static_analysis(pattern_scales=patterns, extract_reactions=True)
             # Use centralized overturning-moment computation (v1 match)
             rxn = results.get("reactions", {})

@@ -99,7 +99,12 @@ class PipelineLog:
         if self._collect:
             self._entries.append(entry)
         for sink in self._sinks:
-            sink(entry)
+            try:
+                sink(entry)
+            except Exception:
+                # A failing sink must not break the emit path or stop later
+                # sinks from receiving the event.
+                continue
 
     def info(self, step: str, msg: str) -> None:
         """Record an informational message."""
