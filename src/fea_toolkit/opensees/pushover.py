@@ -153,7 +153,10 @@ def run_pushover_4dir(
     Returns
     -------
     dict
-        ``{direction: {"results": ..., "adrs": ..., "pp": ..., ...}}``.
+        ``{direction: {"results": ..., "adrs": ..., "pp": ...,
+        "spectrum": {"T": ..., "Sa": ...}, ...}}`` — ``spectrum`` is the
+        demand spectrum each direction's performance point was evaluated
+        against, so a caller can re-plot the ADRS demand curve faithfully.
     """
     from fea_toolkit.model.csm import check_modal_pushover_mode
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
@@ -295,6 +298,7 @@ def run_pushover_4dir(
             "pp": pp,
             "mode_index": best_mode_idx,
             "rs_warning": rs_warning,
+            "spectrum": {"T": T_spec, "Sa": Sa_spec},
         }
         if return_builders:
             all_out[label]["builder"] = ab
@@ -397,7 +401,10 @@ def pushover_rc_openseespy(
     Returns
     -------
     dict
-        ``{direction: {"results": ..., "adrs": ..., "pp": ..., ...}}``.
+        ``{direction: {"results": ..., "adrs": ..., "pp": ...,
+        "spectrum": {"T": ..., "Sa": ...}, ...}}`` — ``spectrum`` is the
+        demand spectrum each direction's performance point was evaluated
+        against, so a caller can re-plot the ADRS demand curve faithfully.
         When *return_builders* is ``True``, each value additionally
         contains ``"builder"``.
     """
@@ -529,6 +536,7 @@ def pushover_rc_openseespy(
             "pp": pp,
             "mode_index": best_mode_idx,
             "rs_warning": rs_warning,
+            "spectrum": {"T": T_spec, "Sa": Sa_spec},
         }
         if return_builders:
             all_out[label]["builder"] = ab
