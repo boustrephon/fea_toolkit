@@ -15,6 +15,7 @@ the viewport, plus the node / shell display toggles.
 
 import contextlib
 import gc
+import shutil
 from typing import Any, Optional
 
 from qtpy.QtCore import QItemSelection, QItemSelectionModel, QItemSelectionRange, Qt, QTimer, QUrl
@@ -2144,7 +2145,7 @@ class MainWindow(QMainWindow):
         from ..workflow import Step
         from .views.step_dialog import StepDialog
 
-        edited = StepDialog.edit(Step(verb=verb), self)
+        edited = StepDialog.edit(Step(verb=verb), self, store.raw())
         if edited is None:
             return
         if verb in ("response_spectrum", "pushover"):
@@ -2551,7 +2552,7 @@ class MainWindow(QMainWindow):
         for pending in getattr(self, "_recipe_messages", None) or []:
             self.log(pending)
         self._recipe_messages = None
-        self.log(f"Preprocessing failed: {message}", "error")
+        self.log(f"Recipe failed: {message}", "error")
 
     def _preprocess_ended(self) -> None:
         """Restore the UI once the worker has stopped, successfully or not.
@@ -2926,6 +2927,10 @@ class MainWindow(QMainWindow):
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return
+            # Clear the existing contents before writing, so stale files from a
+            # previous save (e.g. a results.npz) cannot be loaded alongside the
+            # new manifest.
+            shutil.rmtree(directory)
 
         collected = project_mod.collect_project_results(
             self._last_run.results if self._last_run is not None else []
