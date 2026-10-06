@@ -171,3 +171,35 @@ def test_display_settings_round_trip_through_main_window(qapp, monkeypatch, tmp_
     assert win2._display.shell_opacity == pytest.approx(0.42)
     assert win2._display.shrink == pytest.approx(0.6)
     win2.close()
+
+
+@pytest.mark.needs_gui
+def test_apply_display_values_restores_widgets(qapp, monkeypatch, tmp_path):
+    """``_apply_display_values`` pushes a saved display dict onto the widgets."""
+    from fea_toolkit.gui.controllers.interaction import CONFIG_ENV_VAR
+    from fea_toolkit.gui.main_window import MainWindow
+
+    monkeypatch.setenv(CONFIG_ENV_VAR, str(tmp_path / "absent.json"))
+    win = MainWindow()
+    win._apply_display_values(
+        {
+            "shell_opacity": 0.3,
+            "shrink": 0.6,
+            "deformed_scale": 25.0,
+            "force_scale": 35.0,
+            "force_quantity": "V2",
+            "restraint_style": "arrow",
+            "show_extruded": True,
+            "extruded_detail": "solid",
+        }
+    )
+    assert win._shell_opacity.value() == pytest.approx(0.3)
+    assert win._shrink.value() == pytest.approx(0.6)
+    assert win._deformed_scale.value() == pytest.approx(25.0)
+    assert win._force_scale.value() == pytest.approx(35.0)
+    assert win._force_quantity.currentText() == "V2"
+    assert win._display.restraint_style == "arrow"
+    assert win._display.show_extruded is True
+    assert win._display.extruded_detail == "solid"
+    assert win._actions["view.show_extruded"].isChecked() is True
+    win.close()

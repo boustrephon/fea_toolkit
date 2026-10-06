@@ -1,0 +1,279 @@
+"""Tests for the Qt-free project-bundle module (:mod:`fea_toolkit.gui.project`).
+
+The module is exercised without the ``[gui]`` extra and without OpenSees: the
+payload-mapping helpers are pure, and the write/read round-trip uses synthetic
+results arrays and JSON payloads (no model stage).
+"""
+
+import json
+
+import numpy as np
+
+from fea_toolkit.analysis.base import AnalysisResult
+from fea_toolkit.gui.controllers.view_registry import FIGURE, GEOMETRY, RESULTS, TABLE, View
+from fea_toolkit.gui.project import (
+    build_manifest,
+    collect_project_results,
+    detect_model_format,
+    figure_identity,
+    figures_payload,
+    is_project,
+    read_project,
+    tables_payload,
+    views_payload,
+    write_project,
+    zip_project,
+)
+from fea_toolkit.workflow.steps import CASES, MODAL, PUSHOVER, RS, StepResult, Table
+
+# ── Helpers ──────────────────────────────────────────────────────────
+
+
+def _modal_step() -> StepResult:
+    return StepResult(
+        kind=MODAL,
+        label="Modal",
+        payload=AnalysisResult(
+            name="Modal",
+            analysis_type="ModalAnalysis",
+            data={
+                "modal": {
+                    "periods": [1.0, 0.5],
+                    "frequencies": [1.0, 2.0],
+                    "modal_props": {"partiMassRatiosMX": [0.8, 0.1]},
+                },
+                "shapes": {},
+            },
+        ),
+    )
+
+
+def _rs_step(direction: str) -> StepResult:
+    return StepResult(
+        kind=RS,
+        label=f"Response spectrum ({direction})",
+        payload=AnalysisResult(
+            name="ResponseSpectrum",
+            analysis_type="ResponseSpectrumAnalysis",
+            data={
+                "rs_result": {
+                    "base_shear_cqc": 120.0,
+                    "base_shear_srss": 130.0,
+                    "base_moment_cqc": 140.0,
+                    "base_moment_srss": 150.0,
+                    "base_shear_total": 160.0,
+                },
+                "direction": direction,
+            },
+        ),
+    )
+
+
+def _pushover_step() -> StepResult:
+    return StepResult(
+        kind=PUSHOVER,
+        label="Pushover",
+        payload=AnalysisResult(
+            name="Pushover",
+            analysis_type="PushoverAnalysis",
+            data={
+                "+X": {
+                    "adrs": {"S_a": [0.0, 1.0], "S_d": [0.0, 0.1]},
+                    "pp": {"S_dp": 0.1, "S_ap": 1.0, "S_dy": 0.05, "S_ay": 0.9},
+                    "spectrum": {"T": [0.0, 1.0], "Sa": [1.0, 1.0]},
+                },
+            },
+        ),
+    )
+
+
+def _views() -> list:
+    return [
+        View(key="meshed", name="Meshed", kind=GEOMETRY, source="Preprocessor"),
+        View(key="results:DEAD", name="DEAD", kind=RESULTS, source="Recipe: Static · DEAD"),
+        View(key="table:modal", name="Modal", kind=TABLE, source="Recipe: Modal"),
+        View(
+            key="figure:pushover-plusx",
+            name="Pushover — +X",
+            kind=FIGURE,
+            source="Recipe: Pushover",
+        ),
+    ]
+
+
+# ── figure_identity ──────────────────────────────────────────────────
+
+
+def test_figure_identity_maps_directions():
+    assert figure_identity("Pushover", "+X") == ("figure:pushover-plusx", "Pushover — +X")
+    assert figure_identity("Pushover", "-Y") == ("figure:pushover-minusy", "Pushover — -Y")
+
+
+# ── collect_project_results ──────────────────────────────────────────
+
+
+def test_collect_project_results_maps_each_kind():
+    static_arrays = {"node_tag": np.array([1, 2]), "schema_version": np.array([3])}
+    results = [
+        StepResult(kind=CASES, label="Static cases", payload=static_arrays),
+        _modal_step(),
+        _rs_step("X"),
+        _rs_step("Y"),
+        _pushover_step(),
+    ]
+    collected = collect_project_results(results)
+
+    assert collected["static_arrays"] == static_arrays
+    assert collected["modal"]["periods"] == [1.0, 0.5]
+    assert collected["mode_shapes"] == {}
+    assert set(collected["rs"]) == {"rs_x", "rs_y"}
+    assert collected["rs"]["rs_x"]["base_shear_cqc"] == 120.0
+    assert "+X" in collected["pushover"]
+    assert collected["pushover"]["+X"]["adrs"]["S_a"] == [0.0, 1.0]
+
+
+def test_collect_project_results_empty_run():
+    assert collect_project_results([]) == {
+        "static_arrays": {},
+        "modal": None,
+        "mode_shapes": None,
+        "rs": {},
+        "pushover": {},
+    }
+
+
+# ── figures / tables payloads ────────────────────────────────────────
+
+
+def test_figures_payload_is_json_native():
+    pushover = {
+        "+X": {
+            "adrs": {"S_a": [0.0], "S_d": [0.0]},
+            "pp": {"S_dp": 1.0},
+            "spectrum": {"T": [0.0], "Sa": [1.0]},
+        }
+    }
+    entry = figures_payload(pushover)["figure:pushover-plusx"]
+    assert entry["kind"] == "capacity_spectrum"
+    assert entry["adrs"] == {"S_a": [0.0], "S_d": [0.0]}
+    json.dumps(entry)  # no numpy scalars may leak through
+
+
+def test_tables_payload_round_trips():
+    table = Table(title="Modal", columns=("Mode", "Period"), rows=(("1", "1.0"), ("2", "0.5")))
+    assert tables_payload({"table:modal": table})["table:modal"] == {
+        "title": "Modal",
+        "columns": ["Mode", "Period"],
+        "rows": [["1", "1.0"], ["2", "0.5"]],
+    }
+
+
+# ── views_payload / build_manifest ───────────────────────────────────
+
+
+def test_views_payload_records_pointers():
+    payload = views_payload(_views())
+    by_key = {entry["key"]: entry for entry in payload}
+    assert by_key["results:DEAD"]["case"] == "DEAD"
+    assert by_key["table:modal"]["table_key"] == "table:modal"
+    assert by_key["figure:pushover-plusx"]["figure_key"] == "figure:pushover-plusx"
+    assert [entry["order"] for entry in payload] == [0, 1, 2, 3]
+
+
+def test_build_manifest_shape():
+    manifest = build_manifest(
+        name="Admin",
+        source_label="Admin.s2k",
+        model_file="model.h5",
+        units={"F": "N", "L": "m", "T": "C"},
+        recipe=None,
+        views=_views(),
+        active_view="results:DEAD",
+        camera=None,
+        hidden_elem_ids=["A-1"],
+        display={"shell_opacity": 0.6},
+    )
+    assert manifest["schema_version"] == 1
+    assert manifest["project"]["model_file"] == "model.h5"
+    assert manifest["active_view"] == "results:DEAD"
+    assert manifest["viewport"]["hidden_elem_ids"] == ["A-1"]
+    assert len(manifest["views"]) == 4
+
+
+# ── write / read round-trip ──────────────────────────────────────────
+
+
+def _write_small_project(tmp_path) -> dict:
+    collected = collect_project_results([_modal_step(), _rs_step("X"), _pushover_step()])
+    collected["static_arrays"] = {"node_tag": np.array([1, 2]), "schema_version": np.array([3])}
+
+    from fea_toolkit.io.unified_writer import collect_modal_arrays, collect_rs_arrays
+
+    arrays = dict(collected["static_arrays"])
+    arrays.update(collect_modal_arrays(collected["modal"], collected["mode_shapes"]))
+    arrays.update(collect_rs_arrays(collected["rs"].get("rs_x"), collected["rs"].get("rs_y")))
+
+    figures = figures_payload(collected["pushover"])
+    tables = tables_payload(
+        {"table:modal": Table(title="Modal", columns=("Mode",), rows=(("1",),))}
+    )
+    manifest = build_manifest(
+        name="Admin",
+        source_label="Admin.s2k",
+        model_file="model.npz",
+        units={"F": "N"},
+        recipe=None,
+        views=_views(),
+        active_view="figure:pushover-plusx",
+        camera=[[1.0, 2.0, 3.0], [0.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+        hidden_elem_ids=["A-1"],
+        display={"shell_opacity": 0.6},
+    )
+    notes = write_project(
+        tmp_path / "Admin.fea",
+        manifest=manifest,
+        sap=None,
+        mesh=None,
+        results_arrays=arrays,
+        figures=figures,
+        tables=tables,
+        model_fmt="npz",
+    )
+    return manifest, notes
+
+
+def test_write_read_roundtrip(tmp_path):
+    _manifest, notes = _write_small_project(tmp_path)
+    assert notes == []
+
+    bundle = read_project(tmp_path / "Admin.fea")
+    assert bundle["manifest"]["active_view"] == "figure:pushover-plusx"
+    assert bundle["sap"] is None and bundle["mesh"] is None  # no model stage written
+    assert bundle["results"] is not None
+    assert "DEAD" not in bundle["results"].cases()  # only synthetic arrays, no cases
+
+    assert bundle["tables"]["table:modal"].title == "Modal"
+    assert "figure:pushover-plusx" in bundle["figures"]
+    assert bundle["figures"]["figure:pushover-plusx"]["adrs"]["S_a"] == [0.0, 1.0]
+
+
+def test_zip_project_roundtrip(tmp_path):
+    _write_small_project(tmp_path)
+    directory = tmp_path / "Admin.fea"
+    archive = zip_project(directory)
+    assert archive.endswith(".zip")
+
+    bundle = read_project(archive)
+    assert bundle["manifest"]["active_view"] == "figure:pushover-plusx"
+
+
+def test_is_project(tmp_path):
+    _write_small_project(tmp_path)
+    directory = tmp_path / "Admin.fea"
+    assert is_project(directory)
+    assert is_project(zip_project(directory))
+    assert not is_project(tmp_path)
+
+
+def test_detect_model_format_is_h5_or_npz():
+    assert detect_model_format() in ("h5", "npz")

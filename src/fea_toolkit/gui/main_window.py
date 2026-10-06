@@ -201,6 +201,9 @@ class MainWindow(QMainWindow):
         self._reset_view_baseline: Optional[tuple] = None
         self._default_style: Any = None  # interactor style to restore after Select mode
         self._worker: Any = None
+        #: The last completed :class:`~fea_toolkit.workflow.recipe.RecipeRun`,
+        #: retained so ``File ▸ Save project`` can serialise its results.
+        self._last_run: Any = None
         self._policy, self._display, self._policy_notes = load_gui_settings()
         self._cursor_timer: Optional[QTimer] = None
         self._interaction_enabled = False
@@ -728,6 +731,17 @@ class MainWindow(QMainWindow):
             tip="Write the displayed result to an NPZ archive",
         )
         a["file.save_results"].setEnabled(False)
+        a["file.save_project"] = self._real_action(
+            "Save project\u2026",
+            self._on_save_project,
+            tip="Write the model, recipe, results and figures to a project directory",
+        )
+        a["file.save_project"].setEnabled(False)
+        a["file.open_project"] = self._real_action(
+            "Open project\u2026",
+            self._on_open_project,
+            tip="Reload a saved project (directory or .fea zip) without re-running analyses",
+        )
         a["file.export_tcl"] = self._placeholder("Export Tcl", "Milestone 7")
         a["file.export_image"] = self._placeholder("Export screenshot", "Milestone 7")
         a["edit.copy"] = self._real_action(
@@ -894,10 +908,12 @@ class MainWindow(QMainWindow):
         m = bar.addMenu("&File")
         m.addAction(a["file.open"])
         m.addAction(a["file.open_results"])
+        m.addAction(a["file.open_project"])
         m.addSeparator()
         for key in (
             "file.save_model",
             "file.save_results",
+            "file.save_project",
             "file.export_tcl",
             "file.export_image",
         ):
@@ -2176,6 +2192,7 @@ class MainWindow(QMainWindow):
         model_data = store.raw()
         starting_mesh = store.preprocessed()
         messages: list = []
+        self._recipe_messages = messages
         label = getattr(self, "_pending_label", None) or f"Running recipe ({len(recipe)} steps)"
         self._pending_label = None
 
@@ -2255,8 +2272,10 @@ class MainWindow(QMainWindow):
             payload: ``(RecipeRun, [log lines])`` from the worker.
         """
         from ..workflow import CASES, FIGURE, TABLE
+        from ..workflow.steps import MODAL, PUSHOVER, RS
 
         run, messages = payload
+        self._last_run = run
         for message in messages:
             self.log(message)
         for result in run.results:
@@ -2266,6 +2285,12 @@ class MainWindow(QMainWindow):
                 added = self._show_results_result(result.label, result.payload)
                 if not added and not run.cancelled:
                     self.log(f"{result.label}: the run produced no results.", "warn")
+            elif result.kind == MODAL:
+                self._show_modal_result(result.label, result.payload)
+            elif result.kind == PUSHOVER:
+                self._show_pushover_result(result.label, result.payload)
+            elif result.kind == RS:
+                self._show_rs_result(result.label, result.payload)
             elif result.kind == TABLE:
                 self._show_table_result(result.label, result.payload)
             elif result.kind == FIGURE:
@@ -2300,6 +2325,130 @@ class MainWindow(QMainWindow):
         view = self._views.add_figure(key, label, figure, source=f"Recipe: {label}")
         self._show_view(view, rebuild_tree=True)
         self.log(f"Added figure view: {label}.")
+
+    def _show_modal_result(self, label: str, payload: Any) -> None:
+        """Summarise a modal result as a table and register it.
+
+        The ``modal`` verb's payload is an
+        :class:`~fea_toolkit.analysis.base.AnalysisResult` whose ``data`` holds
+        ``{"modal": {…}, "shapes": {…}}``.  Distilling the modal dict into a
+        period/participation table makes the preset's result inspectable instead
+        of silently dropped.
+        """
+        from ..workflow.steps import Table
+
+        data = getattr(payload, "data", None) or {}
+        modal = data.get("modal", data) if isinstance(data, dict) else {}
+        periods = list(modal.get("periods", []) or [])
+        if not periods:
+            self.log(f"{label}: the modal result has no converged modes.", "warn")
+            return
+        frequencies = list(modal.get("frequencies", []) or [])
+        props = modal.get("modal_props", {}) or {}
+        keys = ("partiMassRatiosMX", "partiMassRatiosMY", "partiMassRatiosMZ")
+        rows = []
+        for i, period in enumerate(periods):
+            freq = frequencies[i] if i < len(frequencies) else 0.0
+            ratios = []
+            for key in keys:
+                series = props.get(key) or []
+                ratios.append(float(series[i]) if i < len(series) else 0.0)
+            rows.append((str(i + 1), f"{period:.4f}", f"{freq:.4f}", *[f"{r:.2f}" for r in ratios]))
+        self._show_table_result(
+            label,
+            Table(
+                title=label,
+                columns=("Mode", "Period (s)", "Freq (Hz)", "Mx (%)", "My (%)", "Mz (%)"),
+                rows=tuple(rows),
+            ),
+        )
+
+    def _show_rs_result(self, label: str, payload: Any) -> None:
+        """Summarise a response-spectrum result as a table and register it.
+
+        The ``response_spectrum`` verb's payload is an
+        :class:`~fea_toolkit.analysis.base.AnalysisResult` whose ``data`` holds
+        ``{"rs_result": {…}, "direction": …}``.  The combined base shear / moment
+        scalars are distilled into a one-row table so the CQC / SRSS totals are
+        inspectable (and savable) rather than only logged.
+        """
+        from ..workflow.steps import Table
+
+        data = getattr(payload, "data", None)
+        if not isinstance(data, dict):
+            self.log(f"{label}: no response-spectrum data.", "warn")
+            return
+        rs = data.get("rs_result") or {}
+        direction = data.get("direction", "")
+        table = Table(
+            title=label,
+            columns=("Direction", "V CQC", "V SRSS", "V total", "M CQC", "M SRSS"),
+            rows=(
+                (
+                    str(direction),
+                    f"{float(rs.get('base_shear_cqc', 0.0)):.2f}",
+                    f"{float(rs.get('base_shear_srss', 0.0)):.2f}",
+                    f"{float(rs.get('base_shear_total', 0.0)):.2f}",
+                    f"{float(rs.get('base_moment_cqc', 0.0)):.2f}",
+                    f"{float(rs.get('base_moment_srss', 0.0)):.2f}",
+                ),
+            ),
+        )
+        self._show_table_result(label, table)
+
+    def _show_pushover_result(self, label: str, payload: Any) -> None:
+        """Plot each converged direction's capacity spectrum (ADRS) as a figure.
+
+        The ``pushover`` verb's payload is an
+        :class:`~fea_toolkit.analysis.base.AnalysisResult` whose ``data`` maps each
+        push direction to its result dict, which already carries the ADRS capacity
+        curve (``adrs``), the performance point (``pp``) and the demand spectrum
+        (``spectrum``).  Each direction becomes a figure view, so the CSM data is
+        inspectable rather than only logged.
+        """
+        data = getattr(payload, "data", None) or {}
+        directions = sorted(data) if isinstance(data, dict) else []
+        if not directions:
+            self.log(f"{label}: the run produced no pushover directions.", "warn")
+            return
+        self.log(f"{label}: complete ({', '.join(directions)}).")
+
+        from ..plotting.viz_pushover import plot_capacity_spectrum
+        from .project import figure_identity
+
+        views = []
+        for direction in directions:
+            entry = data.get(direction) or {}
+            adrs = entry.get("adrs")
+            spectrum = entry.get("spectrum") or {}
+            periods = spectrum.get("T") or []
+            accels = spectrum.get("Sa") or []
+            if not adrs or not periods or len(periods) != len(accels):
+                continue
+            figure = plot_capacity_spectrum(
+                adrs,
+                periods,
+                accels,
+                performance_point=entry.get("pp"),
+                title=f"{label} — {direction}",
+            )
+            if figure is None:
+                continue
+            key, name = figure_identity(label, direction)
+            views.append(
+                self._views.add_figure(
+                    key,
+                    name,
+                    figure,
+                    source=f"Recipe: {label}",
+                    activate=False,
+                )
+            )
+        if not views:
+            self.log(f"{label}: no plottable pushover curves.", "warn")
+            return
+        self._show_view(views[0], rebuild_tree=True)
+        self.log(f"{label}: added {len(views)} ADRS figure(s).")
 
     def _show_results_result(self, label: str, arrays: Any) -> list:
         """Register each case in a recipe's results as a view, and show the first.
@@ -2392,7 +2541,16 @@ class MainWindow(QMainWindow):
         self.log(f"Added view: {name}.")
 
     def _preprocess_failed(self, message: str) -> None:
-        """Report a preprocessing failure, leaving the display alone."""
+        """Report a recipe failure, flushing buffered diagnostics first.
+
+        The pipeline messages collected by ``_collect`` on the worker thread are
+        flushed here (on the GUI thread) before the error, so the diagnostics that
+        led up to the failure appear before it — matching the success path's flush
+        in :meth:`_recipe_finished`.
+        """
+        for pending in getattr(self, "_recipe_messages", None) or []:
+            self.log(pending)
+        self._recipe_messages = None
         self.log(f"Preprocessing failed: {message}", "error")
 
     def _preprocess_ended(self) -> None:
@@ -2440,6 +2598,9 @@ class MainWindow(QMainWindow):
         # is safe while an analysis runs (the topology is frozen), so it is not
         # gated on ``running``.
         self._actions["file.save_model"].setEnabled(mesh is not None)
+        # A project can be saved with just a model (results are optional), so it
+        # is gated on a loaded model rather than on a preprocessed mesh.
+        self._actions["file.save_project"].setEnabled(self._store is not None)
         action = self._actions["analysis.run"]
         if mesh is None:
             action.setToolTip(
@@ -2687,6 +2848,230 @@ class MainWindow(QMainWindow):
             self.log(f"Could not save model: {exc}", "error")
             return
         self.log(f"Saved model to {written}.")
+
+    # ── Project bundle (File ▸ Save/Open project) ────────────────────
+
+    def _project_results_arrays(self, collected: dict) -> dict:
+        """Merge the collected static archive arrays with modal + RS arrays."""
+        from ..io.unified_writer import collect_modal_arrays, collect_rs_arrays
+
+        arrays = dict(collected.get("static_arrays") or {})
+        modal = collected.get("modal")
+        if modal:
+            arrays.update(collect_modal_arrays(modal, collected.get("mode_shapes")))
+        rs = collected.get("rs") or {}
+        if rs:
+            arrays.update(collect_rs_arrays(rs.get("rs_x"), rs.get("rs_y")))
+        return arrays
+
+    def _project_tables(self) -> dict:
+        """Collect ``{key: Table}`` from every table view in the registry."""
+        tables = {}
+        for view in self._views.views():
+            if view.kind == TABLE:
+                table = self._views.table(view.key)
+                if table is not None:
+                    tables[view.key] = table
+        return tables
+
+    def _merge_results_view_arrays(self, arrays: dict) -> None:
+        """Merge static arrays from results views (``Analysis ▸ Run``, no recipe).
+
+        Falls back to the registered results repositories when the recipe run
+        produced no ``CASES`` payload, so a project can be saved from either path.
+        """
+        seen = set()
+        for view in self._views.views():
+            if view.kind == RESULTS:
+                repository = self._views.results(view.key)
+                if repository is not None and id(repository) not in seen:
+                    seen.add(id(repository))
+                    arrays.update(repository.raw())
+
+    def _on_save_project(self) -> None:
+        """**File ▸ Save project…**: write the full session to a project directory.
+
+        A project is a directory (``<name>.fea``) holding the model stage, the
+        results archive, the recipe, the ordered view list and the figure / table
+        payloads — everything needed to reconstruct the session without re-running
+        an analysis.
+        """
+        from pathlib import Path
+
+        if self._store is None:
+            self.log("Open a model before saving a project.", "warn")
+            return
+
+        from . import project as project_mod
+
+        stem = Path(self._source_label).stem or "project"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save project", f"{stem}.fea", "FEA project (*.fea)"
+        )
+        if not path:
+            return
+        directory = Path(path)
+        if directory.suffix.lower() != ".fea":
+            directory = Path(f"{directory}.fea")
+        if directory.exists() and not directory.is_dir():
+            self.log(f"{directory} exists and is not a directory.", "error")
+            return
+        if directory.is_dir() and any(directory.iterdir()):
+            answer = QMessageBox.question(
+                self,
+                "Confirm overwrite",
+                f"{directory} is not empty.\nReplace its contents?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
+        collected = project_mod.collect_project_results(
+            self._last_run.results if self._last_run is not None else []
+        )
+        if not collected["static_arrays"]:
+            self._merge_results_view_arrays(collected["static_arrays"])
+
+        figures = project_mod.figures_payload(collected["pushover"])
+        tables = project_mod.tables_payload(self._project_tables())
+        active = self._views.active
+        active_key = active.key if active is not None else None
+        recipe = getattr(getattr(self, "_recipe_panel", None), "recipe", None)
+        manifest = project_mod.build_manifest(
+            name=stem,
+            source_label=self._source_label,
+            model_file="model.h5",
+            units=dict(getattr(self._store.raw(), "units", None) or {}),
+            recipe=recipe,
+            views=self._views.views(),
+            active_view=active_key,
+            camera=self._current_camera(),
+            hidden_elem_ids=sorted(self._hidden_elem_ids),
+            display=self._collect_display_values(),
+        )
+        notes = project_mod.write_project(
+            directory,
+            manifest=manifest,
+            sap=self._store.raw(),
+            mesh=self._store.preprocessed(),
+            results_arrays=self._project_results_arrays(collected),
+            figures=figures,
+            tables=tables,
+        )
+        for note in notes:
+            self.log(note, "warn")
+        self.log(f"Saved project to {directory}.")
+
+    def _on_open_project(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open project",
+            "",
+            "FEA project (*.fea *.zip);;Project directory (*);;All files (*)",
+        )
+        if path and not self.open_project_path(path):
+            QMessageBox.critical(
+                self, "Open failed", f"Could not open project:\n{path}\n\nSee the message log."
+            )
+
+    def open_project_path(self, path: str) -> bool:
+        """Load a project (directory or ``.fea`` zip) and rebuild the session.
+
+        Dialog-free so tests can drive it directly.  The model, results, tables
+        and figures are read back from the bundle and re-registered as views — so
+        nothing is re-run — and the active view, camera and hidden set are
+        restored from the manifest.
+        """
+        from ..workflow import Recipe
+        from .project import is_project, read_project, regenerate_figure
+
+        self.log(f"Opening project {path} …")
+        try:
+            if not is_project(path):
+                self.log(f"{path} is not a project (directory or .fea zip).", "error")
+                return False
+            bundle = read_project(path)
+        except Exception as exc:
+            self.log(f"Failed to open project {path}: {exc}", "error")
+            return False
+
+        manifest = bundle["manifest"] or {}
+        sap = bundle["sap"]
+        mesh = bundle["mesh"]
+        repository = bundle["results"]
+        tables = bundle["tables"] or {}
+        figures = bundle["figures"] or {}
+
+        if sap is None:
+            self.log("Project has no model stage; nothing to display.", "error")
+            return False
+
+        project = manifest.get("project") or {}
+        source_label = project.get("source_label", "")
+        self._save_view_state()
+        self._remember_source(sap, source=source_label)
+        if mesh is not None:
+            self._store.set_preprocessed(mesh)
+
+        geometry_sources = {"unprocessed": sap, "processed": mesh, "meshed": mesh}
+        display_model = repository.as_model() if repository is not None else None
+
+        for entry in manifest.get("views") or []:
+            kind = entry.get("kind")
+            key = entry.get("key")
+            name = entry.get("name")
+            source = entry.get("source", "")
+            if kind == GEOMETRY:
+                model = geometry_sources.get(key)
+                if model is not None:
+                    self._views.add_geometry(key, name, model, source=source, activate=False)
+            elif kind == RESULTS:
+                case = entry.get("case")
+                if repository is not None and case in repository.cases():
+                    self._views.add_results(
+                        f"results:{case}",
+                        name,
+                        repository,
+                        source=source,
+                        model=display_model,
+                        activate=False,
+                    )
+            elif kind == TABLE:
+                table = tables.get(entry.get("table_key", key))
+                if table is not None:
+                    self._views.add_table(key, name, table, source=source, activate=False)
+            elif kind == FIGURE:
+                figure_data = figures.get(entry.get("figure_key", key))
+                if figure_data:
+                    figure = regenerate_figure(figure_data)
+                    if figure is not None:
+                        self._views.add_figure(key, name, figure, source=source, activate=False)
+
+        recipe_dict = project.get("recipe")
+        if recipe_dict is not None:
+            panel = getattr(self, "_recipe_panel", None)
+            if panel is not None:
+                with contextlib.suppress(Exception):
+                    panel.set_recipe(Recipe.from_dict(recipe_dict))
+
+        viewport = manifest.get("viewport") or {}
+        hidden = viewport.get("hidden_elem_ids")
+        self._hidden_elem_ids = {str(ref) for ref in hidden} if isinstance(hidden, list) else set()
+
+        self._apply_display_values(manifest.get("display") or {})
+
+        active_key = manifest.get("active_view")
+        active = self._views.get(active_key) if active_key else None
+        if active is None:
+            views = self._views.views()
+            active = views[0] if views else None
+        if active is not None:
+            self._show_view(active, rebuild_tree=True)
+            self._restore_camera(viewport.get("camera_position"))
+
+        self.log(f"Opened project: {len(self._views)} view(s).")
+        return True
 
     def open_path(self, path: str) -> bool:
         """Parse *path* and display it; return False on failure (no dialog).
@@ -2971,13 +3356,9 @@ class MainWindow(QMainWindow):
                 self._interactor.close()
         super().closeEvent(event)
 
-    def _save_display_settings(self) -> None:
-        """Write the display knobs to the settings file, best effort.
-
-        A failure to save is reported in the log rather than raised, so closing
-        the window never blocks on a read-only config directory.
-        """
-        values = {
+    def _collect_display_values(self) -> dict:
+        """The display knobs, shared by the settings save and the project save."""
+        return {
             "shell_opacity": float(self._shell_opacity.value()),
             "shrink": float(self._shrink.value()),
             "deformed_scale": float(self._deformed_scale.value()),
@@ -2987,7 +3368,58 @@ class MainWindow(QMainWindow):
             "show_extruded": self._display.show_extruded,
             "extruded_detail": self._display.extruded_detail,
         }
-        for note in save_display_settings(default_config_path(), values):
+
+    def _apply_display_values(self, display: dict) -> None:
+        """Restore a saved ``display`` section onto the widgets and render state.
+
+        The numeric knobs and the force-quantity selector are set on their
+        widgets (with signals blocked, so no per-knob re-render fires), and the
+        frozen :class:`~fea_toolkit.gui.controllers.settings.DisplaySettings`
+        fields that carry the restraint style, extruded-frame toggle and detail
+        are replaced.  A later view render reads all of these, so the project
+        reopens with the look it was saved with.
+
+        Values are resolved through :func:`~fea_toolkit.gui.controllers.settings
+        .resolve_display`, so an out-of-range or unknown key in a stale manifest
+        falls back to the default rather than corrupting a widget.
+        """
+        if not display:
+            return
+        from dataclasses import replace
+
+        from .controllers.settings import resolve_display
+
+        resolved, notes = resolve_display(display)
+        for note in notes:
+            self.log(note, "warn")
+
+        for widget, name in (
+            (self._shell_opacity, "shell_opacity"),
+            (self._shrink, "shrink"),
+            (self._deformed_scale, "deformed_scale"),
+            (self._force_scale, "force_scale"),
+        ):
+            widget.blockSignals(True)
+            widget.setValue(float(getattr(resolved, name)))
+            widget.blockSignals(False)
+
+        self._force_quantity.setCurrentText(resolved.force_quantity)
+
+        self._display = replace(
+            self._display,
+            restraint_style=resolved.restraint_style,
+            show_extruded=resolved.show_extruded,
+            extruded_detail=resolved.extruded_detail,
+        )
+        self._set_toggle_checked("view.show_extruded", resolved.show_extruded)
+
+    def _save_display_settings(self) -> None:
+        """Write the display knobs to the settings file, best effort.
+
+        A failure to save is reported in the log rather than raised, so closing
+        the window never blocks on a read-only config directory.
+        """
+        for note in save_display_settings(default_config_path(), self._collect_display_values()):
             self.log(note, "warn")
 
     def _current_camera(self) -> Optional[list]:
