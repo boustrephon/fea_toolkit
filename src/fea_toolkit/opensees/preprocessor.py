@@ -1969,20 +1969,13 @@ class Preprocessor:
                 )
                 mesh_model.frame_element_properties[eid] = props
                 _frame_group_matched_ids.add(eid)
-                self._log.debug(
-                    "preprocessor", f"[elem_props] {eid}: per-ID → {props.element_type}"
-                )
                 continue
 
             # Level 2: selection-based groups
-            for sel_idx, (sel, sel_props) in enumerate(frame_groups):
+            for sel, sel_props in frame_groups:
                 if sel._frame_matches(model_data, eid):
                     mesh_model.frame_element_properties[eid] = copy.deepcopy(sel_props)
                     _frame_group_matched_ids.add(eid)
-                    self._log.debug(
-                        "preprocessor",
-                        f"[elem_props] {eid}: group {sel_idx} → {sel_props.element_type}",
-                    )
                     break
 
             if eid not in _frame_group_matched_ids:
@@ -2058,20 +2051,13 @@ class Preprocessor:
                 )
                 mesh_model.area_element_properties[aid] = props
                 _area_group_matched_ids.add(aid)
-                self._log.debug(
-                    "preprocessor", f"[area_props] {aid}: per-ID → {props.element_type}"
-                )
                 continue
 
             # Level 2: selection-based groups
-            for group_name, sel, sel_props in area_groups:
+            for _group_name, sel, sel_props in area_groups:
                 if sel._area_matches(model_data, aid):
                     mesh_model.area_element_properties[aid] = sel_props
                     _area_group_matched_ids.add(aid)
-                    self._log.debug(
-                        "preprocessor",
-                        f"[area_props] {aid}: group '{group_name}' → {sel_props.element_type}",
-                    )
                     break
 
             if aid not in _area_group_matched_ids:
