@@ -3,11 +3,11 @@
 Provides both a direct spectrum function (``_gb50011_spectrum``) and a
 config-driven builder (``_build_spectrum``) that reads intensity, site
 class, level and damping from a dictionary.  The two functions implement
-the same GB 50011 elastic spectrum but use slightly different formulas
-for the ascending branch:
-
-* ``_gb50011_spectrum`` — older form: ``0.45 + 5.5·T``
-* ``_build_spectrum`` — damping-corrected form: ``0.45 + (η₂ − 0.45)·10·T``
+the same GB 50011 elastic spectrum, including the damping-corrected
+ascending branch ``0.45 + (η₂ − 0.45)·10·T`` (which reduces to
+``0.45 + 5.5·T`` at the default η₂ = 1.0).  ``_gb50011_spectrum`` takes
+the γ / η₁ / η₂ factors as explicit arguments, while ``_build_spectrum``
+derives them from the damping ratio in its config dict.
 
 ``plot_seismic_spectrum`` renders all three levels (frequent,
 fortification, rare) on a single figure; it lives in
@@ -558,7 +558,7 @@ def _gb50011_spectrum(
         if T <= 0.0:
             Sa.append(0.45 * alpha_max * g)
         elif T <= 0.1:
-            Sa.append((0.45 + 5.5 * T) * alpha_max * g)
+            Sa.append((0.45 + (eta2 - 0.45) * 10.0 * T) * alpha_max * g)
         elif tg >= T:
             Sa.append(alpha_max * g)
         elif 5.0 * tg >= T:
