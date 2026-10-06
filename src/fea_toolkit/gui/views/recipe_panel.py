@@ -44,6 +44,7 @@ _STATUS_GLYPHS = {
     "running": ("\u2026", "#808080"),
     "ok": ("\u2713", "#1a7f37"),
     "failed": ("\u2717", "#b00020"),
+    "cancelled": ("\u2298", "#9a6700"),
     "skipped": ("\u2014", "#aaaaaa"),
 }
 
@@ -282,7 +283,8 @@ class RecipePanel(QWidget):
 
         Args:
             index: Zero-based step position in the recipe.
-            status: One of ``"running"``, ``"ok"``, ``"failed"`` or ``"skipped"``.
+            status: One of ``"running"``, ``"ok"``, ``"failed"``,
+                ``"cancelled"`` or ``"skipped"``.
         """
         if not (0 <= index < len(self._recipe)):
             return

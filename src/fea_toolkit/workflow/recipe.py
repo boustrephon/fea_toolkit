@@ -20,6 +20,7 @@ properties copies it first (see
 :mod:`fea_toolkit.workflow.verbs.scale_sections`).
 """
 
+import contextlib
 import copy
 import json
 from dataclasses import dataclass, field
@@ -252,10 +253,10 @@ class RecipeRun:
     results: list = field(default_factory=list)
     failures: list = field(default_factory=list)
     cancelled: bool = False
-    #: ``(step index, verb, "ok" | "failed")`` in completion order, so a caller
-    #: can show which steps ran and how they ended without re-deriving it from
-    #: ``results`` / ``failures`` (a successful step may produce no result, and a
-    #: tolerated failure appears here as well as in ``failures``).
+    #: ``(step index, verb, "ok" | "failed" | "cancelled")`` in completion order,
+    #: so a caller can show which steps ran and how they ended without re-deriving
+    #: it from ``results`` / ``failures`` (a successful step may produce no
+    #: result, and a tolerated failure appears here as well as in ``failures``).
     step_status: list = field(default_factory=list)
 
 
@@ -294,9 +295,10 @@ def run_recipe(
             :class:`~fea_toolkit.io.log.PipelineLog` handed to analysis verbs;
             ``None`` leaves verbs to their own (``verbose``-derived) logging.
         on_step: Optional callback ``(step index, verb, status)`` called as each
-            step starts (``"running"``) and finishes (``"ok"`` / ``"failed"``),
-            so a GUI can show live per-step progress.  It is called on the
-            caller's thread.
+            step starts (``"running"``) and finishes (``"ok"`` / ``"failed"`` /
+            ``"cancelled"``), so a GUI can show live per-step progress.  A
+            callback exception is swallowed — a progress listener must never
+            change a step's outcome.  It is called on the caller's thread.
 
     Returns:
         The :class:`RecipeRun` — its results, tolerated failures and whether it
@@ -342,8 +344,15 @@ def run_recipe(
                 f"known verbs: {sorted(STEP_SPECS)}"
             )
         missing = [kind for kind in spec.needs if kind not in produced]
-        if on_step is not None:
-            on_step(index, step.verb, "running")
+
+        def _notify(index: int, verb: str, status: str) -> None:
+            # A progress listener must never change a step's outcome, replace a
+            # StepError or mask the real error — swallow its failures.
+            if on_step is not None:
+                with contextlib.suppress(Exception):
+                    on_step(index, verb, status)
+
+        _notify(index, step.verb, "running")
         try:
             if missing:
                 raise ValueError(
@@ -361,14 +370,18 @@ def run_recipe(
                 produced.difference_update((CASES, MODAL, FIGURE))
                 context.case_results.clear()
                 context.results.clear()
-            run.step_status.append((index, step.verb, "ok"))
-            if on_step is not None:
-                on_step(index, step.verb, "ok")
+            if context.cancelled:
+                # A solve cancelled between cases still completed its run;
+                # record a distinct status instead of a misleading "ok".
+                run.step_status.append((index, step.verb, "cancelled"))
+                _notify(index, step.verb, "cancelled")
+            else:
+                run.step_status.append((index, step.verb, "ok"))
+                _notify(index, step.verb, "ok")
         except Exception as exc:
             message = f"{type(exc).__name__}: {exc}"
             run.step_status.append((index, step.verb, "failed"))
-            if on_step is not None:
-                on_step(index, step.verb, "failed")
+            _notify(index, step.verb, "failed")
             if not step.optional:
                 raise StepError(index, step.verb, exc) from exc
             run.failures.append((index, step.verb, message))
