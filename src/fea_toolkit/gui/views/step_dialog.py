@@ -234,6 +234,8 @@ class StepDialog(QDialog):
         static_cases = list_static_cases(self._model_data)
         editor = CasesEditor(static_cases, value or None, self)
         editor.setToolTip(self._spec.params["cases"].help)
+        if editor._list is not None:
+            editor._list.itemChanged.connect(self._validate)
         return editor
 
     def _param_value(self, name: str) -> Any:
@@ -300,6 +302,18 @@ class StepDialog(QDialog):
                 except ValueError as exc:
                     errors.append(f"{name}: {exc}")
                     self._widgets[name].setStyleSheet("color: #b00020;")
+        # A ``run_static`` cases editor with no checked case must not fall back
+        # to the "solve all" sentinel — reject it before OK is enabled.
+        if self._verb == "run_static" and self._model_data is not None:
+            from .cases_editor import CasesEditor
+
+            cases_widget = self._widgets.get("cases")
+            if isinstance(cases_widget, CasesEditor):
+                if cases_widget.has_selection():
+                    cases_widget.setStyleSheet("")
+                else:
+                    errors.append("cases: select at least one case to solve")
+                    cases_widget.setStyleSheet("color: #b00020;")
         self._error.setText("\n".join(errors))
         ok = self._buttons.button(QDialogButtonBox.StandardButton.Ok)
         ok.setEnabled(not errors)

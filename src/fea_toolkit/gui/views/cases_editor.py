@@ -106,7 +106,7 @@ class CasesEditor(QWidget):
             self._table.setItem(row, 0, item)
             spin = QDoubleSpinBox(self._table)
             spin.setRange(-1e12, 1e12)
-            spin.setDecimals(6)
+            spin.setDecimals(12)
             spin.setValue(float(factor))
             self._table.setCellWidget(row, 1, spin)
 
@@ -127,6 +127,10 @@ class CasesEditor(QWidget):
         ``{}`` is the verb's "solve all" sentinel; it is returned only when every
         case is checked *and* no factor differs from the model's own, so a recipe
         that was not touched keeps its default meaning.
+
+        Raises:
+            ValueError: If no case is checked — ``{}`` already means "solve all",
+                so "solve none" cannot be represented.
         """
         self._save_table()
         if self._list is not None:
@@ -136,8 +140,25 @@ class CasesEditor(QWidget):
 
         all_cases = set(self._case_order)
         selected = {case for case in self._case_order if self._checked[case]}
+        if not selected and all_cases:
+            raise ValueError("Select at least one case to solve.")
         if selected == all_cases and all(
             self._factors[case] == self._static_cases[case] for case in self._case_order
         ):
             return {}
         return {case: dict(self._factors[case]) for case in self._case_order if self._checked[case]}
+
+    def has_selection(self) -> bool:
+        """Whether at least one case is checked (or there are no cases to pick).
+
+        The side-effect-free counterpart to :meth:`value`'s empty-selection guard,
+        for a dialog to poll during validation without committing any factor edits
+        (``value`` runs :meth:`_save_table` first).
+        """
+        if self._list is None:
+            return True
+        for row in range(self._list.count()):
+            item = self._list.item(row)
+            if item.checkState() == Qt.CheckState.Checked:
+                return True
+        return False
