@@ -351,6 +351,21 @@ def generate_report(
     log_cfg = cfg.get("analysis_log", {"enabled": True})
     export_cfg = cfg.get("export") or {}
 
+    # Validate pushover.directions immediately after configuration merging —
+    # before any analysis runs — so a misconfigured subset is rejected up front
+    # rather than after the static / modal / RS analyses have already solved.
+    # The report's pushover runs the steel path (``run_pushover_4dir``), which
+    # honors only the full four-direction set; a configured subset cannot be
+    # expressed, so it is rejected here rather than silently pushed as all four.
+    if cfg.get("pushover") and push_cfg.get("patterns") and push_cfg.get("directions"):
+        push_dirs = list(push_cfg["directions"])
+        if sorted(push_dirs) != sorted(["+X", "-X", "+Y", "-Y"]):
+            raise ValueError(
+                "report pushover.directions must be the full four-direction "
+                "set [+X, -X, +Y, -Y]; run_pushover_4dir cannot honor a "
+                f"subset (got {push_dirs})"
+            )
+
     log_enabled = log_cfg.get("enabled", True)
     log = PipelineLog(verbose=verbose, collect=log_enabled)
     _detach_logging = _attach_pipeline_logging(log)
@@ -576,19 +591,10 @@ def generate_report(
                     },
                 )
         # Note: rs_modal_base_shear is not available until after modal + RS run, so
-        # it is omitted here (the mode1 diagnostic is skipped).
+        # it is omitted here (the mode1 diagnostic is skipped).  The four-direction
+        # validation of push_cfg["directions"] happens at config-merging time (see
+        # above), so the full set is guaranteed here.
         if cfg.get("pushover") and push_cfg.get("patterns") and push_cfg.get("directions"):
-            # The report's pushover runs the steel path (``run_pushover_4dir``),
-            # which honors only the full four-direction set — a configured subset
-            # cannot be expressed, so it is rejected here rather than silently
-            # pushed as all four directions.
-            push_dirs = list(push_cfg["directions"])
-            if sorted(push_dirs) != sorted(["+X", "-X", "+Y", "-Y"]):
-                raise ValueError(
-                    "report pushover.directions must be the full four-direction "
-                    "set [+X, -X, +Y, -Y]; run_pushover_4dir cannot honor a "
-                    f"subset (got {push_dirs})"
-                )
             for pattern in push_cfg["patterns"]:
                 # ``gravity_patterns`` and ``brace_sections`` are optional, so
                 # they are omitted when unset — the verb's declared types (a
