@@ -73,17 +73,33 @@ RS_PARAMS: dict[str, ParamSpec] = {
 }
 
 
-def _find_auto_seismic_record(model_data) -> tuple[dict, str]:
-    """The first ``AUTO SEISMIC`` record among the model's load patterns.
+#: The only ``AUTO SEISMIC`` table
+#: :func:`~fea_toolkit.spectrum.spectrum_from_auto_seismic` understands — SAP2000
+#: writes other code families (IBC, UBC, …) with different fields, so matching
+#: any ``"SEISMIC"`` name would hand it a record it cannot read.
+_AUTO_SEISMIC_TABLE = "AUTO SEISMIC - CHINESE 2010"
+
+
+def _find_auto_seismic_record(model_data) -> tuple[dict, str, list[str]]:
+    """The supported ``AUTO SEISMIC`` record among the model's load patterns.
 
     Returns:
-        ``(record, table_name)``, or ``({}, "")`` when the model defines none.
+        ``(record, table_name, unsupported)`` — *record* / *table_name* are
+        ``{}`` / ``""`` when no supported record exists, and *unsupported* lists
+        the other ``AUTO SEISMIC`` tables the model defines but
+        :func:`~fea_toolkit.spectrum.spectrum_from_auto_seismic` cannot read.
     """
+    unsupported: list[str] = []
     for lp in (getattr(model_data, "load_patterns", None) or {}).values():
         for table_name, record in (getattr(lp, "auto_data", None) or {}).items():
-            if "SEISMIC" in table_name.upper():
-                return record, table_name
-    return {}, ""
+            upper = table_name.upper()
+            if not upper.startswith("AUTO SEISMIC"):
+                continue
+            if upper == _AUTO_SEISMIC_TABLE:
+                return record, table_name, unsupported
+            if table_name not in unsupported:
+                unsupported.append(table_name)
+    return {}, "", unsupported
 
 
 def resolve_spectrum(
@@ -114,8 +130,13 @@ def resolve_spectrum(
     if source == "auto_seismic":
         from ...spectrum import spectrum_from_auto_seismic
 
-        record, _table_name = _find_auto_seismic_record(context.model_data)
+        record, _table_name, unsupported = _find_auto_seismic_record(context.model_data)
         if not record:
+            if unsupported:
+                raise ValueError(
+                    "response_spectrum: no supported AUTO SEISMIC table "
+                    f"(supported: {_AUTO_SEISMIC_TABLE}; found: {unsupported})"
+                )
             raise ValueError("response_spectrum: the model defines no AUTO SEISMIC table")
         T, Sa = spectrum_from_auto_seismic(record, units=context.model_data.units)
         return T, Sa
