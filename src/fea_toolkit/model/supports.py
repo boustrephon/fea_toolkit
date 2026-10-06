@@ -116,8 +116,13 @@ def shell_only_base_node_ids(md: Any) -> set[str]:
     nodes = getattr(md, "nodes", None) or {}
     if not nodes:
         return set()
-    min_z = min(nd.z for nd in nodes.values())
-    base_ids = {nid for nid, nd in nodes.items() if abs(nd.z - min_z) < 0.01}
+    zs = [nd.z for nd in nodes.values()]
+    min_z = min(zs)
+    # Scale the base-node tolerance with the model's vertical extent, so a
+    # millimetre model and a metre model agree on what "at the base" means (a
+    # hardcoded 0.01 only suits metre models).
+    z_tol = max((max(zs) - min_z) * 1e-3, 1e-9)
+    base_ids = {nid for nid, nd in nodes.items() if abs(nd.z - min_z) <= z_tol}
     frame_conn: set = set()
     for element in (getattr(md, "frame_elements", None) or {}).values():
         if getattr(element, "node_i", None) in base_ids:
@@ -153,9 +158,19 @@ def fix_shell_only_base_restraints(md: Any) -> tuple[int, list[str]]:
     from .sap_data import Restraint
 
     restraints = getattr(md, "restraints", None)
+    if restraints is None:
+        restraints = {}
+        md.restraints = restraints
     fixed: list[str] = []
     for nid in sorted(shell_only_base_node_ids(md)):
-        if restraints is not None and nid in restraints:
-            restraints[nid] = Restraint([1, 1, 1, 1, 1, 1])
-            fixed.append(nid)
+        existing = restraints.get(nid)
+        if existing is None:
+            # No restraint at all — translations stay free, rotations fixed.
+            dofs = [0, 0, 0, 1, 1, 1]
+        else:
+            # Keep the node's existing translational flags; fix only rotations.
+            dofs = list(existing.dofs)
+            dofs[3] = dofs[4] = dofs[5] = 1
+        restraints[nid] = Restraint(dofs=dofs)
+        fixed.append(nid)
     return len(fixed), fixed
