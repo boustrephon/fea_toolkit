@@ -175,11 +175,18 @@ def _point_uv_on_quad(
         h = -(dvdx * rx + dvdy * ry + dvdz * rz)
 
         det = a * c - b * b
-        if det == 0.0:
-            break
-        # Cramer's rule for [[a, b], [b, c]] · delta = (g, h).
-        du = (c * g - b * h) / det
-        dv = (a * h - b * g) / det
+        if det <= 1e-12 * max(a * c, 1e-30):
+            # Near-singular normal equations (a narrow / skew quad): fall back
+            # to a stable least-squares solve of the 3×2 Jacobian instead of
+            # Cramer's rule on the (squared-condition) 2×2 system.
+            jac = np.array([[dudx, dvdx], [dudy, dvdy], [dudz, dvdz]])
+            delta = np.linalg.lstsq(jac, np.array([-rx, -ry, -rz]), rcond=None)[0]
+            du = float(delta[0])
+            dv = float(delta[1])
+        else:
+            # Cramer's rule for [[a, b], [b, c]] · delta = (g, h).
+            du = (c * g - b * h) / det
+            dv = (a * h - b * g) / det
 
         nu = u + du
         if nu < 0.0:
