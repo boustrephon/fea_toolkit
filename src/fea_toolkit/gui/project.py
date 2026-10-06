@@ -557,7 +557,7 @@ def regenerate_figure(figure_data: dict) -> Any:
     """
     if figure_data.get("kind") != "capacity_spectrum":
         return None
-    from ...plotting.viz_pushover import plot_capacity_spectrum
+    from ..plotting.viz_pushover import plot_capacity_spectrum
 
     spectrum = figure_data.get("spectrum") or {}
     return plot_capacity_spectrum(
