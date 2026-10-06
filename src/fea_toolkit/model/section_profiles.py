@@ -39,13 +39,36 @@ __all__ = [
 
 
 def profile_rect(depth: float, bf: float) -> list[tuple[float, float]]:
-    """Solid rectangular profile in the YZ plane."""
+    """Solid rectangular profile in the YZ plane.
+
+    Args:
+        depth: Section depth — the profile's extent along the element's local
+            *z* axis (the profile's ``y`` coordinate).
+        bf: Section breadth / flange width — the profile's extent along the
+            element's local *y* axis (the profile's ``x`` coordinate).
+
+    Returns:
+        A ``list`` of four ``(x, y)`` points, one per corner, tracing the
+        rectangle **clockwise** in the YZ plane.
+    """
     h, w = depth / 2.0, bf / 2.0
     return [(-w, -h), (-w, h), (w, h), (w, -h)]
 
 
 def profile_i(depth: float, bf: float, tf: float, tw: float) -> list[tuple[float, float]]:
-    """I / wide-flange profile in the YZ plane."""
+    """I / wide-flange profile in the YZ plane.
+
+    Args:
+        depth: Section depth (overall height along the local *z* axis).
+        bf: Flange width (overall breadth along the local *y* axis).
+        tf: Flange thickness.
+        tw: Web thickness.
+
+    Returns:
+        A ``list`` of twelve ``(x, y)`` points tracing the I outline —
+        flanges and web as one closed perimeter — **counter-clockwise** in the
+        YZ plane.
+    """
     h = depth / 2.0
     w = bf / 2.0
     wi = tw / 2.0
@@ -66,26 +89,46 @@ def profile_i(depth: float, bf: float, tf: float, tw: float) -> list[tuple[float
     ]
 
 
-def profile_box(depth: float, bf: float, tf: float, tw: float) -> list[tuple[float, float]]:
-    """Box / RHS (hollow rectangle) profile in the YZ plane."""
+def profile_box(
+    depth: float, bf: float, tf: float, tw: float
+) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+    """Box / RHS (hollow rectangle) profile in the YZ plane.
+
+    Args:
+        depth: Section depth (overall height along the local *z* axis).
+        bf: Section breadth (overall width along the local *y* axis).
+        tf: Wall (flange) thickness.
+        tw: Wall (web) thickness.
+
+    Returns:
+        The outer and inner boundaries as two separate closed loops, a
+        ``tuple`` ``(outer, inner)`` with *outer* first — each loop a ``list``
+        of four ``(x, y)`` points.  The inner loop is the box's void; returning
+        it separately lets an extrusion consumer keep it as a hole instead of
+        tracing a self-intersecting single path that opens the left wall.
+    """
     h = depth / 2.0
     w = bf / 2.0
     hi = h - tf
     wi = w - tw
-    return [
-        (-w, -h),
-        (w, -h),
-        (w, h),
-        (-w, h),
-        (-w, hi),
-        (wi, hi),
-        (wi, -hi),
-        (-w, -hi),
-    ]
+    outer = [(-w, -h), (w, -h), (w, h), (-w, h)]
+    inner = [(-wi, -hi), (wi, -hi), (wi, hi), (-wi, hi)]
+    return outer, inner
 
 
 def profile_channel(depth: float, bf: float, tf: float, tw: float) -> list[tuple[float, float]]:
-    """Channel / C-section profile in the YZ plane (CW winding)."""
+    """Channel / C-section profile in the YZ plane (CW winding).
+
+    Args:
+        depth: Section depth (overall height along the local *z* axis).
+        bf: Flange width (overall breadth along the local *y* axis).
+        tf: Flange thickness.
+        tw: Web thickness.
+
+    Returns:
+        A ``list`` of eight ``(x, y)`` points tracing the channel outline
+        **clockwise** in the YZ plane.
+    """
     h = depth / 2.0
     w = bf / 2.0
     fi = h - tf
@@ -102,9 +145,11 @@ def profile_channel(depth: float, bf: float, tf: float, tw: float) -> list[tuple
     ]
 
 
-#: The shape a :func:`section_profile_outline` returns — either a polygonal
-#: ``("polygon", [(x, y), ...])`` or a ``("circle", radius)`` pair.  A single
-#: union rather than a dataclass keeps the Rhino / PyVista call sites plain.
+#: The shape a :func:`section_profile_outline` returns — a polygonal
+#: ``("polygon", [(x, y), ...])``, a hollow ``("polygon", (outer, inner))``
+#: (where *outer* and *inner* are two closed loops), or a
+#: ``("circle", radius)`` pair.  A single union rather than a dataclass keeps
+#: the Rhino / PyVista call sites plain.
 ProfileOutline = tuple[str, Any]
 
 
@@ -112,7 +157,9 @@ def section_profile_outline(section: Union[Section, Any]) -> Optional[ProfileOut
     """The closed cross-section outline of *section*.
 
     Returns ``("polygon", [(x, y), ...])`` for polygonal sections, or
-    ``("circle", radius)`` for circular ones — the same shape
+    ``("polygon", (outer, inner))`` for a hollow section (a box, where
+    *outer* and *inner* are the two closed loops), or ``("circle", radius)``
+    for circular ones — the same shape
     :mod:`fea_toolkit.rhino.geometry` consumes for ``Extrusion.Create``.  A
     catalogue section with zero dimensions falls back to a square of side
     ``sqrt(A)`` (or 0.1), so a section with no geometry still has an outline.
@@ -121,15 +168,17 @@ def section_profile_outline(section: Union[Section, Any]) -> Optional[ProfileOut
         section: Any :class:`~fea_toolkit.model.sap_data.Section` (or a subtype).
 
     Returns:
-        A ``("polygon", points)`` / ``("circle", radius)`` pair, or ``None`` if
-        the section cannot be outlined.
+        A ``("polygon", points)`` / ``("polygon", (outer, inner))`` /
+        ``("circle", radius)`` pair, or ``None`` if the section cannot be
+        outlined.
     """
-    pts_2d: Optional[list[tuple[float, float]]] = None
+    pts_2d: Any = None
     is_circle = False
     radius = 0.0
 
     if isinstance(section, RectangularSection):
-        pts_2d = profile_rect(section.depth, section.bf)
+        if section.depth > 0 and section.bf > 0:
+            pts_2d = profile_rect(section.depth, section.bf)
     elif isinstance(section, CircularSection):
         is_circle = True
         radius = section.diameter / 2.0
@@ -215,6 +264,8 @@ def section_plates(
         A list of open polylines, each a list of ``(x, y)`` points.
     """
     if isinstance(section, RectangularSection):
+        if section.depth <= 0 or section.bf <= 0:
+            return _zero_dimension_plates(section)
         return _rect_sides(section.depth / 2.0, section.bf / 2.0)
 
     if isinstance(section, (CircularSection, PipeSection)):
@@ -234,7 +285,7 @@ def section_plates(
         return [
             [(-w, h - tf / 2.0), (w, h - tf / 2.0)],  # top flange
             [(-w, -(h - tf / 2.0)), (w, -(h - tf / 2.0))],  # bottom flange
-            [(0.0, -(h - tf)), (0.0, h - tf)],  # web
+            [(0.0, -(h - tf / 2.0)), (0.0, h - tf / 2.0)],  # web
         ]
 
     if isinstance(section, ChannelSection):
@@ -242,10 +293,11 @@ def section_plates(
             return _zero_dimension_plates(section)
         h, w = section.depth / 2.0, section.bf / 2.0
         tf = section.tf
+        web_x = -(w - section.tw / 2.0)  # the left wall's midline
         return [
-            [(0.0, -(h - tf)), (0.0, h - tf)],  # web
-            [(0.0, h - tf / 2.0), (w, h - tf / 2.0)],  # top flange
-            [(0.0, -(h - tf / 2.0)), (w, -(h - tf / 2.0))],  # bottom flange
+            [(web_x, -(h - tf / 2.0)), (web_x, h - tf / 2.0)],  # web
+            [(-w, h - tf / 2.0), (w, h - tf / 2.0)],  # top flange
+            [(-w, -(h - tf / 2.0)), (w, -(h - tf / 2.0))],  # bottom flange
         ]
 
     if isinstance(section, BoxSection):
@@ -258,8 +310,8 @@ def section_plates(
         return [
             [(-w, y), (w, y)],  # top flange
             [(-w, -y), (w, -y)],  # bottom flange
-            [(-x, -(h - tf)), (-x, h - tf)],  # left web
-            [(x, -(h - tf)), (x, h - tf)],  # right web
+            [(-x, -y), (-x, y)],  # left web
+            [(x, -y), (x, y)],  # right web
         ]
 
     return _zero_dimension_plates(section)

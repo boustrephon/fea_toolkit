@@ -38,7 +38,19 @@ CHART_PARAMS: dict[str, ParamSpec] = {
 
 
 def _run_spectra_chart(context: StepContext, params: dict[str, Any]) -> list[StepResult]:
-    """Plot the model's parsed response-spectrum functions — nothing is solved."""
+    """Plot the model's parsed response-spectrum functions — nothing is solved.
+
+    Args:
+        context: The run's working state.  ``model_data`` supplies the parsed
+            response-spectrum functions to plot.
+        params: The step's validated parameters (``chart`` is
+            ``"response_spectra"``).
+
+    Returns:
+        One :data:`~fea_toolkit.workflow.steps.FIGURE` result whose payload is
+        the rendered ``matplotlib.figure.Figure``, or ``None`` when the model
+        defines no response-spectrum functions.
+    """
     from ...plotting.seismic_spectrum import plot_response_spectra
 
     functions = getattr(context.model_data, "response_spectrum_functions", None) or {}

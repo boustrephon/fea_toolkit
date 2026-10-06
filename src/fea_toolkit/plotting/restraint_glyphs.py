@@ -60,6 +60,14 @@ def _unit_arrow(axis: int) -> tuple[np.ndarray, np.ndarray]:
 
     The tail sits one unit along the positive *axis* and the tip at the origin,
     matching :func:`translation_glyph`'s ``start`` / ``direction`` convention.
+
+    Args:
+        axis: Translation axis index (``0`` = U1/X, ``1`` = U2/Y, ``2`` = U3/Z).
+
+    Returns:
+        ``(points, faces)`` for the unit arrow.  The arrays are cached and
+        shared — callers must **not** mutate them (build copies instead, as
+        :func:`translation_glyph` does).
     """
     cached = _UNIT_ARROW.get(axis)
     if cached is None:
@@ -135,6 +143,14 @@ def translation_block_glyph(position: np.ndarray, axis: int, size: float) -> obj
     U2 → Y, U3 → Z), so a fixed base reads as three mutually perpendicular
     squares stacked at the joint.  It is an outline (no fill), so a rotational
     circle drawn in the same plane does not hide it.
+
+    Args:
+        position: Node coordinates, shape ``(3,)``.
+        axis: Translation axis index (``0`` = U1/X, ``1`` = U2/Y, ``2`` = U3/Z).
+        size: Glyph length in model units.
+
+    Returns:
+        A :class:`pyvista.PolyData` wireframe square.
     """
     import pyvista as pv
 
@@ -163,6 +179,14 @@ def rotation_disc_glyph(position: np.ndarray, axis: int, size: float) -> object:
     Larger than the translation square, so a rotational restraint reads as a
     different shape than a translational one.  It is an outline (no fill), so
     the square and circle remain distinguishable when both are drawn for a node.
+
+    Args:
+        position: Node coordinates, shape ``(3,)``.
+        axis: Rotation axis index (``0`` = R1/X, ``1`` = R2/Y, ``2`` = R3/Z).
+        size: Glyph length in model units.
+
+    Returns:
+        A :class:`pyvista.PolyData` wireframe circle.
     """
     import pyvista as pv
 

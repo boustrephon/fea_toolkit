@@ -90,15 +90,24 @@ def _find_auto_seismic_record(model_data) -> tuple[dict, str, list[str]]:
         :func:`~fea_toolkit.spectrum.spectrum_from_auto_seismic` cannot read.
     """
     unsupported: list[str] = []
+    matches: list[tuple[dict, str]] = []
     for lp in (getattr(model_data, "load_patterns", None) or {}).values():
         for table_name, record in (getattr(lp, "auto_data", None) or {}).items():
             upper = table_name.upper()
             if not upper.startswith("AUTO SEISMIC"):
                 continue
             if upper == _AUTO_SEISMIC_TABLE:
-                return record, table_name, unsupported
+                matches.append((record, table_name))
+                continue
             if table_name not in unsupported:
                 unsupported.append(table_name)
+    if len(matches) > 1:
+        raise ValueError(
+            f"response_spectrum: multiple {_AUTO_SEISMIC_TABLE} records found "
+            f"({len(matches)}) — a single AUTO SEISMIC definition is required"
+        )
+    if matches:
+        return matches[0][0], matches[0][1], unsupported
     return {}, "", unsupported
 
 
@@ -113,6 +122,22 @@ def resolve_spectrum(
     """Resolve the demand spectrum ``(T, Sa)`` for the given *source*.
 
     Pure — no OpenSees — so it is unit-tested without the analysis engine.
+
+    Args:
+        context: The run's working state.  ``model_data`` supplies the parsed
+            response-spectrum functions / ``AUTO SEISMIC`` tables a ``"model"``
+            or ``"auto_seismic"`` source reads from.
+        source: Where the demand spectrum comes from — ``"explicit"``,
+            ``"model"``, or ``"auto_seismic"``.
+        name: The model response-spectrum function name (used when *source* is
+            ``"model"``).
+        T_spec: The period axis of an explicit spectrum (used when *source* is
+            ``"explicit"``).
+        Sa_spec: The spectral accelerations paired with *T_spec*.
+
+    Returns:
+        The resolved ``(T, Sa)`` pair — a ``tuple`` of two ``list`` values —
+        taken from the chosen source.
 
     Raises:
         ValueError: If the chosen source cannot provide a spectrum (unknown
