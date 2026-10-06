@@ -212,6 +212,7 @@ class MainWindow(QMainWindow):
         self._stack: Any = None
         self._table_page: Any = None
         self._figure_page: Any = None
+        self._figure_canvases: dict = {}
 
         self._create_viewport()
         self._create_actions()
@@ -1597,8 +1598,12 @@ class MainWindow(QMainWindow):
     def _show_figure_view(self, view: View) -> None:
         """Render a ``figure`` view — a chart's Matplotlib figure on a canvas.
 
-        The page is created once and re-used; the canvas is rebuilt per view
-        because a figure belongs to one result, not to the window.
+        Each figure is embedded in **exactly one** canvas, created lazily and
+        cached by figure key.  A Matplotlib figure must not be re-parented across
+        multiple canvases: wrapping the same figure in a new
+        :class:`~matplotlib.backends.backend_qtagg.FigureCanvasQTAgg` on every
+        switch re-runs its layout each time, so the legend and markers visibly
+        inflate.  The page is shared; only the canvas widget it shows changes.
         """
         figure = self._views.figure(view.key)
         if figure is None:
@@ -1609,16 +1614,22 @@ class MainWindow(QMainWindow):
             self._figure_layout.setContentsMargins(0, 0, 0, 0)
             self._stack.addWidget(self._figure_page)
 
+        # Detach the canvas currently on the page without deleting it — a cached
+        # canvas stays alive and is re-attached when its figure is shown again.
         while self._figure_layout.count():
             item = self._figure_layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
-                widget.deleteLater()
+                widget.hide()
 
-        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+        canvas = self._figure_canvases.get(view.key)
+        if canvas is None:
+            from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
-        canvas = FigureCanvasQTAgg(figure)
+            canvas = FigureCanvasQTAgg(figure)
+            self._figure_canvases[view.key] = canvas
         self._figure_layout.addWidget(canvas)
+        canvas.show()
         canvas.draw()
         self._stack.setCurrentWidget(self._figure_page)
 

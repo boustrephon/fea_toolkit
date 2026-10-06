@@ -326,6 +326,30 @@ class TestTableAndFigureViews:
         window._show_figure_result("Storey displacements", figure)
         assert window._tree_model.index_for("views", "Storey displacements") is not None
 
+    def test_switching_figures_reuses_canvases(self, window):
+        """Each figure is embedded once; switching back reuses its canvas."""
+        from matplotlib.figure import Figure
+
+        fig_a = Figure()
+        fig_a.gca().plot([0.0, 1.0], [0.0, 1.0])
+        fig_b = Figure()
+        fig_b.gca().plot([0.0, 1.0], [1.0, 0.0])
+
+        window._show_figure_result("Alpha", fig_a)
+        canvas_a = window._figure_canvases["figure:alpha"]
+        window._show_figure_result("Beta", fig_b)
+        canvas_b = window._figure_canvases["figure:beta"]
+
+        assert canvas_a is not canvas_b
+        assert len(window._figure_canvases) == 2
+
+        # Switching back must re-attach the *same* canvas, not wrap the figure in
+        # a fresh one (re-embedding a figure re-runs its layout and inflates the
+        # legend/markers).
+        window._show_figure_result("Alpha", fig_a)
+        assert window._figure_canvases["figure:alpha"] is canvas_a
+        assert window._figure_layout.count() == 1
+
 
 def test_the_config_editor_emits_only_the_keys_a_user_changes(qapp):
     """The structured config editor writes back a minimal override dict."""
