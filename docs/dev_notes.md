@@ -1221,11 +1221,16 @@ present after the incident).
 
 ### The rule
 
-- **Agent / tool-driven commits** run the hook's exact equivalent by hand, then
-  commit with `--no-verify`, in one tool call so the two cannot drift apart:
+- **Agent / tool-driven commits** run the hook's exact equivalent by hand,
+  re-stage the intended files after Ruff runs, validate the staged content with
+  `--exit-non-zero-on-fix`, and only then commit with `--no-verify`, in one tool
+  call so the steps cannot drift apart:
 
   ```bash
-  ruff check --fix <files…> && ruff format <files…> && git commit --no-verify -m "…"
+  ruff check --fix <files…> && ruff format <files…> && \
+  git add <files…> && \
+  ruff check --fix --exit-non-zero-on-fix <files…> && \
+  git commit --no-verify -m "…"
   ```
 
   `--no-verify` skips only that commit; the hook remains installed and keeps
