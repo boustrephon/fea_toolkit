@@ -117,8 +117,12 @@ def plot_response_spectra(
 
     Args:
         functions: ``{name: function}`` — each function supplies ``periods``
-            and ``accels`` (s and acceleration, in the model's own units).
-        units: Model units dict; the length unit labels the acceleration axis.
+            (s) and ``accels`` (normalized, dimensionless spectral accelerations
+            as parsed from the .s2k — the physical scale is applied later by the
+            load case's acceleration scale).
+        units: Model units dict (accepted for API compatibility; the plotted
+            ordinates are normalized and dimensionless, so no unit label is
+            shown).
 
     Returns:
         The matplotlib figure, or ``None`` when matplotlib is unavailable.
@@ -139,8 +143,10 @@ def plot_response_spectra(
         plotted += 1
 
     ax.set_xlabel("Period T (s)")
-    _length_unit = (units or {}).get("L") or "m"
-    ax.set_ylabel(f"Spectral acceleration S\u2090 ({_length_unit}/s\u00b2)")
+    # Parsed SAP response-spectrum functions store their ordinates normalized
+    # (dimensionless); the physical acceleration scale is applied only when a
+    # case's scale is imposed, which this plot does not do.
+    ax.set_ylabel("Spectral acceleration S\u2090 (normalized, dimensionless)")
     ax.set_title("Response spectra")
     ax.grid(True, alpha=0.3)
     if plotted:
