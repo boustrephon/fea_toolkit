@@ -2035,15 +2035,30 @@ class SAP2000Parser:
                 if not name:
                     continue
                 name = str(name)
+                period_raw = rec.get("Period")
+                accel_raw = rec.get("Accel")
+                if period_raw is None or accel_raw is None:
+                    continue
                 try:
-                    period = float(rec.get("Period", 0.0))
-                    accel = float(rec.get("Accel", 0.0))
+                    period = float(period_raw)
+                    accel = float(accel_raw)
                 except (TypeError, ValueError):
                     continue
                 periods.setdefault(name, []).append(period)
                 accels.setdefault(name, []).append(accel)
                 if "FuncDamp" in rec:
-                    damping[name] = float(rec.get("FuncDamp", 0.05))
+                    func_damp = rec["FuncDamp"]
+                    if func_damp is None or func_damp == "":
+                        # None / empty cell -> the documented default damping.
+                        damping[name] = 0.05
+                    else:
+                        try:
+                            damping[name] = float(func_damp)
+                        except (TypeError, ValueError) as exc:
+                            raise ValueError(
+                                f"invalid FuncDamp {func_damp!r} for response "
+                                f"spectrum function {name!r}"
+                            ) from exc
 
         return {
             name: ResponseSpectrumFunction(

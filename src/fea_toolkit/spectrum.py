@@ -560,7 +560,7 @@ def _gb50011_spectrum(
         elif T <= 0.1:
             Sa.append((0.45 + (eta2 - 0.45) * 10.0 * T) * alpha_max * g)
         elif tg >= T:
-            Sa.append(alpha_max * g)
+            Sa.append(eta2 * alpha_max * g)
         elif 5.0 * tg >= T:
             Sa.append((tg / T) ** gamma * eta2 * alpha_max * g)
         else:
