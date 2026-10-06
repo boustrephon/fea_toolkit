@@ -84,7 +84,7 @@ def test_empty_frames_returns_an_empty_mesh():
     "detail, expected_faces",
     [
         ("plates", 30),  # I=3, R=4, C=8, P=8, B=4, CH=3
-        ("solid", 60),  # I=14, R=6, C=10, P=10, B=10, CH=10
+        ("solid", 58),  # I=14, R=6, C=10, P=10, B=8, CH=10
     ],
 )
 def test_face_counts_per_detail(detail, expected_faces):
@@ -127,3 +127,35 @@ def test_face_colors_are_per_face_and_match_section():
     # The first faces belong to R (red), the rest to C (blue).
     assert np.all(mesh.face_colors[0] == [1.0, 0.0, 0.0])
     assert np.all(mesh.face_colors[-1] == [0.0, 0.0, 1.0])
+
+
+def test_sweep_mesh_caps_reference_appended_vertices():
+    """Cap indices offset past the side vertices, for grouped members."""
+    from fea_toolkit.plotting.extruded_frames import _sweep_mesh
+
+    pts2d = np.array([[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]])
+    s0 = np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 2.0]])  # two grouped members
+    s1 = np.array([[1.0, 0.0, 0.0], [1.0, 0.0, 2.0]])
+    vy = np.array([[0.0, 1.0, 0.0], [0.0, 1.0, 0.0]])
+    vz = np.array([[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]])
+
+    points, _quads, caps = _sweep_mesh(pts2d, closed=True, caps=True, s0=s0, s1=s1, vy=vy, vz=vz)
+
+    P = pts2d.shape[0]
+    M = s0.shape[0]
+    side_vertices = P * M * 4  # E == P for a closed loop
+    assert caps is not None
+    assert caps.shape == (2 * M, P)
+
+    # Cap indices must point past the swept side vertices into the appended caps.
+    assert caps.min() == side_vertices
+    assert caps.max() == len(points) - 1
+
+    offsets = pts2d[:, 0:1] * np.array([0.0, 1.0, 0.0]) + pts2d[:, 1:2] * np.array([0.0, 0.0, 1.0])
+
+    def _rows(arr):
+        return {tuple(np.round(row, 9)) for row in arr}
+
+    for m in range(M):
+        assert _rows(points[caps[m]]) == _rows(s0[m] + offsets)  # bottom cap
+        assert _rows(points[caps[m + M]]) == _rows(s1[m] + offsets)  # top cap

@@ -50,6 +50,12 @@ def _build_profile_curve(sec) -> t.Optional[t.Any]:
     if kind == "circle":
         return ("circle", value)
 
+    if isinstance(value, tuple):
+        # Hollow section (e.g. a box): the lightweight-extrusion path extrudes
+        # the outer boundary only — the inner void is not carved here (that
+        # would need a Boolean difference, heavier than ``Extrusion.Create``).
+        value = value[0]
+
     pts_3d = [rg.Point3d(x, y, 0) for x, y in value]
     pl = rg.Polyline(pts_3d)
     pl.Add(pts_3d[0])

@@ -96,7 +96,18 @@ def local_axes_batch(
 
 
 def _shrunk_segment_batch(starts: np.ndarray, ends: np.ndarray, shrink: float):
-    """Pull each segment's endpoints toward its midpoint by *shrink*."""
+    """Pull each segment's endpoints toward its midpoint by *shrink*.
+
+    Args:
+        starts: Member start points, ``(M, 3)``.
+        ends: Member end points, ``(M, 3)``.
+        shrink: Fraction of the original length to keep (``1.0`` = no shrink).
+
+    Returns:
+        ``(shrunk_starts, shrunk_ends)`` — the endpoints pulled toward each
+        segment's midpoint by *shrink*, each ``(M, 3)``.  When *shrink* is
+        ``>= 1.0`` the inputs are returned unchanged.
+    """
     if shrink >= 1.0:
         return starts, ends
     mid = (starts + ends) * 0.5
@@ -104,7 +115,16 @@ def _shrunk_segment_batch(starts: np.ndarray, ends: np.ndarray, shrink: float):
 
 
 def _circle_ring(radius: float, segments: int) -> np.ndarray:
-    """``(segments, 2)`` points around a circle (open — no closing duplicate)."""
+    """``(segments, 2)`` points around a circle (open — no closing duplicate).
+
+    Args:
+        radius: Circle radius.
+        segments: Number of points on the ring.
+
+    Returns:
+        ``(segments, 2)`` array of ``(x, y)`` points, evenly spaced around the
+        circle without a closing duplicate.
+    """
     theta = np.linspace(0.0, 2.0 * np.pi, segments, endpoint=False)
     return np.column_stack([radius * np.cos(theta), radius * np.sin(theta)])
 
@@ -115,6 +135,15 @@ def _sweeps(section: Any, detail: str, circle_segments: int) -> list[tuple[np.nd
     ``"plates"`` produces the open plate decomposition (no caps); ``"solid"``
     produces the closed perimeter (with caps).  Each sweep's *points* are the
     cross-section coordinates in the local YZ plane, ``(P, 2)``.
+
+    Args:
+        section: The section to sweep.
+        detail: ``"plates"`` (open plates, no caps) or ``"solid"`` (closed
+            perimeter, with caps).
+        circle_segments: Number of sides used to approximate a circular section.
+
+    Returns:
+        A list of ``(points, closed, caps)`` tuples, one per sweep.
     """
     if detail == "plates":
         polylines = section_plates(section, circle_segments=circle_segments)
@@ -135,6 +164,15 @@ def _sweeps(section: Any, detail: str, circle_segments: int) -> list[tuple[np.nd
     kind, value = outline
     if kind == "circle":
         return [(_circle_ring(float(value), circle_segments), True, True)]
+    if isinstance(value, tuple):
+        # Hollow section (e.g. a box): sweep the outer and inner boundaries as
+        # two open tubes so the inner boundary stays a hole in the solid.  The
+        # inner loop is reversed so its faces point into the void.
+        outer, inner = value
+        return [
+            (np.asarray(outer, dtype=float), True, False),
+            (np.asarray(inner, dtype=float)[::-1], True, False),
+        ]
     return [(np.asarray(value, dtype=float), True, True)]
 
 
@@ -149,9 +187,21 @@ def _sweep_mesh(
 ) -> tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
     """Sweep one cross-section over ``M`` members.
 
-    Returns ``(points, quads, caps)`` — ``points`` is ``(K, 3)``, ``quads`` is
-    ``(Q, 4)`` vertex indices into *points*, and ``caps`` is ``(2M, P)`` vertex
-    indices (bottom then top ring) or ``None`` when no caps.
+    Args:
+        pts2d: Cross-section coordinates in the local YZ plane, ``(P, 2)``.
+        closed: Whether the cross-section is a closed loop (otherwise an open
+            polyline is swept).
+        caps: Whether to append end caps (only valid when *closed*).
+        s0: Member start points, ``(M, 3)``.
+        s1: Member end points, ``(M, 3)``.
+        vy: Member local Y axes, ``(M, 3)``.
+        vz: Member local Z axes, ``(M, 3)``.
+
+    Returns:
+        ``(points, quads, caps)`` — ``points`` is ``(K, 3)`` the combined
+        vertex array, ``quads`` is ``(Q, 4)`` vertex indices into *points*, and
+        ``caps`` is ``(2M, P)`` vertex indices (bottom then top ring) **into
+        *points***, or ``None`` when no caps are produced.
     """
     P = pts2d.shape[0]
     M = s0.shape[0]
@@ -184,10 +234,14 @@ def _sweep_mesh(
         o_all = pts2d[:, 0:1, None] * vy[None, :, :] + pts2d[:, 1:2, None] * vz[None, :, :]
         bottom = (s0[None, :, :] + o_all).reshape(P * M, 3)
         top = (s1[None, :, :] + o_all).reshape(P * M, 3)
+        side_vertices = points.shape[0]
         points = np.concatenate([points, bottom, top], axis=0)
         ring = (np.arange(M)[None, :] + np.arange(P)[:, None] * M).T  # (M, P)
-        bottom_ring = ring
-        top_ring = ring[:, ::-1] + P * M
+        # Offset both rings past the swept side vertices so they index the
+        # appended cap vertices, and reverse the bottom ring (not the top) so
+        # both caps wind outward.
+        bottom_ring = ring[:, ::-1] + side_vertices
+        top_ring = ring + side_vertices + P * M
         caps_arr = np.concatenate([bottom_ring, top_ring], axis=0)  # (2M, P)
 
     return points, quads, caps_arr
