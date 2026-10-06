@@ -488,8 +488,12 @@ def run_static_cases(
             log.warning("static", f"{case_name} failed — {e}")
         finally:
             # A failed case must not leave its loads behind to poison the next.
+            # A cleanup failure must not abort the remaining cases.
             if build_once:
-                ab.remove_load_patterns()
+                try:
+                    ab.remove_load_patterns()
+                except Exception as exc:
+                    log.warning("static", f"cleanup after {case_name} failed — {exc}")
 
         rows.append(
             {
