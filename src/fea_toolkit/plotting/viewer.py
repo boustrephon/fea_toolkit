@@ -535,6 +535,24 @@ class ModelViewer:
             return 1.0
         return fraction * model_size / max_disp
 
+    def deformed_amplification(
+        self, displacements: dict[str, np.ndarray], fraction: float
+    ) -> float:
+        """The amplification :meth:`overlay_deformed` would use for *displacements*.
+
+        Exposes :meth:`_auto_amplification` to a caller that needs the base scale
+        once (e.g. to oscillate it for an animation) rather than letting
+        :meth:`overlay_deformed` recompute it on every redraw.
+
+        Args:
+            displacements: ``{node_id: (dx, dy, dz)}``.
+            fraction: Target shape size as a fraction of the model diagonal.
+
+        Returns:
+            The amplification factor, or ``1.0`` when there is nothing to scale.
+        """
+        return self._auto_amplification(displacements, fraction)
+
     def overlay_forces(
         self,
         elem_forces: Optional[dict[str, dict]] = None,

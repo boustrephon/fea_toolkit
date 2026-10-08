@@ -341,6 +341,42 @@ class TestResultViews:
             assert view.kind == "results"
             assert window._views.results(key).has_displacements(key.split(":")[1])
 
+    def test_animate_toggle_starts_and_stops_the_timer(self, window):
+        """Results ▸ Animate starts a timer over the active view's displacement field."""
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.analysis.base import AnalysisResult
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
+        mesh = preprocess_model(make_sample_model(), {"split_elements": True})
+        window._store.set_preprocessed(mesh)
+        node_tags = [node.node_tag for node in mesh.nodes.values()]
+        field = dict.fromkeys(node_tags, (0.001, 0.0, 0.0))
+
+        payload = AnalysisResult(
+            name="ResponseSpectrum",
+            analysis_type="ResponseSpectrumAnalysis",
+            data={
+                "rs_result": {
+                    "base_shear_cqc": 120.0,
+                    "base_shear_srss": 130.0,
+                    "base_shear_total": 160.0,
+                    "base_moment_cqc": 140.0,
+                    "base_moment_srss": 150.0,
+                },
+                "direction": "X",
+                "node_displacements": field,
+            },
+        )
+        window._show_rs_result("Response spectrum (X)", payload)
+
+        window._on_animate_toggled(True)
+        assert window._anim_timer is not None
+        assert window._anim_timer.isActive()
+        assert window._anim_displacements
+
+        window._on_animate_toggled(False)
+        assert not window._anim_timer.isActive()
+
 
 class TestTableAndFigureViews:
     """P30 phase C: a check's table and a chart's figure reach the viewport."""

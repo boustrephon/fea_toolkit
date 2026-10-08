@@ -213,6 +213,10 @@ class MainWindow(QMainWindow):
         self._table_page: Any = None
         self._figure_page: Any = None
         self._figure_canvases: dict = {}
+        self._anim_timer: Optional[QTimer] = None
+        self._anim_displacements: dict = {}
+        self._anim_base_scale: float = 1.0
+        self._anim_phase: float = 0.0
 
         self._create_viewport()
         self._create_actions()
@@ -893,6 +897,13 @@ class MainWindow(QMainWindow):
             checked=False,
             enabled=False,
         )
+        a["results.animate"] = self._toggle_action(
+            "Animate deformed shape",
+            self._on_animate_toggled,
+            tip="Oscillate the active view's deformed shape (a mode shape, a static or RS field)",
+            checked=False,
+            enabled=False,
+        )
         a["results.storey"] = self._placeholder("Storey response", "Milestone 7")
         a["results.pushover_curve"] = self._placeholder("Pushover curve", "Milestone 7")
         a["results.clear"] = self._real_action(
@@ -983,6 +994,7 @@ class MainWindow(QMainWindow):
         for key in (
             "results.deformed",
             "results.forces",
+            "results.animate",
             "results.storey",
             "results.pushover_curve",
         ):
@@ -1699,6 +1711,11 @@ class MainWindow(QMainWindow):
         self._actions["results.deformed"].setEnabled(
             repository is not None and bool(case) and repository.has_displacements(case)
         )
+        # Animation animates the deformed shape, so it is enabled exactly when
+        # the deformed overlay is (a displacement field is its only input).
+        self._actions["results.animate"].setEnabled(
+            repository is not None and bool(case) and repository.has_displacements(case)
+        )
         # The same rule for the flag diagram, on end forces — and the quantity
         # selector is greyed with it, so it cannot look like it is choosing
         # something the archive has none of.
@@ -1784,6 +1801,8 @@ class MainWindow(QMainWindow):
 
     def _on_clear_results(self) -> None:
         """**Results ▸ Clear results**: remove every results overlay."""
+        self._stop_animation()
+        self._set_toggle_checked("results.animate", False)
         self._clear_deformed()
         self._set_toggle_checked("results.deformed", False)
         self._clear_forces()
@@ -1813,6 +1832,60 @@ class MainWindow(QMainWindow):
         """Remove the deformed overlay, leaving the model itself drawn."""
         if self._viewer is not None:
             self._viewer.clear_deformed()
+
+    def _on_animate_toggled(self, checked: bool) -> None:
+        """**Results ▸ Animate deformed shape**: oscillate the active shape.
+
+        Re-uses the deformed overlay: the base amplification is computed once and
+        a timer re-draws the shape at a sinusoidally varying scale, so a mode
+        shape visibly vibrates and a static / RS field visibly "breathes".
+
+        Args:
+            checked: Whether the animation should run.
+        """
+        if not checked:
+            self._stop_animation()
+            # Leave the shape at rest at its un-animated scale, not frozen at a
+            # mid-oscillation phase.
+            if self._anim_displacements and self._actions["results.deformed"].isChecked():
+                fraction = self._deformed_scale.value() / 100.0
+                self._viewer.overlay_deformed(
+                    self._anim_displacements, scale=None, auto_fraction=fraction
+                )
+                self._viewer.show()
+            return
+
+        displacements = self._active_displacements()
+        if not displacements:
+            self.log("No displacement data in this view — nothing to animate.", "error")
+            self._set_toggle_checked("results.animate", False)
+            return
+
+        fraction = self._deformed_scale.value() / 100.0
+        self._viewer.overlay_deformed(displacements, scale=None, auto_fraction=fraction)
+        self._viewer.show()
+        self._anim_displacements = displacements
+        self._anim_base_scale = self._viewer.deformed_amplification(displacements, fraction)
+        self._anim_phase = 0.0
+        if self._anim_timer is None:
+            self._anim_timer = QTimer(self)
+            self._anim_timer.setInterval(40)
+            self._anim_timer.timeout.connect(self._anim_tick)
+        self._anim_timer.start()
+
+    def _anim_tick(self) -> None:
+        """Redraw the animated shape at the next oscillation phase."""
+        import math
+
+        self._anim_phase += 0.25  # ≈ 6.25 rad/s at 40 ms → ~1 Hz
+        scale = self._anim_base_scale * math.sin(self._anim_phase)
+        self._viewer.overlay_deformed(self._anim_displacements, scale=scale)
+        self._viewer.show()
+
+    def _stop_animation(self) -> None:
+        """Stop the deformed-shape animation timer without re-drawing."""
+        if self._anim_timer is not None:
+            self._anim_timer.stop()
 
     def _sync_force_toggles(self, checked: bool) -> None:
         """Keep the two force-diagram toggles in lockstep.
@@ -1921,6 +1994,8 @@ class MainWindow(QMainWindow):
         :meth:`_set_toggle_checked`: re-entering the handler would try to
         clear an actor that is gone.
         """
+        self._stop_animation()
+        self._set_toggle_checked("results.animate", False)
         self._set_toggle_checked("results.deformed", False)
         self._sync_force_toggles(False)
 
