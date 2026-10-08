@@ -69,9 +69,10 @@ row per view, added as you work.
 | **Meshed** | `Model ▸ Mesh…` | the above, plus the shell elements for areas |
 
 A step that fans out — a modal run's mode shapes, a response-spectrum run's
-directions, a pushover run's ADRS curves — **bundles** its results: the step's
-summary view (its table, or the first curve) is a parent row, and the per-mode /
-per-direction views nest under it rather than flooding the Views list flat.
+directions, a pushover run's ADRS curves *and* per-direction deformed shapes —
+**bundles** its results: the step's summary view (its table, or the first curve)
+is a parent row, and the per-mode / per-direction views nest under it rather
+than flooding the Views list flat.
 
 Selecting a view redraws the scene with that view's geometry and **keeps the
 camera**, so comparing the drawn model with the prepared one does not move your
@@ -144,6 +145,14 @@ in model units and never modified.
 Switching views clears the overlay and unchecks the action, because a deformed
 shape belongs to **one** case's geometry: drawing case A's shape over case B's
 members would be a lie.  **Results ▸ Clear results** does the same on demand.
+
+**Results ▸ Animate deformed shape** brings the active shape to life.  For a
+single displacement field — a mode shape, a static case, a response-spectrum
+direction — it oscillates the shape through zero at the chosen scale, so a mode
+visibly vibrates.  For a pushover view it instead **steps through the recorded
+push history**: each increment's deformed shape is drawn in turn, so the
+progression to the fully-pushed shape is visible.  The action is enabled exactly
+when **Deformed shape** is; unchecking either leaves the shape at rest.
 
 **Results ▸ Force diagrams** draws the active case's **member end forces** as
 flag diagrams, in whichever component the **Force** selector names.  The
