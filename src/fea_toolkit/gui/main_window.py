@@ -222,6 +222,9 @@ class MainWindow(QMainWindow):
         self._anim_displacements: dict = {}
         self._anim_base_scale: float = 1.0
         self._anim_phase: float = 0.0
+        self._anim_frames: list = []
+        self._anim_frame_index: int = 0
+        self._anim_step_mode: bool = False
 
         self._create_viewport()
         self._create_actions()
@@ -1838,22 +1841,72 @@ class MainWindow(QMainWindow):
         if self._viewer is not None:
             self._viewer.clear_deformed()
 
-    def _on_animate_toggled(self, checked: bool) -> None:
-        """**Results ▸ Animate deformed shape**: oscillate the active shape.
+    def _pushover_step_frames(self, repository: Any, case: str) -> list:
+        """Per-step displacement fields for a pushover case, or ``[]`` otherwise.
 
-        Re-uses the deformed overlay: the base amplification is computed once and
-        a timer re-draws the shape at a sinusoidally varying scale, so a mode
-        shape visibly vibrates and a static / RS field visibly "breathes".
+        A pushover results view carries its full ``pushover/<direction>/node_disp_*``
+        history (threaded through :meth:`_show_pushover_result`); this turns it into
+        ``[{node_id: (dx, dy, dz)}]`` per recorded step so the animation can step
+        through it.  Non-pushover cases return ``[]``.
+        """
+        import numpy as np
+
+        if not case.startswith("Pushover"):
+            return []
+        raw = repository.raw()
+        direction = case[len("Pushover") :]
+        dx = raw.get(f"pushover/{direction}/node_disp_x")
+        tags = raw.get(f"pushover/{direction}/node_tag")
+        if dx is None or tags is None:
+            return []
+        dy = raw.get(f"pushover/{direction}/node_disp_y")
+        dz = raw.get(f"pushover/{direction}/node_disp_z")
+        # Map the sorted pushover node tags back to node ids via the geometry.
+        geo_tags = raw.get("node_tag")
+        geo_ids = raw.get("node_sap_id")
+        tag_to_id: dict = {}
+        if geo_tags is not None:
+            for i, tag in enumerate(np.asarray(geo_tags)):
+                node_id = str(np.asarray(geo_ids)[i]) if geo_ids is not None else str(tag)
+                tag_to_id[int(tag)] = node_id
+        n_step = dx.shape[0]
+        frames = []
+        for k in range(n_step):
+            field: dict = {}
+            for j, tag in enumerate(np.asarray(tags)):
+                node_id = tag_to_id.get(int(tag), str(tag))
+                field[node_id] = np.array(
+                    [
+                        float(dx[k, j]),
+                        float(dy[k, j]) if dy is not None else 0.0,
+                        float(dz[k, j]) if dz is not None else 0.0,
+                    ],
+                    dtype=float,
+                )
+            frames.append(field)
+        return frames
+
+    def _on_animate_toggled(self, checked: bool) -> None:
+        """**Results ▸ Animate deformed shape**: animate the active shape.
+
+        A single displacement field (a mode shape, a static/RS field) oscillates at
+        a sinusoidally varying scale; a pushover view steps through its recorded
+        push history instead.
 
         Args:
             checked: Whether the animation should run.
         """
         if not checked:
             self._stop_animation()
-            # Leave the shape at rest at its un-animated scale, not frozen at a
-            # mid-oscillation phase.
-            if self._anim_displacements and self._actions["results.deformed"].isChecked():
-                fraction = self._deformed_scale.value() / 100.0
+            # Leave the shape at rest — the final step for a pushover history, the
+            # un-animated scale for a single field — not frozen mid-animation.
+            fraction = self._deformed_scale.value() / 100.0
+            if self._anim_step_mode and self._anim_frames:
+                self._viewer.overlay_deformed(
+                    self._anim_frames[-1], scale=None, auto_fraction=fraction
+                )
+                self._viewer.show()
+            elif self._anim_displacements and self._actions["results.deformed"].isChecked():
                 self._viewer.overlay_deformed(
                     self._anim_displacements, scale=None, auto_fraction=fraction
                 )
@@ -1866,11 +1919,23 @@ class MainWindow(QMainWindow):
             self._set_toggle_checked("results.animate", False)
             return
 
+        repository, case = self._active_results_source()
+        frames = (
+            self._pushover_step_frames(repository, case) if repository is not None and case else []
+        )
         fraction = self._deformed_scale.value() / 100.0
-        self._viewer.overlay_deformed(displacements, scale=None, auto_fraction=fraction)
-        self._viewer.show()
-        self._anim_displacements = displacements
-        self._anim_base_scale = self._viewer.deformed_amplification(displacements, fraction)
+        if frames:
+            self._anim_step_mode = True
+            self._anim_frames = frames
+            self._anim_frame_index = 0
+            self._anim_base_scale = self._viewer.deformed_amplification(frames[-1], fraction)
+        else:
+            self._anim_step_mode = False
+            self._anim_frames = []
+            self._viewer.overlay_deformed(displacements, scale=None, auto_fraction=fraction)
+            self._viewer.show()
+            self._anim_displacements = displacements
+            self._anim_base_scale = self._viewer.deformed_amplification(displacements, fraction)
         self._anim_phase = 0.0
         if self._anim_timer is None:
             self._anim_timer = QTimer(self)
@@ -1879,7 +1944,13 @@ class MainWindow(QMainWindow):
         self._anim_timer.start()
 
     def _anim_tick(self) -> None:
-        """Redraw the animated shape at the next oscillation phase."""
+        """Redraw the animated shape at the next phase (oscillate) or step."""
+        if self._anim_step_mode and self._anim_frames:
+            frame = self._anim_frames[self._anim_frame_index]
+            self._anim_frame_index = (self._anim_frame_index + 1) % len(self._anim_frames)
+            self._viewer.overlay_deformed(frame, scale=self._anim_base_scale)
+            self._viewer.show()
+            return
         import math
 
         self._anim_phase += 0.25  # ≈ 6.25 rad/s at 40 ms → ~1 Hz
@@ -2639,18 +2710,34 @@ class MainWindow(QMainWindow):
 
         # Per-direction deformed-shape views (final recorded step), nested under
         # the first ADRS figure — only when the run recorded node displacements.
+        # The full per-step history is threaded into the same archive so the
+        # "animate" toggle can step through it.
         mesh = self._store.preprocessed() if self._store is not None else None
         if mesh is not None:
+            from ..io.npz_writer import collect_pushover_arrays
             from .project import pushover_displacement_arrays
 
             final_fields = {}
+            step_by_dir = {}
+            results_by_dir = {}
             for direction in directions:
                 results = (data.get(direction) or {}).get("results") or {}
                 step_results = results.get("step_results") or []
                 if step_results and step_results[-1].get("node_displacements"):
                     final_fields[direction] = step_results[-1]["node_displacements"]
+                    step_by_dir[direction] = step_results
+                    results_by_dir[direction] = results
             if final_fields:
                 arrays = pushover_displacement_arrays(mesh, final_fields)
+                for direction, per_step in step_by_dir.items():
+                    arrays.update(
+                        collect_pushover_arrays(
+                            mesh,
+                            per_step,
+                            direction=direction,
+                            pushover_results=results_by_dir.get(direction),
+                        )
+                    )
                 self._show_results_archive(label, arrays, parent=bundle_parent, show=False)
 
         self._show_view(views[0], rebuild_tree=True)

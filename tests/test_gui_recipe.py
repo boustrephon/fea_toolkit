@@ -511,6 +511,15 @@ class TestTableAndFigureViews:
         assert view.parent == "figure:pushover-plusx"
         assert window._views.results("results:Pushover+X").has_displacements("Pushover+X")
 
+        # The recorded step history is threaded through, so the animation steps
+        # through it rather than oscillating a single field.
+        window._views.set_active("results:Pushover+X")
+        window._on_animate_toggled(True)
+        assert window._anim_step_mode is True
+        assert len(window._anim_frames) == 2
+        window._on_animate_toggled(False)
+        assert not window._anim_timer.isActive()
+
 
 def test_the_config_editor_emits_only_the_keys_a_user_changes(qapp):
     """The structured config editor writes back a minimal override dict."""
