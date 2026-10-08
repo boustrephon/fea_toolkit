@@ -100,8 +100,8 @@ def _views() -> list:
         View(key="results:DEAD", name="DEAD", kind=RESULTS, source="Recipe: Static · DEAD"),
         View(key="table:modal", name="Modal", kind=TABLE, source="Recipe: Modal"),
         View(
-            key="figure:pushover-plusx",
-            name="Pushover — +X",
+            key="figure:pushover-plusx-uniform",
+            name="Pushover — +X · uniform",
             kind=FIGURE,
             source="Recipe: Pushover",
         ),
@@ -114,6 +114,10 @@ def _views() -> list:
 def test_figure_identity_maps_directions():
     assert figure_identity("Pushover", "+X") == ("figure:pushover-plusx", "Pushover — +X")
     assert figure_identity("Pushover", "-Y") == ("figure:pushover-minusy", "Pushover — -Y")
+    assert figure_identity("Pushover", "+X", "uniform") == (
+        "figure:pushover-plusx-uniform",
+        "Pushover — +X · uniform",
+    )
 
 
 # ── collect_project_results ──────────────────────────────────────────
@@ -135,8 +139,8 @@ def test_collect_project_results_maps_each_kind():
     assert collected["mode_shapes"] == {}
     assert set(collected["rs"]) == {"rs_x", "rs_y"}
     assert collected["rs"]["rs_x"]["base_shear_cqc"] == 120.0
-    assert "+X" in collected["pushover"]
-    assert collected["pushover"]["+X"]["adrs"]["S_a"] == [0.0, 1.0]
+    assert ("+X", "uniform") in collected["pushover"]
+    assert collected["pushover"][("+X", "uniform")]["adrs"]["S_a"] == [0.0, 1.0]
 
 
 def test_collect_project_results_captures_rs_nodal_displacements():
@@ -270,11 +274,13 @@ def test_pushover_displacement_arrays_build_static_shaped_cases():
     node_tags = [node.node_tag for node in mesh.nodes.values()]
     field = dict.fromkeys(node_tags, (0.003, 0.0, 0.0))
 
-    arrays = pushover_displacement_arrays(mesh, {"+X": field, "-X": field})
+    arrays = pushover_displacement_arrays(
+        mesh, {("+X", "uniform"): field, ("-X", "uniform"): field}
+    )
 
-    assert list(arrays["static_case_labels"]) == ["Pushover+X", "Pushover-X"]
-    assert len(arrays["static/Pushover+X/node_dx"]) == len(node_tags)
-    assert arrays["static/Pushover+X/node_dx"][0] == 0.003
+    assert list(arrays["static_case_labels"]) == ["Pushover+X-uniform", "Pushover-X-uniform"]
+    assert len(arrays["static/Pushover+X-uniform/node_dx"]) == len(node_tags)
+    assert arrays["static/Pushover+X-uniform/node_dx"][0] == 0.003
 
 
 def test_pushover_step_results_round_trip_through_the_bundle(tmp_path):
@@ -305,7 +311,7 @@ def test_pushover_step_results_round_trip_through_the_bundle(tmp_path):
         "base_shear": [0.0, 5.0, 10.0],
     }
 
-    arrays = dict(pushover_displacement_arrays(mesh, {"+X": final_field}))
+    arrays = dict(pushover_displacement_arrays(mesh, {("+X", "uniform"): final_field}))
     arrays.update(
         collect_pushover_arrays(mesh, step_results, direction="+X", pushover_results=po_results)
     )
@@ -334,8 +340,8 @@ def test_pushover_step_results_round_trip_through_the_bundle(tmp_path):
     )
 
     bundle = read_project(tmp_path / "Pushover.fea")
-    assert "Pushover+X" in bundle["results"].cases()
-    assert bundle["results"].has_displacements("Pushover+X")
+    assert "Pushover+X-uniform" in bundle["results"].cases()
+    assert bundle["results"].has_displacements("Pushover+X-uniform")
     raw = bundle["results"].raw()
     assert "pushover/+X/uniform/node_disp_x" in raw
     assert raw["pushover/+X/uniform/node_disp_x"].shape[0] == 2
@@ -359,13 +365,13 @@ def test_collect_project_results_empty_run():
 
 def test_figures_payload_is_json_native():
     pushover = {
-        "+X": {
+        ("+X", "uniform"): {
             "adrs": {"S_a": [0.0], "S_d": [0.0]},
             "pp": {"S_dp": 1.0},
             "spectrum": {"T": [0.0], "Sa": [1.0]},
         }
     }
-    entry = figures_payload(pushover)["figure:pushover-plusx"]
+    entry = figures_payload(pushover)["figure:pushover-plusx-uniform"]
     assert entry["kind"] == "capacity_spectrum"
     assert entry["adrs"] == {"S_a": [0.0], "S_d": [0.0]}
     json.dumps(entry)  # no numpy scalars may leak through
@@ -388,7 +394,7 @@ def test_views_payload_records_pointers():
     by_key = {entry["key"]: entry for entry in payload}
     assert by_key["results:DEAD"]["case"] == "DEAD"
     assert by_key["table:modal"]["table_key"] == "table:modal"
-    assert by_key["figure:pushover-plusx"]["figure_key"] == "figure:pushover-plusx"
+    assert by_key["figure:pushover-plusx-uniform"]["figure_key"] == "figure:pushover-plusx-uniform"
     assert [entry["order"] for entry in payload] == [0, 1, 2, 3]
 
 
@@ -436,7 +442,7 @@ def _write_small_project(tmp_path) -> dict:
         units={"F": "N"},
         recipe=None,
         views=_views(),
-        active_view="figure:pushover-plusx",
+        active_view="figure:pushover-plusx-uniform",
         camera=[[1.0, 2.0, 3.0], [0.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
         hidden_elem_ids=["A-1"],
         display={"shell_opacity": 0.6},
@@ -459,14 +465,14 @@ def test_write_read_roundtrip(tmp_path):
     assert notes == []
 
     bundle = read_project(tmp_path / "Admin.fea")
-    assert bundle["manifest"]["active_view"] == "figure:pushover-plusx"
+    assert bundle["manifest"]["active_view"] == "figure:pushover-plusx-uniform"
     assert bundle["sap"] is None and bundle["mesh"] is None  # no model stage written
     assert bundle["results"] is not None
     assert "DEAD" not in bundle["results"].cases()  # only synthetic arrays, no cases
 
     assert bundle["tables"]["table:modal"].title == "Modal"
-    assert "figure:pushover-plusx" in bundle["figures"]
-    assert bundle["figures"]["figure:pushover-plusx"]["adrs"]["S_a"] == [0.0, 1.0]
+    assert "figure:pushover-plusx-uniform" in bundle["figures"]
+    assert bundle["figures"]["figure:pushover-plusx-uniform"]["adrs"]["S_a"] == [0.0, 1.0]
 
 
 def test_zip_project_roundtrip(tmp_path):
@@ -476,7 +482,7 @@ def test_zip_project_roundtrip(tmp_path):
     assert archive.endswith(".zip")
 
     bundle = read_project(archive)
-    assert bundle["manifest"]["active_view"] == "figure:pushover-plusx"
+    assert bundle["manifest"]["active_view"] == "figure:pushover-plusx-uniform"
 
 
 def test_is_project(tmp_path):

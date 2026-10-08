@@ -1844,23 +1844,29 @@ class MainWindow(QMainWindow):
     def _pushover_step_frames(self, repository: Any, case: str) -> list:
         """Per-step displacement fields for a pushover case, or ``[]`` otherwise.
 
-        A pushover results view carries its full ``pushover/<direction>/node_disp_*``
-        history (threaded through :meth:`_show_pushover_result`); this turns it into
-        ``[{node_id: (dx, dy, dz)}]`` per recorded step so the animation can step
-        through it.  Non-pushover cases return ``[]``.
+        A pushover results view carries its full
+        ``pushover/<direction>/<load_type>/node_disp_*`` history (threaded through
+        :meth:`_show_pushover_result`); this turns it into ``[{node_id: (dx, dy,
+        dz)}]`` per recorded step so the animation can step through it.
+        Non-pushover cases return ``[]``.
         """
         import numpy as np
 
         if not case.startswith("Pushover"):
             return []
         raw = repository.raw()
-        direction = case[len("Pushover") :]
-        dx = raw.get(f"pushover/{direction}/node_disp_x")
-        tags = raw.get(f"pushover/{direction}/node_tag")
+        rest = case[len("Pushover") :]
+        if len(rest) >= 4 and rest[2] == "-":
+            direction, load_type = rest[:2], rest[3:]
+        else:
+            # Legacy case label without a load type.
+            direction, load_type = rest, "uniform"
+        dx = raw.get(f"pushover/{direction}/{load_type}/node_disp_x")
+        tags = raw.get(f"pushover/{direction}/{load_type}/node_tag")
         if dx is None or tags is None:
             return []
-        dy = raw.get(f"pushover/{direction}/node_disp_y")
-        dz = raw.get(f"pushover/{direction}/node_disp_z")
+        dy = raw.get(f"pushover/{direction}/{load_type}/node_disp_y")
+        dz = raw.get(f"pushover/{direction}/{load_type}/node_disp_z")
         # Map the sorted pushover node tags back to node ids via the geometry.
         geo_tags = raw.get("node_tag")
         geo_ids = raw.get("node_sap_id")
@@ -2650,19 +2656,19 @@ class MainWindow(QMainWindow):
         self._show_results_archive(label, arrays, parent=parent)
 
     def _show_pushover_result(self, label: str, payload: Any) -> None:
-        """Plot each converged direction's capacity spectrum (ADRS) as a figure.
+        """Summarise a pushover run as a table, ADRS figures and deformed shapes.
 
         The ``pushover`` verb's payload is an
         :class:`~fea_toolkit.analysis.base.AnalysisResult` whose ``data`` maps each
-        push direction to its result dict, which already carries the ADRS capacity
-        curve (``adrs``), the performance point (``pp``) and the demand spectrum
-        (``spectrum``).  Each direction becomes a figure view, so the CSM data is
-        inspectable rather than only logged.
-
-        When the run recorded per-step node displacements, each direction also
-        becomes a ``results`` view of its final converged deformed shape, nested
-        under the first ADRS figure — the same fan-out as RS directions and modes.
+        push direction to its result dict, which carries the ADRS capacity curve
+        (``adrs``), the performance point (``pp``), the demand spectrum
+        (``spectrum``) and the per-step ``results`` (including ``lateral_load_type``).
+        A summary table lists each direction × load type; each also becomes an ADRS
+        figure, and (when steps were recorded) a ``results`` view of its final
+        converged deformed shape — nested under the table, direction-first.
         """
+        from ..workflow.steps import Table
+
         data = getattr(payload, "data", None) or {}
         directions = sorted(data) if isinstance(data, dict) else []
         if not directions:
@@ -2670,11 +2676,56 @@ class MainWindow(QMainWindow):
             return
         self.log(f"{label}: complete ({', '.join(directions)}).")
 
+        # ── Summary table: one row per direction × load type ────────
+        rows = []
+        for direction in directions:
+            entry = data.get(direction) or {}
+            results = entry.get("results") or {}
+            pp = entry.get("pp") or {}
+            load_type = (
+                results.get("lateral_load_type", "uniform")
+                if isinstance(results, dict)
+                else "uniform"
+            )
+            control = results.get("control_disp") or [] if isinstance(results, dict) else []
+            shear = results.get("base_shear") or [] if isinstance(results, dict) else []
+            max_disp = max((abs(v) for v in control), default=0.0)
+            max_shear = max((abs(v) for v in shear), default=0.0)
+            rows.append(
+                (
+                    str(direction),
+                    str(load_type),
+                    f"{max_disp:.4f}",
+                    f"{max_shear:.2f}",
+                    f"{float(pp.get('D_roof', 0.0)):.4f}",
+                    f"{float(pp.get('V_base', 0.0)):.2f}",
+                    f"{float(pp.get('mu', 0.0)):.2f}",
+                    str(bool(pp.get("converged", False))),
+                )
+            )
+        self._show_table_result(
+            label,
+            Table(
+                title=label,
+                columns=(
+                    "Direction",
+                    "Load type",
+                    "Max roof disp",
+                    "Max base shear",
+                    "PP D_roof",
+                    "PP V_base",
+                    "Ductility",
+                    "Converged",
+                ),
+                rows=tuple(rows),
+            ),
+        )
+        table_key = _table_key(label)
+
         from ..plotting.viz_pushover import plot_capacity_spectrum
         from .project import figure_identity
 
         views = []
-        bundle_parent: Optional[str] = None
         for direction in directions:
             entry = data.get(direction) or {}
             adrs = entry.get("adrs")
@@ -2692,55 +2743,63 @@ class MainWindow(QMainWindow):
             )
             if figure is None:
                 continue
-            key, name = figure_identity(label, direction)
-            # The first figure anchors the bundle; the rest nest under it.
+            results = entry.get("results") or {}
+            load_type = (
+                results.get("lateral_load_type", "uniform")
+                if isinstance(results, dict)
+                else "uniform"
+            )
+            key, name = figure_identity(label, direction, load_type)
             view = self._views.add_figure(
                 key,
                 name,
                 figure,
                 source=f"Recipe: {label}",
-                parent=bundle_parent,
+                parent=table_key,
                 activate=False,
             )
             views.append(view)
-            bundle_parent = bundle_parent or view.key
-        if not views:
-            self.log(f"{label}: no plottable pushover curves.", "warn")
-            return
 
-        # Per-direction deformed-shape views (final recorded step), nested under
-        # the first ADRS figure — only when the run recorded node displacements.
-        # The full per-step history is threaded into the same archive so the
-        # "animate" toggle can step through it.
+        # Per-(direction, load type) deformed-shape views (final recorded step),
+        # nested under the summary table — only when steps were recorded.  The full
+        # per-step history is threaded into the same archive so the "animate" toggle
+        # can step through it.
         mesh = self._store.preprocessed() if self._store is not None else None
         if mesh is not None:
             from ..io.npz_writer import collect_pushover_arrays
             from .project import pushover_displacement_arrays
 
             final_fields = {}
-            step_by_dir = {}
-            results_by_dir = {}
+            step_by_pair = {}
+            results_by_pair = {}
             for direction in directions:
-                results = (data.get(direction) or {}).get("results") or {}
+                entry = data.get(direction) or {}
+                results = entry.get("results") or {}
+                if not isinstance(results, dict):
+                    continue
+                load_type = results.get("lateral_load_type", "uniform")
                 step_results = results.get("step_results") or []
                 if step_results and step_results[-1].get("node_displacements"):
-                    final_fields[direction] = step_results[-1]["node_displacements"]
-                    step_by_dir[direction] = step_results
-                    results_by_dir[direction] = results
+                    pair = (direction, load_type)
+                    final_fields[pair] = step_results[-1]["node_displacements"]
+                    step_by_pair[pair] = step_results
+                    results_by_pair[pair] = results
             if final_fields:
                 arrays = pushover_displacement_arrays(mesh, final_fields)
-                for direction, per_step in step_by_dir.items():
+                for (direction, load_type), per_step in step_by_pair.items():
                     arrays.update(
                         collect_pushover_arrays(
                             mesh,
                             per_step,
                             direction=direction,
-                            pushover_results=results_by_dir.get(direction),
+                            load_type=load_type,
+                            pushover_results=results_by_pair.get((direction, load_type)),
                         )
                     )
-                self._show_results_archive(label, arrays, parent=bundle_parent, show=False)
+                self._show_results_archive(label, arrays, parent=table_key, show=False)
 
-        self._show_view(views[0], rebuild_tree=True)
+        if views:
+            self._show_view(views[0], rebuild_tree=True)
         self.log(f"{label}: added {len(views)} ADRS figure(s).")
 
     def _show_results_result(self, label: str, arrays: Any) -> list:
@@ -3200,19 +3259,21 @@ class MainWindow(QMainWindow):
             step_results = collected.get("pushover_step_results") or {}
             pushover_results = collected.get("pushover_results") or {}
             if step_results:
-                for direction, per_step in step_results.items():
+                for (direction, load_type), per_step in step_results.items():
                     arrays.update(
                         collect_pushover_arrays(
                             mesh,
                             per_step,
                             direction=direction,
-                            pushover_results=pushover_results.get(direction),
+                            load_type=load_type,
+                            pushover_results=pushover_results.get((direction, load_type)),
                         )
                     )
-                # The per-direction deformed-shape view: the final recorded step.
+                # Per-(direction, load type) deformed-shape view: the final
+                # recorded step.
                 final_fields = {
-                    direction: per_step[-1].get("node_displacements")
-                    for direction, per_step in step_results.items()
+                    (direction, load_type): per_step[-1].get("node_displacements")
+                    for (direction, load_type), per_step in step_results.items()
                     if per_step and per_step[-1].get("node_displacements")
                 }
                 if final_fields:

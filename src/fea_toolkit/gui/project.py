@@ -78,22 +78,30 @@ def detect_model_format() -> str:
     return "h5"
 
 
-def figure_identity(label: str, direction: str) -> tuple[str, str]:
+def figure_identity(label: str, direction: str, load_type: Optional[str] = None) -> tuple[str, str]:
     """Return ``(key, name)`` for a pushover direction's ADRS figure view.
 
     One spelling shared by the figure-view producer and the project loader, so a
-    saved figure reopens under the same key it was registered with.
+    saved figure reopens under the same key it was registered with.  When a
+    *load_type* is given (the lateral-load distribution shape), it is folded into
+    both the key and the display name so a direction's several shapes do not
+    collide.
 
     Args:
         label: The pushover result label, e.g. ``"Pushover"``.
         direction: The push direction label, e.g. ``"+X"``.
+        load_type: The lateral load type, e.g. ``"uniform"`` (``None`` for a
+            single-shape figure key).
 
     Returns:
         The stable registry key and the display name.
     """
     suffix = direction.replace("+", "plus").replace("-", "minus").lower()
-    key = f"figure:{label.lower().replace(' ', '-')}-{suffix}"
     name = f"{label} \u2014 {direction}"
+    if load_type:
+        suffix = f"{suffix}-{load_type}"
+        name = f"{name} \u00b7 {load_type}"
+    key = f"figure:{label.lower().replace(' ', '-')}-{suffix}"
     return key, name
 
 
@@ -152,10 +160,10 @@ def collect_project_results(results: list) -> dict:
         A dict with keys ``static_arrays`` (the merged ``CASES`` archive arrays),
         ``modal`` / ``mode_shapes`` (from the ``MODAL`` payload), ``rs`` (``rs_x``
         / ``rs_y``), ``rs_nodal_displacements`` (``{direction: {node_tag: (dx, dy,
-        dz)}}``), and ``pushover`` (``{direction: entry}``), plus
-        ``pushover_results`` (``{direction: result dict}``) and
-        ``pushover_step_results`` (``{direction: [per-step dicts]}``) when the run
-        recorded per-step data.
+        dz)}}``), and ``pushover`` (``{(direction, load_type): entry}``), plus
+        ``pushover_results`` (``{(direction, load_type): result dict}``) and
+        ``pushover_step_results`` (``{(direction, load_type): [per-step dicts]}``)
+        when the run recorded per-step data.
     """
     static_arrays: dict = {}
     modal: Optional[dict] = None
@@ -192,13 +200,19 @@ def collect_project_results(results: list) -> dict:
             if isinstance(data, dict):
                 for direction, entry in data.items():
                     if isinstance(entry, dict) and "adrs" in entry:
-                        pushover[str(direction)] = entry
                         results = entry.get("results")
+                        load_type = (
+                            results.get("lateral_load_type", "uniform")
+                            if isinstance(results, dict)
+                            else "uniform"
+                        )
+                        key = (str(direction), str(load_type))
+                        pushover[key] = entry
                         if isinstance(results, dict):
-                            pushover_results[str(direction)] = results
+                            pushover_results[key] = results
                             step_results = results.get("step_results")
                             if step_results:
-                                pushover_step_results[str(direction)] = step_results
+                                pushover_step_results[key] = step_results
 
     return {
         "static_arrays": static_arrays,
@@ -287,29 +301,31 @@ def mode_shape_arrays(mesh: Any, mode_shapes: dict) -> dict:
 
 
 def pushover_displacement_arrays(mesh: Any, pushover_nodal_displacements: dict) -> dict:
-    """Marshal per-direction pushover deformed shapes into static-shaped cases.
+    """Marshal per-(direction, load type) pushover shapes into static-shaped cases.
 
-    Each direction's chosen-step field (``{direction: {node_tag: (dx, dy, dz)}}``)
-    is written as a ``static/Pushover<direction>/node_*`` case over the mesh's
-    geometry, so each push direction becomes a deformed-shape results view that
-    round-trips through the project bundle like a static case (Option C).  The
-    signed direction is kept verbatim (``+X`` → ``Pushover+X``) rather than
-    re-spelled, so a negative direction is not double-dashed.
+    Each ``(direction, load_type)`` pair's chosen-step field
+    (``{(direction, load_type): {node_tag: (dx, dy, dz)}}``) is written as a
+    ``static/Pushover<direction>-<load_type>/node_*`` case over the mesh's
+    geometry, so each direction × shape becomes a deformed-shape results view
+    that round-trips through the project bundle like a static case (Option C).
+    Direction stays the primary axis (``Pushover+X-uniform``), matching the
+    direction-first tree order.
 
     Args:
         mesh: The ``MeshModel`` (or ``SAPModelData``) the fields are keyed to.
-        pushover_nodal_displacements: ``{direction: {node_tag: (dx, dy, dz)}}``.
+        pushover_nodal_displacements: ``{(direction, load_type): {node_tag: (dx,
+            dy, dz)}}``.
 
     Returns:
-        The geometry arrays, ``static_case_labels`` (``Pushover<direction>`` in
-        sorted direction order) and one ``static/Pushover<direction>/node_*``
-        block per direction, in geometry order.
+        The geometry arrays, ``static_case_labels`` (``Pushover<direction>-<load
+        type>`` in sorted pair order) and one case block per pair, in geometry
+        order.
     """
-    directions = sorted(pushover_nodal_displacements)
+    pairs = sorted(pushover_nodal_displacements)
     return _displacement_cases(
         mesh,
         pushover_nodal_displacements,
-        [f"Pushover{direction}" for direction in directions],
+        [f"Pushover{direction}-{load_type}" for direction, load_type in pairs],
     )
 
 
@@ -322,15 +338,16 @@ def figures_payload(pushover: dict, label: str = "Pushover") -> dict:
     identical figure on load.
 
     Args:
-        pushover: ``{direction: {"adrs": …, "pp": …, "spectrum": …}}``.
+        pushover: ``{(direction, load_type): {"adrs": …, "pp": …, "spectrum": …}}``.
         label: The pushover result label used to name the figures.
 
     Returns:
         ``{figure_key: {kind, title, adrs, pp, spectrum}}``.
     """
     figures: dict = {}
-    for direction, entry in pushover.items():
-        key, name = figure_identity(label, direction)
+    for pair, entry in pushover.items():
+        direction, load_type = pair
+        key, name = figure_identity(label, direction, load_type)
         figures[key] = {
             "kind": "capacity_spectrum",
             "title": name,

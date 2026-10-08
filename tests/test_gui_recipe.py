@@ -484,6 +484,7 @@ class TestTableAndFigureViews:
                         "step": [0, 1, 2],
                         "control_disp": [0.0, 0.1, 0.2],
                         "base_shear": [0.0, 5.0, 10.0],
+                        "lateral_load_type": "uniform",
                         "step_results": [
                             {
                                 "step": 1,
@@ -504,16 +505,21 @@ class TestTableAndFigureViews:
         )
         window._show_pushover_result("Pushover", payload)
 
-        figure = window._views.get("figure:pushover-plusx")
+        assert window._views.get("table:pushover") is not None, (
+            "pushover registered no summary table"
+        )
+        figure = window._views.get("figure:pushover-plusx-uniform")
         assert figure is not None, "pushover registered no ADRS figure"
-        view = window._views.get("results:Pushover+X")
+        view = window._views.get("results:Pushover+X-uniform")
         assert view is not None, "pushover registered no deformed-shape view"
-        assert view.parent == "figure:pushover-plusx"
-        assert window._views.results("results:Pushover+X").has_displacements("Pushover+X")
+        assert view.parent == "table:pushover"
+        assert window._views.results("results:Pushover+X-uniform").has_displacements(
+            "Pushover+X-uniform"
+        )
 
         # The recorded step history is threaded through, so the animation steps
         # through it rather than oscillating a single field.
-        window._views.set_active("results:Pushover+X")
+        window._views.set_active("results:Pushover+X-uniform")
         window._on_animate_toggled(True)
         assert window._anim_step_mode is True
         assert len(window._anim_frames) == 2
