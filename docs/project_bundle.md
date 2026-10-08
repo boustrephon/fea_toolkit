@@ -104,14 +104,16 @@ serializable payloads:
 |---|---|---|
 | `cases` | assembled archive arrays | `results.npz` |
 | `modal` | `AnalysisResult.data` (`modal` + `shapes`) | `results.npz` (`collect_modal_arrays`) |
-| `response_spectrum` | `AnalysisResult.data` (`rs_result` + `direction` + `node_displacements`) | `results.npz` (`collect_rs_arrays` + `collect_rs_nodal_displacement_arrays`) + `tables.json` |
+| `response_spectrum` | `AnalysisResult.data` (`rs_result` + `direction` + `node_displacements`) | `results.npz` (`collect_rs_arrays` + `rs_displacement_arrays`) + `tables.json` |
 | `pushover` | `AnalysisResult.data` per direction (`adrs`/`pp`/`spectrum`) | `figures.json` |
 
 The response-spectrum results are walked from `run.results` (not the context
-slot) because the context's `results["rs"]` is overwritten per direction.  The
-`rs/node_*` block is single-direction in the schema (like `rs/elem_*`), so of
-the per-direction displacement fields the last one to write wins — mirroring the
-review path, which keeps one direction's field.
+slot) because the context's `results["rs"]` is overwritten per direction.
+
+RS displacement fields are persisted as **static-shaped cases**
+(`static/RS-<direction>/node_*`), not the single-direction `rs/node_*` block —
+so each direction's deformed-shape view round-trips through the bundle exactly
+like a static load case (Option C).
 
 ## Related fixes
 

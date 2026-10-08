@@ -45,6 +45,7 @@ __all__ = [
     "is_project",
     "read_project",
     "regenerate_figure",
+    "rs_displacement_arrays",
     "tables_payload",
     "views_payload",
     "write_project",
@@ -195,6 +196,49 @@ def collect_project_results(results: list) -> dict:
         "rs_nodal_displacements": rs_nodal_displacements,
         "pushover": pushover,
     }
+
+
+def rs_displacement_arrays(mesh: Any, rs_nodal_displacements: dict) -> dict:
+    """Marshal per-direction RS displacement fields into static-shaped arrays.
+
+    Option C for the single-direction ``rs/node_*`` block: each direction's
+    CQC-combined displacement field (keyed by OpenSees node tag) is written as a
+    ``static/RS-<direction>/node_*`` case over the mesh's geometry, so the
+    standard :class:`~fea_toolkit.io.results_repository.NpzResultsRepository`
+    reads it exactly like a static load case and the deformed-shape view
+    round-trips through the project bundle.
+
+    Args:
+        mesh: The ``MeshModel`` (or ``SAPModelData``) the fields are keyed to —
+            supplies the geometry arrays and the node-tag ordering.
+        rs_nodal_displacements: ``{direction: {node_tag: (dx, dy, dz)}}``, as
+            captured by :func:`collect_project_results`.
+
+    Returns:
+        The geometry arrays, ``static_case_labels`` (the ``RS-<direction>``
+        labels, in sorted direction order) and one
+        ``static/RS-<direction>/node_*`` block per direction, with displacements
+        in geometry order.
+    """
+    import numpy as np
+
+    from ..io._serial import collect_geometry_arrays
+
+    arrays = dict(collect_geometry_arrays(mesh))
+    directions = sorted(rs_nodal_displacements)
+    labels = [f"RS-{direction}" for direction in directions]
+    arrays["static_case_labels"] = np.array(labels, dtype=str)
+    node_tags = [int(tag) for tag in arrays.get("node_tag", [])]
+    for direction, label in zip(directions, labels):
+        field = rs_nodal_displacements.get(direction) or {}
+        components = [[], [], []]
+        for tag in node_tags:
+            disp = field.get(tag, (0.0, 0.0, 0.0))
+            for axis in range(3):
+                components[axis].append(float(disp[axis]))
+        for axis, dof in enumerate(("dx", "dy", "dz")):
+            arrays[f"static/{label}/node_{dof}"] = np.array(components[axis], dtype=float)
+    return arrays
 
 
 def figures_payload(pushover: dict, label: str = "Pushover") -> dict:

@@ -20,6 +20,7 @@ from fea_toolkit.gui.project import (
     figures_payload,
     is_project,
     read_project,
+    rs_displacement_arrays,
     tables_payload,
     views_payload,
     write_project,
@@ -142,6 +143,65 @@ def test_collect_project_results_captures_rs_nodal_displacements():
     assert collected["rs_nodal_displacements"] == {"X": field}
     # A direction that recorded no field leaves the slot empty.
     assert collect_project_results([_rs_step("Y")])["rs_nodal_displacements"] == {}
+
+
+def test_rs_displacement_arrays_build_static_shaped_cases():
+    """Option C: RS fields become ``static/RS-<dir>/node_*`` cases over the geometry."""
+    from examples.sample_model import make_sample_model
+
+    mesh = make_sample_model()
+    node_tags = [node.node_tag for node in mesh.nodes.values()]
+    field = dict.fromkeys(node_tags, (0.001, 0.0, 0.0))
+
+    arrays = rs_displacement_arrays(mesh, {"X": field, "Y": field})
+
+    assert list(arrays["static_case_labels"]) == ["RS-X", "RS-Y"]
+    for direction in ("X", "Y"):
+        for dof in ("dx", "dy", "dz"):
+            key = f"static/RS-{direction}/node_{dof}"
+            assert key in arrays
+            assert len(arrays[key]) == len(node_tags)
+    # The X field's dx component is the seeded magnitude.
+    assert arrays["static/RS-X/node_dx"][0] == 0.001
+
+
+def test_rs_directions_round_trip_through_the_bundle(tmp_path):
+    """Option C: RS displacement cases survive a write/read project round-trip."""
+    from examples.sample_model import make_sample_model
+
+    mesh = make_sample_model()
+    node_tags = [node.node_tag for node in mesh.nodes.values()]
+    field = dict.fromkeys(node_tags, (0.001, 0.0, 0.0))
+    arrays = rs_displacement_arrays(mesh, {"X": field, "Y": field})
+
+    manifest = build_manifest(
+        name="RS",
+        source_label="rs.s2k",
+        model_file="model.npz",
+        units={"F": "N"},
+        recipe=None,
+        views=[],
+        active_view=None,
+        camera=None,
+        hidden_elem_ids=[],
+        display={},
+    )
+    write_project(
+        tmp_path / "RS.fea",
+        manifest=manifest,
+        sap=None,
+        mesh=None,
+        results_arrays=arrays,
+        figures=figures_payload({}),
+        tables=tables_payload({}),
+        model_fmt="npz",
+    )
+
+    bundle = read_project(tmp_path / "RS.fea")
+    assert "RS-X" in bundle["results"].cases()
+    assert "RS-Y" in bundle["results"].cases()
+    assert bundle["results"].has_displacements("RS-X")
+    assert bundle["results"].has_displacements("RS-Y")
 
 
 def test_collect_project_results_empty_run():

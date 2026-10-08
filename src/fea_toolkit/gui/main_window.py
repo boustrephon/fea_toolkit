@@ -2438,12 +2438,11 @@ class MainWindow(QMainWindow):
         The field is keyed by OpenSees node tag, but the existing
         :class:`~fea_toolkit.io.results_repository.NpzResultsRepository` reads
         the static-shaped ``static/<case>/node_*`` layout, so the field is
-        marshalled into that shape over the mesh's own geometry and registered
+        marshalled into that shape over the mesh's own geometry (via
+        :func:`~fea_toolkit.gui.project.rs_displacement_arrays`) and registered
         through the same path a static case takes.
         """
-        import numpy as np
-
-        from ..io._serial import collect_geometry_arrays
+        from .project import rs_displacement_arrays
 
         mesh = self._store.preprocessed() if self._store is not None else None
         if mesh is None:
@@ -2452,19 +2451,7 @@ class MainWindow(QMainWindow):
                 "warn",
             )
             return
-
-        arrays = dict(collect_geometry_arrays(mesh))
-        case = f"RS-{direction}"
-        arrays["static_case_labels"] = np.array([case], dtype=str)
-        node_tags = [int(tag) for tag in arrays.get("node_tag", [])]
-        components = [[], [], []]
-        for tag in node_tags:
-            disp = node_displacements.get(tag, (0.0, 0.0, 0.0))
-            for axis in range(3):
-                components[axis].append(float(disp[axis]))
-        for axis, dof in enumerate(("dx", "dy", "dz")):
-            arrays[f"static/{case}/node_{dof}"] = np.array(components[axis], dtype=float)
-
+        arrays = rs_displacement_arrays(mesh, {direction: node_displacements})
         self._show_results_archive(label, arrays)
 
     def _show_pushover_result(self, label: str, payload: Any) -> None:
@@ -2928,12 +2915,17 @@ class MainWindow(QMainWindow):
     # ── Project bundle (File ▸ Save/Open project) ────────────────────
 
     def _project_results_arrays(self, collected: dict) -> dict:
-        """Merge the collected static archive arrays with modal + RS arrays."""
-        from ..io.unified_writer import (
-            collect_modal_arrays,
-            collect_rs_arrays,
-            collect_rs_nodal_displacement_arrays,
-        )
+        """Merge the collected static archive arrays with modal + RS arrays.
+
+        The RS displacement fields are persisted as static-shaped cases
+        (``static/RS-<direction>/node_*``) rather than the single-direction
+        ``rs/node_*`` block, so each direction's deformed-shape view round-trips
+        through the bundle exactly like a static load case (Option C).
+        """
+        import numpy as np
+
+        from ..io.unified_writer import collect_modal_arrays, collect_rs_arrays
+        from .project import rs_displacement_arrays
 
         arrays = dict(collected.get("static_arrays") or {})
         modal = collected.get("modal")
@@ -2942,14 +2934,20 @@ class MainWindow(QMainWindow):
         rs = collected.get("rs") or {}
         if rs:
             arrays.update(collect_rs_arrays(rs.get("rs_x"), rs.get("rs_y")))
-        # The ``rs/node_*`` block is single-direction in the schema (like
-        # ``rs/elem_*``), so the last direction to write wins — mirroring the
-        # review path, which keeps one direction's displacement field.
+
         rs_disp = collected.get("rs_nodal_displacements") or {}
-        for direction in ("X", "Y", "Z"):
-            field = rs_disp.get(direction)
-            if field:
-                arrays.update(collect_rs_nodal_displacement_arrays(field))
+        mesh = self._store.preprocessed() if self._store is not None else None
+        if rs_disp and mesh is not None:
+            rs_arrays = rs_displacement_arrays(mesh, rs_disp)
+            rs_labels = rs_arrays.pop("static_case_labels")
+            existing = arrays.get("static_case_labels")
+            if existing is not None and len(existing):
+                arrays["static_case_labels"] = np.concatenate(
+                    [np.asarray(existing), np.asarray(rs_labels)]
+                )
+            else:
+                arrays["static_case_labels"] = rs_labels
+            arrays.update(rs_arrays)
         return arrays
 
     def _project_tables(self) -> dict:
