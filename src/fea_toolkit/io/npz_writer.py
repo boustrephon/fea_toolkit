@@ -923,7 +923,7 @@ def write_pushover_results_npz(
             :func:`fea_toolkit.utils.length_unit_label`.
         forces_coordinate_system: Coordinate system of the recorded frame
             end-force arrays.  Defaults to ``"local"`` — frame end-forces
-            (``pushover/{direction}/frame_fx_i``, ...) are recorded in the
+            (``pushover/{direction}/{load_type}/frame_fx_i``, ...) are recorded in the
             element LOCAL coordinate system via the OpenSees "localForces"
             query.  If a caller passes a different value, the forces must
             already be in that coordinate system before collection.

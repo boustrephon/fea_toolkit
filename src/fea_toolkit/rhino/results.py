@@ -250,7 +250,7 @@ def colour_shells_from_results(
     """Colour Rhino shell objects by a pushover in-plane force quantity.
 
     Matches objects carrying a ``SAP_AreaID`` UserString against the
-    ``pushover/{direction}/shell_{quantity}`` arrays (last pushover step
+    ``pushover/{direction}/{load_type}/shell_{quantity}`` arrays (last pushover step
     by default, or the explicit *step*).  Uses the same red-white-blue
     diverging scale as the frame colouring.
 
@@ -404,7 +404,7 @@ def colour_frames_from_results(
     """Colour Rhino frame objects by a pushover frame force/moment quantity.
 
     Mirrors :func:`colour_shells_from_results` for the per-step frame
-    end-force arrays (``pushover/{direction}/frame_{q}_i``).  Matches
+    end-force arrays (``pushover/{direction}/{load_type}/frame_{q}_i``).  Matches
     objects carrying a ``SAP_FrameID`` UserString; uses the last pushover
     step by default, or the explicit *step*.
 
@@ -698,7 +698,7 @@ def apply_results(
     * ``frames=True`` — colour frame objects by a static force/moment
       quantity (``quantity``, ``case``, ``use_local``).  Pass
       ``frame_direction`` to colour instead from the pushover per-step
-      frame forces (``pushover/{direction}/frame_{q}_i``, at ``frame_step``
+      frame forces (``pushover/{direction}/{load_type}/frame_{q}_i``, at ``frame_step``
       or the last step);
     * ``shells=True`` — colour shell objects by a pushover in-plane
       quantity (``shell_quantity``, ``shell_direction``, ``shell_step``);

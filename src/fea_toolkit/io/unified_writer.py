@@ -447,7 +447,7 @@ def write_results(
         rs_results: Dict with keys ``rs_x``, ``rs_y`` from ``run_rs()``.
         pushover_results: Pushover per-step results per direction as
             ``{direction: (step_results, results)}`` — written under
-            ``pushover/{direction}/...`` via
+            ``pushover/{direction}/{load_type}/...`` via
             :func:`fea_toolkit.io.npz_writer.collect_pushover_arrays`
             (requires *mesh_model* for the node tags).
         fmt: ``"npz"`` (default) or ``"h5"``.

@@ -260,9 +260,9 @@ exactly the flattened ``f"{direction}/{field}"`` output of
 field; the keys listed in the table above).  ``control_step`` is *not*
 part of the schema.  Consumers that need the recorded pushover step at
 (or nearest to) the performance point match by value: find the index of
-``pushover/{direction}/control_disp`` closest to ``D_roof`` (or to
+``pushover/{direction}/{load_type}/control_disp`` closest to ``D_roof`` (or to
 ``control_disp`` when present) and use the same index into
-``pushover/{direction}/base_shear``.  Because ``D_roof`` is a magnitude,
+``pushover/{direction}/{load_type}/base_shear``.  Because ``D_roof`` is a magnitude,
 always compare against ``abs(control_disp)``.
 
 ### Modal analysis results

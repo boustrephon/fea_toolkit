@@ -37,7 +37,7 @@ def _resolve_pushover_data(
     Accepts three input types:
 
     * An ``AnalysisBuilder`` instance (reads from ``pushover_step_results``).
-    * An NPZ data dict (from ``np.load()`` — reads ``pushover/{direction}/...`` arrays).
+    * An NPZ data dict (from ``np.load()`` — reads ``pushover/{direction}/{load_type}/...`` arrays).
     * A ``list[dict]`` — raw step results from ``_record_step()``.
 
     Returns:

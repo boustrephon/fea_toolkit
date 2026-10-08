@@ -31,7 +31,7 @@ All components follow existing project patterns:
 
 | Component | Existing pattern | Pushover extension |
 |---|---|---|
-| **Schema** | `static/`, `modal/`, `rs/` namespaces in `results_schema.py` | `pushover/{direction}/` namespace |
+| **Schema** | `static/`, `modal/`, `rs/` namespaces in `results_schema.py` | `pushover/{direction}/{load_type}/` namespace |
 | **Writer** | `_collect_static()`, `_collect_modal()`, `_collect_rs()` in `npz_writer.py` | `_collect_pushover()` |
 | **Selection** | `Selection` class with `element_types`, `sections`, `materials`, `groups`, `element_ids` | Add `elevation_range`, `story` fields |
 | **Engine** | `AnalysisBuilder.run_pushover_analysis()` returns global dict | Optional per-step `eleResponse()` recording |
@@ -243,26 +243,26 @@ def export_pushover_results(self, path: str, direction: str) -> str:
 
 ```python
 PUSHOVER_GLOBAL_ARRAYS: Dict[str, Tuple] = {
-    "pushover/{direction}/step":       ("N_step", "int"),
-    "pushover/{direction}/control_disp": ("N_step", "float"),
-    "pushover/{direction}/base_shear": ("N_step", "float"),
+    "pushover/{direction}/{load_type}/step":       ("N_step", "int"),
+    "pushover/{direction}/{load_type}/control_disp": ("N_step", "float"),
+    "pushover/{direction}/{load_type}/base_shear": ("N_step", "float"),
 }
 
 PUSHOVER_FRAME_ARRAYS: Dict[str, Tuple] = {
-    "pushover/{direction}/frame_sap_id": ("N_recorded_frame", "str"),
-    "pushover/{direction}/frame_fx_i":   ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/{load_type}/frame_sap_id": ("N_recorded_frame", "str"),
+    "pushover/{direction}/{load_type}/frame_fx_i":   ("N_step N_recorded_frame", "float"),
     # ... all 12 force components, global + local ...
-    "pushover/{direction}/frame_mz_j":   ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/{load_type}/frame_mz_j":   ("N_step N_recorded_frame", "float"),
 }
 
 PUSHOVER_SHELL_ARRAYS: Dict[str, Tuple] = {
-    "pushover/{direction}/shell_sap_id": ("N_recorded_shell", "str"),
-    "pushover/{direction}/shell_Nx":     ("N_step N_recorded_shell", "float"),
-    "pushover/{direction}/shell_Ny":     ("N_step N_recorded_shell", "float"),
-    "pushover/{direction}/shell_Nxy":    ("N_step N_recorded_shell", "float"),
-    "pushover/{direction}/shell_Mx":     ("N_step N_recorded_shell", "float"),
-    "pushover/{direction}/shell_My":     ("N_step N_recorded_shell", "float"),
-    "pushover/{direction}/shell_Mxy":    ("N_step N_recorded_shell", "float"),
+    "pushover/{direction}/{load_type}/shell_sap_id": ("N_recorded_shell", "str"),
+    "pushover/{direction}/{load_type}/shell_Nx":     ("N_step N_recorded_shell", "float"),
+    "pushover/{direction}/{load_type}/shell_Ny":     ("N_step N_recorded_shell", "float"),
+    "pushover/{direction}/{load_type}/shell_Nxy":    ("N_step N_recorded_shell", "float"),
+    "pushover/{direction}/{load_type}/shell_Mx":     ("N_step N_recorded_shell", "float"),
+    "pushover/{direction}/{load_type}/shell_My":     ("N_step N_recorded_shell", "float"),
+    "pushover/{direction}/{load_type}/shell_Mxy":    ("N_step N_recorded_shell", "float"),
 }
 ```
 
@@ -351,7 +351,7 @@ npz_static["pp"] = {
 
 A single 4-direction pushover run produces **one archive per direction**
 (`{model_stem}_pushover_{direction}.npz`), each containing the full
-``pushover/{direction}/...`` payload (step, control_disp, base_shear,
+``pushover/{direction}/{load_type}/...`` payload (step, control_disp, base_shear,
 per-element/shell forces) plus the ``static/pp/{direction}/...``
 performance-point scalars for that direction.  Consumers therefore load
 the per-direction archive whose ``direction`` key matches the PP
@@ -359,8 +359,8 @@ direction they want.
 
 Consumers (e.g. the GB 50010/GB 50011 checks scripts) locate the PP step
 by reading ``static/pp/{direction}/control_step`` — the deterministic,
-authoritative index into the recorded ``pushover/{direction}/control_disp``
-and ``pushover/{direction}/base_shear`` arrays.  ``D_roof`` is used only
+authoritative index into the recorded ``pushover/{direction}/{load_type}/control_disp``
+and ``pushover/{direction}/{load_type}/base_shear`` arrays.  ``D_roof`` is used only
 to validate the match (``abs(control_disp[control_step])`` ≈ ``D_roof``),
 never for nearest-value lookup — see the deterministic step-selection rule
 in `docs/results_schema.md` §PP authoring.
@@ -532,7 +532,7 @@ and material definitions — so replaying the recorded history through a fresh c
 of the section reproduces every fiber's stress-strain.  This replay is a
 **separate, deferred tool** (below), not part of this provision.
 
-**NPZ namespace**: `pushover/{direction}/section_...` — section index/location
+**NPZ namespace**: `pushover/{direction}/{load_type}/section_...` — section index/location
 and the `section_deformation_*` block.
 
 **Caveats recorded with the slot**:
@@ -551,7 +551,7 @@ and the `section_deformation_*` block.
 - Fiber stress and strain at each fiber (for fiber sections)
 - nD material stress/strain state at Gauss points (for layered shells)
 
-**NPZ namespace**: `pushover/{direction}/fiber/...` — separate arrays due to high
+**NPZ namespace**: `pushover/{direction}/{load_type}/fiber/...` — separate arrays due to high
 data volume.
 
 **Enforcement**:

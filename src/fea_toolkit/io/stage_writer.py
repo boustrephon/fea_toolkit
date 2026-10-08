@@ -261,7 +261,7 @@ def write_model_stages(
             is the builder's ``pushover_step_results`` list and *results*
             the direction result dict (provides the global
             ``step`` / ``control_disp`` / ``base_shear`` arrays).  Arrays
-            are written under ``pushover/{direction}/...`` via
+            are written under ``pushover/{direction}/{load_type}/...`` via
             :func:`fea_toolkit.io.npz_writer.collect_pushover_arrays`.
         rs_results: Response-spectrum results per direction, as
             ``{"rs_x": rs_result, "rs_y": rs_result}``.  Arrays are written
