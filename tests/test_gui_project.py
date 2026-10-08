@@ -20,6 +20,7 @@ from fea_toolkit.gui.project import (
     figures_payload,
     is_project,
     mode_shape_arrays,
+    pushover_displacement_arrays,
     read_project,
     rs_displacement_arrays,
     tables_payload,
@@ -261,6 +262,85 @@ def test_mode_shapes_round_trip_through_the_bundle(tmp_path):
     assert bundle["results"].has_displacements("Mode-1")
 
 
+def test_pushover_displacement_arrays_build_static_shaped_cases():
+    """Pushover directions become ``static/Pushover<direction>/node_*`` cases."""
+    from examples.sample_model import make_sample_model
+
+    mesh = make_sample_model()
+    node_tags = [node.node_tag for node in mesh.nodes.values()]
+    field = dict.fromkeys(node_tags, (0.003, 0.0, 0.0))
+
+    arrays = pushover_displacement_arrays(mesh, {"+X": field, "-X": field})
+
+    assert list(arrays["static_case_labels"]) == ["Pushover+X", "Pushover-X"]
+    assert len(arrays["static/Pushover+X/node_dx"]) == len(node_tags)
+    assert arrays["static/Pushover+X/node_dx"][0] == 0.003
+
+
+def test_pushover_step_results_round_trip_through_the_bundle(tmp_path):
+    """Per-step pushover history and per-direction cases survive a round-trip."""
+    from examples.sample_model import make_sample_model
+    from fea_toolkit.io.npz_writer import collect_pushover_arrays
+
+    mesh = make_sample_model()
+    node_tags = [node.node_tag for node in mesh.nodes.values()]
+    final_field = dict.fromkeys(node_tags, (0.005, 0.0, 0.0))
+    step_results = [
+        {
+            "step": 1,
+            "frame_forces": {},
+            "shell_forces": {},
+            "node_displacements": dict.fromkeys(node_tags, (0.002, 0.0, 0.0)),
+        },
+        {
+            "step": 2,
+            "frame_forces": {},
+            "shell_forces": {},
+            "node_displacements": final_field,
+        },
+    ]
+    po_results = {
+        "step": [0, 1, 2],
+        "control_disp": [0.0, 0.1, 0.2],
+        "base_shear": [0.0, 5.0, 10.0],
+    }
+
+    arrays = dict(pushover_displacement_arrays(mesh, {"+X": final_field}))
+    arrays.update(
+        collect_pushover_arrays(mesh, step_results, direction="+X", pushover_results=po_results)
+    )
+
+    manifest = build_manifest(
+        name="Pushover",
+        source_label="po.s2k",
+        model_file="model.npz",
+        units={"F": "N"},
+        recipe=None,
+        views=[],
+        active_view=None,
+        camera=None,
+        hidden_elem_ids=[],
+        display={},
+    )
+    write_project(
+        tmp_path / "Pushover.fea",
+        manifest=manifest,
+        sap=None,
+        mesh=None,
+        results_arrays=arrays,
+        figures=figures_payload({}),
+        tables=tables_payload({}),
+        model_fmt="npz",
+    )
+
+    bundle = read_project(tmp_path / "Pushover.fea")
+    assert "Pushover+X" in bundle["results"].cases()
+    assert bundle["results"].has_displacements("Pushover+X")
+    raw = bundle["results"].raw()
+    assert "pushover/+X/node_disp_x" in raw
+    assert raw["pushover/+X/node_disp_x"].shape[0] == 2
+
+
 def test_collect_project_results_empty_run():
     assert collect_project_results([]) == {
         "static_arrays": {},
@@ -269,6 +349,8 @@ def test_collect_project_results_empty_run():
         "rs": {},
         "rs_nodal_displacements": {},
         "pushover": {},
+        "pushover_results": {},
+        "pushover_step_results": {},
     }
 
 

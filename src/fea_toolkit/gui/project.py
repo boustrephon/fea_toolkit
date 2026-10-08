@@ -152,7 +152,10 @@ def collect_project_results(results: list) -> dict:
         A dict with keys ``static_arrays`` (the merged ``CASES`` archive arrays),
         ``modal`` / ``mode_shapes`` (from the ``MODAL`` payload), ``rs`` (``rs_x``
         / ``rs_y``), ``rs_nodal_displacements`` (``{direction: {node_tag: (dx, dy,
-        dz)}}``), and ``pushover`` (``{direction: entry}``).
+        dz)}}``), and ``pushover`` (``{direction: entry}``), plus
+        ``pushover_results`` (``{direction: result dict}``) and
+        ``pushover_step_results`` (``{direction: [per-step dicts]}``) when the run
+        recorded per-step data.
     """
     static_arrays: dict = {}
     modal: Optional[dict] = None
@@ -160,6 +163,8 @@ def collect_project_results(results: list) -> dict:
     rs: dict = {}
     rs_nodal_displacements: dict = {}
     pushover: dict = {}
+    pushover_results: dict = {}
+    pushover_step_results: dict = {}
 
     for result in results:
         kind = getattr(result, "kind", None)
@@ -188,6 +193,12 @@ def collect_project_results(results: list) -> dict:
                 for direction, entry in data.items():
                     if isinstance(entry, dict) and "adrs" in entry:
                         pushover[str(direction)] = entry
+                        results = entry.get("results")
+                        if isinstance(results, dict):
+                            pushover_results[str(direction)] = results
+                            step_results = results.get("step_results")
+                            if step_results:
+                                pushover_step_results[str(direction)] = step_results
 
     return {
         "static_arrays": static_arrays,
@@ -196,6 +207,8 @@ def collect_project_results(results: list) -> dict:
         "rs": rs,
         "rs_nodal_displacements": rs_nodal_displacements,
         "pushover": pushover,
+        "pushover_results": pushover_results,
+        "pushover_step_results": pushover_step_results,
     }
 
 
@@ -271,6 +284,33 @@ def mode_shape_arrays(mesh: Any, mode_shapes: dict) -> dict:
     """
     indices = sorted(mode_shapes)
     return _displacement_cases(mesh, mode_shapes, [f"Mode-{index + 1}" for index in indices])
+
+
+def pushover_displacement_arrays(mesh: Any, pushover_nodal_displacements: dict) -> dict:
+    """Marshal per-direction pushover deformed shapes into static-shaped cases.
+
+    Each direction's chosen-step field (``{direction: {node_tag: (dx, dy, dz)}}``)
+    is written as a ``static/Pushover<direction>/node_*`` case over the mesh's
+    geometry, so each push direction becomes a deformed-shape results view that
+    round-trips through the project bundle like a static case (Option C).  The
+    signed direction is kept verbatim (``+X`` → ``Pushover+X``) rather than
+    re-spelled, so a negative direction is not double-dashed.
+
+    Args:
+        mesh: The ``MeshModel`` (or ``SAPModelData``) the fields are keyed to.
+        pushover_nodal_displacements: ``{direction: {node_tag: (dx, dy, dz)}}``.
+
+    Returns:
+        The geometry arrays, ``static_case_labels`` (``Pushover<direction>`` in
+        sorted direction order) and one ``static/Pushover<direction>/node_*``
+        block per direction, in geometry order.
+    """
+    directions = sorted(pushover_nodal_displacements)
+    return _displacement_cases(
+        mesh,
+        pushover_nodal_displacements,
+        [f"Pushover{direction}" for direction in directions],
+    )
 
 
 def figures_payload(pushover: dict, label: str = "Pushover") -> dict:

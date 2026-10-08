@@ -3045,15 +3045,21 @@ class MainWindow(QMainWindow):
     # ── Project bundle (File ▸ Save/Open project) ────────────────────
 
     def _project_results_arrays(self, collected: dict) -> dict:
-        """Merge the collected static archive arrays with modal + RS arrays.
+        """Merge the collected static archive arrays with modal + RS + pushover.
 
-        RS displacement fields and modal mode shapes are persisted as
-        static-shaped cases (``static/RS-<direction>/node_*`` and
-        ``static/Mode-<i>/node_*``) so each direction's / mode's deformed-shape
-        view round-trips through the bundle like a static load case (Option C).
+        RS displacement fields, modal mode shapes and pushover directions are
+        persisted as static-shaped cases (``static/RS-<direction>/node_*``,
+        ``static/Mode-<i>/node_*``, ``static/Pushover-<direction>/node_*``) so
+        each deformed-shape view round-trips like a static load case (Option C).
+        The pushover per-step history is persisted as ``pushover/<direction>/…``.
         """
+        from ..io.npz_writer import collect_pushover_arrays
         from ..io.unified_writer import collect_modal_arrays, collect_rs_arrays
-        from .project import mode_shape_arrays, rs_displacement_arrays
+        from .project import (
+            mode_shape_arrays,
+            pushover_displacement_arrays,
+            rs_displacement_arrays,
+        )
 
         arrays = dict(collected.get("static_arrays") or {})
         modal = collected.get("modal")
@@ -3076,7 +3082,43 @@ class MainWindow(QMainWindow):
                 mode_arrays = mode_shape_arrays(mesh, shapes)
                 self._append_static_case_labels(arrays, mode_arrays.pop("static_case_labels"))
                 arrays.update(mode_arrays)
+
+            step_results = collected.get("pushover_step_results") or {}
+            pushover_results = collected.get("pushover_results") or {}
+            if step_results:
+                for direction, per_step in step_results.items():
+                    arrays.update(
+                        collect_pushover_arrays(
+                            mesh,
+                            per_step,
+                            direction=direction,
+                            pushover_results=pushover_results.get(direction),
+                        )
+                    )
+                # The per-direction deformed-shape view: the final recorded step.
+                final_fields = {
+                    direction: per_step[-1].get("node_displacements")
+                    for direction, per_step in step_results.items()
+                    if per_step and per_step[-1].get("node_displacements")
+                }
+                if final_fields:
+                    po_arrays = pushover_displacement_arrays(mesh, final_fields)
+                    self._append_static_case_labels(arrays, po_arrays.pop("static_case_labels"))
+                    arrays.update(po_arrays)
+                self._append_analysis_type(arrays, "pushover")
         return arrays
+
+    def _append_analysis_type(self, arrays: dict, name: str) -> None:
+        """Append *name* to ``analysis_types``, creating it when absent."""
+        import numpy as np
+
+        existing = arrays.get("analysis_types")
+        if existing is not None and len(existing):
+            arrays["analysis_types"] = np.concatenate(
+                [np.asarray(existing), np.array([name], dtype=str)]
+            )
+        else:
+            arrays["analysis_types"] = np.array([name], dtype=str)
 
     def _append_static_case_labels(self, arrays: dict, labels: Any) -> None:
         """Append *labels* to ``static_case_labels``, creating it when absent."""
