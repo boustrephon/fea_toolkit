@@ -702,9 +702,15 @@ def generate_report(
                         for label, out in _dirs.items():
                             ab = out.get("builder")
                             if ab is not None and getattr(ab, "pushover_step_results", None):
-                                po_export[label] = (
+                                res = out.get("results", {})
+                                load_type = (
+                                    res.get("lateral_load_type", _pat)
+                                    if isinstance(res, dict)
+                                    else _pat
+                                )
+                                po_export[(label, load_type)] = (
                                     ab.pushover_step_results,
-                                    out.get("results", {}),
+                                    res,
                                 )
 
                 # Response-spectrum results (one entry per direction), so the

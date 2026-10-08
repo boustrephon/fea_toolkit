@@ -234,6 +234,39 @@ class TestStageFile:
         assert "frame_sap_id" in flat
         assert "shell_parent_sap_id" in flat
 
+    def test_pushover_results_round_trip_with_load_type_keys(self, prepared, tmp_path, fmt):
+        """A ``(direction, load_type)`` key writes under ``pushover/<dir>/<load_type>/``.
+
+        Two shapes for the same direction must not collide — each gets its own
+        ``{load_type}`` segment, keyed by the tuple's second element.
+        """
+        md, mesh, config = prepared
+        step_results = [
+            {"step": 1, "frame_forces": {}, "shell_forces": {}, "node_displacements": {}}
+        ]
+        po_results = {
+            "step": [0, 1],
+            "control_disp": [0.0, 0.1],
+            "base_shear": [0.0, 5.0],
+            "lateral_load_type": "triangular",
+        }
+        p = str(tmp_path / f"po_lt.{fmt}")
+        write_model_stages(
+            p,
+            sap=md,
+            mesh=mesh,
+            config=config,
+            fmt=fmt,
+            pushover_results={
+                ("+X", "triangular"): (step_results, po_results),
+                ("+X", "uniform"): (step_results, po_results),
+            },
+        )
+        data = read_results(p)
+        assert "pushover/+X/triangular/step" in data
+        assert "pushover/+X/uniform/step" in data
+        assert list(data["pushover/+X/triangular/control_disp"]) == [0.1]
+
     def test_response_spectrum_results_round_trip(self, prepared, tmp_path, fmt):
         """RS arrays are written under the canonical ``rs/*`` keys."""
         _md, mesh, _config = prepared

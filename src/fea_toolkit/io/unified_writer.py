@@ -531,13 +531,18 @@ def write_results(
     if pushover_results and mesh_model is not None:
         from .npz_writer import collect_pushover_arrays
 
-        for direction, (step_results, po_results) in pushover_results.items():
+        for key, (step_results, po_results) in pushover_results.items():
             if step_results:
+                if isinstance(key, tuple):
+                    direction, load_type = key
+                else:
+                    direction, load_type = key, None
                 arrays.update(
                     collect_pushover_arrays(
                         mesh_model,
                         step_results,
                         direction=direction,
+                        load_type=load_type,
                         pushover_results=po_results,
                     )
                 )

@@ -371,13 +371,18 @@ def write_model_stages(
         analysis_types.append("pushover")
         from .npz_writer import collect_pushover_arrays
 
-        for direction, (step_results, po_results) in pushover_results.items():
+        for key, (step_results, po_results) in pushover_results.items():
             if step_results:
+                if isinstance(key, tuple):
+                    direction, load_type = key
+                else:
+                    direction, load_type = key, None
                 arrays.update(
                     collect_pushover_arrays(
                         mesh,
                         step_results,
                         direction=direction,
+                        load_type=load_type,
                         pushover_results=po_results,
                     )
                 )
