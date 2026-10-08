@@ -2587,6 +2587,10 @@ class MainWindow(QMainWindow):
         curve (``adrs``), the performance point (``pp``) and the demand spectrum
         (``spectrum``).  Each direction becomes a figure view, so the CSM data is
         inspectable rather than only logged.
+
+        When the run recorded per-step node displacements, each direction also
+        becomes a ``results`` view of its final converged deformed shape, nested
+        under the first ADRS figure — the same fan-out as RS directions and modes.
         """
         data = getattr(payload, "data", None) or {}
         directions = sorted(data) if isinstance(data, dict) else []
@@ -2632,6 +2636,23 @@ class MainWindow(QMainWindow):
         if not views:
             self.log(f"{label}: no plottable pushover curves.", "warn")
             return
+
+        # Per-direction deformed-shape views (final recorded step), nested under
+        # the first ADRS figure — only when the run recorded node displacements.
+        mesh = self._store.preprocessed() if self._store is not None else None
+        if mesh is not None:
+            from .project import pushover_displacement_arrays
+
+            final_fields = {}
+            for direction in directions:
+                results = (data.get(direction) or {}).get("results") or {}
+                step_results = results.get("step_results") or []
+                if step_results and step_results[-1].get("node_displacements"):
+                    final_fields[direction] = step_results[-1]["node_displacements"]
+            if final_fields:
+                arrays = pushover_displacement_arrays(mesh, final_fields)
+                self._show_results_archive(label, arrays, parent=bundle_parent, show=False)
+
         self._show_view(views[0], rebuild_tree=True)
         self.log(f"{label}: added {len(views)} ADRS figure(s).")
 
@@ -2644,7 +2665,9 @@ class MainWindow(QMainWindow):
         """
         return self._show_results_archive(label, arrays or {})
 
-    def _show_results_archive(self, label: str, arrays: dict, parent: Optional[str] = None) -> list:
+    def _show_results_archive(
+        self, label: str, arrays: dict, parent: Optional[str] = None, *, show: bool = True
+    ) -> list:
         """Register one ``results`` view per case in *arrays* and show the first.
 
         A :class:`~fea_toolkit.io.results_repository.NpzResultsRepository` over
@@ -2660,6 +2683,9 @@ class MainWindow(QMainWindow):
                 ``static/<case>/…`` blocks and the geometry arrays.
             parent: Key of the step's summary view the case views nest under
                 (``None`` leaves them top-level).
+            show: Whether to display the first case after registering (a fan-out
+                step that keeps another view active, e.g. pushover's ADRS figure,
+                passes ``False``).
 
         Returns:
             The case labels registered, in archive order — empty when the
@@ -2686,9 +2712,10 @@ class MainWindow(QMainWindow):
             )
         self.log(f"{label}: {len(cases)} case(s) added as views.")
 
-        first = self._views.get(f"{_RESULTS_KEY_PREFIX}{cases[0]}")
-        if first is not None:
-            self._show_view(first, rebuild_tree=True)
+        if show:
+            first = self._views.get(f"{_RESULTS_KEY_PREFIX}{cases[0]}")
+            if first is not None:
+                self._show_view(first, rebuild_tree=True)
         return cases
 
     def _show_geometry_result(self, label: str, mesh_model: Any) -> None:

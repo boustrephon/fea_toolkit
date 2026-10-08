@@ -461,6 +461,56 @@ class TestTableAndFigureViews:
         assert window._figure_canvases["figure:alpha"] is canvas_a
         assert window._figure_layout.count() == 1
 
+    def test_a_pushover_result_registers_a_shape_view_per_direction(self, window):
+        """Pushover directions become deformed-shape views nested under the first figure."""
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.analysis.base import AnalysisResult
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
+        mesh = preprocess_model(make_sample_model(), {"split_elements": True})
+        window._store.set_preprocessed(mesh)
+        node_tags = [node.node_tag for node in mesh.nodes.values()]
+        field = dict.fromkeys(node_tags, (0.004, 0.0, 0.0))
+
+        payload = AnalysisResult(
+            name="Pushover",
+            analysis_type="PushoverAnalysis",
+            data={
+                "+X": {
+                    "adrs": {"S_a": [0.0, 1.0], "S_d": [0.0, 0.1]},
+                    "pp": {"S_dp": 0.1, "S_ap": 1.0, "S_dy": 0.05, "S_ay": 0.9},
+                    "spectrum": {"T": [0.0, 1.0], "Sa": [1.0, 1.0]},
+                    "results": {
+                        "step": [0, 1, 2],
+                        "control_disp": [0.0, 0.1, 0.2],
+                        "base_shear": [0.0, 5.0, 10.0],
+                        "step_results": [
+                            {
+                                "step": 1,
+                                "frame_forces": {},
+                                "shell_forces": {},
+                                "node_displacements": dict.fromkeys(node_tags, (0.002, 0.0, 0.0)),
+                            },
+                            {
+                                "step": 2,
+                                "frame_forces": {},
+                                "shell_forces": {},
+                                "node_displacements": field,
+                            },
+                        ],
+                    },
+                },
+            },
+        )
+        window._show_pushover_result("Pushover", payload)
+
+        figure = window._views.get("figure:pushover-plusx")
+        assert figure is not None, "pushover registered no ADRS figure"
+        view = window._views.get("results:Pushover+X")
+        assert view is not None, "pushover registered no deformed-shape view"
+        assert view.parent == "figure:pushover-plusx"
+        assert window._views.results("results:Pushover+X").has_displacements("Pushover+X")
+
 
 def test_the_config_editor_emits_only_the_keys_a_user_changes(qapp):
     """The structured config editor writes back a minimal override dict."""
