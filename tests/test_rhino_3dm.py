@@ -753,8 +753,8 @@ class TestColourDocObjects:
         self._add_frame(doc, "SAP2000/Mesh/Frames/CL/UB300", "B1-0")
         self._add_frame(doc, "SAP2000/Mesh/Frames/CL/UB300", "B1-1")
         data = {
-            "pushover/+X/frame_sap_id": np.array(["B1-0", "B1-1"]),
-            "pushover/+X/frame_mz_i": np.array([[1.0, -2.0], [1.5, -2.5]]),
+            "pushover/+X/uniform/frame_sap_id": np.array(["B1-0", "B1-1"]),
+            "pushover/+X/uniform/frame_mz_i": np.array([[1.0, -2.0], [1.5, -2.5]]),
         }
         n = colour_frames_from_results(data, quantity="Mz", direction="+X", verbose=False)
         assert n == 2
@@ -768,8 +768,8 @@ class TestColourDocObjects:
         for sap_id in ("B-A", "B-B", "B-C"):
             self._add_frame(doc, "SAP2000/Mesh/Frames/CL/UB300", sap_id)
         data = {
-            "pushover/+X/frame_sap_id": np.array(["B-A", "B-B", "B-C"]),
-            "pushover/+X/frame_mz_i": np.array([[-100.0, 20.0, 100.0]]),
+            "pushover/+X/uniform/frame_sap_id": np.array(["B-A", "B-B", "B-C"]),
+            "pushover/+X/uniform/frame_mz_i": np.array([[-100.0, 20.0, 100.0]]),
         }
         n = colour_frames_from_results(
             data,
@@ -795,8 +795,10 @@ class TestColourDocObjects:
         for sap_id in ("B-100", "B-50", "B-10", "B10", "B50", "B100"):
             self._add_frame(doc, "SAP2000/Mesh/Frames/CL/UB300", sap_id)
         data = {
-            "pushover/+X/frame_sap_id": np.array(["B-100", "B-50", "B-10", "B10", "B50", "B100"]),
-            "pushover/+X/frame_mz_i": np.array([[-100.0, -50.0, -10.0, 10.0, 50.0, 100.0]]),
+            "pushover/+X/uniform/frame_sap_id": np.array(
+                ["B-100", "B-50", "B-10", "B10", "B50", "B100"]
+            ),
+            "pushover/+X/uniform/frame_mz_i": np.array([[-100.0, -50.0, -10.0, 10.0, 50.0, 100.0]]),
         }
         # Without clipping the range is [-100, 100]; +10 maps near-white.
         n = colour_frames_from_results(data, quantity="Mz", direction="+X", verbose=False)

@@ -194,12 +194,19 @@ def _load_pushover_flag_values(
         ordering (``NaN`` where a frame has no pushover result).  Empty
         tuples when the pushover arrays are unavailable.
     """
-    from ..io.results_schema import make_pushover_key
+    from ..io.results_schema import make_pushover_key, pushover_load_type
 
     q = quantity.lower()
-    pids = data.get(make_pushover_key(direction, "pushover/{direction}/frame_sap_id"))
-    arr_i = data.get(make_pushover_key(direction, f"pushover/{{direction}}/frame_{q}_i"))
-    arr_j = data.get(make_pushover_key(direction, f"pushover/{{direction}}/frame_{q}_j"))
+    load_type = pushover_load_type(data, direction)
+    pids = data.get(
+        make_pushover_key(direction, load_type, "pushover/{direction}/{load_type}/frame_sap_id")
+    )
+    arr_i = data.get(
+        make_pushover_key(direction, load_type, f"pushover/{{direction}}/{{load_type}}/frame_{q}_i")
+    )
+    arr_j = data.get(
+        make_pushover_key(direction, load_type, f"pushover/{{direction}}/{{load_type}}/frame_{q}_j")
+    )
     if pids is None or arr_i is None:
         return [], [], []
 

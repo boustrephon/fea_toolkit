@@ -79,15 +79,22 @@ def _load_pushover_shell_quantities(
         ``(values, (vmin, vmax))`` where ``values`` maps shell/area SAP
         ID → scalar value.  Empty when the quantity is unavailable.
     """
-    from ..io.results_schema import make_pushover_key
+    from ..io.results_schema import make_pushover_key, pushover_load_type
 
     directions = _get_pushover_directions(data)
     dirname = direction or (directions[0] if directions else None)
     if dirname is None:
         return {}, (0.0, 0.0)
+    load_type = pushover_load_type(data, dirname)
 
-    ids = data.get(make_pushover_key(dirname, "pushover/{direction}/shell_sap_id"))
-    arr = data.get(make_pushover_key(dirname, f"pushover/{{direction}}/shell_{quantity}"))
+    ids = data.get(
+        make_pushover_key(dirname, load_type, "pushover/{direction}/{load_type}/shell_sap_id")
+    )
+    arr = data.get(
+        make_pushover_key(
+            dirname, load_type, f"pushover/{{direction}}/{{load_type}}/shell_{quantity}"
+        )
+    )
     if ids is None or arr is None:
         return {}, (0.0, 0.0)
 
@@ -150,7 +157,7 @@ def _load_deformed_arrays(
         data is unavailable.
     """
     from ..io.npz_reader import _get_static_cases
-    from ..io.results_schema import make_pushover_key
+    from ..io.results_schema import make_pushover_key, pushover_load_type
 
     if source_type == "static":
         cases = _get_static_cases(data)
@@ -186,15 +193,24 @@ def _load_deformed_arrays(
         dirname = direction or (directions[0] if directions else None)
         if dirname is None:
             return None
-        pdx = data.get(make_pushover_key(dirname, "pushover/{direction}/node_disp_x"))
-        pdy = data.get(make_pushover_key(dirname, "pushover/{direction}/node_disp_y"))
-        pdz = data.get(make_pushover_key(dirname, "pushover/{direction}/node_disp_z"))
+        load_type = pushover_load_type(data, dirname)
+        pdx = data.get(
+            make_pushover_key(dirname, load_type, "pushover/{direction}/{load_type}/node_disp_x")
+        )
+        pdy = data.get(
+            make_pushover_key(dirname, load_type, "pushover/{direction}/{load_type}/node_disp_y")
+        )
+        pdz = data.get(
+            make_pushover_key(dirname, load_type, "pushover/{direction}/{load_type}/node_disp_z")
+        )
         if pdx is None or pdy is None or pdz is None:
             return None
         n_steps = pdx.shape[0] if pdx.ndim > 1 else 1
         step_idx = max(0, min(step if step is not None else n_steps - 1, n_steps - 1))
         dx, dy, dz = pdx[step_idx], pdy[step_idx], pdz[step_idx]
-        tags = data.get(make_pushover_key(dirname, "pushover/{direction}/node_tag"))
+        tags = data.get(
+            make_pushover_key(dirname, load_type, "pushover/{direction}/{load_type}/node_tag")
+        )
         label = f"pushover/{dirname}/step{step_idx}"
     else:
         raise ValueError(
@@ -327,16 +343,21 @@ def _load_pushover_frame_quantities(
         the quantity is unavailable.
     """
     from ..io.npz_reader import npz_build_parent_map
-    from ..io.results_schema import make_pushover_key
+    from ..io.results_schema import make_pushover_key, pushover_load_type
 
     directions = _get_pushover_directions(data)
     dirname = direction or (directions[0] if directions else None)
     if dirname is None:
         return {}, (0.0, 0.0)
+    load_type = pushover_load_type(data, dirname)
 
     q = quantity.lower()
-    ids = data.get(make_pushover_key(dirname, "pushover/{direction}/frame_sap_id"))
-    arr = data.get(make_pushover_key(dirname, f"pushover/{{direction}}/frame_{q}_i"))
+    ids = data.get(
+        make_pushover_key(dirname, load_type, "pushover/{direction}/{load_type}/frame_sap_id")
+    )
+    arr = data.get(
+        make_pushover_key(dirname, load_type, f"pushover/{{direction}}/{{load_type}}/frame_{q}_i")
+    )
     if ids is None or arr is None:
         return {}, (0.0, 0.0)
 

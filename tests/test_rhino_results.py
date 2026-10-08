@@ -42,14 +42,14 @@ def flat_results():
         "static/DEAD/mz_i": np.array([1.0, -2.0]),
         "static/DEAD/mz_i_local": np.array([1.5, -2.5]),
         "static/DEAD/mz_j": np.array([0.5, -1.0]),
-        "pushover/+X/shell_sap_id": np.array(["S1-0", "S1-1"]),
-        "pushover/+X/shell_Nx": np.array([[10.0, -20.0], [12.0, -25.0]]),
-        "pushover/+X/frame_sap_id": np.array(["B1-0", "B1-1"]),
-        "pushover/+X/frame_mz_i": np.array([[1.0, -2.0], [1.5, -2.5]]),
-        "pushover/+X/frame_mz_j": np.array([[0.5, -1.0], [0.7, -1.2]]),
-        "pushover/+X/node_disp_x": np.array([[0.0, 0.5, 1.0, 0.5]]),
-        "pushover/+X/node_disp_y": np.zeros((1, 4)),
-        "pushover/+X/node_disp_z": np.zeros((1, 4)),
+        "pushover/+X/uniform/shell_sap_id": np.array(["S1-0", "S1-1"]),
+        "pushover/+X/uniform/shell_Nx": np.array([[10.0, -20.0], [12.0, -25.0]]),
+        "pushover/+X/uniform/frame_sap_id": np.array(["B1-0", "B1-1"]),
+        "pushover/+X/uniform/frame_mz_i": np.array([[1.0, -2.0], [1.5, -2.5]]),
+        "pushover/+X/uniform/frame_mz_j": np.array([[0.5, -1.0], [0.7, -1.2]]),
+        "pushover/+X/uniform/node_disp_x": np.array([[0.0, 0.5, 1.0, 0.5]]),
+        "pushover/+X/uniform/node_disp_y": np.zeros((1, 4)),
+        "pushover/+X/uniform/node_disp_z": np.zeros((1, 4)),
     }
 
 
@@ -365,9 +365,9 @@ class TestPushoverFlagValues:
             "frame_node_i": np.array([0, 1]),
             "frame_node_j": np.array([1, 2]),
             # pushover order is the REVERSE of the geometry order
-            "pushover/+X/frame_sap_id": np.array(["B1-1", "B1-0"]),
-            "pushover/+X/frame_mz_i": np.array([[10.0, 100.0]]),
-            "pushover/+X/frame_mz_j": np.array([[1.0, 2.0]]),
+            "pushover/+X/uniform/frame_sap_id": np.array(["B1-1", "B1-0"]),
+            "pushover/+X/uniform/frame_mz_i": np.array([[10.0, 100.0]]),
+            "pushover/+X/uniform/frame_mz_j": np.array([[1.0, 2.0]]),
         }
         sap, vi, vj = _load_pushover_flag_values(data, "+X", "Mz")
         assert sap == ["B1-0", "B1-1"]
@@ -379,9 +379,9 @@ class TestPushoverFlagValues:
 
         data = {
             "frame_sap_id": np.array(["B1-0"]),
-            "pushover/+X/frame_sap_id": np.array(["B1-0"]),
-            "pushover/+X/frame_mz_i": np.array([[1.0], [5.0]]),
-            "pushover/+X/frame_mz_j": np.array([[0.5], [4.0]]),
+            "pushover/+X/uniform/frame_sap_id": np.array(["B1-0"]),
+            "pushover/+X/uniform/frame_mz_i": np.array([[1.0], [5.0]]),
+            "pushover/+X/uniform/frame_mz_j": np.array([[0.5], [4.0]]),
         }
         _s, vi0, vj0 = _load_pushover_flag_values(data, "+X", "Mz", step=0)
         _s, vi1, vj1 = _load_pushover_flag_values(data, "+X", "Mz", step=1)
@@ -402,9 +402,9 @@ class TestPushoverFlagValues:
 
         data = {
             "frame_sap_id": np.array(["B1-0", "B1-NO-RESULT"]),
-            "pushover/+X/frame_sap_id": np.array(["B1-0"]),
-            "pushover/+X/frame_mz_i": np.array([[1.0]]),
-            "pushover/+X/frame_mz_j": np.array([[0.5]]),
+            "pushover/+X/uniform/frame_sap_id": np.array(["B1-0"]),
+            "pushover/+X/uniform/frame_mz_i": np.array([[1.0]]),
+            "pushover/+X/uniform/frame_mz_j": np.array([[0.5]]),
         }
         _sap, vi, vj = _load_pushover_flag_values(data, "+X", "Mz")
         assert vi[0] == 1.0 and np.isnan(vi[1])

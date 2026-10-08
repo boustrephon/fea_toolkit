@@ -204,42 +204,42 @@ RS_ARRAYS: dict[str, tuple] = {
 # ── Pushover per-step results (direction-keyed) ───────────────────────────
 
 PUSHOVER_GLOBAL_ARRAYS: dict[str, tuple] = {
-    "pushover/{direction}/step": ("N_step", "int"),
-    "pushover/{direction}/control_disp": ("N_step", "float"),
-    "pushover/{direction}/base_shear": ("N_step", "float"),
+    "pushover/{direction}/{load_type}/step": ("N_step", "int"),
+    "pushover/{direction}/{load_type}/control_disp": ("N_step", "float"),
+    "pushover/{direction}/{load_type}/base_shear": ("N_step", "float"),
 }
 
 PUSHOVER_FRAME_ARRAYS: dict[str, tuple] = {
-    "pushover/{direction}/frame_sap_id": ("N_recorded_frame", "str"),
-    "pushover/{direction}/frame_fx_i": ("N_step N_recorded_frame", "float"),
-    "pushover/{direction}/frame_fy_i": ("N_step N_recorded_frame", "float"),
-    "pushover/{direction}/frame_fz_i": ("N_step N_recorded_frame", "float"),
-    "pushover/{direction}/frame_mx_i": ("N_step N_recorded_frame", "float"),
-    "pushover/{direction}/frame_my_i": ("N_step N_recorded_frame", "float"),
-    "pushover/{direction}/frame_mz_i": ("N_step N_recorded_frame", "float"),
-    "pushover/{direction}/frame_fx_j": ("N_step N_recorded_frame", "float"),
-    "pushover/{direction}/frame_fy_j": ("N_step N_recorded_frame", "float"),
-    "pushover/{direction}/frame_fz_j": ("N_step N_recorded_frame", "float"),
-    "pushover/{direction}/frame_mx_j": ("N_step N_recorded_frame", "float"),
-    "pushover/{direction}/frame_my_j": ("N_step N_recorded_frame", "float"),
-    "pushover/{direction}/frame_mz_j": ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/{load_type}/frame_sap_id": ("N_recorded_frame", "str"),
+    "pushover/{direction}/{load_type}/frame_fx_i": ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/{load_type}/frame_fy_i": ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/{load_type}/frame_fz_i": ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/{load_type}/frame_mx_i": ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/{load_type}/frame_my_i": ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/{load_type}/frame_mz_i": ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/{load_type}/frame_fx_j": ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/{load_type}/frame_fy_j": ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/{load_type}/frame_fz_j": ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/{load_type}/frame_mx_j": ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/{load_type}/frame_my_j": ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/{load_type}/frame_mz_j": ("N_step N_recorded_frame", "float"),
 }
 
 PUSHOVER_SHELL_ARRAYS: dict[str, tuple] = {
-    "pushover/{direction}/shell_sap_id": ("N_recorded_shell", "str"),
-    "pushover/{direction}/shell_Nx": ("N_step N_recorded_shell", "float"),
-    "pushover/{direction}/shell_Ny": ("N_step N_recorded_shell", "float"),
-    "pushover/{direction}/shell_Nxy": ("N_step N_recorded_shell", "float"),
-    "pushover/{direction}/shell_Mx": ("N_step N_recorded_shell", "float"),
-    "pushover/{direction}/shell_My": ("N_step N_recorded_shell", "float"),
-    "pushover/{direction}/shell_Mxy": ("N_step N_recorded_shell", "float"),
+    "pushover/{direction}/{load_type}/shell_sap_id": ("N_recorded_shell", "str"),
+    "pushover/{direction}/{load_type}/shell_Nx": ("N_step N_recorded_shell", "float"),
+    "pushover/{direction}/{load_type}/shell_Ny": ("N_step N_recorded_shell", "float"),
+    "pushover/{direction}/{load_type}/shell_Nxy": ("N_step N_recorded_shell", "float"),
+    "pushover/{direction}/{load_type}/shell_Mx": ("N_step N_recorded_shell", "float"),
+    "pushover/{direction}/{load_type}/shell_My": ("N_step N_recorded_shell", "float"),
+    "pushover/{direction}/{load_type}/shell_Mxy": ("N_step N_recorded_shell", "float"),
 }
 
 PUSHOVER_NODE_DISP_ARRAYS: dict[str, tuple] = {
-    "pushover/{direction}/node_tag": ("N_node", "int"),
-    "pushover/{direction}/node_disp_x": ("N_step N_node", "float"),
-    "pushover/{direction}/node_disp_y": ("N_step N_node", "float"),
-    "pushover/{direction}/node_disp_z": ("N_step N_node", "float"),
+    "pushover/{direction}/{load_type}/node_tag": ("N_node", "int"),
+    "pushover/{direction}/{load_type}/node_disp_x": ("N_step N_node", "float"),
+    "pushover/{direction}/{load_type}/node_disp_y": ("N_step N_node", "float"),
+    "pushover/{direction}/{load_type}/node_disp_z": ("N_step N_node", "float"),
 }
 
 META_ARRAYS: dict[str, tuple] = {
@@ -319,17 +319,42 @@ def case_meta_arrays(
     return out
 
 
-def make_pushover_key(direction: str, template: str) -> str:
-    """Build the NPZ key for a pushover result array, e.g. ``pushover/+X/step``.
+def make_pushover_key(direction: str, load_type: str, template: str) -> str:
+    """Build the NPZ key for a pushover result array.
 
     Args:
         direction: Push direction label, e.g. ``"+X"``, ``"+Y"``.
-        template: Key template containing ``{direction}``.
+        load_type: Lateral load distribution, e.g. ``"uniform"``,
+            ``"triangular"``, ``"mode1"``.
+        template: Key template containing ``{direction}`` and ``{load_type}``.
 
     Returns:
-        Formatted array name.
+        Formatted array name, e.g. ``pushover/+X/uniform/step``.
     """
-    return template.replace("{direction}", direction)
+    return template.format(direction=direction, load_type=load_type)
+
+
+def pushover_load_type(data: t.Mapping[str, t.Any], direction: str) -> str:
+    """Return the lateral load type recorded for *direction* in *data*.
+
+    Falls back to ``"uniform"`` when no ``pushover/{direction}/<load_type>/step``
+    array is present (e.g. a legacy single-segment key, or an archive written
+    before the load-type dimension existed).
+
+    Args:
+        data: Flat results dict (NPZ-style keys).
+        direction: Push direction label, e.g. ``"+X"``.
+
+    Returns:
+        The load-type segment, e.g. ``"uniform"``, ``"triangular"``, ``"mode1"``.
+    """
+    prefix = f"pushover/{direction}/"
+    for key in data:
+        if key.startswith(prefix) and key.endswith("/step"):
+            parts = key.split("/")
+            if len(parts) >= 4:
+                return parts[2]
+    return "uniform"
 
 
 def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
@@ -505,37 +530,45 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
                     continue
                 _check_shape(key, arr, shape_desc, dtype_str)
         if "pushover" in types:
-            # Detect directions from arrays present
-            directions: set[str] = set()
+            # Detect (direction, load_type) pairs from arrays present
+            pairs: set[tuple[str, str]] = set()
             for key in data:
                 if key.startswith("pushover/") and "/step" in key:
                     parts = key.split("/")
-                    if len(parts) >= 2:
-                        directions.add(parts[1])
-            for direction in sorted(directions):
+                    if len(parts) >= 4:
+                        pairs.add((parts[1], parts[2]))
+                    elif len(parts) >= 2:
+                        pairs.add((parts[1], "uniform"))  # legacy single-segment key
+            for direction, load_type in sorted(pairs):
                 # ── Resolve N_step / N_recorded_* per direction ──
                 # Clear the shared dims first so each direction is
                 # validated only against its own arrays — stale dims
                 # from a previous direction must not leak through.
                 for dk in ("N_step", "N_recorded_frame", "N_recorded_shell"):
                     dims.pop(dk, None)
-                step_arr = data.get(make_pushover_key(direction, "pushover/{direction}/step"))
+                step_arr = data.get(
+                    make_pushover_key(direction, load_type, "pushover/{direction}/{load_type}/step")
+                )
                 if step_arr is not None:
                     dims["N_step"] = len(step_arr)
                 frame_id_arr = data.get(
-                    make_pushover_key(direction, "pushover/{direction}/frame_sap_id")
+                    make_pushover_key(
+                        direction, load_type, "pushover/{direction}/{load_type}/frame_sap_id"
+                    )
                 )
                 if frame_id_arr is not None:
                     dims["N_recorded_frame"] = len(frame_id_arr)
                 shell_id_arr = data.get(
-                    make_pushover_key(direction, "pushover/{direction}/shell_sap_id")
+                    make_pushover_key(
+                        direction, load_type, "pushover/{direction}/{load_type}/shell_sap_id"
+                    )
                 )
                 if shell_id_arr is not None:
                     dims["N_recorded_shell"] = len(shell_id_arr)
 
                 # ── Required: global arrays ──
                 for template, (shape_desc, dtype_str) in PUSHOVER_GLOBAL_ARRAYS.items():
-                    key = make_pushover_key(direction, template)
+                    key = make_pushover_key(direction, load_type, template)
                     arr = data.get(key)
                     if arr is None:
                         messages.append(f"Missing pushover array: {key}")
@@ -546,7 +579,7 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
                 #    displacement data was recorded — see has_disp in
                 #    ``_collect_pushover``) ──
                 for template, (shape_desc, dtype_str) in PUSHOVER_NODE_DISP_ARRAYS.items():
-                    key = make_pushover_key(direction, template)
+                    key = make_pushover_key(direction, load_type, template)
                     arr = data.get(key)
                     if arr is None:
                         continue  # not recorded for this model
@@ -555,7 +588,7 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
                 # ── Optional: frame + shell arrays ──
                 for schema_set in (PUSHOVER_FRAME_ARRAYS, PUSHOVER_SHELL_ARRAYS):
                     for template, (shape_desc, dtype_str) in schema_set.items():
-                        key = make_pushover_key(direction, template)
+                        key = make_pushover_key(direction, load_type, template)
                         arr = data.get(key)
                         if arr is None:
                             continue  # not recorded for this model

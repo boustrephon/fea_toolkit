@@ -627,6 +627,7 @@ def _collect_pushover(
     mesh_model: "MeshModel",
     step_results: list[dict[str, Any]],
     direction: str = "+X",
+    load_type: str = "uniform",
 ) -> dict[str, np.ndarray]:
     """Collect pushover per-step results into NPZ arrays.
 
@@ -635,6 +636,8 @@ def _collect_pushover(
         step_results: List of per-step dicts from
             ``AnalysisBuilder.pushover_step_results``.
         direction: Push direction label (e.g. ``"+X"``).
+        load_type: Lateral load distribution (e.g. ``"uniform"``,
+            ``"triangular"``, ``"mode1"``).
 
     Returns:
         Dict of ``{array_name: np.ndarray}`` keyed per the
@@ -648,7 +651,9 @@ def _collect_pushover(
 
     # ── Global arrays ─────────────────────────────────────────
     steps_arr = np.array([sd.get("step", 0) for sd in step_results], dtype=int)
-    arrays[make_pushover_key(direction, "pushover/{direction}/step")] = steps_arr
+    arrays[make_pushover_key(direction, load_type, "pushover/{direction}/{load_type}/step")] = (
+        steps_arr
+    )
     # control_disp and base_shear are NOT stored in step_results
     # (they come from the pushover result dict).  The caller must
     # add them separately if needed.
@@ -663,9 +668,9 @@ def _collect_pushover(
     n_frame = len(frame_ids)
 
     if n_frame > 0:
-        arrays[make_pushover_key(direction, "pushover/{direction}/frame_sap_id")] = np.array(
-            frame_ids, dtype=str
-        )
+        arrays[
+            make_pushover_key(direction, load_type, "pushover/{direction}/{load_type}/frame_sap_id")
+        ] = np.array(frame_ids, dtype=str)
 
         # Pre-allocate 2D arrays: (n_step, n_frame)
         comp_keys = [
@@ -695,7 +700,11 @@ def _collect_pushover(
                     comp_map[f"frame_{key}"][si, j] = forces.get(key, np.nan)
 
         for key, arr in comp_map.items():
-            arrays[make_pushover_key(direction, f"pushover/{{direction}}/{key}")] = arr
+            arrays[
+                make_pushover_key(
+                    direction, load_type, f"pushover/{{direction}}/{{load_type}}/{key}"
+                )
+            ] = arr
 
     # ── Shell arrays ──────────────────────────────────────────
     shell_ids: list[str] = []
@@ -706,9 +715,9 @@ def _collect_pushover(
     n_shell = len(shell_ids)
 
     if n_shell > 0:
-        arrays[make_pushover_key(direction, "pushover/{direction}/shell_sap_id")] = np.array(
-            shell_ids, dtype=str
-        )
+        arrays[
+            make_pushover_key(direction, load_type, "pushover/{direction}/{load_type}/shell_sap_id")
+        ] = np.array(shell_ids, dtype=str)
 
         shell_comp_keys = ["Nx", "Ny", "Nxy", "Mx", "My", "Mxy"]
         shell_comp_map = {
@@ -724,7 +733,11 @@ def _collect_pushover(
                     shell_comp_map[f"shell_{key}"][si, j] = forces.get(key, np.nan)
 
         for key, arr in shell_comp_map.items():
-            arrays[make_pushover_key(direction, f"pushover/{{direction}}/{key}")] = arr
+            arrays[
+                make_pushover_key(
+                    direction, load_type, f"pushover/{{direction}}/{{load_type}}/{key}"
+                )
+            ] = arr
 
     # ── Node displacement arrays ──────────────────────────────
     # Use all geometry nodes so ``node_tag`` matches the ``N_node``
@@ -741,9 +754,9 @@ def _collect_pushover(
             "node_displacements" in sd and sd["node_displacements"] for sd in step_results
         )
         if has_disp:
-            arrays[make_pushover_key(direction, "pushover/{direction}/node_tag")] = np.array(
-                node_tags, dtype=int
-            )
+            arrays[
+                make_pushover_key(direction, load_type, "pushover/{direction}/{load_type}/node_tag")
+            ] = np.array(node_tags, dtype=int)
 
             dx_arr = np.full((n_step, n_node), np.nan, dtype=float)
             dy_arr = np.full((n_step, n_node), np.nan, dtype=float)
@@ -758,9 +771,21 @@ def _collect_pushover(
                         dy_arr[si, j] = disp[1]
                         dz_arr[si, j] = disp[2]
 
-            arrays[make_pushover_key(direction, "pushover/{direction}/node_disp_x")] = dx_arr
-            arrays[make_pushover_key(direction, "pushover/{direction}/node_disp_y")] = dy_arr
-            arrays[make_pushover_key(direction, "pushover/{direction}/node_disp_z")] = dz_arr
+            arrays[
+                make_pushover_key(
+                    direction, load_type, "pushover/{direction}/{load_type}/node_disp_x"
+                )
+            ] = dx_arr
+            arrays[
+                make_pushover_key(
+                    direction, load_type, "pushover/{direction}/{load_type}/node_disp_y"
+                )
+            ] = dy_arr
+            arrays[
+                make_pushover_key(
+                    direction, load_type, "pushover/{direction}/{load_type}/node_disp_z"
+                )
+            ] = dz_arr
 
     return arrays
 
@@ -769,9 +794,10 @@ def collect_pushover_arrays(
     mesh_model: "MeshModel",
     step_results: list[dict[str, Any]],
     direction: str = "+X",
+    load_type: Optional[str] = None,
     pushover_results: Optional[dict[str, Any]] = None,
 ) -> dict[str, np.ndarray]:
-    """Collect per-step pushover arrays for one direction.
+    """Collect per-step pushover arrays for one direction + load type.
 
     Wraps :func:`_collect_pushover` and adds the aligned global arrays
     (``step`` / ``control_disp`` / ``base_shear``) from *pushover_results*
@@ -785,6 +811,10 @@ def collect_pushover_arrays(
         step_results: List of per-step dicts from
             ``AnalysisBuilder.pushover_step_results`` (converged steps only).
         direction: Push direction label (e.g. ``"+X"``).
+        load_type: Lateral load distribution (``"uniform"`` / ``"triangular"``
+            / ``"mode1"``).  When ``None``, it is read from
+            *pushover_results* ``["lateral_load_type"]``, falling back to
+            ``"uniform"``.
         pushover_results: Optional full result dict from
             ``AnalysisBuilder.run_pushover_analysis()`` — contributes the
             global ``step`` / ``control_disp`` / ``base_shear`` arrays.
@@ -793,7 +823,15 @@ def collect_pushover_arrays(
         Dict of ``{array_name: np.ndarray}`` keyed per the
         ``PUSHOVER_*_ARRAYS`` schema.
     """
-    po_arrays = _collect_pushover(mesh_model, step_results, direction=direction)
+    if load_type is None:
+        load_type = (
+            pushover_results.get("lateral_load_type", "uniform")
+            if isinstance(pushover_results, dict)
+            else "uniform"
+        )
+    po_arrays = _collect_pushover(
+        mesh_model, step_results, direction=direction, load_type=load_type
+    )
 
     # Add global arrays from pushover_results if provided
     if pushover_results is not None:
@@ -833,15 +871,19 @@ def collect_pushover_arrays(
             # Write aligned arrays directly into po_arrays so the
             # aligned values are actually used rather than being
             # shadowed by the step array from ``_collect_pushover``.
-            po_arrays[make_pushover_key(direction, "pushover/{direction}/step")] = np.array(
-                aligned_steps, dtype=int
-            )
-            po_arrays[make_pushover_key(direction, "pushover/{direction}/control_disp")] = np.array(
-                aligned_disp, dtype=float
-            )
-            po_arrays[make_pushover_key(direction, "pushover/{direction}/base_shear")] = np.array(
-                aligned_shear, dtype=float
-            )
+            po_arrays[
+                make_pushover_key(direction, load_type, "pushover/{direction}/{load_type}/step")
+            ] = np.array(aligned_steps, dtype=int)
+            po_arrays[
+                make_pushover_key(
+                    direction, load_type, "pushover/{direction}/{load_type}/control_disp"
+                )
+            ] = np.array(aligned_disp, dtype=float)
+            po_arrays[
+                make_pushover_key(
+                    direction, load_type, "pushover/{direction}/{load_type}/base_shear"
+                )
+            ] = np.array(aligned_shear, dtype=float)
 
     return po_arrays
 
@@ -851,6 +893,7 @@ def write_pushover_results_npz(
     mesh_model: "MeshModel",
     step_results: list[dict[str, Any]],
     direction: str = "+X",
+    load_type: Optional[str] = None,
     pushover_results: Optional[dict[str, Any]] = None,
     force_unit: Optional[str] = None,
     length_unit: Optional[str] = None,
@@ -867,6 +910,8 @@ def write_pushover_results_npz(
         step_results: List of per-step dicts from
             ``AnalysisBuilder.pushover_step_results``.
         direction: Push direction label (e.g. ``"+X"``).
+        load_type: Lateral load distribution (``"uniform"`` / ``"triangular"``
+            / ``"mode1"``).  ``None`` reads it from *pushover_results*.
         pushover_results: Optional full result dict from
             ``AnalysisBuilder.run_pushover_analysis()``.  When provided,
             global arrays (step, control_disp, base_shear) are included.
@@ -919,7 +964,11 @@ def write_pushover_results_npz(
     analysis_types: list[str] = ["pushover"]
     arrays.update(
         collect_pushover_arrays(
-            mesh_model, step_results, direction=direction, pushover_results=pushover_results
+            mesh_model,
+            step_results,
+            direction=direction,
+            load_type=load_type,
+            pushover_results=pushover_results,
         )
     )
 

@@ -337,8 +337,8 @@ def test_pushover_step_results_round_trip_through_the_bundle(tmp_path):
     assert "Pushover+X" in bundle["results"].cases()
     assert bundle["results"].has_displacements("Pushover+X")
     raw = bundle["results"].raw()
-    assert "pushover/+X/node_disp_x" in raw
-    assert raw["pushover/+X/node_disp_x"].shape[0] == 2
+    assert "pushover/+X/uniform/node_disp_x" in raw
+    assert raw["pushover/+X/uniform/node_disp_x"].shape[0] == 2
 
 
 def test_collect_project_results_empty_run():

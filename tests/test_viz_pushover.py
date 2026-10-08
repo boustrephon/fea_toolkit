@@ -189,44 +189,44 @@ class TestShellDamageMap:
             "shell_node_3": np.array([5, 3]),
             "shell_node_4": np.array([4, 4]),
             # Pushover data: 3 steps
-            "pushover/+X/step": np.array([0, 1, 2]),
-            "pushover/+X/shell_sap_id": np.array(["W1", "W2"]),
-            "pushover/+X/shell_Nx": np.array(
+            "pushover/+X/uniform/step": np.array([0, 1, 2]),
+            "pushover/+X/uniform/shell_sap_id": np.array(["W1", "W2"]),
+            "pushover/+X/uniform/shell_Nx": np.array(
                 [
                     [100.0, 50.0],  # step 0
                     [200.0, 80.0],  # step 1
                     [300.0, 120.0],  # step 2
                 ]
             ),
-            "pushover/+X/shell_Ny": np.array(
+            "pushover/+X/uniform/shell_Ny": np.array(
                 [
                     [50.0, 25.0],
                     [100.0, 40.0],
                     [150.0, 60.0],
                 ]
             ),
-            "pushover/+X/shell_Nxy": np.array(
+            "pushover/+X/uniform/shell_Nxy": np.array(
                 [
                     [10.0, 5.0],
                     [20.0, 8.0],
                     [30.0, 12.0],
                 ]
             ),
-            "pushover/+X/shell_Mx": np.array(
+            "pushover/+X/uniform/shell_Mx": np.array(
                 [
                     [5.0, 3.0],
                     [10.0, 5.0],
                     [15.0, 8.0],
                 ]
             ),
-            "pushover/+X/shell_My": np.array(
+            "pushover/+X/uniform/shell_My": np.array(
                 [
                     [3.0, 2.0],
                     [6.0, 3.0],
                     [9.0, 5.0],
                 ]
             ),
-            "pushover/+X/shell_Mxy": np.array(
+            "pushover/+X/uniform/shell_Mxy": np.array(
                 [
                     [1.0, 0.5],
                     [2.0, 1.0],
@@ -234,30 +234,30 @@ class TestShellDamageMap:
                 ]
             ),
             # Node displacements
-            "pushover/+X/node_tag": np.array([1, 2, 3, 4, 5]),
-            "pushover/+X/node_disp_x": np.array(
+            "pushover/+X/uniform/node_tag": np.array([1, 2, 3, 4, 5]),
+            "pushover/+X/uniform/node_disp_x": np.array(
                 [
                     [0.0, 0.01, 0.02, 0.0, 0.01],
                     [0.0, 0.02, 0.04, 0.0, 0.02],
                     [0.0, 0.03, 0.06, 0.0, 0.03],
                 ]
             ),
-            "pushover/+X/node_disp_y": np.zeros((3, 5)),
-            "pushover/+X/node_disp_z": np.zeros((3, 5)),
+            "pushover/+X/uniform/node_disp_y": np.zeros((3, 5)),
+            "pushover/+X/uniform/node_disp_z": np.zeros((3, 5)),
             # Frame data for pushover (minimal — only needed for _resolve_pushover_data)
-            "pushover/+X/frame_sap_id": np.array(["F1", "F2"]),
-            "pushover/+X/frame_fx_i": np.zeros((3, 2)),
-            "pushover/+X/frame_fy_i": np.zeros((3, 2)),
-            "pushover/+X/frame_fz_i": np.zeros((3, 2)),
-            "pushover/+X/frame_mx_i": np.zeros((3, 2)),
-            "pushover/+X/frame_my_i": np.zeros((3, 2)),
-            "pushover/+X/frame_mz_i": np.zeros((3, 2)),
-            "pushover/+X/frame_fx_j": np.zeros((3, 2)),
-            "pushover/+X/frame_fy_j": np.zeros((3, 2)),
-            "pushover/+X/frame_fz_j": np.zeros((3, 2)),
-            "pushover/+X/frame_mx_j": np.zeros((3, 2)),
-            "pushover/+X/frame_my_j": np.zeros((3, 2)),
-            "pushover/+X/frame_mz_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_sap_id": np.array(["F1", "F2"]),
+            "pushover/+X/uniform/frame_fx_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_fy_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_fz_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_mx_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_my_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_mz_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_fx_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_fy_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_fz_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_mx_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_my_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_mz_j": np.zeros((3, 2)),
         }
 
     def test_shell_damage_computed_correctly(self, npz_with_shells):
@@ -287,37 +287,37 @@ class TestShellDamageMap:
 
         # Provide 1 step with 0 shells, plus minimal geometry arrays
         empty_npz = {
-            "pushover/+X/step": np.array([0]),
-            "pushover/+X/shell_sap_id": np.array([]),
-            "pushover/+X/shell_Nx": np.empty((1, 0)),
-            "pushover/+X/shell_Ny": np.empty((1, 0)),
-            "pushover/+X/shell_Nxy": np.empty((1, 0)),
-            "pushover/+X/shell_Mx": np.empty((1, 0)),
-            "pushover/+X/shell_My": np.empty((1, 0)),
-            "pushover/+X/shell_Mxy": np.empty((1, 0)),
+            "pushover/+X/uniform/step": np.array([0]),
+            "pushover/+X/uniform/shell_sap_id": np.array([]),
+            "pushover/+X/uniform/shell_Nx": np.empty((1, 0)),
+            "pushover/+X/uniform/shell_Ny": np.empty((1, 0)),
+            "pushover/+X/uniform/shell_Nxy": np.empty((1, 0)),
+            "pushover/+X/uniform/shell_Mx": np.empty((1, 0)),
+            "pushover/+X/uniform/shell_My": np.empty((1, 0)),
+            "pushover/+X/uniform/shell_Mxy": np.empty((1, 0)),
             # Node displacements (empty — no displacements recorded)
-            "pushover/+X/node_tag": np.array([]),
-            "pushover/+X/node_disp_x": np.empty((1, 0)),
-            "pushover/+X/node_disp_y": np.empty((1, 0)),
-            "pushover/+X/node_disp_z": np.empty((1, 0)),
+            "pushover/+X/uniform/node_tag": np.array([]),
+            "pushover/+X/uniform/node_disp_x": np.empty((1, 0)),
+            "pushover/+X/uniform/node_disp_y": np.empty((1, 0)),
+            "pushover/+X/uniform/node_disp_z": np.empty((1, 0)),
             # Frame arrays needed to avoid early exit in _resolve_pushover_data
-            "pushover/+X/frame_sap_id": np.array([]),
+            "pushover/+X/uniform/frame_sap_id": np.array([]),
             # Also need geometry frame arrays for _resolve_pushover_data to not crash
             "frame_node_i": np.array([]),
             "frame_node_j": np.array([]),
             "frame_sap_id": np.array([]),
-            "pushover/+X/frame_fx_i": np.empty((1, 0)),
-            "pushover/+X/frame_fy_i": np.empty((1, 0)),
-            "pushover/+X/frame_fz_i": np.empty((1, 0)),
-            "pushover/+X/frame_mx_i": np.empty((1, 0)),
-            "pushover/+X/frame_my_i": np.empty((1, 0)),
-            "pushover/+X/frame_mz_i": np.empty((1, 0)),
-            "pushover/+X/frame_fx_j": np.empty((1, 0)),
-            "pushover/+X/frame_fy_j": np.empty((1, 0)),
-            "pushover/+X/frame_fz_j": np.empty((1, 0)),
-            "pushover/+X/frame_mx_j": np.empty((1, 0)),
-            "pushover/+X/frame_my_j": np.empty((1, 0)),
-            "pushover/+X/frame_mz_j": np.empty((1, 0)),
+            "pushover/+X/uniform/frame_fx_i": np.empty((1, 0)),
+            "pushover/+X/uniform/frame_fy_i": np.empty((1, 0)),
+            "pushover/+X/uniform/frame_fz_i": np.empty((1, 0)),
+            "pushover/+X/uniform/frame_mx_i": np.empty((1, 0)),
+            "pushover/+X/uniform/frame_my_i": np.empty((1, 0)),
+            "pushover/+X/uniform/frame_mz_i": np.empty((1, 0)),
+            "pushover/+X/uniform/frame_fx_j": np.empty((1, 0)),
+            "pushover/+X/uniform/frame_fy_j": np.empty((1, 0)),
+            "pushover/+X/uniform/frame_fz_j": np.empty((1, 0)),
+            "pushover/+X/uniform/frame_mx_j": np.empty((1, 0)),
+            "pushover/+X/uniform/frame_my_j": np.empty((1, 0)),
+            "pushover/+X/uniform/frame_mz_j": np.empty((1, 0)),
             "node_tag": np.array([]),
             "node_x": np.array([]),
             "node_y": np.array([]),
@@ -361,26 +361,26 @@ class TestPushoverEnvelope:
             "frame_parent_sap_id": np.array(["", ""]),
             "shell_eid": np.array([]),
             # Pushover data: 3 steps, 2 frames
-            "pushover/+X/step": np.array([0, 1, 2]),
-            "pushover/+X/frame_sap_id": np.array(["F1", "F2"]),
-            "pushover/+X/frame_fx_i": np.zeros((3, 2)),
-            "pushover/+X/frame_fy_i": np.zeros((3, 2)),
-            "pushover/+X/frame_fz_i": np.zeros((3, 2)),
-            "pushover/+X/frame_mx_i": np.zeros((3, 2)),
-            "pushover/+X/frame_my_i": np.zeros((3, 2)),
-            "pushover/+X/frame_mz_i": np.array(
+            "pushover/+X/uniform/step": np.array([0, 1, 2]),
+            "pushover/+X/uniform/frame_sap_id": np.array(["F1", "F2"]),
+            "pushover/+X/uniform/frame_fx_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_fy_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_fz_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_mx_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_my_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_mz_i": np.array(
                 [
                     [10.0, 5.0],  # step 0: F1=10, F2=5
                     [25.0, 8.0],  # step 1: F1=25 (peak), F2=8
                     [15.0, 12.0],  # step 2: F1=15, F2=12 (peak)
                 ]
             ),
-            "pushover/+X/frame_fx_j": np.zeros((3, 2)),
-            "pushover/+X/frame_fy_j": np.zeros((3, 2)),
-            "pushover/+X/frame_fz_j": np.zeros((3, 2)),
-            "pushover/+X/frame_mx_j": np.zeros((3, 2)),
-            "pushover/+X/frame_my_j": np.zeros((3, 2)),
-            "pushover/+X/frame_mz_j": np.array(
+            "pushover/+X/uniform/frame_fx_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_fy_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_fz_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_mx_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_my_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_mz_j": np.array(
                 [
                     [-8.0, -4.0],  # step 0
                     [-20.0, -6.0],  # step 1: F1 peak j
@@ -388,10 +388,10 @@ class TestPushoverEnvelope:
                 ]
             ),
             # Node displacements (empty)
-            "pushover/+X/node_tag": np.array([]),
-            "pushover/+X/node_disp_x": np.empty((3, 0)),
-            "pushover/+X/node_disp_y": np.empty((3, 0)),
-            "pushover/+X/node_disp_z": np.empty((3, 0)),
+            "pushover/+X/uniform/node_tag": np.array([]),
+            "pushover/+X/uniform/node_disp_x": np.empty((3, 0)),
+            "pushover/+X/uniform/node_disp_y": np.empty((3, 0)),
+            "pushover/+X/uniform/node_disp_z": np.empty((3, 0)),
         }
 
     def test_envelope_notebook(self, npz_with_frames):
@@ -453,85 +453,85 @@ class TestPushoverEnvelope:
             "shell_node_2": np.array([2, 5]),
             "shell_node_3": np.array([5, 3]),
             "shell_node_4": np.array([4, 4]),
-            "pushover/+X/step": np.array([0, 1, 2]),
-            "pushover/+X/frame_sap_id": np.array(["F1", "F2"]),
-            "pushover/+X/frame_fx_i": np.zeros((3, 2)),
-            "pushover/+X/frame_fy_i": np.zeros((3, 2)),
-            "pushover/+X/frame_fz_i": np.zeros((3, 2)),
-            "pushover/+X/frame_mx_i": np.zeros((3, 2)),
-            "pushover/+X/frame_my_i": np.zeros((3, 2)),
-            "pushover/+X/frame_mz_i": np.array(
+            "pushover/+X/uniform/step": np.array([0, 1, 2]),
+            "pushover/+X/uniform/frame_sap_id": np.array(["F1", "F2"]),
+            "pushover/+X/uniform/frame_fx_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_fy_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_fz_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_mx_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_my_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_mz_i": np.array(
                 [
                     [10.0, 5.0],
                     [25.0, 8.0],
                     [15.0, 12.0],
                 ]
             ),
-            "pushover/+X/frame_fx_j": np.zeros((3, 2)),
-            "pushover/+X/frame_fy_j": np.zeros((3, 2)),
-            "pushover/+X/frame_fz_j": np.zeros((3, 2)),
-            "pushover/+X/frame_mx_j": np.zeros((3, 2)),
-            "pushover/+X/frame_my_j": np.zeros((3, 2)),
-            "pushover/+X/frame_mz_j": np.array(
+            "pushover/+X/uniform/frame_fx_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_fy_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_fz_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_mx_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_my_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_mz_j": np.array(
                 [
                     [-8.0, -4.0],
                     [-20.0, -6.0],
                     [-12.0, -10.0],
                 ]
             ),
-            "pushover/+X/shell_sap_id": np.array(["W1", "W2"]),
-            "pushover/+X/shell_Nx": np.array(
+            "pushover/+X/uniform/shell_sap_id": np.array(["W1", "W2"]),
+            "pushover/+X/uniform/shell_Nx": np.array(
                 [
                     [100.0, 50.0],
                     [200.0, 80.0],
                     [300.0, 120.0],
                 ]
             ),
-            "pushover/+X/shell_Ny": np.array(
+            "pushover/+X/uniform/shell_Ny": np.array(
                 [
                     [50.0, 25.0],
                     [100.0, 40.0],
                     [150.0, 60.0],
                 ]
             ),
-            "pushover/+X/shell_Nxy": np.array(
+            "pushover/+X/uniform/shell_Nxy": np.array(
                 [
                     [10.0, 5.0],
                     [20.0, 8.0],
                     [30.0, 12.0],
                 ]
             ),
-            "pushover/+X/shell_Mx": np.array(
+            "pushover/+X/uniform/shell_Mx": np.array(
                 [
                     [5.0, 3.0],
                     [10.0, 5.0],
                     [15.0, 8.0],
                 ]
             ),
-            "pushover/+X/shell_My": np.array(
+            "pushover/+X/uniform/shell_My": np.array(
                 [
                     [3.0, 2.0],
                     [6.0, 3.0],
                     [9.0, 5.0],
                 ]
             ),
-            "pushover/+X/shell_Mxy": np.array(
+            "pushover/+X/uniform/shell_Mxy": np.array(
                 [
                     [1.0, 0.5],
                     [2.0, 1.0],
                     [3.0, 1.5],
                 ]
             ),
-            "pushover/+X/node_tag": np.array([1, 2, 3, 4, 5]),
-            "pushover/+X/node_disp_x": np.array(
+            "pushover/+X/uniform/node_tag": np.array([1, 2, 3, 4, 5]),
+            "pushover/+X/uniform/node_disp_x": np.array(
                 [
                     [0.0, 0.01, 0.02, 0.0, 0.01],
                     [0.0, 0.02, 0.04, 0.0, 0.02],
                     [0.0, 0.03, 0.06, 0.0, 0.03],
                 ]
             ),
-            "pushover/+X/node_disp_y": np.zeros((3, 5)),
-            "pushover/+X/node_disp_z": np.zeros((3, 5)),
+            "pushover/+X/uniform/node_disp_y": np.zeros((3, 5)),
+            "pushover/+X/uniform/node_disp_z": np.zeros((3, 5)),
         }
 
     def test_envelope_with_shells(self, npz_with_shells_and_frames):
@@ -550,7 +550,7 @@ class TestPushoverEnvelope:
         """Envelope with no data returns None."""
         from fea_toolkit.plotting.viz import plot_pushover_envelope
 
-        empty = {"pushover/+X/step": np.array([])}
+        empty = {"pushover/+X/uniform/step": np.array([])}
         pl = plot_pushover_envelope(empty, notebook=True)
         assert pl is None
 
@@ -579,36 +579,36 @@ class TestPlasticHingeFormation:
             "frame_node_j": np.array([2, 3]),
             "frame_sec_name": np.array(["COL", "BEAM"]),
             "frame_parent_sap_id": np.array(["", ""]),
-            "pushover/+X/step": np.array([0, 1, 2]),
-            "pushover/+X/frame_sap_id": np.array(["F1", "F2"]),
-            "pushover/+X/frame_fx_i": np.zeros((3, 2)),
-            "pushover/+X/frame_fy_i": np.zeros((3, 2)),
-            "pushover/+X/frame_fz_i": np.zeros((3, 2)),
-            "pushover/+X/frame_mx_i": np.zeros((3, 2)),
-            "pushover/+X/frame_my_i": np.zeros((3, 2)),
-            "pushover/+X/frame_mz_i": np.array(
+            "pushover/+X/uniform/step": np.array([0, 1, 2]),
+            "pushover/+X/uniform/frame_sap_id": np.array(["F1", "F2"]),
+            "pushover/+X/uniform/frame_fx_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_fy_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_fz_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_mx_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_my_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_mz_i": np.array(
                 [
                     [10.0, 5.0],
                     [25.0, 8.0],
                     [15.0, 12.0],
                 ]
             ),
-            "pushover/+X/frame_fx_j": np.zeros((3, 2)),
-            "pushover/+X/frame_fy_j": np.zeros((3, 2)),
-            "pushover/+X/frame_fz_j": np.zeros((3, 2)),
-            "pushover/+X/frame_mx_j": np.zeros((3, 2)),
-            "pushover/+X/frame_my_j": np.zeros((3, 2)),
-            "pushover/+X/frame_mz_j": np.array(
+            "pushover/+X/uniform/frame_fx_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_fy_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_fz_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_mx_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_my_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_mz_j": np.array(
                 [
                     [-8.0, -4.0],
                     [-20.0, -6.0],
                     [-12.0, -10.0],
                 ]
             ),
-            "pushover/+X/node_tag": np.array([1, 2, 3]),
-            "pushover/+X/node_disp_x": np.zeros((3, 3)),
-            "pushover/+X/node_disp_y": np.zeros((3, 3)),
-            "pushover/+X/node_disp_z": np.zeros((3, 3)),
+            "pushover/+X/uniform/node_tag": np.array([1, 2, 3]),
+            "pushover/+X/uniform/node_disp_x": np.zeros((3, 3)),
+            "pushover/+X/uniform/node_disp_y": np.zeros((3, 3)),
+            "pushover/+X/uniform/node_disp_z": np.zeros((3, 3)),
         }
 
     def test_hinge_formation_notebook(self, npz_hinge_data):
@@ -695,85 +695,85 @@ class TestAnimatePushoverDeformation:
             "shell_node_2": np.array([2, 5]),
             "shell_node_3": np.array([5, 3]),
             "shell_node_4": np.array([4, 4]),
-            "pushover/+X/step": np.array([0, 1, 2]),
-            "pushover/+X/frame_sap_id": np.array(["F1", "F2"]),
-            "pushover/+X/frame_fx_i": np.zeros((3, 2)),
-            "pushover/+X/frame_fy_i": np.zeros((3, 2)),
-            "pushover/+X/frame_fz_i": np.zeros((3, 2)),
-            "pushover/+X/frame_mx_i": np.zeros((3, 2)),
-            "pushover/+X/frame_my_i": np.zeros((3, 2)),
-            "pushover/+X/frame_mz_i": np.array(
+            "pushover/+X/uniform/step": np.array([0, 1, 2]),
+            "pushover/+X/uniform/frame_sap_id": np.array(["F1", "F2"]),
+            "pushover/+X/uniform/frame_fx_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_fy_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_fz_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_mx_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_my_i": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_mz_i": np.array(
                 [
                     [10.0, 5.0],
                     [25.0, 8.0],
                     [15.0, 12.0],
                 ]
             ),
-            "pushover/+X/frame_fx_j": np.zeros((3, 2)),
-            "pushover/+X/frame_fy_j": np.zeros((3, 2)),
-            "pushover/+X/frame_fz_j": np.zeros((3, 2)),
-            "pushover/+X/frame_mx_j": np.zeros((3, 2)),
-            "pushover/+X/frame_my_j": np.zeros((3, 2)),
-            "pushover/+X/frame_mz_j": np.array(
+            "pushover/+X/uniform/frame_fx_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_fy_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_fz_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_mx_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_my_j": np.zeros((3, 2)),
+            "pushover/+X/uniform/frame_mz_j": np.array(
                 [
                     [-8.0, -4.0],
                     [-20.0, -6.0],
                     [-12.0, -10.0],
                 ]
             ),
-            "pushover/+X/shell_sap_id": np.array(["W1", "W2"]),
-            "pushover/+X/shell_Nx": np.array(
+            "pushover/+X/uniform/shell_sap_id": np.array(["W1", "W2"]),
+            "pushover/+X/uniform/shell_Nx": np.array(
                 [
                     [100.0, 50.0],
                     [200.0, 80.0],
                     [300.0, 120.0],
                 ]
             ),
-            "pushover/+X/shell_Ny": np.array(
+            "pushover/+X/uniform/shell_Ny": np.array(
                 [
                     [50.0, 25.0],
                     [100.0, 40.0],
                     [150.0, 60.0],
                 ]
             ),
-            "pushover/+X/shell_Nxy": np.array(
+            "pushover/+X/uniform/shell_Nxy": np.array(
                 [
                     [10.0, 5.0],
                     [20.0, 8.0],
                     [30.0, 12.0],
                 ]
             ),
-            "pushover/+X/shell_Mx": np.array(
+            "pushover/+X/uniform/shell_Mx": np.array(
                 [
                     [5.0, 3.0],
                     [10.0, 5.0],
                     [15.0, 8.0],
                 ]
             ),
-            "pushover/+X/shell_My": np.array(
+            "pushover/+X/uniform/shell_My": np.array(
                 [
                     [3.0, 2.0],
                     [6.0, 3.0],
                     [9.0, 5.0],
                 ]
             ),
-            "pushover/+X/shell_Mxy": np.array(
+            "pushover/+X/uniform/shell_Mxy": np.array(
                 [
                     [1.0, 0.5],
                     [2.0, 1.0],
                     [3.0, 1.5],
                 ]
             ),
-            "pushover/+X/node_tag": np.array([1, 2, 3, 4, 5]),
-            "pushover/+X/node_disp_x": np.array(
+            "pushover/+X/uniform/node_tag": np.array([1, 2, 3, 4, 5]),
+            "pushover/+X/uniform/node_disp_x": np.array(
                 [
                     [0.0, 0.01, 0.02, 0.0, 0.01],
                     [0.0, 0.02, 0.04, 0.0, 0.02],
                     [0.0, 0.03, 0.06, 0.0, 0.03],
                 ]
             ),
-            "pushover/+X/node_disp_y": np.zeros((3, 5)),
-            "pushover/+X/node_disp_z": np.zeros((3, 5)),
+            "pushover/+X/uniform/node_disp_y": np.zeros((3, 5)),
+            "pushover/+X/uniform/node_disp_z": np.zeros((3, 5)),
         }
 
     def test_anim_notebook(self, npz_anim_data):

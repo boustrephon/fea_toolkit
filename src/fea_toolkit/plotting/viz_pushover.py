@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 import numpy as np
 
-from ..io.results_schema import make_pushover_key
+from ..io.results_schema import make_pushover_key, pushover_load_type
 from .viz_common import (
     _DEFAULT_HINGE_CMAP,
     _NPZ_TYPES,
@@ -50,8 +50,11 @@ def _resolve_pushover_data(
     """
     if isinstance(data, _NPZ_TYPES):
         # NPZ data path
+        load_type = pushover_load_type(data, direction)
         step_results = []
-        step_arr = data.get(make_pushover_key(direction, "pushover/{direction}/step"), [])
+        step_arr = data.get(
+            make_pushover_key(direction, load_type, "pushover/{direction}/{load_type}/step"), []
+        )
         n_step = len(step_arr)
         if n_step == 0:
             return [], {}, [], {}
@@ -66,14 +69,25 @@ def _resolve_pushover_data(
             node_coords[int(n_tags[i])] = (float(n_x[i]), float(n_y[i]), float(n_z[i]))
 
         # Read node displacements if available
-        node_disp_x = data.get(make_pushover_key(direction, "pushover/{direction}/node_disp_x"))
-        node_disp_y = data.get(make_pushover_key(direction, "pushover/{direction}/node_disp_y"))
-        node_disp_z = data.get(make_pushover_key(direction, "pushover/{direction}/node_disp_z"))
-        node_tags_arr = data.get(make_pushover_key(direction, "pushover/{direction}/node_tag"))
+        node_disp_x = data.get(
+            make_pushover_key(direction, load_type, "pushover/{direction}/{load_type}/node_disp_x")
+        )
+        node_disp_y = data.get(
+            make_pushover_key(direction, load_type, "pushover/{direction}/{load_type}/node_disp_y")
+        )
+        node_disp_z = data.get(
+            make_pushover_key(direction, load_type, "pushover/{direction}/{load_type}/node_disp_z")
+        )
+        node_tags_arr = data.get(
+            make_pushover_key(direction, load_type, "pushover/{direction}/{load_type}/node_tag")
+        )
 
         # Read frame SAP IDs
         frame_sap_id = data.get(
-            make_pushover_key(direction, "pushover/{direction}/frame_sap_id"), []
+            make_pushover_key(
+                direction, load_type, "pushover/{direction}/{load_type}/frame_sap_id"
+            ),
+            [],
         )
         n_frame = len(frame_sap_id)
 
@@ -94,19 +108,30 @@ def _resolve_pushover_data(
         ]
         frame_arrays = {}
         for key in comp_keys:
-            arr = data.get(make_pushover_key(direction, f"pushover/{{direction}}/frame_{key}"))
+            arr = data.get(
+                make_pushover_key(
+                    direction, load_type, f"pushover/{{direction}}/{{load_type}}/frame_{key}"
+                )
+            )
             if arr is not None:
                 frame_arrays[key] = arr
 
         # Read shell SAP IDs
         shell_sap_id = data.get(
-            make_pushover_key(direction, "pushover/{direction}/shell_sap_id"), []
+            make_pushover_key(
+                direction, load_type, "pushover/{direction}/{load_type}/shell_sap_id"
+            ),
+            [],
         )
         n_shell = len(shell_sap_id)
         shell_comp_keys = ["Nx", "Ny", "Nxy", "Mx", "My", "Mxy"]
         shell_arrays = {}
         for key in shell_comp_keys:
-            arr = data.get(make_pushover_key(direction, f"pushover/{{direction}}/shell_{key}"))
+            arr = data.get(
+                make_pushover_key(
+                    direction, load_type, f"pushover/{{direction}}/{{load_type}}/shell_{key}"
+                )
+            )
             if arr is not None:
                 shell_arrays[key] = arr
 

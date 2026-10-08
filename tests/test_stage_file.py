@@ -215,14 +215,14 @@ class TestStageFile:
         )
 
         data = read_results(p)
-        assert "pushover/+X/shell_Nx" in data
-        assert "pushover/-Y/shell_Nx" in data
-        assert "pushover/+X/control_disp" in data
+        assert "pushover/+X/uniform/shell_Nx" in data
+        assert "pushover/-Y/uniform/shell_Nx" in data
+        assert "pushover/+X/uniform/control_disp" in data
         assert list(data["analysis_types"]) == ["static", "modal", "pushover"]
 
         # Global arrays are aligned to the *recorded* (converged) steps.
-        assert list(data["pushover/+X/control_disp"]) == [0.1, 0.2, 0.3]
-        assert list(data["pushover/+X/step"]) == [1, 2, 3]
+        assert list(data["pushover/+X/uniform/control_disp"]) == [0.1, 0.2, 0.3]
+        assert list(data["pushover/+X/uniform/step"]) == [1, 2, 3]
 
         # The Rhino results helpers read it back directly.
         values, _range = _load_pushover_shell_quantities(data, "Nx", direction="+X")
