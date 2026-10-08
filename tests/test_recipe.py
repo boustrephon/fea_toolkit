@@ -147,6 +147,7 @@ class TestManifest:
             "mesh",
             "save_model",
             "run_static",
+            "load_verification",
             "modal",
             "response_spectrum",
             "pushover",
@@ -1006,3 +1007,28 @@ class TestEndToEnd:
         assert [result.kind for result in run.results] == ["figure"]
         figure = run.results[-1].payload
         assert isinstance(figure, Figure)
+
+    def test_load_verification_reports_applied_vs_reactions(self):
+        """A mesh + load_verification compares each pattern against its reactions."""
+        from examples.sample_model import make_sample_model
+
+        recipe = Recipe(steps=[Step("mesh"), Step("load_verification")])
+        run = run_recipe(recipe, make_sample_model())
+
+        assert [result.kind for result in run.results] == ["geometry", "table"]
+        table = run.results[-1].payload
+        assert table.title == "Load verification"
+        # One row per load pattern, pairing Applied / Reaction with a Δ column.
+        columns = table.columns
+        assert columns[0] == "Load Pattern"
+        assert any(c.startswith("Applied Fx") for c in columns)
+        assert any(c.startswith("Reaction Fx") for c in columns)
+        assert any(c.startswith("ΔFx") for c in columns)
+        assert len(table.rows) >= 1
+        assert all(isinstance(cell, str) for row in table.rows for cell in row)
+
+    def test_load_verification_without_load_patterns_returns_nothing(self):
+        """A model with no load patterns has nothing to verify — no table, no solve."""
+        model = _slab_model()  # a bare slab: no load patterns
+        run = run_recipe(Recipe(steps=[Step("mesh"), Step("load_verification")]), model)
+        assert [result.kind for result in run.results] == ["geometry"]

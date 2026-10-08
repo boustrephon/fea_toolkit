@@ -104,6 +104,7 @@ reduce.
 | `mesh` | `geometry` | `Preprocessor.run(md, load_shell_selection=…)` | — |
 | `save_model` | `table` | `io.stage_writer.write_model_file` | a topology |
 | `run_static` | `cases` | `analysis.linear.run_case_set` | a topology |
+| `load_verification` | `table` | `analysis.linear.static_load_verification` | a topology |
 | `combine` | `cases` | `analysis.combinations.build_combination_results` | solved cases |
 | `chart` | `figure` | `plotting.report.plot_storey_displacements` | solved cases |
 
