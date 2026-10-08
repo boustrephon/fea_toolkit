@@ -33,12 +33,18 @@ class TreeGroup:
         load_items: Returns ``[(label, entity), ...]``.  Called only when the
             group is first expanded, so a large group costs nothing until it
             is opened.
+        child_items: Optional callable mapping a top-level *entity* to its own
+            ``[(label, child_entity), ...]`` children.  Used by the **Views**
+            group to nest a fan-out child (a mode shape, an RS direction, a
+            pushover direction) under its parent view.  ``None`` for the flat
+            model-entity groups.
     """
 
     key: str
     label: str
     count: int
     load_items: Callable[[], list]
+    child_items: Optional[Callable[[Any], list]] = None
 
 
 # Dictionary-valued groups: the key *is* the SAP identifier, so it labels the row.
@@ -108,25 +114,41 @@ def _list_loader(seq: list, labeller: Callable[[Any], str]) -> Callable[[], list
 
 
 def views_group(views: list) -> TreeGroup:
-    """The synthetic **Views** group: one row per registered view.
+    """The synthetic **Views** group: one row per top-level view, children nested.
 
     Views are UI state rather than model entities, so they are handed in rather
     than derived from the model — but they present exactly like any other group
     (a label, a count, lazily-materialised rows), so the tree needs no special
     case beyond placing this group first.
 
+    A view whose :attr:`View.parent` names another registered view is nested
+    under that parent rather than listed at the top, so the fan-out from one
+    step (mode shapes, RS directions, pushover directions) collapses into a
+    parent → children bundle instead of a flat soup.
+
     Args:
         views: The registered :class:`~fea_toolkit.gui.controllers.view_registry.View` objects.
 
     Returns:
-        A :class:`TreeGroup` whose rows are the views themselves.
+        A :class:`TreeGroup` whose rows are the top-level views, with
+        ``child_items`` supplying each parent's nested children.
     """
-    items = [(view.name, view) for view in views]
+    by_key = {view.key: view for view in views}
+    top_level = [view for view in views if not view.parent or view.parent not in by_key]
+    children_by_parent: dict[str, list] = {}
+    for view in views:
+        if view.parent and view.parent in by_key:
+            children_by_parent.setdefault(view.parent, []).append(view)
+
+    def child_items(parent_view: Any) -> list:
+        return [(child.name, child) for child in children_by_parent.get(parent_view.key, ())]
+
     return TreeGroup(
         key=VIEWS_GROUP_KEY,
         label="Views",
-        count=len(items),
-        load_items=lambda: list(items),
+        count=len(views),
+        load_items=lambda: [(view.name, view) for view in top_level],
+        child_items=child_items,
     )
 
 

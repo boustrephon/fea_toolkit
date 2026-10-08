@@ -299,6 +299,7 @@ class TestResultViews:
         view = window._views.get("results:RS-X")
         assert view is not None, "the RS result registered no deformed-shape view"
         assert view.kind == "results"
+        assert view.parent == "table:response-spectrum-(x)", "RS view should nest under its table"
         repository = window._views.results("results:RS-X")
         assert repository.has_displacements("RS-X")
         assert repository.nodal_displacements("RS-X")
@@ -339,6 +340,7 @@ class TestResultViews:
             view = window._views.get(key)
             assert view is not None, f"{key} registered no mode-shape view"
             assert view.kind == "results"
+            assert view.parent == "table:modal", f"{key} should nest under the modal table"
             assert window._views.results(key).has_displacements(key.split(":")[1])
 
     def test_animate_toggle_starts_and_stops_the_timer(self, window):

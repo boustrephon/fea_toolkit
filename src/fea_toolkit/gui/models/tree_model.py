@@ -38,6 +38,7 @@ class ModelTreeModel(QAbstractItemModel):
         self._groups: list = []
         self._group_ids: list = []
         self._children: dict = {}
+        self._view_children: dict = {}
         self._nodes: dict = {}
         self._next_id = 0
         self.set_model(model)
@@ -55,6 +56,7 @@ class ModelTreeModel(QAbstractItemModel):
         self._groups = build_groups(model, views)
         self._group_ids = []
         self._children = {}
+        self._view_children = {}
         self._nodes = {}
         self._next_id = 0
         for group in self._groups:
@@ -71,17 +73,34 @@ class ModelTreeModel(QAbstractItemModel):
     def rowCount(self, parent: QModelIndex = _ROOT) -> int:
         if not parent.isValid():
             return len(self._groups)
-        group = self._group_of(parent)
-        if group is None:
-            return 0
-        return len(self._children.get(group.key, ()))
+        node = self._nodes.get(parent.internalId())
+        if isinstance(node, TreeGroup):
+            return len(self._children.get(node.key, ()))
+        if isinstance(node, tuple) and len(node) == 2:
+            # A top-level row (a bundle-parent view) reports its nested children.
+            return len(self._view_children.get(parent.internalId(), ()))
+        return 0
 
     def hasChildren(self, parent: QModelIndex = _ROOT) -> bool:
         """A group always reports children, so its expander appears before
-        ``fetchMore`` has materialised any rows (``rowCount`` is 0 until then)."""
+        ``fetchMore`` has materialised any rows (``rowCount`` is 0 until then).
+
+        A top-level *view* row reports children only when it is a bundle parent:
+        its group declares ``child_items`` and they yield for this entity."""
         if not parent.isValid():
             return bool(self._groups)
-        return parent.column() == 0 and self._is_group(parent)
+        if parent.column() != 0:
+            return False
+        node = self._nodes.get(parent.internalId())
+        if isinstance(node, TreeGroup):
+            return True
+        if isinstance(node, tuple) and len(node) == 2:
+            group = self._group_for_row(node[0])
+            if group is None or group.child_items is None:
+                return False
+            entity = self._entity_of(node)
+            return entity is not None and bool(group.child_items(entity))
+        return False
 
     def index(
         self,
@@ -95,13 +114,18 @@ class ModelTreeModel(QAbstractItemModel):
             if row >= len(self._groups):
                 return _ROOT
             return self.createIndex(row, column, self._group_ids[row])
-        group = self._group_of(parent)
-        if group is None:
-            return _ROOT
-        rows = self._children.get(group.key, ())
-        if row >= len(rows):
-            return _ROOT
-        return self.createIndex(row, column, rows[row][2])
+        node = self._nodes.get(parent.internalId())
+        if isinstance(node, TreeGroup):
+            rows = self._children.get(node.key, ())
+            if row >= len(rows):
+                return _ROOT
+            return self.createIndex(row, column, rows[row][2])
+        if isinstance(node, tuple) and len(node) == 2:
+            rows = self._view_children.get(parent.internalId(), ())
+            if row >= len(rows):
+                return _ROOT
+            return self.createIndex(row, column, rows[row][2])
+        return _ROOT
 
     def parent(self, index: QModelIndex) -> QModelIndex:
         if not index.isValid():
@@ -109,6 +133,15 @@ class ModelTreeModel(QAbstractItemModel):
         node = self._nodes.get(index.internalId())
         if not isinstance(node, tuple):
             return _ROOT  # a group sits at the root
+        if len(node) == 3:
+            # A nested view child: its parent is the parent-view row.
+            group = self._group_for_row(node[0])
+            if group is None:
+                return _ROOT
+            rows = self._children.get(group.key, ())
+            if node[1] >= len(rows):
+                return _ROOT
+            return self.createIndex(node[1], 0, rows[node[1]][2])
         group_row = node[0]
         if not 0 <= group_row < len(self._groups):
             return _ROOT
@@ -128,13 +161,27 @@ class ModelTreeModel(QAbstractItemModel):
 
         if not isinstance(node, tuple):
             return None
-        group_row, child_row = node
-        if not 0 <= group_row < len(self._groups):
-            return None
-        rows = self._children.get(self._groups[group_row].key, ())
-        if child_row >= len(rows):
-            return None
-        label, entity, _node_id = rows[child_row]
+
+        if len(node) == 3:
+            group = self._group_for_row(node[0])
+            if group is None:
+                return None
+            parent_rows = self._children.get(group.key, ())
+            if node[1] >= len(parent_rows):
+                return None
+            rows = self._view_children.get(parent_rows[node[1]][2], ())
+            if node[2] >= len(rows):
+                return None
+            label, entity, _node_id = rows[node[2]]
+        else:
+            group = self._group_for_row(node[0])
+            if group is None:
+                return None
+            rows = self._children.get(group.key, ())
+            if node[1] >= len(rows):
+                return None
+            label, entity, _node_id = rows[node[1]]
+
         if role == Qt.ItemDataRole.DisplayRole:
             return label if index.column() == 0 else ""
         if role == Qt.ItemDataRole.UserRole:
@@ -157,11 +204,27 @@ class ModelTreeModel(QAbstractItemModel):
         if not parent.isValid():
             return False
         node = self._nodes.get(parent.internalId())
-        return isinstance(node, TreeGroup) and node.key not in self._children
+        if isinstance(node, TreeGroup):
+            return node.key not in self._children
+        if isinstance(node, tuple) and len(node) == 2:
+            group = self._group_for_row(node[0])
+            if group is None or group.child_items is None:
+                return False
+            if parent.internalId() in self._view_children:
+                return False
+            entity = self._entity_of(node)
+            return entity is not None and bool(group.child_items(entity))
+        return False
 
     def fetchMore(self, parent: QModelIndex) -> None:
-        group = self._group_of(parent) if self._is_group(parent) else None
-        if group is None or group.key in self._children:
+        node = self._nodes.get(parent.internalId())
+        if isinstance(node, TreeGroup):
+            self._fetch_group(parent, node)
+        elif isinstance(node, tuple) and len(node) == 2:
+            self._fetch_view_children(parent, node)
+
+    def _fetch_group(self, parent: QModelIndex, group: TreeGroup) -> None:
+        if group.key in self._children:
             return
         group_row = self._groups.index(group)
         items = group.load_items()
@@ -178,6 +241,30 @@ class ModelTreeModel(QAbstractItemModel):
         self._children[group.key] = rows
         self.endInsertRows()
 
+    def _fetch_view_children(self, parent: QModelIndex, node: tuple) -> None:
+        """Materialise a bundle-parent view's nested children under *parent*."""
+        group = self._group_for_row(node[0])
+        if group is None or group.child_items is None:
+            return
+        if parent.internalId() in self._view_children:
+            return
+        entity = self._entity_of(node)
+        if entity is None:
+            return
+        items = group.child_items(entity)
+        if not items:
+            self._view_children[parent.internalId()] = []
+            return
+        rows = []
+        for child_row, (label, child_entity) in enumerate(items):
+            node_id = self._next_id
+            self._nodes[node_id] = (node[0], node[1], child_row)
+            self._next_id += 1
+            rows.append((label, child_entity, node_id))
+        self.beginInsertRows(parent, 0, len(rows) - 1)
+        self._view_children[parent.internalId()] = rows
+        self.endInsertRows()
+
     # ── Lookup ──────────────────────────────────────────────────────
 
     def index_for(self, group_key: str, label: str) -> Optional[QModelIndex]:
@@ -185,6 +272,10 @@ class ModelTreeModel(QAbstractItemModel):
 
         Materialises the group's rows if the user never expanded it -- the tree
         is lazy, and a viewport pick can name an entity nobody has browsed to.
+
+        A group that declares nested children (the **Views** group, whose
+        fan-out views bundle under their parent) is searched two levels deep, so
+        a nested view is found the same way a top-level one is.
 
         Args:
             group_key: Group key, e.g. ``"frame_elements"``.
@@ -202,14 +293,40 @@ class ModelTreeModel(QAbstractItemModel):
         parent = self.index(group_row, 0)
         # ``fetchMore`` is itself a no-op once the group is loaded.
         self.fetchMore(parent)
-        for child_row, (child_label, _entity, _node_id) in enumerate(
+        group = self._groups[group_row]
+        for child_row, (child_label, _entity, node_id) in enumerate(
             self._children.get(group_key, ())
         ):
             if str(child_label) == str(label):
                 return self.index(child_row, 0, parent)
+            if group.child_items is None:
+                continue
+            child_index = self.index(child_row, 0, parent)
+            self.fetchMore(child_index)
+            for nested_row, (nested_label, _e, _id) in enumerate(
+                self._view_children.get(node_id, ())
+            ):
+                if str(nested_label) == str(label):
+                    return self.index(nested_row, 0, child_index)
         return None
 
     # ── Helpers ─────────────────────────────────────────────────────
+
+    def _group_for_row(self, group_row: int) -> Optional[TreeGroup]:
+        """The group at *group_row*, or ``None`` when out of range."""
+        if 0 <= group_row < len(self._groups):
+            return self._groups[group_row]
+        return None
+
+    def _entity_of(self, node: tuple) -> Optional[Any]:
+        """The entity a top-level (2-tuple) node's row carries, or ``None``."""
+        group = self._group_for_row(node[0])
+        if group is None:
+            return None
+        rows = self._children.get(group.key, ())
+        if node[1] >= len(rows):
+            return None
+        return rows[node[1]][1]
 
     def _is_group(self, index: QModelIndex) -> bool:
         return isinstance(self._nodes.get(index.internalId()), TreeGroup)

@@ -54,7 +54,10 @@ class View:
         n_materials: Material definitions.
         n_sections: Section definitions.
         active: Whether this is the view currently displayed.
-        parent: Key of the view a derived view refines (``None`` for a base).
+        parent: Key of the view this one hangs off: either the base view a
+            *derived* view refines, or the step's summary view (a table, or the
+            first figure) that a fan-out result (a mode shape, an RS direction, a
+            pushover direction) belongs to.  ``None`` for a top-level view.
         selection: Optional ``Selection`` narrowing what the view shows.
     """
 
@@ -241,6 +244,7 @@ class ViewRegistry:
         source: str = "",
         model: Any = None,
         *,
+        parent: Optional[str] = None,
         activate: bool = True,
     ) -> View:
         """Register a results view over *repository* — no ``ModelStore`` needed.
@@ -258,6 +262,8 @@ class ViewRegistry:
             source: Human-readable provenance, e.g. the file name and case.
             model: Optional model to render (see
                 :meth:`ResultsRepository.as_model`).
+            parent: Key of the step's summary view this fan-out case belongs to
+                (``None`` to leave it top-level).
             activate: Make this the displayed view.
 
         Returns:
@@ -274,6 +280,7 @@ class ViewRegistry:
             n_frames=n_frames,
             n_frames_active=n_frames,
             n_shells=int(counts.get("n_shells", 0)),
+            parent=parent,
         )
         self._views[key] = view
         self._results[key] = repository
@@ -290,6 +297,7 @@ class ViewRegistry:
         table: Any,
         source: str = "",
         *,
+        parent: Optional[str] = None,
         activate: bool = True,
     ) -> View:
         """Register a check's :class:`~fea_toolkit.workflow.steps.Table` as a view.
@@ -304,12 +312,13 @@ class ViewRegistry:
             name: Display name (the table's title, usually).
             table: The :class:`~fea_toolkit.workflow.steps.Table` to show.
             source: Human-readable provenance.
+            parent: Key of the view this one hangs off (``None`` for top-level).
             activate: Make this the displayed view.
 
         Returns:
             The registered view.
         """
-        self._views[key] = View(key=key, name=name, kind=TABLE, source=source)
+        self._views[key] = View(key=key, name=name, kind=TABLE, source=source, parent=parent)
         self._tables[key] = table
         if activate or self._active is None:
             self._active = key
@@ -322,6 +331,7 @@ class ViewRegistry:
         figure: Any,
         source: str = "",
         *,
+        parent: Optional[str] = None,
         activate: bool = True,
     ) -> View:
         """Register a chart's matplotlib figure as a view.
@@ -335,12 +345,13 @@ class ViewRegistry:
             name: Display name.
             figure: The ``matplotlib.figure.Figure`` to show.
             source: Human-readable provenance.
+            parent: Key of the view this one hangs off (``None`` for top-level).
             activate: Make this the displayed view.
 
         Returns:
             The registered view.
         """
-        self._views[key] = View(key=key, name=name, kind=FIGURE, source=source)
+        self._views[key] = View(key=key, name=name, kind=FIGURE, source=source, parent=parent)
         self._figures[key] = figure
         if activate or self._active is None:
             self._active = key

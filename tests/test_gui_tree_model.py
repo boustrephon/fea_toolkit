@@ -76,3 +76,30 @@ def test_index_for_reports_unknown_groups_and_labels(model):
     assert model.index_for("no_such_group", "1") is None
     assert model.index_for("frame_elements", "999") is None
     assert model.index_for("nodes", "2").isValid()
+
+
+def test_nested_views_bundle_children_under_their_parent(model):
+    """A fan-out child view nests under its parent view, and round-trips back."""
+    from examples.sample_model import make_sample_model
+    from fea_toolkit.gui.controllers.view_registry import View
+
+    parent = View(key="table:modal", name="Modal", kind="table", source="test")
+    child = View(
+        key="results:Mode-1", name="Mode 1", kind="results", source="test", parent="table:modal"
+    )
+    model.set_model(make_sample_model(), views=[parent, child])
+
+    views_group = model.index(0, 0)
+    assert model.data(views_group) == "Views"
+    model.fetchMore(views_group)
+
+    parent_row = model.index(0, 0, views_group)
+    assert model.data(parent_row) == "Modal"
+    assert model.hasChildren(parent_row)
+    assert model.canFetchMore(parent_row)
+
+    model.fetchMore(parent_row)
+    child_row = model.index(0, 0, parent_row)
+    assert model.data(child_row) == "Mode 1"
+    assert model.parent(child_row) == parent_row
+    assert not model.hasChildren(child_row)

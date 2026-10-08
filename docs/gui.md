@@ -68,6 +68,11 @@ row per view, added as you work.
 | **Processed** | `Model ▸ Mesh…` (create shells off) | the split sub-elements an analysis would build |
 | **Meshed** | `Model ▸ Mesh…` | the above, plus the shell elements for areas |
 
+A step that fans out — a modal run's mode shapes, a response-spectrum run's
+directions, a pushover run's ADRS curves — **bundles** its results: the step's
+summary view (its table, or the first curve) is a parent row, and the per-mode /
+per-direction views nest under it rather than flooding the Views list flat.
+
 Selecting a view redraws the scene with that view's geometry and **keeps the
 camera**, so comparing the drawn model with the prepared one does not move your
 viewpoint.  The Inspector reports the selected view's **counts**, never its

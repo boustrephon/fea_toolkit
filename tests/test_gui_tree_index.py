@@ -65,3 +65,36 @@ def test_response_spectrum_functions_appear_as_a_group():
     groups = _by_label(md)
     items = groups["Response Spectra"].load_items()
     assert [label for label, _ in items] == ["UNIFRS"]
+
+
+def test_views_group_nests_children_under_their_parent():
+    """A fan-out child (a mode, an RS direction) nests under its summary view."""
+    from fea_toolkit.gui.controllers.view_registry import View
+    from fea_toolkit.gui.models.model_index import views_group
+
+    parent = View(key="table:modal", name="Modal", kind="table", source="test")
+    mode1 = View(
+        key="results:Mode-1", name="Mode 1", kind="results", source="test", parent="table:modal"
+    )
+    mode2 = View(
+        key="results:Mode-2", name="Mode 2", kind="results", source="test", parent="table:modal"
+    )
+    top = View(key="unprocessed", name="Unprocessed", kind="geometry", source="test")
+
+    group = views_group([parent, mode1, mode2, top])
+
+    assert group.count == 4
+    assert [name for name, _ in group.load_items()] == ["Modal", "Unprocessed"]
+    assert [name for name, _ in group.child_items(parent)] == ["Mode 1", "Mode 2"]
+    assert group.child_items(top) == []
+
+
+def test_views_group_treats_an_unknown_parent_as_top_level():
+    """A view whose parent is not registered is listed at the top, not lost."""
+    from fea_toolkit.gui.controllers.view_registry import View
+    from fea_toolkit.gui.models.model_index import views_group
+
+    orphan = View(key="results:X", name="X", kind="results", source="test", parent="missing")
+    group = views_group([orphan])
+    assert [name for name, _ in group.load_items()] == ["X"]
+    assert group.child_items(orphan) == []

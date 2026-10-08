@@ -140,6 +140,11 @@ def _case_view_name(case: str, meta: dict) -> str:
 _RESULTS_KEY_PREFIX = "results:"
 
 
+def _table_key(label: str) -> str:
+    """The table view's key for a step *label* — the inverse of its registration."""
+    return f"table:{label.lower().replace(' ', '-')}"
+
+
 def _case_of(view: Optional[View]) -> str:
     """The load case a results view stands for (``""`` for any other view).
 
@@ -1701,7 +1706,7 @@ class MainWindow(QMainWindow):
         active = self._views.active
         self._actions["edit.duplicate_view"].setEnabled(active is not None)
         self._actions["edit.edit_selection"].setEnabled(
-            active is not None and active.parent is not None
+            active is not None and active.kind == GEOMETRY and active.parent is not None
         )
         # A deformed shape needs a results view that carries displacement:
         # a pressed button that could only report "nothing to draw" is worse
@@ -2415,7 +2420,7 @@ class MainWindow(QMainWindow):
         if table is None:
             self.log(f"{label}: nothing to show.", "warn")
             return
-        key = f"table:{label.lower().replace(' ', '-')}"
+        key = _table_key(label)
         name = getattr(table, "title", None) or label
         view = self._views.add_table(key, name, table, source=f"Recipe: {label}")
         self._show_view(view, rebuild_tree=True)
@@ -2470,15 +2475,23 @@ class MainWindow(QMainWindow):
 
         shapes = data.get("shapes")
         if isinstance(shapes, dict) and shapes:
-            self._show_modal_shapes_views(label, shapes)
+            self._show_modal_shapes_views(label, shapes, parent=_table_key(label))
 
-    def _show_modal_shapes_views(self, label: str, shapes: dict) -> None:
+    def _show_modal_shapes_views(
+        self, label: str, shapes: dict, parent: Optional[str] = None
+    ) -> None:
         """Register one ``results`` view per mode shape, like a static case.
 
         Each mode's eigenvector field (``{mode_index: {node_tag: (dx, dy, dz)}}``)
         becomes a ``static/Mode-<i>/node_*`` case via
         :func:`~fea_toolkit.gui.project.mode_shape_arrays`, then registers through
-        the same path a static case takes.
+        the same path a static case takes.  The mode views nest under *parent*
+        (the step's summary table) so they bundle rather than flood the tree.
+
+        Args:
+            label: The step's result label.
+            shapes: The per-mode eigenvector fields.
+            parent: Key of the view the mode views hang off.
         """
         from .project import mode_shape_arrays
 
@@ -2487,7 +2500,7 @@ class MainWindow(QMainWindow):
             self.log(f"{label}: no prepared mesh to draw the mode shapes against.", "warn")
             return
         arrays = mode_shape_arrays(mesh, shapes)
-        self._show_results_archive(label, arrays)
+        self._show_results_archive(label, arrays, parent=parent)
 
     def _show_rs_result(self, label: str, payload: Any) -> None:
         """Summarise a response-spectrum result as a table and a results view.
@@ -2526,9 +2539,17 @@ class MainWindow(QMainWindow):
 
         node_displacements = data.get("node_displacements")
         if isinstance(node_displacements, dict) and node_displacements:
-            self._show_rs_results_view(label, str(direction), node_displacements)
+            self._show_rs_results_view(
+                label, str(direction), node_displacements, parent=_table_key(label)
+            )
 
-    def _show_rs_results_view(self, label: str, direction: str, node_displacements: dict) -> None:
+    def _show_rs_results_view(
+        self,
+        label: str,
+        direction: str,
+        node_displacements: dict,
+        parent: Optional[str] = None,
+    ) -> None:
         """Register the combined RS displacement field as a ``results`` view.
 
         The field is keyed by OpenSees node tag, but the existing
@@ -2536,7 +2557,14 @@ class MainWindow(QMainWindow):
         the static-shaped ``static/<case>/node_*`` layout, so the field is
         marshalled into that shape over the mesh's own geometry (via
         :func:`~fea_toolkit.gui.project.rs_displacement_arrays`) and registered
-        through the same path a static case takes.
+        through the same path a static case takes.  The view nests under
+        *parent* (the step's summary table).
+
+        Args:
+            label: The step's result label.
+            direction: The spectrum direction this field combines.
+            node_displacements: ``{node_tag: (dx, dy, dz)}`` combined field.
+            parent: Key of the view the results view hangs off.
         """
         from .project import rs_displacement_arrays
 
@@ -2548,7 +2576,7 @@ class MainWindow(QMainWindow):
             )
             return
         arrays = rs_displacement_arrays(mesh, {direction: node_displacements})
-        self._show_results_archive(label, arrays)
+        self._show_results_archive(label, arrays, parent=parent)
 
     def _show_pushover_result(self, label: str, payload: Any) -> None:
         """Plot each converged direction's capacity spectrum (ADRS) as a figure.
@@ -2571,6 +2599,7 @@ class MainWindow(QMainWindow):
         from .project import figure_identity
 
         views = []
+        bundle_parent: Optional[str] = None
         for direction in directions:
             entry = data.get(direction) or {}
             adrs = entry.get("adrs")
@@ -2589,15 +2618,17 @@ class MainWindow(QMainWindow):
             if figure is None:
                 continue
             key, name = figure_identity(label, direction)
-            views.append(
-                self._views.add_figure(
-                    key,
-                    name,
-                    figure,
-                    source=f"Recipe: {label}",
-                    activate=False,
-                )
+            # The first figure anchors the bundle; the rest nest under it.
+            view = self._views.add_figure(
+                key,
+                name,
+                figure,
+                source=f"Recipe: {label}",
+                parent=bundle_parent,
+                activate=False,
             )
+            views.append(view)
+            bundle_parent = bundle_parent or view.key
         if not views:
             self.log(f"{label}: no plottable pushover curves.", "warn")
             return
@@ -2613,7 +2644,7 @@ class MainWindow(QMainWindow):
         """
         return self._show_results_archive(label, arrays or {})
 
-    def _show_results_archive(self, label: str, arrays: dict) -> list:
+    def _show_results_archive(self, label: str, arrays: dict, parent: Optional[str] = None) -> list:
         """Register one ``results`` view per case in *arrays* and show the first.
 
         A :class:`~fea_toolkit.io.results_repository.NpzResultsRepository` over
@@ -2627,6 +2658,8 @@ class MainWindow(QMainWindow):
             label: The step's result label, recorded as the view's provenance.
             arrays: The archive arrays — ``static_case_labels`` plus the
                 ``static/<case>/…`` blocks and the geometry arrays.
+            parent: Key of the step's summary view the case views nest under
+                (``None`` leaves them top-level).
 
         Returns:
             The case labels registered, in archive order — empty when the
@@ -2648,6 +2681,7 @@ class MainWindow(QMainWindow):
                 repository,
                 source=f"Recipe: {label} \u00b7 {case}",
                 model=model,
+                parent=parent,
                 activate=False,
             )
         self.log(f"{label}: {len(cases)} case(s) added as views.")
