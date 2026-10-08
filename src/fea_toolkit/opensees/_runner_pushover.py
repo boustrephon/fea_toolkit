@@ -518,7 +518,18 @@ class PushoverRunnerMixin:
         record_frames: set[str] = set()
         record_areas: set[str] = set()
         record_node_tags: set[int] = set()
+        record_node_disp = True
+        record_frame_forces = True
+        record_shell_forces = True
+        step_stride = 1
         if record:
+            # Per-block flags default to the old record-everything behaviour
+            # when the verb has not set them; the verb sets them explicitly so
+            # a default run records node displacements only (cheap).
+            record_node_disp = self.config.get("pushover_record_node_disp", True)
+            record_frame_forces = self.config.get("pushover_record_frame_forces", True)
+            record_shell_forces = self.config.get("pushover_record_shell_forces", True)
+            step_stride = max(1, int(self.config.get("pushover_step_stride", 1)))
             if record_sel is not None:
                 # Pass storey data if available in config (for story-based Selection filtering)
                 _storey_data = self.config.get("pushover_record_storey_data", None)
@@ -537,23 +548,12 @@ class PushoverRunnerMixin:
                     for aid, ae in self.mesh_model.area_elements.items()
                     if not getattr(ae, "inactive", False)
                 }
-            # Collect node tags from selected frames/areas only
-            for eid in record_frames:
-                fe = self.mesh_model.frame_elements.get(eid)
-                if fe is None:
-                    continue
-                for nid in (fe.node_i, fe.node_j):
-                    nd = self.mesh_model.nodes.get(nid)
-                    if nd is not None:
-                        record_node_tags.add(nd.node_tag)
-            for aid in record_areas:
-                ae = self.mesh_model.area_elements.get(aid)
-                if ae is None:
-                    continue
-                for nid in ae.node_ids:
-                    nd = self.mesh_model.nodes.get(nid)
-                    if nd is not None:
-                        record_node_tags.add(nd.node_tag)
+            # Node tags for displacement recording: every node in the model, so
+            # the deformed-shape history is complete (standalone joints
+            # included), not just the frame/area incident nodes.
+            if record_node_disp:
+                for nd in self.mesh_model.nodes.values():
+                    record_node_tags.add(nd.node_tag)
             if print_progress and (record_frames or record_areas):
                 print(
                     f"  Recording {len(record_frames)} frame(s) + "
@@ -700,13 +700,15 @@ class PushoverRunnerMixin:
                     element_forces_history.append({})
 
             # ── Per-step element recording ──────────────────────
-            if record and ok == 0:
+            if record and ok == 0 and step % step_stride == 0:
                 step_data = _record_step(
                     self,
                     step,
                     record_frames,
                     record_areas,
                     node_tags=record_node_tags,
+                    record_frame_forces=record_frame_forces,
+                    record_shell_forces=record_shell_forces,
                 )
                 step_results.append(step_data)
 
@@ -1030,6 +1032,9 @@ def _record_step(
     frame_ids: set[str],
     area_ids: set[str],
     node_tags: Optional[set[int]] = None,
+    *,
+    record_frame_forces: bool = True,
+    record_shell_forces: bool = True,
 ) -> dict[str, Any]:
     """Query ``ops.eleResponse()`` and ``ops.nodeDisp()`` at the current step.
 
@@ -1040,6 +1045,10 @@ def _record_step(
         area_ids: SAP2000 area element IDs to record.
         node_tags: Optional set of OpenSees node tags to record displacements
             for.  When ``None``, no displacement data is collected.
+        record_frame_forces: When ``False``, skip the frame end-force queries
+            (``frame_forces`` is emitted empty).  Forces are the expensive part,
+            so a run that only needs deformed shapes sets this off.
+        record_shell_forces: When ``False``, skip the shell resultant queries.
 
     Returns:
         Dict with keys:
@@ -1053,58 +1062,60 @@ def _record_step(
 
     # ── Frame elements ──
     frame_forces: dict[str, dict[str, float]] = {}
-    for eid in frame_ids:
-        ops_tag = builder.frame_tag_map.get(eid)
-        if ops_tag is None:
-            continue
-        try:
-            f = ops.eleResponse(ops_tag, "localForces")  # 12 local values
-        except Exception:
-            continue
-        f = _normalise_frame_response(f)
-        if f is None:
-            continue
-        frame_forces[eid] = {
-            "fx_i": f[0],
-            "fy_i": f[1],
-            "fz_i": f[2],
-            "mx_i": f[3],
-            "my_i": f[4],
-            "mz_i": f[5],
-            "fx_j": f[6],
-            "fy_j": f[7],
-            "fz_j": f[8],
-            "mx_j": f[9],
-            "my_j": f[10],
-            "mz_j": f[11],
-        }
+    if record_frame_forces:
+        for eid in frame_ids:
+            ops_tag = builder.frame_tag_map.get(eid)
+            if ops_tag is None:
+                continue
+            try:
+                f = ops.eleResponse(ops_tag, "localForces")  # 12 local values
+            except Exception:
+                continue
+            f = _normalise_frame_response(f)
+            if f is None:
+                continue
+            frame_forces[eid] = {
+                "fx_i": f[0],
+                "fy_i": f[1],
+                "fz_i": f[2],
+                "mx_i": f[3],
+                "my_i": f[4],
+                "mz_i": f[5],
+                "fx_j": f[6],
+                "fy_j": f[7],
+                "fz_j": f[8],
+                "mx_j": f[9],
+                "my_j": f[10],
+                "mz_j": f[11],
+            }
     data["frame_forces"] = frame_forces
 
     # ── Shell elements (stress resultants) ──
     shell_forces: dict[str, dict[str, float]] = {}
-    for aid in area_ids:
-        ops_tag = builder._shell_tag_map.get(aid)
-        if ops_tag is None:
-            continue
-        try:
-            f = ops.eleResponse(ops_tag, "section", 1, "forces")  # Shell resultants
-        except Exception:
-            continue
-        # Section forces return [Nx, Ny, Nxy, Mx, My, Mxy, ?, ?] — the
-        # per-unit-width membrane/bending resultants.  (Plain "forces" on a
-        # shell returns 24 local nodal forces, which must NOT be used here.)
-        if not f or len(f) < 6:
-            # None or short unsupported response — skip this element before
-            # indexing f[0..5] (same guard as extract_static_shell_forces).
-            continue
-        shell_forces[aid] = {
-            "Nx": f[0],
-            "Ny": f[1],
-            "Nxy": f[2],
-            "Mx": f[3],
-            "My": f[4],
-            "Mxy": f[5],
-        }
+    if record_shell_forces:
+        for aid in area_ids:
+            ops_tag = builder._shell_tag_map.get(aid)
+            if ops_tag is None:
+                continue
+            try:
+                f = ops.eleResponse(ops_tag, "section", 1, "forces")  # Shell resultants
+            except Exception:
+                continue
+            # Section forces return [Nx, Ny, Nxy, Mx, My, Mxy, ?, ?] — the
+            # per-unit-width membrane/bending resultants.  (Plain "forces" on a
+            # shell returns 24 local nodal forces, which must NOT be used here.)
+            if not f or len(f) < 6:
+                # None or short unsupported response — skip this element before
+                # indexing f[0..5] (same guard as extract_static_shell_forces).
+                continue
+            shell_forces[aid] = {
+                "Nx": f[0],
+                "Ny": f[1],
+                "Nxy": f[2],
+                "Mx": f[3],
+                "My": f[4],
+                "Mxy": f[5],
+            }
     data["shell_forces"] = shell_forces
 
     # ── Node displacements ──

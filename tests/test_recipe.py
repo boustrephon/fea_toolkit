@@ -285,6 +285,45 @@ class TestAnalysisVerbs:
         assert captured["brace_sections"] == ["BRACE-1"]
         assert captured["return_builders"] is True
 
+    def test_pushover_declares_the_retention_parameters(self):
+        """The retention knobs are declared with large-model-friendly defaults."""
+        params = STEP_SPECS["pushover"].params
+        assert params["step_stride"].default == 1
+        assert params["store_node_disp"].default is True
+        assert params["store_frame_forces"].default is False
+        assert params["store_shell_forces"].default is False
+
+    def test_pushover_retention_knobs_reach_the_builder_config(self, monkeypatch):
+        """The retention params become the flat config keys the runner reads."""
+        import fea_toolkit.analysis.pushover as pushover_module
+        from fea_toolkit.workflow.steps import StepContext
+
+        captured: dict = {}
+
+        def fake_run_pushover_analysis(_mesh, _modal, **kwargs):
+            captured.update(kwargs)
+            return object()
+
+        monkeypatch.setattr(pushover_module, "run_pushover_analysis", fake_run_pushover_analysis)
+        context = StepContext(model_data=_slab_model(), model=object(), results={"modal": object()})
+        step = Step(
+            "pushover",
+            params={
+                "step_stride": 2,
+                "store_node_disp": True,
+                "store_frame_forces": True,
+                "store_shell_forces": False,
+            },
+        )
+        STEP_SPECS["pushover"].run(context, step)
+
+        config = captured["config"]
+        assert config["record_pushover_steps"] is True
+        assert config["pushover_step_stride"] == 2
+        assert config["pushover_record_node_disp"] is True
+        assert config["pushover_record_frame_forces"] is True
+        assert config["pushover_record_shell_forces"] is False
+
     def test_response_spectrum_resolves_each_source(self):
         """``resolve_spectrum`` maps source → (T, Sa) from the right place."""
         from fea_toolkit.model.sap_data import LoadPattern, ResponseSpectrumFunction

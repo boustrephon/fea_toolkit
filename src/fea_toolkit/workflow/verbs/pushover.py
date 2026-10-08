@@ -63,6 +63,26 @@ PUSHOVER_PARAMS: dict[str, ParamSpec] = {
         type=list,
         help="Brace section assignments for the 'beam' brace type.",
     ),
+    "step_stride": ParamSpec(
+        default=1,
+        type=int,
+        help="Record every Nth converged push step (subsample the retained history).",
+    ),
+    "store_node_disp": ParamSpec(
+        default=True,
+        type=bool,
+        help="Retain per-step node displacements (the deformed-shape history; cheap).",
+    ),
+    "store_frame_forces": ParamSpec(
+        default=False,
+        type=bool,
+        help="Retain per-step frame end forces (expensive — off unless force/DCR review is wanted).",
+    ),
+    "store_shell_forces": ParamSpec(
+        default=False,
+        type=bool,
+        help="Retain per-step shell stress resultants (expensive — off by default).",
+    ),
     "name": ParamSpec(
         default="Pushover",
         type=str,
@@ -102,6 +122,21 @@ def run_pushover(context: StepContext, step: Step) -> list[StepResult]:
 
     params: dict[str, Any] = validate_params("pushover", PUSHOVER_PARAMS, step.params)
     maybe_export_tcl(context, "pushover", params)
+
+    # ── Retention knobs → builder config ──────────────────────────
+    # The retention params are the authoring surface; the runner reads the
+    # flat builder-config keys below.  ``record_pushover_steps`` is the master
+    # gate (any requested block turns recording on), and the per-block flags
+    # keep a default run cheap: node displacements only.
+    config = dict(params["config"] or {})
+    config["record_pushover_steps"] = bool(
+        params["store_node_disp"] or params["store_frame_forces"] or params["store_shell_forces"]
+    )
+    config["pushover_step_stride"] = params["step_stride"]
+    config["pushover_record_node_disp"] = params["store_node_disp"]
+    config["pushover_record_frame_forces"] = params["store_frame_forces"]
+    config["pushover_record_shell_forces"] = params["store_shell_forces"]
+
     result = run_pushover_analysis(
         context.model,
         context.results["modal"],
@@ -114,7 +149,7 @@ def run_pushover(context: StepContext, step: Step) -> list[StepResult]:
         brace_sections=params["brace_sections"] or None,
         directions=params["directions"],
         name=params["name"],
-        config=params["config"] or None,
+        config=config or None,
         return_builders=params["return_builders"],
         log=context.pipeline_log,
     )

@@ -608,6 +608,38 @@ class TestPushoverWorkflow:
         assert len(results["base_shear"]) > 1, "pattern: base_shear empty"
         assert abs(results["base_shear"][-1]) > 1e-6, "pattern: final base_shear near zero"
 
+    def test_recording_honours_per_block_flags_and_stride(self, sample_ab):
+        """Per-block flags record only the requested blocks, and stride subsamples."""
+        sample_ab.config.update(
+            {
+                "record_pushover_steps": True,
+                "pushover_record_node_disp": True,
+                "pushover_record_frame_forces": False,
+                "pushover_record_shell_forces": False,
+                "pushover_step_stride": 2,
+            }
+        )
+        sample_ab.build_domain()
+        sample_ab.compute_seismic_masses()
+        results = sample_ab.run_pushover_analysis(
+            gravity_patterns={"DEAD": 1.0},
+            lateral_load_type="uniform",
+            lateral_direction="X",
+            control_node_tag=2,
+            max_disp=0.1,
+            num_steps=5,
+            print_progress=False,
+        )
+
+        step_results = results.get("step_results")
+        assert step_results, "recording produced no step results"
+        # Stride 2 over 5 steps records steps 2 and 4 (converged ones).
+        assert [sd["step"] for sd in step_results] == [2, 4]
+        for sd in step_results:
+            assert sd["node_displacements"], "node displacements should be recorded"
+            assert sd["frame_forces"] == {}, "frame forces were disabled"
+            assert sd["shell_forces"] == {}, "shell forces were disabled"
+
 
 # ============================================================================
 # Workflow: P6a steel-shape fiber sections end-to-end (parser → builder)

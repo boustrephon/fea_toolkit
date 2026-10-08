@@ -508,13 +508,15 @@ times the section-deformation history (gigabytes at large-model scale).  So the
 output is split into a cheap *provision* we can land now and a *full* fiber dump
 we defer.
 
-### 5.1 Condensed section-deformation provision (off by default, land now)
+### 5.1 Condensed section-deformation provision (schema slot + config key now; recorder/writer deferred)
 
-**Config**: `pushover_record_section_deformations: True`.
+**Config key reserved**: `pushover_record_section_deformations: True` (the verb
+param, recorder, writer and replay tool land together in the follow-up that
+builds fiber-state reconstruction).
 
-**Data recorded**: per selected element, per integration point, per step, the
-**section deformation vector** — axial strain and two curvatures (ε, κ_y, κ_z),
-plus the elastic torsional term — via
+**Data this provision will record** (per selected element, per integration point,
+per step): the **section deformation vector** — axial strain and two curvatures
+(ε, κ_y, κ_z), plus the elastic torsional term — via
 `ops.eleResponse(tag, 'section', secNum, 'deformation')`.  This is the *minimal*
 state from which every fiber strain is reconstructible.
 
