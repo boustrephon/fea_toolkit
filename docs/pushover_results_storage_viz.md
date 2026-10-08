@@ -508,11 +508,12 @@ times the section-deformation history (gigabytes at large-model scale).  So the
 output is split into a cheap *provision* we can land now and a *full* fiber dump
 we defer.
 
-### 5.1 Condensed section-deformation provision (schema slot + config key now; recorder/writer deferred)
+### 5.1 Condensed section-deformation provision (design only — fully deferred)
 
-**Config key reserved**: `pushover_record_section_deformations: True` (the verb
-param, recorder, writer and replay tool land together in the follow-up that
-builds fiber-state reconstruction).
+**Config key reserved**: `pushover_record_section_deformations: True`.  The verb
+param, schema slot, recorder, writer and replay tool all land together in the
+follow-up that builds fiber-state reconstruction; this section reserves the
+design and the namespace so that increment is a clean addition.
 
 **Data this provision will record** (per selected element, per integration point,
 per step): the **section deformation vector** — axial strain and two curvatures
