@@ -103,16 +103,16 @@ serializable payloads:
 | kind | payload | written to |
 |---|---|---|
 | `cases` | assembled archive arrays | `results.npz` |
-| `modal` | `AnalysisResult.data` (`modal` + `shapes`) | `results.npz` (`collect_modal_arrays`) |
+| `modal` | `AnalysisResult.data` (`modal` + `shapes`) | `results.npz` (`collect_modal_arrays` + `mode_shape_arrays`) |
 | `response_spectrum` | `AnalysisResult.data` (`rs_result` + `direction` + `node_displacements`) | `results.npz` (`collect_rs_arrays` + `rs_displacement_arrays`) + `tables.json` |
 | `pushover` | `AnalysisResult.data` per direction (`adrs`/`pp`/`spectrum`) | `figures.json` |
 
 The response-spectrum results are walked from `run.results` (not the context
 slot) because the context's `results["rs"]` is overwritten per direction.
 
-RS displacement fields are persisted as **static-shaped cases**
-(`static/RS-<direction>/node_*`), not the single-direction `rs/node_*` block —
-so each direction's deformed-shape view round-trips through the bundle exactly
+RS displacement fields and modal mode shapes are persisted as **static-shaped
+cases** (`static/RS-<direction>/node_*`, `static/Mode-<i>/node_*`), so each
+direction's / mode's deformed-shape view round-trips through the bundle exactly
 like a static load case (Option C).
 
 ## Related fixes

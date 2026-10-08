@@ -2357,13 +2357,13 @@ class MainWindow(QMainWindow):
         self.log(f"Added figure view: {label}.")
 
     def _show_modal_result(self, label: str, payload: Any) -> None:
-        """Summarise a modal result as a table and register it.
+        """Summarise a modal result as a table and one results view per mode.
 
         The ``modal`` verb's payload is an
         :class:`~fea_toolkit.analysis.base.AnalysisResult` whose ``data`` holds
-        ``{"modal": {…}, "shapes": {…}}``.  Distilling the modal dict into a
-        period/participation table makes the preset's result inspectable instead
-        of silently dropped.
+        ``{"modal": {…}, "shapes": {…}}``.  The periods / participation are
+        distilled into a table, and each mode shape becomes a ``results`` view
+        (deformed geometry) — one per mode, like a static case.
         """
         from ..workflow.steps import Table
 
@@ -2392,6 +2392,27 @@ class MainWindow(QMainWindow):
                 rows=tuple(rows),
             ),
         )
+
+        shapes = data.get("shapes")
+        if isinstance(shapes, dict) and shapes:
+            self._show_modal_shapes_views(label, shapes)
+
+    def _show_modal_shapes_views(self, label: str, shapes: dict) -> None:
+        """Register one ``results`` view per mode shape, like a static case.
+
+        Each mode's eigenvector field (``{mode_index: {node_tag: (dx, dy, dz)}}``)
+        becomes a ``static/Mode-<i>/node_*`` case via
+        :func:`~fea_toolkit.gui.project.mode_shape_arrays`, then registers through
+        the same path a static case takes.
+        """
+        from .project import mode_shape_arrays
+
+        mesh = self._store.preprocessed() if self._store is not None else None
+        if mesh is None:
+            self.log(f"{label}: no prepared mesh to draw the mode shapes against.", "warn")
+            return
+        arrays = mode_shape_arrays(mesh, shapes)
+        self._show_results_archive(label, arrays)
 
     def _show_rs_result(self, label: str, payload: Any) -> None:
         """Summarise a response-spectrum result as a table and a results view.
@@ -2917,15 +2938,13 @@ class MainWindow(QMainWindow):
     def _project_results_arrays(self, collected: dict) -> dict:
         """Merge the collected static archive arrays with modal + RS arrays.
 
-        The RS displacement fields are persisted as static-shaped cases
-        (``static/RS-<direction>/node_*``) rather than the single-direction
-        ``rs/node_*`` block, so each direction's deformed-shape view round-trips
-        through the bundle exactly like a static load case (Option C).
+        RS displacement fields and modal mode shapes are persisted as
+        static-shaped cases (``static/RS-<direction>/node_*`` and
+        ``static/Mode-<i>/node_*``) so each direction's / mode's deformed-shape
+        view round-trips through the bundle like a static load case (Option C).
         """
-        import numpy as np
-
         from ..io.unified_writer import collect_modal_arrays, collect_rs_arrays
-        from .project import rs_displacement_arrays
+        from .project import mode_shape_arrays, rs_displacement_arrays
 
         arrays = dict(collected.get("static_arrays") or {})
         modal = collected.get("modal")
@@ -2935,20 +2954,32 @@ class MainWindow(QMainWindow):
         if rs:
             arrays.update(collect_rs_arrays(rs.get("rs_x"), rs.get("rs_y")))
 
-        rs_disp = collected.get("rs_nodal_displacements") or {}
         mesh = self._store.preprocessed() if self._store is not None else None
-        if rs_disp and mesh is not None:
-            rs_arrays = rs_displacement_arrays(mesh, rs_disp)
-            rs_labels = rs_arrays.pop("static_case_labels")
-            existing = arrays.get("static_case_labels")
-            if existing is not None and len(existing):
-                arrays["static_case_labels"] = np.concatenate(
-                    [np.asarray(existing), np.asarray(rs_labels)]
-                )
-            else:
-                arrays["static_case_labels"] = rs_labels
-            arrays.update(rs_arrays)
+        if mesh is not None:
+            rs_disp = collected.get("rs_nodal_displacements") or {}
+            if rs_disp:
+                rs_arrays = rs_displacement_arrays(mesh, rs_disp)
+                self._append_static_case_labels(arrays, rs_arrays.pop("static_case_labels"))
+                arrays.update(rs_arrays)
+
+            shapes = collected.get("mode_shapes") or {}
+            if shapes:
+                mode_arrays = mode_shape_arrays(mesh, shapes)
+                self._append_static_case_labels(arrays, mode_arrays.pop("static_case_labels"))
+                arrays.update(mode_arrays)
         return arrays
+
+    def _append_static_case_labels(self, arrays: dict, labels: Any) -> None:
+        """Append *labels* to ``static_case_labels``, creating it when absent."""
+        import numpy as np
+
+        existing = arrays.get("static_case_labels")
+        if existing is not None and len(existing):
+            arrays["static_case_labels"] = np.concatenate(
+                [np.asarray(existing), np.asarray(labels)]
+            )
+        else:
+            arrays["static_case_labels"] = labels
 
     def _project_tables(self) -> dict:
         """Collect ``{key: Table}`` from every table view in the registry."""

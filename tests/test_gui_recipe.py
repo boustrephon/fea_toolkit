@@ -303,6 +303,44 @@ class TestResultViews:
         assert repository.has_displacements("RS-X")
         assert repository.nodal_displacements("RS-X")
 
+    def test_a_modal_result_registers_a_view_per_mode(self, window):
+        """A modal result with shapes becomes one deformed-shape view per mode."""
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.analysis.base import AnalysisResult
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
+        mesh = preprocess_model(make_sample_model(), {"split_elements": True})
+        window._store.set_preprocessed(mesh)
+        node_tags = [node.node_tag for node in mesh.nodes.values()]
+        shapes = {
+            0: dict.fromkeys(node_tags, (0.001, 0.0, 0.0)),
+            1: dict.fromkeys(node_tags, (0.0, 0.002, 0.0)),
+        }
+
+        payload = AnalysisResult(
+            name="Modal",
+            analysis_type="ModalAnalysis",
+            data={
+                "modal": {
+                    "periods": [1.0, 0.5],
+                    "frequencies": [1.0, 2.0],
+                    "modal_props": {
+                        "partiMassRatiosMX": [0.8, 0.1],
+                        "partiMassRatiosMY": [0.0, 0.0],
+                        "partiMassRatiosMZ": [0.0, 0.0],
+                    },
+                },
+                "shapes": shapes,
+            },
+        )
+        window._show_modal_result("Modal", payload)
+
+        for key in ("results:Mode-1", "results:Mode-2"):
+            view = window._views.get(key)
+            assert view is not None, f"{key} registered no mode-shape view"
+            assert view.kind == "results"
+            assert window._views.results(key).has_displacements(key.split(":")[1])
+
 
 class TestTableAndFigureViews:
     """P30 phase C: a check's table and a chart's figure reach the viewport."""

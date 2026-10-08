@@ -19,6 +19,7 @@ from fea_toolkit.gui.project import (
     figure_identity,
     figures_payload,
     is_project,
+    mode_shape_arrays,
     read_project,
     rs_displacement_arrays,
     tables_payload,
@@ -202,6 +203,62 @@ def test_rs_directions_round_trip_through_the_bundle(tmp_path):
     assert "RS-Y" in bundle["results"].cases()
     assert bundle["results"].has_displacements("RS-X")
     assert bundle["results"].has_displacements("RS-Y")
+
+
+def test_mode_shape_arrays_build_static_shaped_cases():
+    """Modal shapes become ``static/Mode-<i>/node_*`` cases over the geometry."""
+    from examples.sample_model import make_sample_model
+
+    mesh = make_sample_model()
+    node_tags = [node.node_tag for node in mesh.nodes.values()]
+    shapes = {
+        0: dict.fromkeys(node_tags, (0.001, 0.0, 0.0)),
+        1: dict.fromkeys(node_tags, (0.0, 0.002, 0.0)),
+    }
+
+    arrays = mode_shape_arrays(mesh, shapes)
+
+    assert list(arrays["static_case_labels"]) == ["Mode-1", "Mode-2"]
+    assert len(arrays["static/Mode-1/node_dx"]) == len(node_tags)
+    assert arrays["static/Mode-1/node_dx"][0] == 0.001
+    assert arrays["static/Mode-2/node_dy"][0] == 0.002
+
+
+def test_mode_shapes_round_trip_through_the_bundle(tmp_path):
+    """Mode shapes persist as results cases that survive a write/read round-trip."""
+    from examples.sample_model import make_sample_model
+
+    mesh = make_sample_model()
+    node_tags = [node.node_tag for node in mesh.nodes.values()]
+    shapes = {0: dict.fromkeys(node_tags, (0.001, 0.0, 0.0))}
+    arrays = mode_shape_arrays(mesh, shapes)
+
+    manifest = build_manifest(
+        name="Modal",
+        source_label="modal.s2k",
+        model_file="model.npz",
+        units={"F": "N"},
+        recipe=None,
+        views=[],
+        active_view=None,
+        camera=None,
+        hidden_elem_ids=[],
+        display={},
+    )
+    write_project(
+        tmp_path / "Modal.fea",
+        manifest=manifest,
+        sap=None,
+        mesh=None,
+        results_arrays=arrays,
+        figures=figures_payload({}),
+        tables=tables_payload({}),
+        model_fmt="npz",
+    )
+
+    bundle = read_project(tmp_path / "Modal.fea")
+    assert "Mode-1" in bundle["results"].cases()
+    assert bundle["results"].has_displacements("Mode-1")
 
 
 def test_collect_project_results_empty_run():

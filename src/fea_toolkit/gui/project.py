@@ -43,6 +43,7 @@ __all__ = [
     "figure_identity",
     "figures_payload",
     "is_project",
+    "mode_shape_arrays",
     "read_project",
     "regenerate_figure",
     "rs_displacement_arrays",
@@ -198,39 +199,25 @@ def collect_project_results(results: list) -> dict:
     }
 
 
-def rs_displacement_arrays(mesh: Any, rs_nodal_displacements: dict) -> dict:
-    """Marshal per-direction RS displacement fields into static-shaped arrays.
+def _displacement_cases(mesh: Any, fields: dict, labels: list[str]) -> dict:
+    """Shared core: marshal tag-keyed displacement fields into static-shaped cases.
 
-    Option C for the single-direction ``rs/node_*`` block: each direction's
-    CQC-combined displacement field (keyed by OpenSees node tag) is written as a
-    ``static/RS-<direction>/node_*`` case over the mesh's geometry, so the
-    standard :class:`~fea_toolkit.io.results_repository.NpzResultsRepository`
-    reads it exactly like a static load case and the deformed-shape view
-    round-trips through the project bundle.
-
-    Args:
-        mesh: The ``MeshModel`` (or ``SAPModelData``) the fields are keyed to —
-            supplies the geometry arrays and the node-tag ordering.
-        rs_nodal_displacements: ``{direction: {node_tag: (dx, dy, dz)}}``, as
-            captured by :func:`collect_project_results`.
-
-    Returns:
-        The geometry arrays, ``static_case_labels`` (the ``RS-<direction>``
-        labels, in sorted direction order) and one
-        ``static/RS-<direction>/node_*`` block per direction, with displacements
-        in geometry order.
+    *fields* maps an arbitrary key (a direction, a mode index) to a
+    ``{node_tag: (dx, dy, dz)}`` field; *labels* is the case label per key,
+    aligned with ``sorted(fields)``.  Each field becomes a
+    ``static/<label>/node_*`` block over the mesh's geometry, so the standard
+    :class:`~fea_toolkit.io.results_repository.NpzResultsRepository` reads it
+    like a static load case.
     """
     import numpy as np
 
     from ..io._serial import collect_geometry_arrays
 
     arrays = dict(collect_geometry_arrays(mesh))
-    directions = sorted(rs_nodal_displacements)
-    labels = [f"RS-{direction}" for direction in directions]
     arrays["static_case_labels"] = np.array(labels, dtype=str)
     node_tags = [int(tag) for tag in arrays.get("node_tag", [])]
-    for direction, label in zip(directions, labels):
-        field = rs_nodal_displacements.get(direction) or {}
+    for key, label in zip(sorted(fields), labels):
+        field = fields.get(key) or {}
         components = [[], [], []]
         for tag in node_tags:
             disp = field.get(tag, (0.0, 0.0, 0.0))
@@ -239,6 +226,51 @@ def rs_displacement_arrays(mesh: Any, rs_nodal_displacements: dict) -> dict:
         for axis, dof in enumerate(("dx", "dy", "dz")):
             arrays[f"static/{label}/node_{dof}"] = np.array(components[axis], dtype=float)
     return arrays
+
+
+def rs_displacement_arrays(mesh: Any, rs_nodal_displacements: dict) -> dict:
+    """Marshal per-direction RS displacement fields into static-shaped arrays.
+
+    Option C for the single-direction ``rs/node_*`` block: each direction's
+    CQC-combined displacement field (keyed by OpenSees node tag) is written as a
+    ``static/RS-<direction>/node_*`` case over the mesh's geometry, so the
+    deformed-shape view round-trips through the project bundle like a static case.
+
+    Args:
+        mesh: The ``MeshModel`` (or ``SAPModelData``) the fields are keyed to.
+        rs_nodal_displacements: ``{direction: {node_tag: (dx, dy, dz)}}``, as
+            captured by :func:`collect_project_results`.
+
+    Returns:
+        The geometry arrays, ``static_case_labels`` (the ``RS-<direction>``
+        labels, in sorted direction order) and one ``static/RS-<direction>/node_*``
+        block per direction, with displacements in geometry order.
+    """
+    directions = sorted(rs_nodal_displacements)
+    return _displacement_cases(
+        mesh, rs_nodal_displacements, [f"RS-{direction}" for direction in directions]
+    )
+
+
+def mode_shape_arrays(mesh: Any, mode_shapes: dict) -> dict:
+    """Marshal per-mode shape eigenvectors into static-shaped cases.
+
+    Each mode's shape (``{mode_index: {node_tag: (dx, dy, dz)}}``, 0-based) is
+    written as a ``static/Mode-<i>/node_*`` case (1-based labels) over the mesh's
+    geometry, so each mode shape becomes a deformed-shape results view that
+    round-trips through the project bundle like a static case.
+
+    Args:
+        mesh: The ``MeshModel`` (or ``SAPModelData``) the shapes are keyed to.
+        mode_shapes: ``{mode_index: {node_tag: (dx, dy, dz)}}``, as returned by
+            :func:`~fea_toolkit.opensees.analysis_builder.run_modal`.
+
+    Returns:
+        The geometry arrays, ``static_case_labels`` (``Mode-1`` … ``Mode-N``)
+        and one ``static/Mode-<i>/node_*`` block per mode, in geometry order.
+    """
+    indices = sorted(mode_shapes)
+    return _displacement_cases(mesh, mode_shapes, [f"Mode-{index + 1}" for index in indices])
 
 
 def figures_payload(pushover: dict, label: str = "Pushover") -> dict:

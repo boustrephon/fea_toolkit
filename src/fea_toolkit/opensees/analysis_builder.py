@@ -649,7 +649,10 @@ def run_modal(
     ab.build_domain()
     ab.compute_seismic_masses()
     modal = ab.run_modal_analysis(num_modes=n_modes, print_results=False)
-    shapes = ab.extract_mode_shapes(n_modes)
+    # Only the converged modes get a shape — a model can converge fewer modes
+    # than requested, and extracting beyond that reads uninitialised eigenvectors
+    # (the review path extracts len(periods) for the same reason).
+    shapes = ab.extract_mode_shapes(len(modal["periods"]))
     return {"modal": modal, "shapes": shapes}
 
 
