@@ -86,11 +86,18 @@ config = {
     # ... existing keys ...
 
     # ── Pushover recording (opt-in) ──
-    "record_pushover_steps": False,              # bool — enable per-step recording
+    "record_pushover_steps": False,              # bool — master gate (OR of the store_* flags)
     "pushover_record_selection": None,           # Selection or None → record all
+    "pushover_record_node_disp": True,           # bool — per-step node displacements (cheap)
+    "pushover_record_frame_forces": False,       # bool — per-step local end forces (expensive)
+    "pushover_record_shell_forces": False,       # bool — per-step shell resultants (expensive)
     "pushover_record_shell_strains": False,      # bool — also record shell layer strains
+    "pushover_step_stride": 1,                   # int — record every Nth converged step
 
-    # ── Fiber-level recording (future) ──
+    # ── Condensed section-deformation provision (off by default) ──
+    "pushover_record_section_deformations": False,  # bool — ε,κ history (the reconstruction key)
+
+    # ── Fiber-level recording (future, deferred) ──
     "pushover_record_fiber": False,              # bool — requires Selection, no --all
 }
 ```
@@ -493,16 +500,56 @@ Both build a ``pyvista.LookupTable`` and call ``plotter.add_scalar_bar()``.  The
 
 ---
 
-## Phase 5 — Fiber-Level Output (Future, Deferred)
+## Phase 5 — Fiber-Level Output (two-tier: provision now, full fibers deferred)
 
-**Config**: `pushover_record_fiber: True` — requires an explicit `pushover_record_selection` (no `None` = all allowed).
+Fiber stress-strain is the one thing we do **not** want to store by default: it
+is per-fiber, per-integration-point, per-step, and the volume is hundreds of
+times the section-deformation history (gigabytes at large-model scale).  So the
+output is split into a cheap *provision* we can land now and a *full* fiber dump
+we defer.
 
-**Data recorded**: Per selected element, per integration point, per step:
-- Section axial strain and curvature (ε, κy, κz)
+### 5.1 Condensed section-deformation provision (off by default, land now)
+
+**Config**: `pushover_record_section_deformations: True`.
+
+**Data recorded**: per selected element, per integration point, per step, the
+**section deformation vector** — axial strain and two curvatures (ε, κ_y, κ_z),
+plus the elastic torsional term — via
+`ops.eleResponse(tag, 'section', secNum, 'deformation')`.  This is the *minimal*
+state from which every fiber strain is reconstructible.
+
+**Why this is sufficient.**  A fiber section derives each fiber's strain from the
+section deformation under the *plane-sections-remain-plane* kinematic assumption
+(`ε_fiber = ε + κ·position`), and `FiberSection::setTrialSectionDeformation`
+feeds that vector to every fiber (see the OpenSees source).  Fiber **strain** is
+therefore exactly reconstructible from a single section deformation; fiber
+**stress** is path-dependent and needs the *history*, but that history is fully
+determined by the recorded ε,κ sequence plus the section's fiber discretisation
+and material definitions — so replaying the recorded history through a fresh copy
+of the section reproduces every fiber's stress-strain.  This replay is a
+**separate, deferred tool** (below), not part of this provision.
+
+**NPZ namespace**: `pushover/{direction}/section_...` — section index/location
+and the `section_deformation_*` block.
+
+**Caveats recorded with the slot**:
+- Reconstruction needs the **full history**, not a snapshot.
+- The fiber discretisation must be reproducible from the model — the toolkit's
+  `create_fiber_sections` flow already guarantees deterministic layouts.
+- The component **order** (ε, κ_z, κ_y, γ_torsion) is documented with the arrays
+  so the future replay tool reads the right columns.
+
+### 5.2 Full fiber stress-strain (deferred)
+
+**Config**: `pushover_record_fiber: True` — requires an explicit
+`pushover_record_selection` (no `None` = all allowed).
+
+**Data recorded**: per selected element, per integration point, per step:
 - Fiber stress and strain at each fiber (for fiber sections)
 - nD material stress/strain state at Gauss points (for layered shells)
 
-**NPZ namespace**: `pushover/{direction}/fiber/...` — separate arrays due to high data volume.
+**NPZ namespace**: `pushover/{direction}/fiber/...` — separate arrays due to high
+data volume.
 
 **Enforcement**:
 ```python
@@ -512,6 +559,14 @@ if config.get("pushover_record_fiber") and config.get("pushover_record_selection
         "No '--all' option is supported for fiber output."
     )
 ```
+
+### 5.3 Fiber-stress-strain replay tool (deferred)
+
+A follow-up workstream, not shipped here: given the recorded ε,κ history plus the
+section's fiber discretisation and material definitions, rebuild a `FiberSection`
+and replay the history through it (`setTrialSectionDeformation` → `commit` per
+step), reading back each fiber's stress-strain.  It must be validated against
+direct `fiber … stressStrain` recording on a benchmark before it is trusted.
 
 ---
 
