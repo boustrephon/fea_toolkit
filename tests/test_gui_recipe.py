@@ -268,6 +268,41 @@ class TestResultViews:
         assert "The recipe was cancelled." in log
         assert "produced no results" not in log
 
+    def test_an_rs_result_registers_a_deformed_shape_view(self, window):
+        """An RS result with a displacement field becomes a results view, like static."""
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.analysis.base import AnalysisResult
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
+        mesh = preprocess_model(make_sample_model(), {"split_elements": True})
+        window._store.set_preprocessed(mesh)
+        node_tags = [node.node_tag for node in mesh.nodes.values()]
+        field = dict.fromkeys(node_tags, (0.001, 0.0, 0.0))
+
+        payload = AnalysisResult(
+            name="ResponseSpectrum",
+            analysis_type="ResponseSpectrumAnalysis",
+            data={
+                "rs_result": {
+                    "base_shear_cqc": 120.0,
+                    "base_shear_srss": 130.0,
+                    "base_shear_total": 160.0,
+                    "base_moment_cqc": 140.0,
+                    "base_moment_srss": 150.0,
+                },
+                "direction": "X",
+                "node_displacements": field,
+            },
+        )
+        window._show_rs_result("Response spectrum (X)", payload)
+
+        view = window._views.get("results:RS-X")
+        assert view is not None, "the RS result registered no deformed-shape view"
+        assert view.kind == "results"
+        repository = window._views.results("results:RS-X")
+        assert repository.has_displacements("RS-X")
+        assert repository.nodal_displacements("RS-X")
+
 
 class TestTableAndFigureViews:
     """P30 phase C: a check's table and a chart's figure reach the viewport."""

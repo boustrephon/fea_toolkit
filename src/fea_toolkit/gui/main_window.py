@@ -2394,13 +2394,15 @@ class MainWindow(QMainWindow):
         )
 
     def _show_rs_result(self, label: str, payload: Any) -> None:
-        """Summarise a response-spectrum result as a table and register it.
+        """Summarise a response-spectrum result as a table and a results view.
 
         The ``response_spectrum`` verb's payload is an
         :class:`~fea_toolkit.analysis.base.AnalysisResult` whose ``data`` holds
-        ``{"rs_result": {…}, "direction": …}``.  The combined base shear / moment
-        scalars are distilled into a one-row table so the CQC / SRSS totals are
-        inspectable (and savable) rather than only logged.
+        ``{"rs_result": {…}, "direction": …, "node_displacements": {…}}``.  The
+        combined base shear / moment scalars are distilled into a one-row table,
+        and the CQC combined displacement field becomes a ``results`` view — one
+        per direction, exactly like a static case — so the deformed shape is
+        inspectable rather than only logged.
         """
         from ..workflow.steps import Table
 
@@ -2425,6 +2427,45 @@ class MainWindow(QMainWindow):
             ),
         )
         self._show_table_result(label, table)
+
+        node_displacements = data.get("node_displacements")
+        if isinstance(node_displacements, dict) and node_displacements:
+            self._show_rs_results_view(label, str(direction), node_displacements)
+
+    def _show_rs_results_view(self, label: str, direction: str, node_displacements: dict) -> None:
+        """Register the combined RS displacement field as a ``results`` view.
+
+        The field is keyed by OpenSees node tag, but the existing
+        :class:`~fea_toolkit.io.results_repository.NpzResultsRepository` reads
+        the static-shaped ``static/<case>/node_*`` layout, so the field is
+        marshalled into that shape over the mesh's own geometry and registered
+        through the same path a static case takes.
+        """
+        import numpy as np
+
+        from ..io._serial import collect_geometry_arrays
+
+        mesh = self._store.preprocessed() if self._store is not None else None
+        if mesh is None:
+            self.log(
+                f"{label}: no prepared mesh to draw the {direction} displaced shape against.",
+                "warn",
+            )
+            return
+
+        arrays = dict(collect_geometry_arrays(mesh))
+        case = f"RS-{direction}"
+        arrays["static_case_labels"] = np.array([case], dtype=str)
+        node_tags = [int(tag) for tag in arrays.get("node_tag", [])]
+        components = [[], [], []]
+        for tag in node_tags:
+            disp = node_displacements.get(tag, (0.0, 0.0, 0.0))
+            for axis in range(3):
+                components[axis].append(float(disp[axis]))
+        for axis, dof in enumerate(("dx", "dy", "dz")):
+            arrays[f"static/{case}/node_{dof}"] = np.array(components[axis], dtype=float)
+
+        self._show_results_archive(label, arrays)
 
     def _show_pushover_result(self, label: str, payload: Any) -> None:
         """Plot each converged direction's capacity spectrum (ADRS) as a figure.
@@ -2481,20 +2522,28 @@ class MainWindow(QMainWindow):
         self.log(f"{label}: added {len(views)} ADRS figure(s).")
 
     def _show_results_result(self, label: str, arrays: Any) -> list:
-        """Register each case in a recipe's results as a view, and show the first.
+        """Register each case in a recipe's results archive as a view.
 
         Both ``cases`` verbs — a solve and a combination reduction — hand back
         an in-memory results archive, so this is the same path the **Analysis ▸
-        Run** results take: a
-        :class:`~fea_toolkit.io.results_repository.NpzResultsRepository` over
-        the array dict, one view per case, nothing written to disk.  Cases
-        replace by key, so re-running a recipe refreshes its views instead of
-        piling them up.
+        Run** results take.  See :meth:`_show_results_archive`.
+        """
+        return self._show_results_archive(label, arrays or {})
+
+    def _show_results_archive(self, label: str, arrays: dict) -> list:
+        """Register one ``results`` view per case in *arrays* and show the first.
+
+        A :class:`~fea_toolkit.io.results_repository.NpzResultsRepository` over
+        the array dict supplies the cases (``static_case_labels``); the mesh the
+        run was prepared from is what the results are keyed to, so it is
+        preferred, and an archive also carries its own display geometry, which is
+        what makes the view drawable with nothing else loaded.  Cases replace by
+        key, so re-running a recipe refreshes its views instead of piling them up.
 
         Args:
-            label: The step's result label, e.g. ``"Static cases"`` — recorded
-                as the view's provenance.
-            arrays: The archive arrays the step produced.
+            label: The step's result label, recorded as the view's provenance.
+            arrays: The archive arrays — ``static_case_labels`` plus the
+                ``static/<case>/…`` blocks and the geometry arrays.
 
         Returns:
             The case labels registered, in archive order — empty when the
@@ -2507,9 +2556,6 @@ class MainWindow(QMainWindow):
         if not cases:
             return []
 
-        # The mesh the run was prepared from is what the results are keyed to,
-        # so prefer it; an archive also carries its own display geometry, which
-        # is what makes the view drawable with nothing else loaded.
         mesh = self._store.preprocessed() if self._store is not None else None
         model = mesh if mesh is not None else repository.as_model()
         for case in cases:
@@ -2883,7 +2929,11 @@ class MainWindow(QMainWindow):
 
     def _project_results_arrays(self, collected: dict) -> dict:
         """Merge the collected static archive arrays with modal + RS arrays."""
-        from ..io.unified_writer import collect_modal_arrays, collect_rs_arrays
+        from ..io.unified_writer import (
+            collect_modal_arrays,
+            collect_rs_arrays,
+            collect_rs_nodal_displacement_arrays,
+        )
 
         arrays = dict(collected.get("static_arrays") or {})
         modal = collected.get("modal")
@@ -2892,6 +2942,14 @@ class MainWindow(QMainWindow):
         rs = collected.get("rs") or {}
         if rs:
             arrays.update(collect_rs_arrays(rs.get("rs_x"), rs.get("rs_y")))
+        # The ``rs/node_*`` block is single-direction in the schema (like
+        # ``rs/elem_*``), so the last direction to write wins — mirroring the
+        # review path, which keeps one direction's displacement field.
+        rs_disp = collected.get("rs_nodal_displacements") or {}
+        for direction in ("X", "Y", "Z"):
+            field = rs_disp.get(direction)
+            if field:
+                arrays.update(collect_rs_nodal_displacement_arrays(field))
         return arrays
 
     def _project_tables(self) -> dict:

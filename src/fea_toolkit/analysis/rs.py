@@ -43,7 +43,9 @@ def run_response_spectrum_analysis(
 
     Returns:
         :class:`AnalysisResult` whose ``data`` holds the RS result dict,
-        the per-mode ``modal_base_shear``, and the ``direction``.
+        the per-mode ``modal_base_shear``, the ``direction``, and the
+        CQC-combined ``node_displacements`` (``{node_tag: (dx, dy, dz)}``)
+        for a deformed-shape view.
     """
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
@@ -84,6 +86,27 @@ def run_response_spectrum_analysis(
     # Also collect per-mode base shear
     modal_base_shear = list(rs_result.get("modal_base_shear", []))
 
+    # CQC-combined peak nodal displacements — the deformed-shape field a results
+    # view needs.  Computed here (not in the GUI) so every RS consumer shares one
+    # computation; kept best-effort, because a model with no usable eigenvectors
+    # still reports its base shears.
+    node_displacements: dict = {}
+    eigenvalues = modal.get("eigenvalues", [])
+    if eigenvalues:
+        try:
+            import numpy as np
+
+            node_displacements = ab.compute_rs_nodal_displacements(
+                num_modes=n_modes,
+                modal_periods=periods,
+                eigenvalues=eigenvalues,
+                spectrum_func=lambda T: float(np.interp(T, T_spec, Sa_spec)),
+                direction=direction,
+                damping_ratio=damping,
+            )
+        except Exception:
+            node_displacements = {}
+
     return AnalysisResult(
         name=name,
         analysis_type="ResponseSpectrumAnalysis",
@@ -91,6 +114,7 @@ def run_response_spectrum_analysis(
             "rs_result": rs_result,
             "modal_base_shear": modal_base_shear,
             "direction": direction,
+            "node_displacements": node_displacements,
         },
         metadata={
             "direction": direction,

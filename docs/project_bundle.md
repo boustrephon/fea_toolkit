@@ -104,16 +104,20 @@ serializable payloads:
 |---|---|---|
 | `cases` | assembled archive arrays | `results.npz` |
 | `modal` | `AnalysisResult.data` (`modal` + `shapes`) | `results.npz` (`collect_modal_arrays`) |
-| `response_spectrum` | `AnalysisResult.data` (`rs_result` + `direction`) | `results.npz` (`collect_rs_arrays`) + `tables.json` |
+| `response_spectrum` | `AnalysisResult.data` (`rs_result` + `direction` + `node_displacements`) | `results.npz` (`collect_rs_arrays` + `collect_rs_nodal_displacement_arrays`) + `tables.json` |
 | `pushover` | `AnalysisResult.data` per direction (`adrs`/`pp`/`spectrum`) | `figures.json` |
 
 The response-spectrum results are walked from `run.results` (not the context
-slot) because the context's `results["rs"]` is overwritten per direction.
+slot) because the context's `results["rs"]` is overwritten per direction.  The
+`rs/node_*` block is single-direction in the schema (like `rs/elem_*`), so of
+the per-direction displacement fields the last one to write wins — mirroring the
+review path, which keeps one direction's field.
 
 ## Related fixes
 
 - `_recipe_finished` now dispatches the `RS` kind (`_show_rs_result` registers a
-  one-row base-shear/moment table), so response-spectrum results are visible and
+  one-row base-shear/moment table **and** a `results` view per direction from the
+  CQC `node_displacements`), so response-spectrum results are visible and
   savable — they previously were logged and dropped.
 - `_show_pushover_result` and the loader share `figure_identity` (one spelling
   for the figure view key/name).

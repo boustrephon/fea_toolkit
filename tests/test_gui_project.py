@@ -6,6 +6,7 @@ results arrays and JSON payloads (no model stage).
 """
 
 import json
+from typing import Optional
 
 import numpy as np
 
@@ -48,23 +49,26 @@ def _modal_step() -> StepResult:
     )
 
 
-def _rs_step(direction: str) -> StepResult:
+def _rs_step(direction: str, node_displacements: Optional[dict] = None) -> StepResult:
+    data = {
+        "rs_result": {
+            "base_shear_cqc": 120.0,
+            "base_shear_srss": 130.0,
+            "base_moment_cqc": 140.0,
+            "base_moment_srss": 150.0,
+            "base_shear_total": 160.0,
+        },
+        "direction": direction,
+    }
+    if node_displacements is not None:
+        data["node_displacements"] = node_displacements
     return StepResult(
         kind=RS,
         label=f"Response spectrum ({direction})",
         payload=AnalysisResult(
             name="ResponseSpectrum",
             analysis_type="ResponseSpectrumAnalysis",
-            data={
-                "rs_result": {
-                    "base_shear_cqc": 120.0,
-                    "base_shear_srss": 130.0,
-                    "base_moment_cqc": 140.0,
-                    "base_moment_srss": 150.0,
-                    "base_shear_total": 160.0,
-                },
-                "direction": direction,
-            },
+            data=data,
         ),
     )
 
@@ -132,12 +136,21 @@ def test_collect_project_results_maps_each_kind():
     assert collected["pushover"]["+X"]["adrs"]["S_a"] == [0.0, 1.0]
 
 
+def test_collect_project_results_captures_rs_nodal_displacements():
+    field = {1: (0.1, 0.2, 0.3), 2: (0.4, 0.5, 0.6)}
+    collected = collect_project_results([_rs_step("X", field)])
+    assert collected["rs_nodal_displacements"] == {"X": field}
+    # A direction that recorded no field leaves the slot empty.
+    assert collect_project_results([_rs_step("Y")])["rs_nodal_displacements"] == {}
+
+
 def test_collect_project_results_empty_run():
     assert collect_project_results([]) == {
         "static_arrays": {},
         "modal": None,
         "mode_shapes": None,
         "rs": {},
+        "rs_nodal_displacements": {},
         "pushover": {},
     }
 

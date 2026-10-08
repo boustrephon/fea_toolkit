@@ -149,12 +149,14 @@ def collect_project_results(results: list) -> dict:
     Returns:
         A dict with keys ``static_arrays`` (the merged ``CASES`` archive arrays),
         ``modal`` / ``mode_shapes`` (from the ``MODAL`` payload), ``rs`` (``rs_x``
-        / ``rs_y``), and ``pushover`` (``{direction: entry}``).
+        / ``rs_y``), ``rs_nodal_displacements`` (``{direction: {node_tag: (dx, dy,
+        dz)}}``), and ``pushover`` (``{direction: entry}``).
     """
     static_arrays: dict = {}
     modal: Optional[dict] = None
     mode_shapes: Optional[dict] = None
     rs: dict = {}
+    rs_nodal_displacements: dict = {}
     pushover: dict = {}
 
     for result in results:
@@ -175,6 +177,9 @@ def collect_project_results(results: list) -> dict:
                 rs_result = data.get("rs_result")
                 if isinstance(rs_result, dict):
                     rs[f"rs_{direction.lower()}"] = rs_result
+                node_disp = data.get("node_displacements")
+                if isinstance(node_disp, dict) and node_disp:
+                    rs_nodal_displacements[direction] = node_disp
         elif kind == PUSHOVER:
             data = getattr(payload, "data", None)
             if isinstance(data, dict):
@@ -187,6 +192,7 @@ def collect_project_results(results: list) -> dict:
         "modal": modal,
         "mode_shapes": mode_shapes,
         "rs": rs,
+        "rs_nodal_displacements": rs_nodal_displacements,
         "pushover": pushover,
     }
 
