@@ -568,6 +568,24 @@ if config.get("pushover_record_fiber") and config.get("pushover_record_selection
     )
 ```
 
+**Decision — deferred, with a preferred future route.**  The
+record-during-analysis path above stays deferred.  The intended way to get
+on-disk per-fiber stress/strain is **offline reconstruction** via §5.3's
+`replay_fiber_section`: replay the already-recorded ε,κ history for a chosen
+subset of sections and persist the result.  Two sinks are possible:
+
+- **C — replay → NPZ.**  Write the replayed `(n_step, n_fiber)` stress/strain
+  arrays under this section's `pushover/{direction}/{load_type}/fiber/...`
+  namespace.
+- **D — replay → H5.**  Write the same arrays into the stage H5, which already
+  carries the section arrays.
+
+Both reproduce the direct recording to numerical precision, cost nothing at
+analysis time, and let the subset be chosen *after* the run instead of before
+it.  The resolve-and-write wrapper C/D would use is itself deferred (see §5.3)
+— this is deliberate: we will implement it if and when we want to review fiber
+stresses, and until then no fiber output is persisted.
+
 ### 5.3 Fiber-stress-strain replay tool (implemented)
 
 ``fea_toolkit.opensees.fiber_replay.replay_fiber_section(patches, materials,
@@ -580,6 +598,22 @@ stress-strain as ``(n_step, n_fiber)`` arrays.  It is validated against direct
 a small RC cantilever, records the section deformation and per-fiber
 stress-strain simultaneously, then replays the recorded history and asserts the
 two match to numerical precision.
+
+**Scope and deferred conveniences.**  This engine is implemented and
+validated, but it is a low-level primitive: it takes explicit `patches` +
+`materials` and returns in-memory arrays, persisting nothing.  The two
+higher-level conveniences that would drive it are **deferred by decision**:
+
+- **A resolve wrapper** — load an NPZ, map `section_frame_sap_id` → section →
+  `to_fiber_patches()` + materials (the material resolution currently lives
+  inside `AnalysisBuilder._create_single_section`, not standalone), then call
+  this engine.
+- **C/D persistence** — write the replayed arrays to NPZ (C) or the stage H5
+  (D), per §5.2.
+
+We will implement these if and when we want to review fiber stresses from a
+recorded run; until then the engine stands ready, but nothing persists fiber
+output.
 
 ---
 
