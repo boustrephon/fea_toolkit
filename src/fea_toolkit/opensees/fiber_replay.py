@@ -134,9 +134,10 @@ def replay_fiber_section(
 
         # ── Replay the history (path-dependent commit per step) ──
         # One Constant time series + Plain pattern drives every step; the
-        # prescribed node-2 DOFs are updated in place (ops.sp) so the imposed
-        # section deformation follows the recorded history while the analysis
-        # is initialised once.
+        # prescribed node-2 DOFs are updated by removing the previous
+        # single-point constraint before adding its replacement, so each DOF
+        # carries exactly one active constraint as the recorded values change
+        # step to step while the analysis is initialised once.
         ops.timeSeries("Constant", 2)
         ops.pattern("Plain", 2, 2)
         for dof in range(1, 7):
@@ -152,12 +153,12 @@ def replay_fiber_section(
 
         for k, row in enumerate(history):
             eps, kz, ky, phi = float(row[0]), float(row[1]), float(row[2]), float(row[3])
-            ops.sp(2, 1, eps)
-            ops.sp(2, 2, 0.0)
-            ops.sp(2, 3, 0.0)
-            ops.sp(2, 4, phi)
-            ops.sp(2, 5, ky)
-            ops.sp(2, 6, kz)
+            # Node-2 DOFs map onto the section deformation as
+            # [ε, κ_z, κ_y, φ] = [ux, rz, ry, rx], with uy/uz restrained.
+            node2_dofs = (eps, 0.0, 0.0, phi, ky, kz)
+            for dof, value in enumerate(node2_dofs, start=1):
+                ops.remove("sp", 2, dof)
+                ops.sp(2, dof, value)
             if ops.analyze(1) != 0:
                 raise RuntimeError(f"replay step {k} failed to converge")
             for i in range(n_fiber):
