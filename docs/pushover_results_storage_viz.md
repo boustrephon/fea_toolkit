@@ -601,8 +601,8 @@ two match to numerical precision.
 
 **Scope and deferred conveniences.**  This engine is implemented and
 validated, but it is a low-level primitive: it takes explicit `patches` +
-`materials` and returns in-memory arrays, persisting nothing.  The two
-higher-level conveniences that would drive it are **deferred by decision**:
+`materials` and returns in-memory arrays, persisting nothing.  The
+conveniences that would drive it are **deferred by decision**:
 
 - **A resolve wrapper** — load an NPZ, map `section_frame_sap_id` → section →
   `to_fiber_patches()` + materials (the material resolution currently lives
@@ -610,6 +610,14 @@ higher-level conveniences that would drive it are **deferred by decision**:
   this engine.
 - **C/D persistence** — write the replayed arrays to NPZ (C) or the stage H5
   (D), per §5.2.
+- **Local admin regeneration (gate + diff).**  The Admin Building outputs
+  (`local/…/output/*.npz`, `admin_v13.h5`) were written before the κy/κz
+  component-order fix, so their `section_deformation_ky`/`..._kz` arrays are
+  swapped.  Nothing reads them yet, so this is latent.  When this workstream
+  starts, regenerate those outputs first: gate the run with a local
+  section-orientation probe (verifies the `[ε, κ_z, κ_y, φ]` order in the
+  installed code), then confirm the fix by diffing the regenerated κy/κz
+  arrays against the stale ones (`new_ky ≈ old_kz`, `new_kz ≈ old_ky`).
 
 We will implement these if and when we want to review fiber stresses from a
 recorded run; until then the engine stands ready, but nothing persists fiber
