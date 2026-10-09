@@ -187,3 +187,64 @@ def test_sweep_mesh_caps_wind_outward_for_both_orientations():
         # Bottom cap points -X (outward), top cap +X (outward).
         assert _normal_x(points[caps[0]]) < 0
         assert _normal_x(points[caps[1]]) > 0
+
+
+def test_sweep_mesh_hollow_box_winds_outward_for_both_orientations():
+    """CCW and CW box profiles both get outward caps and void-facing inner tubes."""
+    from fea_toolkit.plotting.extruded_frames import _sweep_mesh
+
+    s0 = np.array([[0.0, 0.0, 0.0]])
+    s1 = np.array([[1.0, 0.0, 0.0]])  # member along +X
+    vy = np.array([[0.0, 1.0, 0.0]])
+    vz = np.array([[0.0, 0.0, 1.0]])
+
+    outer = np.array([[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]])
+    inner = np.array([[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]])
+
+    def _normal_x(ring):
+        n = np.zeros(3)
+        for a, b in zip(ring, np.roll(ring, -1, axis=0)):
+            n += np.cross(a, b)
+        return n[0]
+
+    def _face_normal(face):
+        n = np.zeros(3)
+        for a, b in zip(face, np.roll(face, -1, axis=0)):
+            n += np.cross(a, b)
+        return n
+
+    for o, i in ((outer, inner), (outer[::-1], inner[::-1])):
+        points, quads, caps = _sweep_mesh(
+            o, closed=True, caps=True, s0=s0, s1=s1, vy=vy, vz=vz, inner=i
+        )
+        assert caps is not None
+        assert caps.shape == (8, 4)  # 2 ends × 4 annular quads
+        # Bottom cap points -X (outward), top cap +X (outward).
+        assert _normal_x(points[caps[0]]) < 0
+        assert _normal_x(points[caps[4]]) > 0
+        # The inner tube (the last four side quads) faces into the void, toward
+        # the box centre at the local origin.
+        for q in quads[4:]:
+            face = points[q]
+            assert np.dot(_face_normal(face), -face.mean(axis=0)) > 0
+
+
+def test_sweep_mesh_hollow_mismatched_loops_skip_caps():
+    """An inner loop with a different vertex count is swept without caps."""
+    from fea_toolkit.plotting.extruded_frames import _sweep_mesh
+
+    s0 = np.array([[0.0, 0.0, 0.0]])
+    s1 = np.array([[1.0, 0.0, 0.0]])
+    vy = np.array([[0.0, 1.0, 0.0]])
+    vz = np.array([[0.0, 0.0, 1.0]])
+
+    outer = np.array([[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]])
+    inner = np.array([[-0.5, -0.5], [0.5, -0.5], [0.5, 0.0], [0.0, 0.5], [-0.5, 0.5]])
+
+    points, quads, caps = _sweep_mesh(
+        outer, closed=True, caps=True, s0=s0, s1=s1, vy=vy, vz=vz, inner=inner
+    )
+    assert caps is None
+    # Outer tube (4 quads) plus inner tube (5 quads), no cap quads appended.
+    assert quads.shape == (9, 4)
+    assert points.shape[0] == 9 * 4

@@ -200,9 +200,11 @@ def _sweep_mesh(
         vy: Member local Y axes, ``(M, 3)``.
         vz: Member local Z axes, ``(M, 3)``.
         inner: Optional inner boundary, ``(Q, 2)``, for a hollow section.  When
-            given, the inner loop is swept as a second tube (reversed so its
-            faces point into the void) and, when *caps* is set, annular caps
-            join the two rings at each end, leaving the void open.
+            given, the inner loop is swept as a second tube whose faces point
+            into the void (its reversal follows the outer loop's winding) and,
+            when *caps* is set and the two loops share a vertex count
+            (``Q == P``), annular caps join the two rings at each end, leaving
+            the void open.  When the counts differ, the caps are omitted.
 
     Returns:
         ``(points, quads, caps)`` — ``points`` is ``(K, 3)`` the combined
@@ -241,17 +243,25 @@ def _sweep_mesh(
     caps_arr: Optional[np.ndarray] = None
 
     if inner is not None:
-        # Hollow section: sweep the inner boundary as a second tube (reversed so
-        # its faces point into the void), then seal the material between the two
-        # rings with annular quad caps when requested.
+        # Hollow section: sweep the inner boundary as a second tube whose faces
+        # point into the void, then seal the material between the two rings with
+        # annular quad caps when the two loops share a vertex count.  Both the
+        # inner-tube reversal and the cap winding follow the outer loop's signed
+        # area, so a clockwise box profile still gets outward-facing caps.
         P = pts2d.shape[0]
         Q = inner.shape[0]
-        inner_pts, inner_quads = _loop_quads(inner[::-1], True)
+        i0 = np.arange(P)
+        i1 = (i0 + 1) % P
+        signed_area = 0.5 * np.sum(pts2d[i0, 0] * pts2d[i1, 1] - pts2d[i1, 0] * pts2d[i0, 1])
+        ccw = signed_area >= 0.0
+        # A CCW outer pairs with a reversed (CW) inner so the inner tube faces
+        # into the void; a CW outer's inner loop already points the right way.
+        inner_pts, inner_quads = _loop_quads(inner[::-1] if ccw else inner, True)
         inner_offset = points.shape[0]
         points = np.concatenate([points, inner_pts], axis=0)
         quads = np.concatenate([quads, inner_quads + inner_offset], axis=0)
 
-        if caps:
+        if caps and P == Q:
             o_all = pts2d[:, 0:1, None] * vy[None, :, :] + pts2d[:, 1:2, None] * vz[None, :, :]
             i_all = inner[:, 0:1, None] * vy[None, :, :] + inner[:, 1:2, None] * vz[None, :, :]
             o_bottom = (s0[None, :, :] + o_all).reshape(P * M, 3)
@@ -277,7 +287,8 @@ def _sweep_mesh(
             jn = (j + 1) % E
 
             # Top cap winds CCW (normal +X, outward); bottom cap winds CW
-            # (normal -X, outward).
+            # (normal -X, outward) for a CCW profile.  A CW profile reverses
+            # both windings so its caps still point outward.
             top_faces = np.stack(
                 [o_top_idx[:, j], o_top_idx[:, jn], i_top_idx[:, jn], i_top_idx[:, j]],
                 axis=2,
@@ -286,6 +297,9 @@ def _sweep_mesh(
                 [o_bottom_idx[:, j], i_bottom_idx[:, j], i_bottom_idx[:, jn], o_bottom_idx[:, jn]],
                 axis=2,
             ).reshape(M * E, 4)
+            if not ccw:
+                top_faces = top_faces[:, ::-1]
+                bottom_faces = bottom_faces[:, ::-1]
             caps_arr = np.concatenate([bottom_faces, top_faces], axis=0)  # (2M*E, 4)
 
         return points, quads, caps_arr
