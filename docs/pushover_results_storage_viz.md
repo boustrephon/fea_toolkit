@@ -508,18 +508,19 @@ times the section-deformation history (gigabytes at large-model scale).  So the
 output is split into a cheap *provision* we can land now and a *full* fiber dump
 we defer.
 
-### 5.1 Condensed section-deformation provision (design only — fully deferred)
+### 5.1 Condensed section-deformation provision (implemented)
 
-**Config key reserved**: `pushover_record_section_deformations: True`.  The verb
-param, schema slot, recorder, writer and replay tool all land together in the
-follow-up that builds fiber-state reconstruction; this section reserves the
-design and the namespace so that increment is a clean addition.
+**Config key**: `pushover_record_section_deformations: True`.  The verb exposes
+it as the ``store_section_deformations`` parameter (default ``False``); the
+recorder, schema slot and writer land in this provision, and the fiber replay
+tool (§5.3) that consumes these arrays is implemented.
 
-**Data this provision will record** (per selected element, per integration point,
-per step): the **section deformation vector** — axial strain and two curvatures
-(ε, κ_y, κ_z), plus the elastic torsional term — via
+**Data recorded** (per selected frame element, per integration point, per step):
+the **section deformation vector** — axial strain and two curvatures
+(ε, κ_z, κ_y), plus the elastic torsional term — via
 `ops.eleResponse(tag, 'section', secNum, 'deformation')`.  This is the *minimal*
-state from which every fiber strain is reconstructible.
+state from which every fiber strain is reconstructible.  Elastic beam-column
+elements carry no sections and are skipped.
 
 **Why this is sufficient.**  A fiber section derives each fiber's strain from the
 section deformation under the *plane-sections-remain-plane* kinematic assumption
@@ -532,15 +533,19 @@ and material definitions — so replaying the recorded history through a fresh c
 of the section reproduces every fiber's stress-strain.  This replay is a
 **separate, deferred tool** (below), not part of this provision.
 
-**NPZ namespace**: `pushover/{direction}/{load_type}/section_...` — section index/location
-and the `section_deformation_*` block.
+**NPZ namespace**: `pushover/{direction}/{load_type}/section_...` — the
+``section_frame_sap_id`` / ``section_num`` index arrays plus the
+``section_deformation_*`` block (see ``PUSHOVER_SECTION_ARRAYS`` in
+``results_schema.py``).
 
 **Caveats recorded with the slot**:
 - Reconstruction needs the **full history**, not a snapshot.
 - The fiber discretisation must be reproducible from the model — the toolkit's
   `create_fiber_sections` flow already guarantees deterministic layouts.
-- The component **order** (ε, κ_z, κ_y, γ_torsion) is documented with the arrays
-  so the future replay tool reads the right columns.
+- The component **order** is ``[ε, κ_z, κ_y, φ]`` — the OpenSees
+  ``eleResponse(tag, 'section', n, 'deformation')`` order (κ_z before κ_y, as
+  in ``FiberSection3d::setTrialSectionDeformation``).  A flexure-only section
+  returns only three values, so ``φ`` (torsion) is recorded as NaN.
 
 ### 5.2 Full fiber stress-strain (deferred)
 
@@ -563,13 +568,18 @@ if config.get("pushover_record_fiber") and config.get("pushover_record_selection
     )
 ```
 
-### 5.3 Fiber-stress-strain replay tool (deferred)
+### 5.3 Fiber-stress-strain replay tool (implemented)
 
-A follow-up workstream, not shipped here: given the recorded ε,κ history plus the
-section's fiber discretisation and material definitions, rebuild a `FiberSection`
-and replay the history through it (`setTrialSectionDeformation` → `commit` per
-step), reading back each fiber's stress-strain.  It must be validated against
-direct `fiber … stressStrain` recording on a benchmark before it is trusted.
+``fea_toolkit.opensees.fiber_replay.replay_fiber_section(patches, materials,
+deform_history, J)`` rebuilds a `FiberSection` in a fresh OpenSees domain and
+replays the recorded ε,κ history through it — a single-integration-point
+`dispBeamColumn` driven per step, the OpenSeesPy equivalent of
+`setTrialSectionDeformation` → `commit` — reading back every fiber's
+stress-strain as ``(n_step, n_fiber)`` arrays.  It is validated against direct
+`fiber … stressStrain` recording by ``tests/test_fiber_replay.py``, which pushes
+a small RC cantilever, records the section deformation and per-fiber
+stress-strain simultaneously, then replays the recorded history and asserts the
+two match to numerical precision.
 
 ---
 

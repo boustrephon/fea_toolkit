@@ -53,6 +53,7 @@ _LAZY_IMPORTS: dict[str, str] = {
     "triangular_lateral_loads": "fea_toolkit.opensees.builder",
     "uniform_lateral_loads": "fea_toolkit.opensees.builder",
     "run_pushover_4dir": "fea_toolkit.opensees.pushover",
+    "replay_fiber_section": "fea_toolkit.opensees.fiber_replay",
     "RecordingOpenSees": "fea_toolkit.opensees.recorder",
     "XaraTclRunner": "fea_toolkit.opensees.recorder",
     "export_mesh_model_to_tcl": "fea_toolkit.opensees.recorder",
@@ -87,6 +88,8 @@ __all__ = [
     "plan_releases",
     "preprocess_model",
     "pushover_tcl",
+    # Fiber replay
+    "replay_fiber_section",
     "run_modal",
     # Pushover
     "run_pushover_4dir",

@@ -521,6 +521,7 @@ class PushoverRunnerMixin:
         record_node_disp = True
         record_frame_forces = True
         record_shell_forces = True
+        record_section_def = False
         step_stride = 1
         if record:
             # Per-block flags default to the old record-everything behaviour
@@ -529,6 +530,7 @@ class PushoverRunnerMixin:
             record_node_disp = self.config.get("pushover_record_node_disp", True)
             record_frame_forces = self.config.get("pushover_record_frame_forces", True)
             record_shell_forces = self.config.get("pushover_record_shell_forces", True)
+            record_section_def = self.config.get("pushover_record_section_deformations", False)
             step_stride = max(1, int(self.config.get("pushover_step_stride", 1)))
             if record_sel is not None:
                 # Pass storey data if available in config (for story-based Selection filtering)
@@ -709,6 +711,7 @@ class PushoverRunnerMixin:
                     node_tags=record_node_tags,
                     record_frame_forces=record_frame_forces,
                     record_shell_forces=record_shell_forces,
+                    record_section_deformations=record_section_def,
                 )
                 step_results.append(step_data)
 
@@ -1035,6 +1038,7 @@ def _record_step(
     *,
     record_frame_forces: bool = True,
     record_shell_forces: bool = True,
+    record_section_deformations: bool = False,
 ) -> dict[str, Any]:
     """Query ``ops.eleResponse()`` and ``ops.nodeDisp()`` at the current step.
 
@@ -1049,6 +1053,10 @@ def _record_step(
             (``frame_forces`` is emitted empty).  Forces are the expensive part,
             so a run that only needs deformed shapes sets this off.
         record_shell_forces: When ``False``, skip the shell resultant queries.
+        record_section_deformations: When ``True``, record the per-integration-
+            point section deformation vector ``[ε, κ_z, κ_y, φ]`` for each
+            recorded frame element (fiber sections only — elastic elements
+            carry no sections and are skipped).
 
     Returns:
         Dict with keys:
@@ -1056,6 +1064,7 @@ def _record_step(
         * ``"frame_forces"`` — ``{eid: {fx_i, fy_i, fz_i, mx_i, my_i, mz_i,
             fx_j, fy_j, fz_j, mx_j, my_j, mz_j}}``
         * ``"shell_forces"`` — ``{aid: {Nx, Ny, Nxy, Mx, My, Mxy}}``
+        * ``"section_deformations"`` — ``{eid: {nums, axial, ky, kz, torsion}}``
         * ``"node_displacements"`` — ``{tag: (dx, dy, dz)}`` (when *node_tags* is provided)
     """
     data: dict[str, Any] = {"step": step}
@@ -1117,6 +1126,47 @@ def _record_step(
                 "Mxy": f[5],
             }
     data["shell_forces"] = shell_forces
+
+    # ── Section deformations (condensed ε,κ history) ──
+    # Per recorded frame element, per integration point (section).  The
+    # section index is 1-based.  Elastic beam-column elements carry no
+    # sections, so ``eleResponse`` returns an empty list and they are
+    # skipped naturally.  Component order is ``[ε, κ_z, κ_y, φ]``; a
+    # flexure-only section returns three values, so φ is recorded as NaN.
+    section_deformations: dict[str, dict[str, list]] = {}
+    if record_section_deformations:
+        for eid in frame_ids:
+            ops_tag = builder.frame_tag_map.get(eid)
+            if ops_tag is None:
+                continue
+            nums: list[int] = []
+            axial: list[float] = []
+            ky: list[float] = []
+            kz: list[float] = []
+            torsion: list[float] = []
+            sec_num = 1
+            while True:
+                try:
+                    d = ops.eleResponse(ops_tag, "section", sec_num, "deformation")
+                except Exception:
+                    break
+                if not d or len(d) < 3:
+                    break
+                nums.append(sec_num)
+                axial.append(float(d[0]))
+                kz.append(float(d[1]))
+                ky.append(float(d[2]))
+                torsion.append(float(d[3]) if len(d) > 3 else float("nan"))
+                sec_num += 1
+            if nums:
+                section_deformations[eid] = {
+                    "nums": nums,
+                    "axial": axial,
+                    "ky": ky,
+                    "kz": kz,
+                    "torsion": torsion,
+                }
+    data["section_deformations"] = section_deformations
 
     # ── Node displacements ──
     if node_tags is not None:

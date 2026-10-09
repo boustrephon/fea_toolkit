@@ -661,9 +661,11 @@ def _collect_pushover(
     # ── Frame arrays ──────────────────────────────────────────
     # Collect all recorded frame IDs in order of first appearance
     frame_ids: list[str] = []
+    seen_frames: set[str] = set()
     for sd in step_results:
         for eid in sd.get("frame_forces", {}):
-            if eid not in frame_ids:
+            if eid not in seen_frames:
+                seen_frames.add(eid)
                 frame_ids.append(eid)
     n_frame = len(frame_ids)
 
@@ -708,9 +710,11 @@ def _collect_pushover(
 
     # ── Shell arrays ──────────────────────────────────────────
     shell_ids: list[str] = []
+    seen_shells: set[str] = set()
     for sd in step_results:
         for aid in sd.get("shell_forces", {}):
-            if aid not in shell_ids:
+            if aid not in seen_shells:
+                seen_shells.add(aid)
                 shell_ids.append(aid)
     n_shell = len(shell_ids)
 
@@ -733,6 +737,57 @@ def _collect_pushover(
                     shell_comp_map[f"shell_{key}"][si, j] = forces.get(key, np.nan)
 
         for key, arr in shell_comp_map.items():
+            arrays[
+                make_pushover_key(
+                    direction, load_type, f"pushover/{{direction}}/{{load_type}}/{key}"
+                )
+            ] = arr
+
+    # ── Section deformation arrays (condensed ε,κ history) ─────
+    # Collected per recorded frame element per integration point.  The section
+    # index is 1-based (matching ``eleResponse(tag, 'section', n, ...)``), and
+    # the deformation vector is stored in the OpenSees order ``[ε, κ_y, κ_z, φ]``
+    # (torsion is NaN when the section is flexure-only and returns three values).
+    sec_entries: list[tuple[str, int]] = []
+    seen_secs: set[tuple[str, int]] = set()
+    for sd in step_results:
+        for eid, sdef in sd.get("section_deformations", {}).items():
+            for num in sdef.get("nums", []):
+                entry = (eid, int(num))
+                if entry not in seen_secs:
+                    seen_secs.add(entry)
+                    sec_entries.append(entry)
+    n_sec = len(sec_entries)
+
+    if n_sec > 0:
+        arrays[
+            make_pushover_key(
+                direction, load_type, "pushover/{direction}/{load_type}/section_frame_sap_id"
+            )
+        ] = np.array([e for e, _ in sec_entries], dtype=str)
+        arrays[
+            make_pushover_key(direction, load_type, "pushover/{direction}/{load_type}/section_num")
+        ] = np.array([n for _, n in sec_entries], dtype=int)
+
+        sec_comp_keys = ["axial", "ky", "kz", "torsion"]
+        sec_comp_map = {
+            f"section_deformation_{k}": np.full((n_step, n_sec), np.nan, dtype=float)
+            for k in sec_comp_keys
+        }
+        sec_to_idx = {entry: i for i, entry in enumerate(sec_entries)}
+        for si, sd in enumerate(step_results):
+            for eid, sdef in sd.get("section_deformations", {}).items():
+                nums = sdef.get("nums", [])
+                for j, num in enumerate(nums):
+                    idx = sec_to_idx.get((eid, int(num)))
+                    if idx is None:
+                        continue
+                    for k in sec_comp_keys:
+                        vals = sdef.get(k)
+                        if vals is not None and j < len(vals):
+                            sec_comp_map[f"section_deformation_{k}"][si, idx] = vals[j]
+
+        for key, arr in sec_comp_map.items():
             arrays[
                 make_pushover_key(
                     direction, load_type, f"pushover/{{direction}}/{{load_type}}/{key}"

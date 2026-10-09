@@ -96,6 +96,37 @@ def _static_validation_fixture(n_node: int, n_frame: int, case: str = "DEAD") ->
     return data
 
 
+def test_validate_arrays_section_deformations():
+    """Section-deformation arrays are optional but validated when present."""
+    import numpy as np
+
+    from fea_toolkit.io.results_schema import validate_arrays
+
+    n_step, n_sec = 2, 2
+    data = _static_validation_fixture(n_node=2, n_frame=2)
+    data["analysis_types"] = np.array(["pushover"], dtype=str)
+    data.pop("static_case_labels")
+
+    prefix = "pushover/+X/uniform"
+    data[f"{prefix}/step"] = np.arange(1, n_step + 1, dtype=int)
+    data[f"{prefix}/control_disp"] = np.linspace(0.0, 0.1, n_step)
+    data[f"{prefix}/base_shear"] = np.linspace(0.0, 5.0, n_step)
+    data[f"{prefix}/section_frame_sap_id"] = np.array(["1", "1"], dtype=str)
+    data[f"{prefix}/section_num"] = np.array([1, 2], dtype=int)
+    for comp in ("axial", "ky", "kz", "torsion"):
+        data[f"{prefix}/section_deformation_{comp}"] = np.zeros((n_step, n_sec))
+
+    assert validate_arrays(data) == []
+
+    # A wrong-width deformation array is still reported.
+    bad = dict(data)
+    bad[f"{prefix}/section_deformation_axial"] = np.zeros((n_step, n_sec + 1))
+    assert any(
+        f"{prefix}/section_deformation_axial" in m and "Shape mismatch" in m
+        for m in validate_arrays(bad)
+    )
+
+
 @pytest.mark.parametrize("fmt", ["npz", _H5_FORMAT])
 class TestStageFile:
     def test_model_round_trip(self, prepared, tmp_path, fmt):
@@ -266,6 +297,51 @@ class TestStageFile:
         assert "pushover/+X/triangular/step" in data
         assert "pushover/+X/uniform/step" in data
         assert list(data["pushover/+X/triangular/control_disp"]) == [0.1]
+
+    def test_pushover_section_deformations_round_trip(self, prepared, tmp_path, fmt):
+        """Section-deformation arrays round-trip under the ``section_*`` namespace."""
+        md, mesh, config = prepared
+        eid = str(next(iter(mesh.frame_elements)))
+        step_results = [
+            {
+                "step": s,
+                "frame_forces": {},
+                "shell_forces": {},
+                "node_displacements": {},
+                "section_deformations": {
+                    eid: {
+                        "nums": [1, 2],
+                        "axial": [float(s) * 1e-4, float(s) * 1e-4],
+                        "ky": [float(s) * 1e-5, 0.0],
+                        "kz": [0.0, float(s) * 1e-5],
+                        "torsion": [0.0, 0.0],
+                    }
+                },
+            }
+            for s in (1, 2)
+        ]
+        po_results = {
+            "step": [0, 1, 2],
+            "control_disp": [0.0, 0.1, 0.2],
+            "base_shear": [0.0, 5.0, 10.0],
+        }
+        p = str(tmp_path / f"po_sec.{fmt}")
+        write_model_stages(
+            p,
+            sap=md,
+            mesh=mesh,
+            config=config,
+            fmt=fmt,
+            pushover_results={"+X": (step_results, po_results)},
+        )
+        data = read_results(p)
+
+        assert list(data["pushover/+X/uniform/section_frame_sap_id"]) == [eid, eid]
+        assert list(data["pushover/+X/uniform/section_num"]) == [1, 2]
+        assert list(data["pushover/+X/uniform/section_deformation_axial"][:, 0]) == [1e-4, 2e-4]
+        assert list(data["pushover/+X/uniform/section_deformation_ky"][:, 1]) == [0.0, 0.0]
+        assert list(data["pushover/+X/uniform/section_deformation_kz"][:, 1]) == [1e-5, 2e-5]
+        assert list(data["pushover/+X/uniform/section_deformation_torsion"][0]) == [0.0, 0.0]
 
     def test_response_spectrum_results_round_trip(self, prepared, tmp_path, fmt):
         """RS arrays are written under the canonical ``rs/*`` keys."""

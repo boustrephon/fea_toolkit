@@ -331,6 +331,7 @@ class AnalysisBuilder(
             "record_pushover_steps": False,
             "pushover_record_selection": None,
             "pushover_record_shell_strains": False,
+            "pushover_record_section_deformations": False,
             # ── Confined concrete spalling-strain cap ──
             # Upper bound for the confined core ultimate (spalling)
             # strain when using the Mander confinement model.  The

@@ -313,6 +313,7 @@ class TestAnalysisVerbs:
                 "store_node_disp": True,
                 "store_frame_forces": True,
                 "store_shell_forces": False,
+                "store_section_deformations": True,
             },
         )
         STEP_SPECS["pushover"].run(context, step)
@@ -323,6 +324,7 @@ class TestAnalysisVerbs:
         assert config["pushover_record_node_disp"] is True
         assert config["pushover_record_frame_forces"] is True
         assert config["pushover_record_shell_forces"] is False
+        assert config["pushover_record_section_deformations"] is True
 
     def test_response_spectrum_resolves_each_source(self):
         """``resolve_spectrum`` maps source → (T, Sa) from the right place."""

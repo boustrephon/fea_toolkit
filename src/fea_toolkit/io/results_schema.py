@@ -242,6 +242,32 @@ PUSHOVER_NODE_DISP_ARRAYS: dict[str, tuple] = {
     "pushover/{direction}/{load_type}/node_disp_z": ("N_step N_node", "float"),
 }
 
+# Condensed section-deformation provision (§5.1): per recorded frame element,
+# per integration point, per step.  The deformation vector is stored as four
+# components in the OpenSees ``eleResponse(tag, 'section', n, 'deformation')``
+# order ``[ε, κ_z, κ_y, φ]`` — ``torsion`` (φ) is NaN when the section is
+# flexure-only and returns only three values.
+PUSHOVER_SECTION_ARRAYS: dict[str, tuple] = {
+    "pushover/{direction}/{load_type}/section_frame_sap_id": ("N_recorded_section", "str"),
+    "pushover/{direction}/{load_type}/section_num": ("N_recorded_section", "int"),
+    "pushover/{direction}/{load_type}/section_deformation_axial": (
+        "N_step N_recorded_section",
+        "float",
+    ),
+    "pushover/{direction}/{load_type}/section_deformation_ky": (
+        "N_step N_recorded_section",
+        "float",
+    ),
+    "pushover/{direction}/{load_type}/section_deformation_kz": (
+        "N_step N_recorded_section",
+        "float",
+    ),
+    "pushover/{direction}/{load_type}/section_deformation_torsion": (
+        "N_step N_recorded_section",
+        "float",
+    ),
+}
+
 META_ARRAYS: dict[str, tuple] = {
     "force_unit": ("", "str"),
     "length_unit": ("", "str"),
@@ -544,7 +570,7 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
                 # Clear the shared dims first so each direction is
                 # validated only against its own arrays — stale dims
                 # from a previous direction must not leak through.
-                for dk in ("N_step", "N_recorded_frame", "N_recorded_shell"):
+                for dk in ("N_step", "N_recorded_frame", "N_recorded_shell", "N_recorded_section"):
                     dims.pop(dk, None)
                 step_arr = data.get(
                     make_pushover_key(direction, load_type, "pushover/{direction}/{load_type}/step")
@@ -565,6 +591,15 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
                 )
                 if shell_id_arr is not None:
                     dims["N_recorded_shell"] = len(shell_id_arr)
+                sec_frame_id_arr = data.get(
+                    make_pushover_key(
+                        direction,
+                        load_type,
+                        "pushover/{direction}/{load_type}/section_frame_sap_id",
+                    )
+                )
+                if sec_frame_id_arr is not None:
+                    dims["N_recorded_section"] = len(sec_frame_id_arr)
 
                 # ── Required: global arrays ──
                 for template, (shape_desc, dtype_str) in PUSHOVER_GLOBAL_ARRAYS.items():
@@ -586,7 +621,11 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
                     _check_shape(key, arr, shape_desc, dtype_str)
 
                 # ── Optional: frame + shell arrays ──
-                for schema_set in (PUSHOVER_FRAME_ARRAYS, PUSHOVER_SHELL_ARRAYS):
+                for schema_set in (
+                    PUSHOVER_FRAME_ARRAYS,
+                    PUSHOVER_SHELL_ARRAYS,
+                    PUSHOVER_SECTION_ARRAYS,
+                ):
                     for template, (shape_desc, dtype_str) in schema_set.items():
                         key = make_pushover_key(direction, load_type, template)
                         arr = data.get(key)

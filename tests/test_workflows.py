@@ -640,6 +640,44 @@ class TestPushoverWorkflow:
             assert sd["frame_forces"] == {}, "frame forces were disabled"
             assert sd["shell_forces"] == {}, "shell forces were disabled"
 
+    def test_recording_section_deformations(self, sample_nl_ab):
+        """Section deformations are recorded for fiber frames when requested."""
+        sample_nl_ab.config.update(
+            {
+                "record_pushover_steps": True,
+                "pushover_record_section_deformations": True,
+                "pushover_record_node_disp": False,
+                "pushover_record_frame_forces": False,
+                "pushover_record_shell_forces": False,
+            }
+        )
+        sample_nl_ab.build_domain()
+        sample_nl_ab.compute_seismic_masses()
+        results = sample_nl_ab.run_pushover_analysis(
+            gravity_patterns={"DEAD": 1.0},
+            lateral_load_type="uniform",
+            lateral_direction="X",
+            max_disp=0.1,
+            num_steps=5,
+            print_progress=False,
+        )
+
+        step_results = results.get("step_results")
+        assert step_results, "recording produced no step results"
+        recorded = [sd.get("section_deformations") or {} for sd in step_results]
+        assert any(recorded), "section deformations should be recorded"
+
+        _eid, sdef = next(iter(recorded[-1].items()))
+        assert set(sdef) == {"nums", "axial", "ky", "kz", "torsion"}
+        assert sdef["nums"], "expected at least one integration point"
+        assert (
+            len(sdef["nums"])
+            == len(sdef["axial"])
+            == len(sdef["ky"])
+            == len(sdef["kz"])
+            == len(sdef["torsion"])
+        )
+
 
 # ============================================================================
 # Workflow: P6a steel-shape fiber sections end-to-end (parser → builder)
