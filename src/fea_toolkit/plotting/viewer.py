@@ -551,6 +551,7 @@ class ModelViewer:
         Returns:
             The amplification factor, or ``1.0`` when there is nothing to scale.
         """
+        self._extract_geometry()
         return self._auto_amplification(displacements, fraction)
 
     def overlay_forces(

@@ -387,7 +387,8 @@ def views_payload(views: list) -> list:
     recover the payload: a ``case`` for results views (recovered from the key
     suffix), a ``table_key`` for table views and a ``figure_key`` for figure
     views.  ``order`` preserves registration order so a reload lists them in the
-    order they appeared.
+    order they appeared, and ``parent`` records the view's parent key so nested
+    views rebuild their hierarchy on reload.
 
     Args:
         views: ``ViewRegistry.views()`` — the views in registration order.
@@ -403,6 +404,7 @@ def views_payload(views: list) -> list:
             "kind": view.kind,
             "source": view.source,
             "order": order,
+            "parent": view.parent,
         }
         if view.kind == "results":
             entry["case"] = view.key.split(":", 1)[1] if ":" in view.key else view.key

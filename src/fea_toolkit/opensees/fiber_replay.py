@@ -133,34 +133,37 @@ def replay_fiber_section(
         strain = np.empty((history.shape[0], n_fiber), dtype=float)
 
         # ── Replay the history (path-dependent commit per step) ──
-        pattern_tag = 2
+        # One Constant time series + Plain pattern drives every step; the
+        # prescribed node-2 DOFs are updated in place (ops.sp) so the imposed
+        # section deformation follows the recorded history while the analysis
+        # is initialised once.
+        ops.timeSeries("Constant", 2)
+        ops.pattern("Plain", 2, 2)
+        for dof in range(1, 7):
+            ops.sp(2, dof, 0.0)
+
+        ops.system("UmfPack")
+        ops.numberer("Plain")
+        ops.constraints("Transformation")
+        ops.test("NormDispIncr", 1e-12, 50)
+        ops.algorithm("Newton")
+        ops.integrator("LoadControl", 1.0)
+        ops.analysis("Static")
+
         for k, row in enumerate(history):
             eps, kz, ky, phi = float(row[0]), float(row[1]), float(row[2]), float(row[3])
-            if pattern_tag > 2:
-                ops.remove("loadPattern", pattern_tag - 1)
-            ts_tag = 1000 + k
-            ops.timeSeries("Constant", ts_tag)
-            ops.pattern("Plain", pattern_tag, ts_tag)
             ops.sp(2, 1, eps)
             ops.sp(2, 2, 0.0)
             ops.sp(2, 3, 0.0)
             ops.sp(2, 4, phi)
             ops.sp(2, 5, ky)
             ops.sp(2, 6, kz)
-            ops.system("UmfPack")
-            ops.numberer("Plain")
-            ops.constraints("Transformation")
-            ops.test("NormDispIncr", 1e-12, 50)
-            ops.algorithm("Newton")
-            ops.integrator("LoadControl", 1.0)
-            ops.analysis("Static")
             if ops.analyze(1) != 0:
                 raise RuntimeError(f"replay step {k} failed to converge")
             for i in range(n_fiber):
                 ss = ops.eleResponse(elem_tag, "section", 1, "fiber", i, "stressStrain")
                 stress[k, i] = float(ss[0])
                 strain[k, i] = float(ss[1])
-            pattern_tag += 1
     finally:
         ops.wipe()
 

@@ -531,7 +531,7 @@ therefore exactly reconstructible from a single section deformation; fiber
 determined by the recorded ε,κ sequence plus the section's fiber discretisation
 and material definitions — so replaying the recorded history through a fresh copy
 of the section reproduces every fiber's stress-strain.  This replay is a
-**separate, deferred tool** (below), not part of this provision.
+**separate tool implemented in §5.3**, not part of this provision.
 
 **NPZ namespace**: `pushover/{direction}/{load_type}/section_...` — the
 ``section_frame_sap_id`` / ``section_num`` index arrays plus the

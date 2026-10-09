@@ -129,12 +129,16 @@ def _circle_ring(radius: float, segments: int) -> np.ndarray:
     return np.column_stack([radius * np.cos(theta), radius * np.sin(theta)])
 
 
-def _sweeps(section: Any, detail: str, circle_segments: int) -> list[tuple[np.ndarray, bool, bool]]:
-    """The ``(points, closed, caps)`` sweeps for one section.
+def _sweeps(
+    section: Any, detail: str, circle_segments: int
+) -> list[tuple[np.ndarray, bool, bool, Optional[np.ndarray]]]:
+    """The ``(points, closed, caps, inner)`` sweeps for one section.
 
     ``"plates"`` produces the open plate decomposition (no caps); ``"solid"``
     produces the closed perimeter (with caps).  Each sweep's *points* are the
-    cross-section coordinates in the local YZ plane, ``(P, 2)``.
+    cross-section coordinates in the local YZ plane, ``(P, 2)``; a hollow
+    section (a box) carries its inner boundary in *inner* so the sweep can seal
+    the material between the two loops with annular caps.
 
     Args:
         section: The section to sweep.
@@ -143,19 +147,19 @@ def _sweeps(section: Any, detail: str, circle_segments: int) -> list[tuple[np.nd
         circle_segments: Number of sides used to approximate a circular section.
 
     Returns:
-        A list of ``(points, closed, caps)`` tuples, one per sweep.
+        A list of ``(points, closed, caps, inner)`` tuples, one per sweep.
     """
     if detail == "plates":
         polylines = section_plates(section, circle_segments=circle_segments)
-        sweeps: list[tuple[np.ndarray, bool, bool]] = []
+        sweeps: list[tuple[np.ndarray, bool, bool, Optional[np.ndarray]]] = []
         for poly in polylines:
             pts = np.asarray(poly, dtype=float)
             if pts.shape[0] > 2:
                 # An open tube (a circular section's perimeter) — closed loop, no caps.
-                sweeps.append((pts, True, False))
+                sweeps.append((pts, True, False, None))
             else:
                 # A flat plate — one open edge.
-                sweeps.append((pts, False, False))
+                sweeps.append((pts, False, False, None))
         return sweeps
 
     outline = section_profile_outline(section)
@@ -163,17 +167,15 @@ def _sweeps(section: Any, detail: str, circle_segments: int) -> list[tuple[np.nd
         return []
     kind, value = outline
     if kind == "circle":
-        return [(_circle_ring(float(value), circle_segments), True, True)]
+        return [(_circle_ring(float(value), circle_segments), True, True, None)]
     if isinstance(value, tuple):
         # Hollow section (e.g. a box): sweep the outer and inner boundaries as
-        # two open tubes so the inner boundary stays a hole in the solid.  The
-        # inner loop is reversed so its faces point into the void.
+        # two closed tubes and seal the material between them with annular caps,
+        # so the inner boundary stays a hole in the solid.  The inner loop is
+        # reversed inside ``_sweep_mesh`` so its faces point into the void.
         outer, inner = value
-        return [
-            (np.asarray(outer, dtype=float), True, False),
-            (np.asarray(inner, dtype=float)[::-1], True, False),
-        ]
-    return [(np.asarray(value, dtype=float), True, True)]
+        return [(np.asarray(outer, dtype=float), True, True, np.asarray(inner, dtype=float))]
+    return [(np.asarray(value, dtype=float), True, True, None)]
 
 
 def _sweep_mesh(
@@ -184,6 +186,7 @@ def _sweep_mesh(
     s1: np.ndarray,
     vy: np.ndarray,
     vz: np.ndarray,
+    inner: Optional[np.ndarray] = None,
 ) -> tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
     """Sweep one cross-section over ``M`` members.
 
@@ -196,41 +199,104 @@ def _sweep_mesh(
         s1: Member end points, ``(M, 3)``.
         vy: Member local Y axes, ``(M, 3)``.
         vz: Member local Z axes, ``(M, 3)``.
+        inner: Optional inner boundary, ``(Q, 2)``, for a hollow section.  When
+            given, the inner loop is swept as a second tube (reversed so its
+            faces point into the void) and, when *caps* is set, annular caps
+            join the two rings at each end, leaving the void open.
 
     Returns:
         ``(points, quads, caps)`` — ``points`` is ``(K, 3)`` the combined
         vertex array, ``quads`` is ``(Q, 4)`` vertex indices into *points*, and
-        ``caps`` is ``(2M, P)`` vertex indices (bottom then top ring) **into
-        *points***, or ``None`` when no caps are produced.
+        ``caps`` is ``(2M, P)`` (solid disk caps) or ``(2M*P, 4)`` (annular
+        quad caps) vertex indices into *points*, or ``None`` when no caps are
+        produced.
     """
-    P = pts2d.shape[0]
     M = s0.shape[0]
 
-    if closed:
-        i0 = np.arange(P)
-        i1 = (i0 + 1) % P
-    else:
-        i0 = np.arange(P - 1)
-        i1 = i0 + 1
+    def _loop_quads(loop: np.ndarray, loop_closed: bool) -> tuple[np.ndarray, np.ndarray]:
+        """Side-wall quads for one loop; returns ``(points, quads)``."""
+        P_ = loop.shape[0]
+        if loop_closed:
+            i0 = np.arange(P_)
+            i1 = (i0 + 1) % P_
+        else:
+            i0 = np.arange(P_ - 1)
+            i1 = i0 + 1
+        p0 = loop[i0]  # (E, 2)
+        p1 = loop[i1]  # (E, 2)
+        o0 = p0[:, 0:1, None] * vy[None, :, :] + p0[:, 1:2, None] * vz[None, :, :]
+        o1 = p1[:, 0:1, None] * vy[None, :, :] + p1[:, 1:2, None] * vz[None, :, :]
+        b0 = s0[None, :, :] + o0
+        b1 = s0[None, :, :] + o1
+        t0 = s1[None, :, :] + o0
+        t1 = s1[None, :, :] + o1
+        corners = np.stack([b0, b1, t1, t0], axis=2)  # (E, M, 4, 3)
+        pts = corners.reshape(-1, 3)  # (E*M*4, 3)
+        base = np.arange(corners.shape[0] * corners.shape[1], dtype=np.int64) * 4
+        quads = np.stack([base, base + 1, base + 2, base + 3], axis=1)  # (E*M, 4)
+        return pts, quads
 
-    p0 = pts2d[i0]  # (E, 2)
-    p1 = pts2d[i1]  # (E, 2)
-
-    o0 = p0[:, 0:1, None] * vy[None, :, :] + p0[:, 1:2, None] * vz[None, :, :]
-    o1 = p1[:, 0:1, None] * vy[None, :, :] + p1[:, 1:2, None] * vz[None, :, :]
-
-    b0 = s0[None, :, :] + o0
-    b1 = s0[None, :, :] + o1
-    t0 = s1[None, :, :] + o0
-    t1 = s1[None, :, :] + o1
-
-    corners = np.stack([b0, b1, t1, t0], axis=2)  # (E, M, 4, 3)
-    points = corners.reshape(-1, 3)  # (E*M*4, 3)
-    base = np.arange(corners.shape[0] * corners.shape[1], dtype=np.int64) * 4
-    quads = np.stack([base, base + 1, base + 2, base + 3], axis=1)  # (E*M, 4)
+    points, quads = _loop_quads(pts2d, closed)
 
     caps_arr: Optional[np.ndarray] = None
+
+    if inner is not None:
+        # Hollow section: sweep the inner boundary as a second tube (reversed so
+        # its faces point into the void), then seal the material between the two
+        # rings with annular quad caps when requested.
+        P = pts2d.shape[0]
+        Q = inner.shape[0]
+        inner_pts, inner_quads = _loop_quads(inner[::-1], True)
+        inner_offset = points.shape[0]
+        points = np.concatenate([points, inner_pts], axis=0)
+        quads = np.concatenate([quads, inner_quads + inner_offset], axis=0)
+
+        if caps:
+            o_all = pts2d[:, 0:1, None] * vy[None, :, :] + pts2d[:, 1:2, None] * vz[None, :, :]
+            i_all = inner[:, 0:1, None] * vy[None, :, :] + inner[:, 1:2, None] * vz[None, :, :]
+            o_bottom = (s0[None, :, :] + o_all).reshape(P * M, 3)
+            o_top = (s1[None, :, :] + o_all).reshape(P * M, 3)
+            i_bottom = (s0[None, :, :] + i_all).reshape(Q * M, 3)
+            i_top = (s1[None, :, :] + i_all).reshape(Q * M, 3)
+
+            cap_side = points.shape[0]
+            points = np.concatenate([points, o_bottom, o_top, i_bottom, i_top], axis=0)
+
+            o_ring = (np.arange(M)[None, :] + np.arange(P)[:, None] * M).T  # (M, P)
+            i_ring = (np.arange(M)[None, :] + np.arange(Q)[:, None] * M).T  # (M, Q)
+
+            o_bottom_idx = o_ring + cap_side
+            o_top_idx = o_ring + cap_side + P * M
+            i_bottom_idx = i_ring + cap_side + 2 * P * M
+            i_top_idx = i_ring + cap_side + 2 * P * M + Q * M
+
+            # A box's outer and inner loops share a vertex count, so edge j of
+            # the outer ring pairs with edge j of the inner ring.
+            E = P
+            j = np.arange(E)
+            jn = (j + 1) % E
+
+            # Top cap winds CCW (normal +X, outward); bottom cap winds CW
+            # (normal -X, outward).
+            top_faces = np.stack(
+                [o_top_idx[:, j], o_top_idx[:, jn], i_top_idx[:, jn], i_top_idx[:, j]],
+                axis=2,
+            ).reshape(M * E, 4)
+            bottom_faces = np.stack(
+                [o_bottom_idx[:, j], i_bottom_idx[:, j], i_bottom_idx[:, jn], o_bottom_idx[:, jn]],
+                axis=2,
+            ).reshape(M * E, 4)
+            caps_arr = np.concatenate([bottom_faces, top_faces], axis=0)  # (2M*E, 4)
+
+        return points, quads, caps_arr
+
+    # Solid (single) loop: a disk cap per end, wound outward based on the
+    # profile's signed area, so CCW and CW profiles both get outward normals.
     if caps and closed:
+        P = pts2d.shape[0]
+        i0 = np.arange(P)
+        i1 = (i0 + 1) % P
+        signed_area = 0.5 * np.sum(pts2d[i0, 0] * pts2d[i1, 1] - pts2d[i1, 0] * pts2d[i0, 1])
         o_all = pts2d[:, 0:1, None] * vy[None, :, :] + pts2d[:, 1:2, None] * vz[None, :, :]
         bottom = (s0[None, :, :] + o_all).reshape(P * M, 3)
         top = (s1[None, :, :] + o_all).reshape(P * M, 3)
@@ -238,10 +304,16 @@ def _sweep_mesh(
         points = np.concatenate([points, bottom, top], axis=0)
         ring = (np.arange(M)[None, :] + np.arange(P)[:, None] * M).T  # (M, P)
         # Offset both rings past the swept side vertices so they index the
-        # appended cap vertices, and reverse the bottom ring (not the top) so
-        # both caps wind outward.
-        bottom_ring = ring[:, ::-1] + side_vertices
-        top_ring = ring + side_vertices + P * M
+        # appended cap vertices.  Reverse whichever ring needs the opposite
+        # winding: a CCW profile (positive area) winds outward at the top, so
+        # the bottom ring is reversed; a CW profile is the mirror image.
+        ccw = signed_area >= 0.0
+        if ccw:
+            bottom_ring = ring[:, ::-1] + side_vertices
+            top_ring = ring + side_vertices + P * M
+        else:
+            bottom_ring = ring + side_vertices
+            top_ring = ring[:, ::-1] + side_vertices + P * M
         caps_arr = np.concatenate([bottom_ring, top_ring], axis=0)  # (2M, P)
 
     return points, quads, caps_arr
@@ -305,9 +377,9 @@ def build_extruded_frame_mesh(
         if not sweeps:
             continue
         rgb = colors.get(sec_name, (0.5, 0.5, 0.5))
-        for pts2d, closed, caps in sweeps:
+        for pts2d, closed, caps, inner in sweeps:
             points, quads, caps_arr = _sweep_mesh(
-                pts2d, closed, caps, s0[idxs], s1[idxs], vy[idxs], vz[idxs]
+                pts2d, closed, caps, s0[idxs], s1[idxs], vy[idxs], vz[idxs], inner=inner
             )
             if len(points) == 0:
                 continue

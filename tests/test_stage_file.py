@@ -915,3 +915,21 @@ class TestUnifiedWriterSchemaCoverage:
         assert arrays["rs/elem_My_i"][0] == 5.0
         # A producer without element forces writes nothing at all.
         assert collect_rs_element_force_arrays(None) == {}
+
+
+def test_pushover_load_type_detects_ambiguous_directions():
+    """A direction with several load types is ambiguous; none falls back to uniform."""
+    from fea_toolkit.io.results_schema import pushover_load_type
+
+    assert pushover_load_type({}, "+X") == "uniform"
+    assert pushover_load_type({"pushover/+X/mode1/step": [1]}, "+X") == "mode1"
+    assert pushover_load_type({"pushover/-Y/triangular/step": [1]}, "-Y") == "triangular"
+    # Other directions do not leak into the query.
+    assert (
+        pushover_load_type(
+            {"pushover/+Y/triangular/step": [1], "pushover/+X/uniform/step": [1]}, "+X"
+        )
+        == "uniform"
+    )
+    with pytest.raises(ValueError):
+        pushover_load_type({"pushover/+X/uniform/step": [1], "pushover/+X/mode1/step": [1]}, "+X")

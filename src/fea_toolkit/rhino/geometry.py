@@ -32,34 +32,44 @@ from ..model.sap_data import SAPModelData
 # x = width (→ element y_axis), y = depth (→ element z_axis).
 
 
-def _build_profile_curve(sec) -> t.Optional[t.Any]:
-    """Build a closed profile curve for ``Extrusion.Create``.
+def _polyline_curve(pts) -> t.Any:
+    """A closed ``rg.PolylineCurve`` through the ``(x, y)`` points, in the XY plane."""
+    pts_3d = [rg.Point3d(x, y, 0) for x, y in pts]
+    pl = rg.Polyline(pts_3d)
+    pl.Add(pts_3d[0])
+    return rg.PolylineCurve(pl)
+
+
+def _build_profile_curve(sec) -> tuple[t.Any, t.Optional[t.Any]]:
+    """Build the outer profile curve (and optional inner hole) for ``Extrusion.Create``.
 
     Returns:
-        A ``rg.PolylineCurve`` for polygonal sections,
-        a ``("circle", radius)`` tuple for circular sections,
-        or ``None`` if the section cannot be profiled.
+        A tuple ``(outer, inner)``.  *outer* is a ``rg.PolylineCurve`` for
+        polygonal sections or a ``("circle", radius)`` tuple for circular
+        sections; *inner* is a ``rg.PolylineCurve`` tracing a hollow section's
+        void (a box), reversed so it winds opposite the outer boundary, or
+        ``None``.  ``(None, None)`` when the section cannot be profiled.
     """
     from ..model.section_profiles import section_profile_outline
 
     outline = section_profile_outline(sec)
     if outline is None:
-        return None
+        return None, None
 
     kind, value = outline
     if kind == "circle":
-        return ("circle", value)
+        return ("circle", value), None
 
+    inner = None
     if isinstance(value, tuple):
-        # Hollow section (e.g. a box): the lightweight-extrusion path extrudes
-        # the outer boundary only — the inner void is not carved here (that
-        # would need a Boolean difference, heavier than ``Extrusion.Create``).
-        value = value[0]
+        # Hollow section (e.g. a box): keep the outer boundary as the extrusion
+        # profile and the inner boundary as a hole, added through
+        # ``Extrusion.AddInnerProfile`` so the section's cavity survives.  The
+        # inner loop is reversed so it winds opposite the outer boundary.
+        value, inner_pts = value
+        inner = _polyline_curve(inner_pts[::-1])
 
-    pts_3d = [rg.Point3d(x, y, 0) for x, y in value]
-    pl = rg.Polyline(pts_3d)
-    pl.Add(pts_3d[0])
-    return rg.PolylineCurve(pl)
+    return _polyline_curve(value), inner
 
 
 # ========================================================================
@@ -368,7 +378,7 @@ def create_frame_extrusions(
             sec = md.sections[sec_name]
 
             # Build profile
-            profile = _build_profile_curve(sec)
+            profile, inner_profile = _build_profile_curve(sec)
             if profile is None:
                 continue
 
@@ -399,6 +409,9 @@ def create_frame_extrusions(
 
             if extrusion is None:
                 continue
+
+            if inner_profile is not None:
+                extrusion.AddInnerProfile(inner_profile)
 
             # Check if J-end offsets differ from I-end
             off_diff = abs(oy_i - off_y_j) > 1e-6 or abs(oz_i - off_z_j) > 1e-6

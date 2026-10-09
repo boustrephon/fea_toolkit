@@ -84,7 +84,7 @@ def test_empty_frames_returns_an_empty_mesh():
     "detail, expected_faces",
     [
         ("plates", 30),  # I=3, R=4, C=8, P=8, B=4, CH=3
-        ("solid", 58),  # I=14, R=6, C=10, P=10, B=8, CH=10
+        ("solid", 66),  # I=14, R=6, C=10, P=10, B=16, CH=10
     ],
 )
 def test_face_counts_per_detail(detail, expected_faces):
@@ -159,3 +159,31 @@ def test_sweep_mesh_caps_reference_appended_vertices():
     for m in range(M):
         assert _rows(points[caps[m]]) == _rows(s0[m] + offsets)  # bottom cap
         assert _rows(points[caps[m + M]]) == _rows(s1[m] + offsets)  # top cap
+
+
+def test_sweep_mesh_caps_wind_outward_for_both_orientations():
+    """CCW and CW profiles both produce outward-facing cap normals."""
+    from fea_toolkit.plotting.extruded_frames import _sweep_mesh
+
+    s0 = np.array([[0.0, 0.0, 0.0]])
+    s1 = np.array([[1.0, 0.0, 0.0]])  # member along +X
+    vy = np.array([[0.0, 1.0, 0.0]])
+    vz = np.array([[0.0, 0.0, 1.0]])
+
+    ccw = np.array([[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]])
+    cw = ccw[::-1].copy()
+
+    def _normal_x(ring):
+        n = np.zeros(3)
+        for a, b in zip(ring, np.roll(ring, -1, axis=0)):
+            n += np.cross(a, b)
+        return n[0]
+
+    for pts2d in (ccw, cw):
+        points, _quads, caps = _sweep_mesh(
+            pts2d, closed=True, caps=True, s0=s0, s1=s1, vy=vy, vz=vz
+        )
+        assert caps is not None
+        # Bottom cap points -X (outward), top cap +X (outward).
+        assert _normal_x(points[caps[0]]) < 0
+        assert _normal_x(points[caps[1]]) > 0

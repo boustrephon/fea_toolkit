@@ -104,6 +104,7 @@ def _views() -> list:
             name="Pushover — +X · uniform",
             kind=FIGURE,
             source="Recipe: Pushover",
+            parent="table:modal",
         ),
     ]
 
@@ -396,6 +397,7 @@ def test_views_payload_records_pointers():
     assert by_key["table:modal"]["table_key"] == "table:modal"
     assert by_key["figure:pushover-plusx-uniform"]["figure_key"] == "figure:pushover-plusx-uniform"
     assert [entry["order"] for entry in payload] == [0, 1, 2, 3]
+    assert by_key["figure:pushover-plusx-uniform"]["parent"] == "table:modal"
 
 
 def test_build_manifest_shape():

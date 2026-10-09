@@ -365,7 +365,9 @@ def pushover_load_type(data: t.Mapping[str, t.Any], direction: str) -> str:
 
     Falls back to ``"uniform"`` when no ``pushover/{direction}/<load_type>/step``
     array is present (e.g. a legacy single-segment key, or an archive written
-    before the load-type dimension existed).
+    before the load-type dimension existed).  When more than one load-type
+    segment is present for *direction*, the load type is ambiguous and a
+    :class:`ValueError` is raised rather than silently returning the first.
 
     Args:
         data: Flat results dict (NPZ-style keys).
@@ -373,14 +375,26 @@ def pushover_load_type(data: t.Mapping[str, t.Any], direction: str) -> str:
 
     Returns:
         The load-type segment, e.g. ``"uniform"``, ``"triangular"``, ``"mode1"``.
+
+    Raises:
+        ValueError: If *direction* records more than one load type.
     """
     prefix = f"pushover/{direction}/"
+    load_types: list[str] = []
     for key in data:
         if key.startswith(prefix) and key.endswith("/step"):
             parts = key.split("/")
             if len(parts) >= 4:
-                return parts[2]
-    return "uniform"
+                load_types.append(parts[2])
+    unique = sorted(set(load_types))
+    if not unique:
+        return "uniform"
+    if len(unique) > 1:
+        raise ValueError(
+            f"Multiple load types recorded for pushover direction {direction!r}: "
+            f"{unique}.  The load type is ambiguous."
+        )
+    return unique[0]
 
 
 def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:

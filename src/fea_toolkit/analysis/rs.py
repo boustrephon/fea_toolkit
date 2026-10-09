@@ -104,7 +104,13 @@ def run_response_spectrum_analysis(
                 direction=direction,
                 damping_ratio=damping,
             )
-        except Exception:
+        except Exception as exc:
+            from ..io.log import coerce_log
+
+            coerce_log(log).warn(
+                "rs",
+                f"Could not compute CQC-combined nodal displacements: {exc}",
+            )
             node_displacements = {}
 
     return AnalysisResult(

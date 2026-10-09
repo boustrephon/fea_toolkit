@@ -135,17 +135,20 @@ def run_pushover(context: StepContext, step: Step) -> list[StepResult]:
     # gate (any requested block turns recording on), and the per-block flags
     # keep a default run cheap: node displacements only.
     config = dict(params["config"] or {})
-    config["record_pushover_steps"] = bool(
-        params["store_node_disp"]
-        or params["store_frame_forces"]
-        or params["store_shell_forces"]
-        or params["store_section_deformations"]
+    config.setdefault(
+        "record_pushover_steps",
+        bool(
+            params["store_node_disp"]
+            or params["store_frame_forces"]
+            or params["store_shell_forces"]
+            or params["store_section_deformations"]
+        ),
     )
-    config["pushover_step_stride"] = params["step_stride"]
-    config["pushover_record_node_disp"] = params["store_node_disp"]
-    config["pushover_record_frame_forces"] = params["store_frame_forces"]
-    config["pushover_record_shell_forces"] = params["store_shell_forces"]
-    config["pushover_record_section_deformations"] = params["store_section_deformations"]
+    config.setdefault("pushover_step_stride", params["step_stride"])
+    config.setdefault("pushover_record_node_disp", params["store_node_disp"])
+    config.setdefault("pushover_record_frame_forces", params["store_frame_forces"])
+    config.setdefault("pushover_record_shell_forces", params["store_shell_forces"])
+    config.setdefault("pushover_record_section_deformations", params["store_section_deformations"])
 
     result = run_pushover_analysis(
         context.model,

@@ -746,7 +746,7 @@ def _collect_pushover(
     # ── Section deformation arrays (condensed ε,κ history) ─────
     # Collected per recorded frame element per integration point.  The section
     # index is 1-based (matching ``eleResponse(tag, 'section', n, ...)``), and
-    # the deformation vector is stored in the OpenSees order ``[ε, κ_y, κ_z, φ]``
+    # the deformation vector is stored in the OpenSees order ``[ε, κ_z, κ_y, φ]``
     # (torsion is NaN when the section is flexure-only and returns three values).
     sec_entries: list[tuple[str, int]] = []
     seen_secs: set[tuple[str, int]] = set()

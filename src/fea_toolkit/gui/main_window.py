@@ -1905,14 +1905,18 @@ class MainWindow(QMainWindow):
         if not checked:
             self._stop_animation()
             # Leave the shape at rest — the final step for a pushover history, the
-            # un-animated scale for a single field — not frozen mid-animation.
+            # un-animated scale for a single field — not frozen mid-animation, but
+            # only while the deformed-shape toggle is on; otherwise clear it.
+            if not self._actions["results.deformed"].isChecked():
+                self._clear_deformed()
+                return
             fraction = self._deformed_scale.value() / 100.0
             if self._anim_step_mode and self._anim_frames:
                 self._viewer.overlay_deformed(
                     self._anim_frames[-1], scale=None, auto_fraction=fraction
                 )
                 self._viewer.show()
-            elif self._anim_displacements and self._actions["results.deformed"].isChecked():
+            elif self._anim_displacements:
                 self._viewer.overlay_deformed(
                     self._anim_displacements, scale=None, auto_fraction=fraction
                 )
@@ -3471,6 +3475,7 @@ class MainWindow(QMainWindow):
             key = entry.get("key")
             name = entry.get("name")
             source = entry.get("source", "")
+            parent = entry.get("parent")
             if kind == GEOMETRY:
                 model = geometry_sources.get(key)
                 if model is not None:
@@ -3484,18 +3489,23 @@ class MainWindow(QMainWindow):
                         repository,
                         source=source,
                         model=display_model,
+                        parent=parent,
                         activate=False,
                     )
             elif kind == TABLE:
                 table = tables.get(entry.get("table_key", key))
                 if table is not None:
-                    self._views.add_table(key, name, table, source=source, activate=False)
+                    self._views.add_table(
+                        key, name, table, source=source, parent=parent, activate=False
+                    )
             elif kind == FIGURE:
                 figure_data = figures.get(entry.get("figure_key", key))
                 if figure_data:
                     figure = regenerate_figure(figure_data)
                     if figure is not None:
-                        self._views.add_figure(key, name, figure, source=source, activate=False)
+                        self._views.add_figure(
+                            key, name, figure, source=source, parent=parent, activate=False
+                        )
 
         recipe_dict = project.get("recipe")
         if recipe_dict is not None:
