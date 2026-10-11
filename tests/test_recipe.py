@@ -1049,6 +1049,32 @@ class TestEndToEnd:
         figure = run.results[-1].payload
         assert isinstance(figure, Figure)
 
+    def test_a_chart_step_renders_the_storey_force_profile_from_solved_cases(self):
+        """A 'storey_forces' chart turns a solved lateral case into a figure."""
+        from matplotlib.figure import Figure
+
+        from examples.sample_model import make_sample_model
+
+        recipe = Recipe(
+            steps=[
+                Step("mesh"),
+                Step("run_static", params={"cases": {"WIND": {"WIND": 1.0}}}),
+                Step("chart", params={"chart": "storey_forces"}),
+            ]
+        )
+        run = run_recipe(recipe, make_sample_model())
+
+        assert [result.kind for result in run.results] == ["geometry", "cases", "figure"]
+        figure = run.results[-1].payload
+        assert isinstance(figure, Figure)
+
+    @pytest.mark.parametrize("kind", ["modal", "pushover", "csm"])
+    def test_a_chart_step_analysis_kinds_require_their_preceding_verb(self, kind):
+        """The analysis-result charts read a preceding verb's result, never re-solve."""
+        with pytest.raises(StepError) as info:
+            run_recipe(Recipe(steps=[Step("chart", params={"chart": kind})]), _slab_model())
+        assert "preceding" in str(info.value.cause)
+
     def test_load_verification_reports_applied_vs_reactions(self):
         """A mesh + load_verification compares each pattern against its reactions."""
         from examples.sample_model import make_sample_model
