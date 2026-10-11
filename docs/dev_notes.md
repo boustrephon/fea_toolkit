@@ -10,6 +10,28 @@ related: [analysis_builder_migration_plan.md]
 
 
 
+## Documentation build environment
+
+The docs build (`mkdocs build --strict`) requires **Python 3.11+**: the pinned
+`mkdocstrings 1.0.7` + `pymdown-extensions 12.2` pair (see `docs/requirements.txt`
+and the `[docs]` extra) dropped Python 3.10.  The miniforge base `python3` (3.10)
+therefore **cannot** install the pinned docs toolchain — it only worked
+historically because it held the older 1.0.6 / 11.0.1 pair, which is not what CI
+(`python-version: "3.11"` in `.github/workflows/docs.yml`) installs.
+
+Verified 2026-11-10 with a gitignored `venv/`:
+
+    /opt/homebrew/bin/python3.11 -m venv venv
+    venv/bin/pip install -r docs/requirements.txt
+    venv/bin/pip install -e . --no-deps   # makes the source locatable to griffe
+    venv/bin/mkdocs build --strict        # -> "Documentation built" (clean)
+
+`pip install -e . --no-deps` is enough because `mkdocstrings` (griffe) parses
+the source statically — the heavy FEA deps are not needed for the build.  Two
+cosmetic differences vs the old 3.10 build: mkdocstrings 1.0.7 logs an INFO
+notice that signature formatting wants Black/Ruff (non-strict-failing), and the
+build is ~4x slower (~244 s vs ~58 s) on griffelib 2.x.
+
 ## CSM (Capacity Spectrum Method)
 - `pushover_to_adrs()`: Converts pushover curve to ADRS format.
   - Uses best_mode (max participation in push direction) from modal_props.

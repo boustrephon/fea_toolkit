@@ -48,6 +48,24 @@ category: [planning]
 > `.clinerules` §11.2).  The `219 / 109` counts remain a **stale baseline** —
 > re-run `python -m pyright src/` after the P2 / runner splits before using
 > them.
+>
+> **Status update (2026-11-10):** re-ran `npx pyright src/ --outputjson`
+> (Pyright 1.1.4xx) against the current tree.  **Fresh baseline: 308 errors /
+> 890 warnings across 157 files.**  Errors by rule — `reportArgumentType` 151,
+> `reportCallIssue` 57, `reportInvalidTypeForm` 30, `reportMissingImports` 30,
+> `reportOperatorIssue` 10, `reportIndexIssue` 9, `reportGeneralTypeIssues` 8,
+> `reportReturnType` 5, `reportAssignmentType` 4, `reportRedeclaration` 3,
+> `reportUndefinedVariable` 1.  **No new real bugs:** the one
+> `reportUndefinedVariable` is a false positive (Pyright mis-flags
+> `workflow/verbs/chart.py::_run_storey_forces_chart` inside its own body —
+> the function compiles, lints and passes its tests), and the 30
+> `reportMissingImports` are the known C-extension / optional-extra imports
+> (`opensees`, `AppKit`, `pyvistaqt`, `qtpy.*`).  The rest map one-to-one onto
+> the benign categories in `.clinerules` §11 (numpy/PyVista overloads,
+> ``Optional`` duck-typing).  **Decision — Phase 3 is accepted as known-benign**
+> and is not a release blocker; the one concrete, tracked cleanup remains the
+> `pd.Series.to_numpy()` convention (§11.2).  Treat this as the renewed
+> baseline — re-run and diff against it, don't re-derive.
 
 ## Quick Start (for a fresh task)
 
