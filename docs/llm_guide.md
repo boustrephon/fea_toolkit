@@ -622,8 +622,9 @@ loaded and resync:
 
 ## 9. Contributor backlog — add usage examples to function docstrings
 
-> **Complete (2026-12).**  All six items below have ``Examples:`` blocks now:
-> items 4–5 landed in `a927369c` and items 1–3, 6 in `ad2d0d35` / `4e78ad47`.
+> **Complete (2026-10).**  All six items below have ``Examples:`` blocks now:
+> items 4–5 landed in `a927369c`, items 1 and 6 in `4e78ad47`, and items 2–3
+> across both commits (all dated 2026-10-11; `ad2d0d35` added none).
 > This section is retained as the historical task list; no item is open.
 
 The following modules have Google-style docstrings with ``Args:`` and
@@ -635,11 +636,11 @@ reliable ways LLMs produce correct code).
 Priority order for adding docstring examples:
 
 1. ``src/fea_toolkit/opensees/analysis_builder.py`` — all ``run_*()`` methods
-2. ``src/fea_toolkit/plotting/viz.py`` — all ``plot_*()`` functions
+2. ``src/fea_toolkit/plotting/viz_model.py`` / ``src/fea_toolkit/plotting/viz_pushover.py`` — the ``plot_*()`` functions (``viz.py`` is now a re-export facade)
 3. ``src/fea_toolkit/model/storey_response.py`` — storey-level methods
 4. ``src/fea_toolkit/io/npz_writer.py`` — ``write_results_npz()``
 5. ``src/fea_toolkit/model/selection.py`` — ``filter_model()``, ``from_brace_sections()``
-6. ``src/fea_toolkit/model/geometry.py`` — ``split_elements()``, ``mesh_area_elements()``
+6. ``src/fea_toolkit/model/geometry_frames.py`` (``split_elements()``) / ``src/fea_toolkit/model/geometry_mesh.py`` (``mesh_area_elements()``) — ``geometry.py`` is now a re-export facade
 
 Example format to follow (from existing docstrings):
 

@@ -676,8 +676,11 @@ def run_static_cases(
                     shell_forces = ab.extract_static_shell_forces()
                     if shell_forces:
                         entry["shell_forces"] = shell_forces
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log.warning(
+                        "static",
+                        f"{case_name} shell force extraction failed — {exc}",
+                    )
                 raw_out[case_name] = entry
         except Exception as e:
             fx = fy = fz = mx = my = mz = max_roof_disp = 0.0

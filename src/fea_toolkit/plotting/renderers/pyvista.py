@@ -827,6 +827,10 @@ class PyVistaRenderer(RenderBackend):
             shells: Shell geometries (undeformed) providing the faces to colour.
             values: ``{area_id: scalar}`` — one value per shell to colour.
         """
+        # Re-drawing the shell force overlay must *replace* the previous one,
+        # not stack another actor on top of it — mirror render_deformed's
+        # clear-first contract for the deformed shape.
+        self.clear_category("shell_forces")
         if not shells:
             return
         p = self.plotter
