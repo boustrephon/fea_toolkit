@@ -894,7 +894,8 @@ def _build_spectrum(
     Returns:
         ``(T_spec, Sa_spec, alpha_max, tg, zeta, label)`` tuple where
         *T_spec* and *Sa_spec* are lists of period (s) and spectral
-        acceleration (m/s²), *alpha_max* is the seismic influence
+        acceleration in the same units as the resolved *g* (see
+        :func:`_resolve_g`), *alpha_max* is the seismic influence
         coefficient, *tg* is the characteristic period, *zeta* is the
         damping ratio, and *label* is a human-readable level name.
     """

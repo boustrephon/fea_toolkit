@@ -97,7 +97,8 @@ def run_pushover_4dir(
         gravity_patterns: Optional dict mapping pattern name → scale factor.
         lateral_load_type: One of ``'uniform'``, ``'triangular'``,
             ``'mode1'``.
-        max_disp_val: Maximum control displacement magnitude (m).
+        max_disp_val: Maximum control displacement magnitude, in the
+            model's length units (``mesh_model.units["L"]``).
         num_steps: Number of push increments.
         tg: Characteristic period for GB 50011 spectrum (s).
         alpha_max_rare: Seismic influence coefficient (rare event).
@@ -329,7 +330,8 @@ def pushover_rc_openseespy(
         gravity_patterns: Optional dict mapping pattern name → scale factor.
         lateral_load_type: One of ``'uniform'``, ``'triangular'``,
             ``'mode1'``.
-        max_disp: Maximum control displacement magnitude (m).
+        max_disp: Maximum control displacement magnitude, in the model's
+            length units (``mesh_model.units["L"]``).
         num_steps: Number of push increments.
         tg: Characteristic period for GB 50011 spectrum (s).
         alpha_max_rare: Seismic influence coefficient (rare event).

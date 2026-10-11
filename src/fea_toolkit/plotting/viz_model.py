@@ -2216,8 +2216,10 @@ def plot_building_views(md, mesh_model=None, window_size=(1200, 900)):
         window_size: PyVista window dimensions (width, height) in pixels.
 
     Returns:
-        ``matplotlib.figure.Figure`` or ``None`` (when matplotlib or
-        PyVista is unavailable).
+        ``matplotlib.figure.Figure``, or ``None`` when matplotlib is
+        unavailable.  When PyVista is unavailable (or the model build
+        fails), a Matplotlib figure carrying a fallback message is
+        returned instead.
 
     Examples:
         >>> from fea_toolkit.plotting.viz_model import plot_building_views

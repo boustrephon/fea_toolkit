@@ -175,8 +175,10 @@ def assign_nodes_to_storeys(md, stories, z_tolerance: float = 0.5):
     Args:
         md: Parsed :class:`~fea_toolkit.model.sap_data.SAPModelData`.
         stories: List of :class:`StoryLevel` objects.
-        z_tolerance: Half-band for Z matching (nodes within this distance
-            of a storey elevation are assigned to that storey).
+        z_tolerance: Maximum intended Z distance between a node and a
+            storey elevation for matching; the matching half-band is
+            ``z_tolerance / 2`` (a node is assigned to a storey when it
+            lies within this half-band).
 
     Returns:
         ``{storey_name: [node_id, ...]}`` dict.

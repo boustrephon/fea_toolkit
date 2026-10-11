@@ -743,12 +743,18 @@ def colour_frame_by_npz_ratio(
     bending direction dominates.
 
     Args:
+        npz_path: Path to the ``.npz`` / ``.h5`` results file.
         numerator: Numerator quantity name (e.g. ``'Mz'``).
         denominator: Denominator quantity name (e.g. ``'My'``).
         use_local: Use local-coordinate forces (default ``True``).
         stage: Stage to promote for stage files (``None`` → auto).
-        **kwargs: Passed through to :func:`colour_from_npz` (e.g.
-            ``layer_filter``).
+        scale_mode: ``"continuous"`` (default) or ``"stepped"``.
+        n_steps: Number of bands for ``scale_mode="stepped"`` (odd ≥ 3).
+        clip_pct: Percent clipped off each end of the value range before
+            colouring (``0`` = raw min/max).
+        **kwargs: Only ``layer_filter`` (glob), ``skip_locked`` (bool),
+            and ``verbose`` (bool) are supported; other keyword arguments
+            are ignored.
     """
     data = _load_unified(npz_path, stage=stage)
     suffix = "_local" if use_local else ""
@@ -831,6 +837,8 @@ def create_result_flags(
         quantity: Force/moment quantity, e.g. ``'Mz'``, ``'My'``, ``'Fx'``,
             ``'Fz'``.
         use_local: Use local-coordinate forces (default ``True``).
+        combo: Load-combination key (prefix) selecting the static case
+            whose results are used.  ``None`` = the first available case.
         scale_factor: Flag height per unit force/moment.  If ``None``,
             auto-scaled so the largest flag is 20 % of the model height.
         layer_name: Name of the Rhino layer for the flags.  Default is
