@@ -22,11 +22,14 @@ from .sap_data import (
     Group,
     JointLoad,
     LayeredShellSection,
+    LoadCase,
+    LoadCombination,
     LoadPattern,
     MassSource,
     Material,
     NDMaterial,
     Node,
+    ResponseSpectrumFunction,
     Restraint,
     Section,
     apply_material_defaults,
@@ -174,6 +177,12 @@ class MeshModel:
     area_uniform_loads: list[AreaUniformLoad] = field(default_factory=list)
     load_patterns: dict[str, "LoadPattern"] = field(default_factory=dict)
     mass_sources: dict[str, MassSource] = field(default_factory=dict)
+    # Load-case / combination / response-spectrum *definitions* — carried
+    # through unchanged from the SAP model so the Model Tree (and the recipe
+    # panel) can present them without the raw model at hand.
+    load_cases: dict[str, LoadCase] = field(default_factory=dict)
+    load_combinations: dict[str, LoadCombination] = field(default_factory=dict)
+    response_spectrum_functions: dict[str, ResponseSpectrumFunction] = field(default_factory=dict)
 
     # ── Constraints (detected, not yet applied to OpenSees) ───────
     # ── Detected coarse‑fine node pairs (for visualisation only) ──

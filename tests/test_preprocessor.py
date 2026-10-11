@@ -23,8 +23,12 @@ from fea_toolkit.model.sap_data import (
     FrameElement,
     FrameEndOffset,
     Group,
+    LoadCase,
+    LoadCombination,
+    LoadCombinationEntry,
     Material,
     Node,
+    ResponseSpectrumFunction,
     Restraint,
     SAPModelData,
     Section,
@@ -293,3 +297,30 @@ class TestGeometryHelpersDoNotMutateTheirInputs:
         assert parent.child_ids == []
         assert areas["S1"].inactive is True
         assert areas["S1"].child_ids
+
+
+class TestLoadDefinitionsCarryThrough:
+    """The MeshModel must present SAP-level load metadata for the Model Tree."""
+
+    def _model_with_definitions(self) -> SAPModelData:
+        model = _crossing_frames_model()
+        model.load_cases = {
+            "DEAD": LoadCase("DEAD", "LinStatic", "Prog Det", "DEAD", "Prog Det", "Non-Composite"),
+        }
+        model.load_combinations = {
+            "COMB1": LoadCombination("COMB1", "Linear Add", [LoadCombinationEntry("DEAD", 1.0)]),
+        }
+        model.response_spectrum_functions = {
+            "RS1": ResponseSpectrumFunction("RS1", [0.0, 1.0], [0.1, 0.2]),
+        }
+        return model
+
+    def test_load_cases_combinations_and_spectra_reach_the_mesh(self):
+        mesh = Preprocessor({}).run(self._model_with_definitions())
+
+        assert set(mesh.load_cases) == {"DEAD"}
+        assert mesh.load_cases["DEAD"].case_name == "DEAD"
+        assert set(mesh.load_combinations) == {"COMB1"}
+        assert mesh.load_combinations["COMB1"].entries[0].name == "DEAD"
+        assert set(mesh.response_spectrum_functions) == {"RS1"}
+        assert mesh.response_spectrum_functions["RS1"].accels == [0.1, 0.2]

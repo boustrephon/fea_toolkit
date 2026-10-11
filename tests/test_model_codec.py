@@ -1,11 +1,13 @@
 """Tests for the dataclass ⟷ JSON codec (``fea_toolkit.io.model_codec``)."""
 
 import dataclasses
+import warnings
 
 import pytest
 
 from examples.sample_model import make_rc_frame_model, make_sample_model
 from fea_toolkit.io.model_codec import (
+    _CLASS_REGISTRY,
     BARE_LIST_TYPES,
     MODEL_SCHEMA_VERSION,
     SCHEMA_KEY,
@@ -23,9 +25,13 @@ from fea_toolkit.model.sap_data import (
     FrameElement,
     Group,
     ISection,
+    LoadCase,
+    LoadCombination,
+    LoadCombinationEntry,
     Material,
     NDMaterial,
     Node,
+    ResponseSpectrumFunction,
     Restraint,
     SAPModelData,
 )
@@ -39,6 +45,11 @@ class TestRoundTripGuard:
     def test_all_model_fields_are_codec_safe(self):
         """New fields on SAPModelData / MeshModel must be serialisable."""
         assert check_round_trip_types() == []
+
+    def test_nested_dataclasses_are_registered(self):
+        """Dataclasses nested 2+ levels deep resolve without a fallback warning."""
+        assert "LoadCombinationEntry" in _CLASS_REGISTRY
+        assert "StressStrainCurve" in _CLASS_REGISTRY
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -100,6 +111,15 @@ def _tricky_mesh() -> MeshModel:
         area_uniform_loads=[],
         load_patterns={},
         mass_sources={},
+        load_cases={
+            "DEAD": LoadCase("DEAD", "LinStatic", "Prog Det", "DEAD", "Prog Det", "Non-Composite")
+        },
+        load_combinations={
+            "COMB1": LoadCombination("COMB1", "Linear Add", [LoadCombinationEntry("DEAD", 1.0)])
+        },
+        response_spectrum_functions={
+            "RS1": ResponseSpectrumFunction("RS1", [0.0, 1.0], [0.1, 0.2])
+        },
         detected_edge_pairs=[("A1", "A2")],
         diaphragm_levels=[3.0],
         offset_rigid_links=[("l1", "1", "2", 99)],
@@ -138,6 +158,13 @@ class TestMeshRoundTrip:
         mesh = _tricky_mesh()
         mesh2 = dict_to_model(model_to_dict(mesh))
         assert mesh2 == mesh
+
+    def test_nested_dataclasses_round_trip_without_warning(self):
+        """A nested dataclass decodes via its ``__type__``, never the fallback."""
+        mesh = _tricky_mesh()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            assert dict_to_model(model_to_dict(mesh)) == mesh
 
     def test_tricky_mesh_json_round_trip(self):
         mesh = _tricky_mesh()

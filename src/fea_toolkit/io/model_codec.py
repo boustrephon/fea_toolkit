@@ -3,7 +3,7 @@
 Round-trips :class:`~fea_toolkit.model.sap_data.SAPModelData` and
 :class:`~fea_toolkit.model.mesh_model.MeshModel` (including every nested
 dataclass, the polymorphic :class:`~fea_toolkit.model.sap_data.Section`
-hierarchy, and all 40 ``MeshModel`` fields) through a JSON-safe
+hierarchy, and every ``MeshModel`` field) through a JSON-safe
 representation.
 
 Design rules (see ``docs/model_stage_file.md``):
@@ -144,30 +144,37 @@ def _iter_type_args(h: t.Any) -> t.Iterator[type]:
 def _collect_dataclasses() -> dict[str, type]:
     """Build ``{class_name: class}`` for every dataclass reachable from
     ``SAPModelData`` and ``MeshModel`` type hints, plus all ``Section``
-    subclasses."""
+    subclasses.
+
+    The walk is **transitive**: registering a dataclass also walks its own
+    fields, so a dataclass nested two or more levels deep — e.g.
+    ``LoadCombinationEntry`` inside ``LoadCombination.entries`` or
+    ``StressStrainCurve`` inside ``Material.ss_curve`` — is registered too and
+    its ``__type__`` discriminator resolves without the fallback warning.  A
+    ``seen`` set keeps the walk idempotent and cycle-safe.
+    """
     registry: dict[str, type] = {}
+    seen: set[type] = set()
 
-    def _add(cls: type) -> None:
-        if dataclasses.is_dataclass(cls):
-            registry[cls.__name__] = cls
-
-    def _walk(model_cls: type) -> None:
+    def _walk(cls: type) -> None:
+        if cls in seen or not dataclasses.is_dataclass(cls):
+            return
+        seen.add(cls)
+        registry[cls.__name__] = cls
         try:
-            hints = t.get_type_hints(model_cls)
+            hints = t.get_type_hints(cls)
         except Exception:  # pragma: no cover - defensive
             hints = {}
         for h in hints.values():
             for candidate in _iter_type_args(h):
                 if dataclasses.is_dataclass(candidate):
-                    _add(candidate)
+                    _walk(candidate)
 
     _walk(SAPModelData)
     _walk(MeshModel)
-    _add(WallElement)
-    _add(SAPModelData)
-    _add(MeshModel)
+    _walk(WallElement)
     for sub in Section.__subclasses__():
-        _add(sub)
+        _walk(sub)
     return registry
 
 
