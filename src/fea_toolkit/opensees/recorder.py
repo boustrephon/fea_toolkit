@@ -173,9 +173,8 @@ class RecordingOpenSees(types.ModuleType):
                 ``"build_model"``).
 
         Raises:
-        ValueError
-            If *func_name* is not a valid Python identifier or is a
-            reserved keyword.
+            ValueError: If *func_name* is not a valid Python identifier
+                or is a reserved keyword.
         """
         if not isinstance(func_name, str) or not func_name.isidentifier():
             raise ValueError(f"func_name={func_name!r} is not a valid Python identifier")
@@ -225,9 +224,8 @@ class RecordingOpenSees(types.ModuleType):
             path: File path to write to.
             ndm: Number of spatial dimensions (fallback if no ``model``
                 command was recorded).
-            ndf:
-            Number of DOFs per node (fallback if no ``model``
-            command was recorded).
+            ndf: Number of DOFs per node (fallback if no ``model``
+                command was recorded).
         """
         # Detect model dimensionality from recorded commands
         model_ndm, model_ndf = ndm, ndf

@@ -1018,25 +1018,19 @@ class Preprocessor:
         bounding box are passed to the ``point_on_segment`` check.
 
         Args:
-            md : ModelData
-                Model data container with ``area_elements``, ``nodes``.
-            frame_elements : dict
-                ``{elem_id: FrameElement}`` — may be extended with new
-                child elements.
-            frame_assignments : dict
-                ``{elem_id: section_name}``.
-            dist_loads : list
-                Distributed loads to redistribute.
-            frame_element_types : dict
-                ``{elem_id: element_type_str}``.
-            edge_loads : list, optional
-                Edge loads (from area-to-frame conversion) to redistribute
-                to split children.  If ``None``, treated as empty list.
-            exclude_area_ids : set, optional
-                Set of area IDs whose nodes should be excluded from
-                frame-splitting consideration.  Typically loads-only
-                areas (e.g. brick walls) that won't produce shell
-                elements in OpenSees — splitting frames at their
+            md: Model data container with ``area_elements``, ``nodes``.
+            frame_elements: ``{elem_id: FrameElement}`` — may be extended
+                with new child elements.
+            frame_assignments: ``{elem_id: section_name}``.
+            dist_loads: Distributed loads to redistribute.
+            frame_element_types: ``{elem_id: element_type_str}``.
+            edge_loads: Edge loads (from area-to-frame conversion) to
+                redistribute to split children.  If ``None``, treated as
+                empty list.
+            exclude_area_ids: Set of area IDs whose nodes should be
+                excluded from frame-splitting consideration.  Typically
+                loads-only areas (e.g. brick walls) that won't produce
+                shell elements in OpenSees — splitting frames at their
                 sub-nodes would create unnecessary intermediate nodes
                 with no shell connection.
 
