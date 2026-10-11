@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import shutil
 import tempfile
 import zipfile
@@ -645,21 +646,51 @@ def is_project(path: str | Path) -> bool:
 
 
 def _extract_project_members(zf: zipfile.ZipFile, destination: str) -> None:
-    """Extract only the canonical members, rejecting oversize entries.
+    """Extract the six canonical project members, rejecting oversize entries.
 
-    Zip-bomb protection for :func:`read_project`: every member's uncompressed
-    size is checked first, and only the five canonical project members are
-    written to *destination*.  A member that exceeds :data:`_MAX_MEMBER_BYTES`
-    raises ``ValueError`` before any extraction happens.
+    Zip-bomb protection for :func:`read_project`.  Only the six canonical
+    members in :data:`_PROJECT_MEMBERS` are extracted — ``project.json`` (the
+    manifest), ``results.npz``, ``figures.json``, ``tables.json``, and the
+    model stage (``model.h5`` or ``model.npz``) — and entries outside that set
+    are skipped outright.  Each allowlisted member is streamed through
+    ``zf.open`` with a hard cap of :data:`_MAX_MEMBER_BYTES` on the bytes
+    actually decompressed — not merely the ZIP header's declared size, which a
+    crafted archive can misstate.  Each member is written to a temporary file
+    first, so a member that would exceed the cap raises :class:`ValueError`
+    before any over-limit chunk is written and never leaves a partial file at
+    the destination.  Members are processed in archive order, so an oversized
+    member raises ``ValueError`` when it is encountered, potentially after any
+    earlier members have already been extracted to *destination*.
     """
+    chunk_size = 1 << 20  # 1 MiB
+    dest_dir = Path(destination)
     for info in zf.infolist():
-        if info.file_size > _MAX_MEMBER_BYTES:
-            raise ValueError(
-                f"project member {info.filename!r} is too large "
-                f"({info.file_size} bytes > {_MAX_MEMBER_BYTES})"
-            )
-        if info.filename in _PROJECT_MEMBERS:
-            zf.extract(info, destination)
+        if info.filename not in _PROJECT_MEMBERS:
+            continue
+        target = dest_dir / info.filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(
+            dir=target.parent, prefix=f".{info.filename}.", suffix=".part"
+        )
+        written = 0
+        try:
+            with zf.open(info) as src, os.fdopen(fd, "wb") as dst:
+                while True:
+                    chunk = src.read(chunk_size)
+                    if not chunk:
+                        break
+                    if written + len(chunk) > _MAX_MEMBER_BYTES:
+                        raise ValueError(
+                            f"project member {info.filename!r} is too large "
+                            f"(decompresses to more than {_MAX_MEMBER_BYTES} bytes)"
+                        )
+                    dst.write(chunk)
+                    written += len(chunk)
+            os.replace(tmp_name, target)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_name)
+            raise
 
 
 def read_project(path: str | Path) -> dict:
