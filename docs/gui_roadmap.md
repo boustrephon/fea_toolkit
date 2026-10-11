@@ -8,7 +8,7 @@ related: [viewer.md, workflow.md, results_schema.md, rhino_export.md, report_gen
 ---
 # Desktop GUI Roadmap
 
-## Status: ⚠️ Partial — the chrome and the workflow-modelling path are built.  Milestones 1–4 landed (viewport spike, chrome, model tree + inspector, bidirectional selection + display toggles), the mouse-interaction policy is configurable, and the Model Tree carries a **Views** group (geometry views over the storage seam, derived views filtered by a `Selection`, results archives opened as a view per load case).  **Milestone 5** landed for **static** cases and combinations (**Analysis ▸ Run…** solves them in the application and shows each as a case view, no archive needed), as did **Milestone 6** (load rendering) and **Milestone 7** (deformed shape *and* member force diagrams).  **Milestone 11 (workflow authoring) landed its Phases A and B on 2026-09-29** — the `workflow` package, the Recipe dock and the Model-menu presets ([P29](_pending_work.md)).  Remaining: modal / spectrum / pushover runs, storey response and the pushover curve, layout persistence (M8) and the quad view (M10), plus the workflow layer's Phases C and D — now their own items, **[P30](_pending_work.md)** (result verbs and their views — its model, capacity and mesh check verbs have landed; only its charts await P32's results) and **[P31](_pending_work.md)** (the command palette).
+## Status: ⚠️ Partial — the chrome and the workflow-modelling path are built.  Milestones 1–4 landed (viewport spike, chrome, model tree + inspector, bidirectional selection + display toggles), the mouse-interaction policy is configurable, and the Model Tree carries a **Views** group (geometry views over the storage seam, derived views filtered by a `Selection`, results archives opened as a view per load case).  **Milestone 5** landed for **static** cases and combinations (**Analysis ▸ Run…** solves them in the application and shows each as a case view, no archive needed), as did **Milestone 6** (load rendering) and **Milestone 7** (deformed shape *and* member force diagrams).  **Milestone 11 (workflow authoring) landed its Phases A and B on 2026-09-29** — the `workflow` package, the Recipe dock and the Model-menu presets ([P29](_pending_work.md)).  **Milestone 11's Phase E ([P32](_pending_work.md)) has also landed** — the `modal` / `response_spectrum` / `pushover` verbs, `generate_report` composing the registry, and the `Analysis ▸ Modal / Response spectrum / Pushover` entries recast as recipe presets.  Remaining: storey response and the pushover curve, layout persistence (M8) and the quad view (M10), plus the workflow layer's Phases C and D — now their own items, **[P30](_pending_work.md)** (result verbs and their views — its model, capacity and mesh check verbs have landed; only its charts await P32's results) and **[P31](_pending_work.md)** (the command palette) — together with the shell result display ([P36](_pending_work.md)) and named selections / document verbs ([P35](_pending_work.md)).
 
 > **User-facing guide:** [`docs/gui.md`](gui.md) — what the application does
 > today, how to select, the camera and display controls, and the settings file.
@@ -18,8 +18,8 @@ related: [viewer.md, workflow.md, results_schema.md, rhino_export.md, report_gen
 This document records the **framework decision** and the **proposed
 architecture** for a native desktop GUI that wraps the workflow already
 implemented in the package.  Ten of its milestones have landed and an eleventh
-(**workflow authoring**, P29–P31) has begun; the remainder are tracked as **P22**
-and **P29**–**P31** in [Pending Work Register](_pending_work.md), and the workflow
+(**workflow authoring**, P29–P36) has begun; the remainder are tracked as **P22**
+and **P29**–**P36** in [Pending Work Register](_pending_work.md), and the workflow
 layer itself is specified in [`workflow_authoring.md`](workflow_authoring.md).
 
 > **Where this sketch has diverged from the code.** The §6 tree below is the
@@ -472,17 +472,21 @@ The GUI must respect the existing architectural contracts:
 10. **Tests.**  Headless `QApplication` with the `offscreen` platform plugin
     (`QT_QPA_PLATFORM=offscreen`), `ops.wipe()` hygiene, a `needs_gui` marker
     alongside the existing `needs_pyvista` marker.
-11. **Workflow authoring (P29–P32, added 2026-09-29).**  The `workflow` package
+11. **Workflow authoring (P29–P36, added 2026-09-29).**  The `workflow` package
     (verbs, steps, recipes as data), the **Recipe dock**, the `&Recipe` menu,
     and the Model-menu items re-cast as **presets over the recipe** — landed as
     **P29** (phases A–B).  **P30** (phase C) is **⚠️ partial**: the three
     model-check verbs (`check_connectivity`, `check_self_weight`,
-    `check_brace_buckling`) landed, while the `chart` verb, the GUI's first
-    figure view and a check table, `combine`'s view, and a recipe's cases as
-    views remain.  Also remaining, as independent items: **P31** (phase D — the
-    command palette and script interop) and **P32** (phase E — the modal /
-    response-spectrum / pushover verbs, and `generate_report` composing the
-    registry).
+    `check_brace_buckling`), the `chart` verb (`storey_displacements`), the GUI's
+    first figure view and a check-table view, the capacity checks
+    (`member_shear_capacity`, `wall_shear_check`, `hinge_length`), the
+    `mesh_checks` verb, `combine`'s view, and a recipe's cases as views all
+    landed; only the other charts (`storey_forces`, pushover, modal, CSM) remain.
+    **P32** (phase E) ✅ landed (2026-10-02): the `modal` / `response_spectrum` /
+    `pushover` verbs and `generate_report` composing the registry.  **P33** (GUI
+    ergonomics) ✅ landed (2026-09-30).  Remaining, as independent items: **P31**
+    (phase D — the command palette and script interop), **P35** (named selections
+    and the document verbs) and **P36** (shell result display).
     See [`workflow_authoring.md`](workflow_authoring.md) and
     [`_pending_work.md`](_pending_work.md).
 
@@ -666,13 +670,13 @@ class QtRenderBackend(RenderBackend):
 | 2 | ✅ Chrome | menubar, toolbars, dock layout, message log, status bar (units + coords live; elem/progress wired later), axes triad + view cube.  Domain actions present but greyed, each naming its milestone |
 | 3 | ✅ Trees + inspector | lazy Model Tree over `SAPModelData`/`MeshModel` (`ModelTreeModel` + the Qt-free `model_index`); the Inspector shows the selected dataclass's fields.  The Property Tree is still pending; the actor-category display toggles landed with Milestone 4 (nodes / shells — element *labels* have no renderer yet, so that toggle stays greyed) |
 | 4 | ✅ Selection sync | both directions work.  **Tree→viewport**: `ModelViewer.highlight_elements` / `highlight_nodes`, redrawn (replacing the old highlight) on every click.  **Viewport→tree**: a right-click resolves the picked batch + cell index through the Qt-free `SelectionIndex`, expands the lazy group, selects the row and scrolls to it — which then drives the inspector and the highlight through the ordinary tree wiring.  Verified end-to-end against real pyvista picks (`tests/test_picking.py`, `tests/test_gui_pick.py`) |
-| 5 | ⚠️ Partial — static-linear runs | ✅ Open runs `SAP2000Parser` on a worker; **Analysis ▸ Run…** lists the model's static cases and combinations (with a per-case load multiplier), solves them via `run_case_set` on a worker with progress + log, registers each result as a **view** through `ResultsRepository` — **no archive written** — and `File ▸ Save results…` writes one when wanted. Modal / spectrum / pushover are still to come. Stop cancels cooperatively at a case boundary |
+| 5 | ⚠️ Partial — static-linear runs | ✅ Open runs `SAP2000Parser` on a worker; **Analysis ▸ Run…** lists the model's static cases and combinations (with a per-case load multiplier), solves them via `run_case_set` on a worker with progress + log, registers each result as a **view** through `ResultsRepository` — **no archive written** — and `File ▸ Save results…` writes one when wanted. Modal / spectrum / pushover landed as recipe presets via **P32** (workflow Phase E). Stop cancels cooperatively at a case boundary |
 | 6 | Load rendering | `render_loads()` + `extract_load_glyphs()` draw joint/line/area/gravity glyphs scaled to model units |
 | 7 | ✅ Deformed shape + force diagrams (storey response outstanding) | ✅ a results case's **deformed shape** draws from its own archive (`Results ▸ Deformed shape`, amplified by the toolbar `Scale` box) and its **member force diagrams** draw with the SAP local-DOF vocabulary (`Results ▸ Force diagrams` + the Force selector); `File ▸ Save results…` writes the displayed result to an NPZ.  **Still to come:** storey response — the storey profiles need member-interior force stations ([P19](_pending_work.md)) — and the pushover curve |
 | 8 | Persistence | geometry + dock state round-trip through `QSettings` |
 | 9 | Tests | headless `QT_QPA_PLATFORM=offscreen` suite green; `needs_gui` marker; `ops.wipe()` hygiene |
 | 10 | Quad-view + polish | central `QWidget` container hosts iso/front/top/side `QtInteractor`s with shared camera toggles |
-| 11 | ⚠️ Partial — workflow authoring (P29–P33) | ✅ **P29** (Phases A–B): the `workflow` package (verbs, steps, recipes as data), the **Recipe dock**, the `&Recipe` menu and the Model-menu presets.  **P30** (Phase C) — the three model-check verbs (`check_connectivity`, `check_self_weight`, `check_brace_buckling`) ✅ landed, a recipe's solved cases and combinations ✅ register as result views, and the `chart` verb plus the GUI's first figure view and a check-table view ✅ landed, and the capacity checks (`member_shear_capacity`, `wall_shear_check`, `hinge_length`) plus the `mesh_checks` verb ✅ landed; only the other charts (`storey_forces`, pushover, modal, CSM) remain 🚧 (they need P32's results) — **P33** (GUI ergonomics: the `StepDialog`, one `Model ▸ Mesh…` entry, the toolbar reorganisation and *Show beams*) ✅ landed (2026-09-30) — **P31** (Phase D, the command palette) and **P32** (Phase E, the modal/RS/pushover verbs and the `generate_report` reconciliation) remain — `docs/workflow_authoring.md` |
+| 11 | ⚠️ Partial — workflow authoring (P29–P33) | ✅ **P29** (Phases A–B): the `workflow` package (verbs, steps, recipes as data), the **Recipe dock**, the `&Recipe` menu and the Model-menu presets.  **P30** (Phase C) — the three model-check verbs (`check_connectivity`, `check_self_weight`, `check_brace_buckling`) ✅ landed, a recipe's solved cases and combinations ✅ register as result views, and the `chart` verb plus the GUI's first figure view and a check-table view ✅ landed, and the capacity checks (`member_shear_capacity`, `wall_shear_check`, `hinge_length`) plus the `mesh_checks` verb ✅ landed; only the other charts (`storey_forces`, pushover, modal, CSM) remain 🚧 (P32's analysis verbs now produce the results they consume) — **P33** (GUI ergonomics: the `StepDialog`, one `Model ▸ Mesh…` entry, the toolbar reorganisation and *Show beams*) ✅ landed (2026-09-30) — **P32** (Phase E, the modal/RS/pushover verbs and the `generate_report` reconciliation) ✅ landed (2026-10-02) — **P31** (Phase D, the command palette) remains — `docs/workflow_authoring.md` |
 
 ### 9.7 Testing strategy
 

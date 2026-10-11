@@ -8,10 +8,13 @@ related: [gui.md, gui_roadmap.md, analysis.md, workflow.md, report_generation.md
 ---
 # Workflow Authoring — Steps and Recipes
 
-> **Status: ⚠️ Partial.** Phase A (the `fea_toolkit.workflow` package) and
-> Phase B (the GUI's Recipe panel and the Model-menu presets) have landed.
-> Phases C and D — the `check` and `chart` verbs, and the command palette —
-> are planned; see [Roadmap](#roadmap).
+> **Status: ⚠️ Partial.** Phase A (the `fea_toolkit.workflow` package),
+> Phase B (the GUI's Recipe panel and the Model-menu presets) and Phase E
+> (the `modal` / `response_spectrum` / `pushover` verbs, with
+> `generate_report` composing the registry) have landed.  Phase C (the
+> `check` and `chart` verbs) is partial — the checks and the first chart
+> have landed, the rest await P32's results — and Phase D (the command
+> palette) is planned; see [Roadmap](#roadmap).
 
 ## Why this layer exists
 
@@ -262,7 +265,7 @@ rather than mutating it; the recipe object stays the single source of truth.
 | **B** | [P29](_pending_work.md) | the Recipe panel, the `&Recipe` menu, the Model-menu presets | ✅ landed |
 | **C** | **[P30](_pending_work.md)** | **computed results become visible** — the three model-check verbs (`check_connectivity`, `check_self_weight`, `check_brace_buckling`) ✅ complete, a recipe's solved cases and combinations ✅ register as result views, the `chart` verb (`storey_displacements`) plus the GUI's **first figure view** and a check-table view ✅ land, and the capacity checks (`member_shear_capacity`, `wall_shear_check`, `hinge_length`) plus the `mesh_checks` verb ✅ land; the rest 🚧 planned — the other `plotting.report.*` charts (`storey_forces`, pushover, modal, CSM), which need the results P32's analysis verbs will produce | ⚠️ Partial |
 | **D** | **[P31](_pending_work.md)** | **authoring ergonomics** — the command palette (`Ctrl+K`) compiling a command string into a step, a command-echo log recording every action as its equivalent step, and importing a Python script back into a recipe | 🚧 planned |
-| **E** | **[P32](_pending_work.md)** | **the report pipeline joins the vocabulary** — the *analysis* verbs the reconciliation needs (modal, response spectrum, pushover), and `generate_report` composing the same registry; see *Resolving the `generate_report` duality* below | 🚧 planned |
+| **E** | **[P32](_pending_work.md)** | **the report pipeline joins the vocabulary** — the *analysis* verbs the reconciliation needs (`modal`, `response_spectrum`, `pushover`) and `generate_report` composing the same registry; the greyed `Analysis ▸ Modal / Response spectrum / Pushover` entries became recipe presets; see *Resolving the `generate_report` duality* below | ✅ landed |
 
 **C, D and E are deliberately separate register items** (P30, P31, P32): C makes
 computed results *visible*, D makes authoring *fast*, and E reconciles an
