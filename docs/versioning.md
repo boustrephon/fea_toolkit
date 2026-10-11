@@ -59,7 +59,7 @@ not as a side effect of adding a feature.
 |---|---|---|
 | `v0.3.0` | previous release | ✅ released |
 | `v0.4.0` | the backlog of backward-compatible features accumulated since `v0.3.0` (load combinations, force-diagram unification, per-storey forces, …) — the current (last tagged) release | ✅ tagged 2026-09-23 |
-| `v0.5.0` | the **desktop GUI** — the `[gui]` extra (see [Desktop GUI Roadmap](gui_roadmap.md), P22) | 🚧 planned |
+| `v0.5.0` | the **desktop GUI** (milestones 1–7) plus the **workflow layer** (verbs, recipes, result + chart views), the four result charts (`storey_forces` / `pushover` / `modal` / `csm`) and the LLM result-interpretation guide — the `[gui]` extra | ✅ tagged 2026-11-10 |
 | `v1.0.0` | public-API freeze / stability milestone | 🚧 not scheduled |
 
 Notes:
