@@ -1,7 +1,6 @@
-"""Project bundle — save and reload the complete GUI session to a directory.
+"""Project bundle — save and reload the complete GUI session to a ``.zip`` archive.
 
-Directory-first, with an optional zip wrapper.  A project is a directory holding
-five canonical files:
+A project is a single ``.zip`` file holding five canonical members:
 
     project.json   the manifest: recipe, ordered view list, active view,
                    viewport (camera + hidden set) and display preferences
@@ -13,10 +12,10 @@ five canonical files:
                    per direction), regenerated to matplotlib figures on load
     tables.json    table-view payloads (modal, response-spectrum)
 
-The loader accepts either the directory or a ``.zip`` of it.  Everything here is
-Qt-free and OpenSees-free, so the module is unit-tested without the ``[gui]``
-extra.  Heavy imports (the io writers, matplotlib) live inside the functions
-they serve, mirroring the project's lazy-import policy.
+The loader accepts the ``.zip`` archive or a legacy directory / ``.fea``.
+Everything here is Qt-free and OpenSees-free, so the module is unit-tested
+without the ``[gui]`` extra.  Heavy imports (the io writers, matplotlib) live
+inside the functions they serve, mirroring the project's lazy-import policy.
 """
 
 from __future__ import annotations
@@ -25,6 +24,7 @@ import contextlib
 import json
 import shutil
 import tempfile
+import zipfile
 from pathlib import Path
 from typing import Any, Optional
 
@@ -50,6 +50,7 @@ __all__ = [
     "tables_payload",
     "views_payload",
     "write_project",
+    "write_project_zip",
     "zip_project",
 ]
 
@@ -613,7 +614,7 @@ def is_project(path: str | Path) -> bool:
     """Whether *path* looks like a project (a directory, or a zip of one).
 
     Args:
-        path: A directory or ``.zip`` / ``.fea`` path.
+        path: A directory, or a ``.zip`` (or legacy ``.fea``) archive.
 
     Returns:
         ``True`` when the directory contains a manifest, or the path has a zip
@@ -629,7 +630,7 @@ def read_project(path: str | Path) -> dict:
     """Read a project directory (or a zip of one) back into memory.
 
     Args:
-        path: The project directory, or a ``.zip`` / ``.fea`` of it.
+        path: The project directory, or a ``.zip`` (or legacy ``.fea``) of it.
 
     Returns:
         A dict with ``manifest``, ``sap``, ``mesh``, ``results`` (an
@@ -644,9 +645,12 @@ def read_project(path: str | Path) -> dict:
     if path.is_dir():
         return _read_dir(path)
     if path.suffix.lower() in (".zip", ".fea"):
+        # A ``.fea`` is a renamed zip; ``shutil.unpack_archive`` keys off the
+        # extension, so read it with ``zipfile`` (which sniffs the magic bytes).
         tmp = tempfile.mkdtemp(prefix="fea_project_")
         try:
-            shutil.unpack_archive(str(path), tmp)
+            with zipfile.ZipFile(path) as zf:
+                zf.extractall(tmp)
             return _read_dir(Path(tmp))
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -654,14 +658,14 @@ def read_project(path: str | Path) -> dict:
 
 
 def zip_project(bundle_dir: str | Path, zip_path: Optional[str | Path] = None) -> str:
-    """Archive a project directory as a single ``.fea`` zip.
+    """Archive a project directory as a single ``.zip`` archive.
 
     The directory is the canonical form; this is a transport wrapper the loader
     (:func:`read_project`) understands unchanged.
 
     Args:
         bundle_dir: The project directory.
-        zip_path: The output path (defaults to ``<bundle_dir>.fea``).
+        zip_path: The output path (defaults to ``<bundle_dir>.zip``).
 
     Returns:
         The written archive path.
@@ -670,7 +674,7 @@ def zip_project(bundle_dir: str | Path, zip_path: Optional[str | Path] = None) -
     if not bundle_dir.is_dir():
         raise ValueError(f"{bundle_dir} is not a directory")
     if zip_path is None:
-        zip_path = bundle_dir.with_suffix(".fea")
+        zip_path = bundle_dir.with_suffix(".zip")
     base = str(Path(zip_path))
     if base.lower().endswith(".fea") or base.lower().endswith(".zip"):
         base = base[: -len(Path(base).suffix)]
@@ -678,6 +682,71 @@ def zip_project(bundle_dir: str | Path, zip_path: Optional[str | Path] = None) -
     # (and :func:`read_project`) sees ``project.json`` etc. without a folder
     # prefix.
     return shutil.make_archive(base, "zip", root_dir=bundle_dir)
+
+
+def write_project_zip(
+    zip_path: str | Path,
+    *,
+    manifest: dict,
+    sap: Any,
+    mesh: Any,
+    results_arrays: dict,
+    figures: dict,
+    tables: dict,
+    model_fmt: Optional[str] = None,
+) -> list[str]:
+    """Write a project as a single ``.zip`` archive, returning non-fatal notes.
+
+    Writes the canonical directory to a temp dir via :func:`write_project`, then
+    archives it with the already-compressed members (``model.h5`` — gzip,
+    ``results.npz`` — DEFLATE) *stored* and the JSON text members deflated, so a
+    save never re-compresses data that is already compressed.
+
+    Args:
+        zip_path: The output ``.zip`` file.
+        Remaining args mirror :func:`write_project`.
+
+    Returns:
+        Notes to log; ``[]`` when everything wrote silently.
+    """
+    tmp = Path(tempfile.mkdtemp(prefix="fea_project_save_"))
+    try:
+        notes = write_project(
+            tmp,
+            manifest=manifest,
+            sap=sap,
+            mesh=mesh,
+            results_arrays=results_arrays,
+            figures=figures,
+            tables=tables,
+            model_fmt=model_fmt,
+        )
+        _zip_selective(tmp, Path(zip_path))
+        return notes
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _zip_selective(bundle_dir: Path, zip_path: Path) -> str:
+    """Archive *bundle_dir* as a zip, storing the already-compressed members.
+
+    ``model.h5`` (written with HDF5 gzip) and ``results.npz`` (NumPy's zip) are
+    stored with ``ZIP_STORED`` so they are not re-compressed; the JSON text
+    members are deflated.  Members sit at the archive root, matching
+    :func:`zip_project`.
+    """
+    zip_path = Path(zip_path)
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for member in sorted(bundle_dir.iterdir()):
+            if not member.is_file():
+                continue
+            compress_type = (
+                zipfile.ZIP_STORED
+                if member.suffix.lower() in {".h5", ".npz"}
+                else zipfile.ZIP_DEFLATED
+            )
+            zf.write(member, member.name, compress_type=compress_type)
+    return str(zip_path)
 
 
 # ── Figure regeneration ──────────────────────────────────────────────

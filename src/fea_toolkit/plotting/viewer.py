@@ -25,6 +25,7 @@ Usage::
 
 import logging
 import warnings
+from collections.abc import Iterable
 from typing import Any, Optional, Union
 
 import numpy as np
@@ -47,8 +48,22 @@ def _resolve_backend(backend: str, **kwargs) -> RenderBackend:
         raise ValueError(f"Unknown render backend: {backend!r}. Choices: 'pyvista', 'rhino'.")
 
 
+def _section_names(model: Any) -> set[str]:
+    """Every section name *model* references — definitions plus assignments.
+
+    A results archive's display model carries section *names* on its element
+    assignments but no section *definitions* (``sections`` is empty), so the
+    palette must be built from the union or such a model renders grey.
+    """
+    names = set(getattr(model, "sections", {}) or {})
+    names.update((getattr(model, "frame_assignments", {}) or {}).values())
+    names.update((getattr(model, "area_assignments", {}) or {}).values())
+    names.discard("")
+    return names
+
+
 def _section_palette(
-    sections: dict[str, Any],
+    names: Iterable[str],
 ) -> dict[str, tuple[float, float, float]]:
     """Build a deterministic colour map from section names."""
     palette = [
@@ -63,8 +78,8 @@ def _section_palette(
         (0.314, 0.314, 0.314),
         (0.859, 0.373, 0.522),
     ]
-    names = sorted(sections.keys())
-    return {n: palette[i % len(palette)] for i, n in enumerate(names)}
+    ordered = sorted(set(names))
+    return {n: palette[i % len(palette)] for i, n in enumerate(ordered)}
 
 
 def _end_force_values(entry: dict, quantity: str, use_local: bool) -> Optional[tuple[float, float]]:
@@ -224,7 +239,7 @@ class ModelViewer:
             return
 
         md = self._model
-        self._section_colors = _section_palette(md.sections)
+        self._section_colors = _section_palette(_section_names(md))
 
         # Collapse-to-parents: include inactive parents and unsplit
         # elements (those without a parent); skip active children.
@@ -343,6 +358,7 @@ class ModelViewer:
     def show_model(
         self,
         show_nodes: bool = True,
+        show_frames: bool = True,
         show_shells: bool = True,
         color_by_section: bool = True,
         opacity: float = 1.0,
@@ -358,6 +374,7 @@ class ModelViewer:
 
         Args:
             show_nodes: If True, draw node markers.
+            show_frames: If True, draw the frame line skeleton.
             show_shells: If True, draw shell elements.
             color_by_section: If True, colour elements by section name.
             opacity: Element opacity.
@@ -409,7 +426,8 @@ class ModelViewer:
                 shrink=shrink,
                 detail=extruded_detail,
             )
-        self._backend.render_frames(self._frames, colors, opacity=opacity, shrink=shrink)
+        if show_frames:
+            self._backend.render_frames(self._frames, colors, opacity=opacity, shrink=shrink)
 
         if show_shells:
             self._backend.render_shells(

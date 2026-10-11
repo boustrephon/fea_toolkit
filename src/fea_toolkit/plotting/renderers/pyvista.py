@@ -706,6 +706,11 @@ class PyVistaRenderer(RenderBackend):
         scale: float = 1.0,
         color: tuple[float, float, float] = (0.3, 0.6, 1.0),
     ) -> None:
+        # The deformed shape is a single overlay: re-drawing it (e.g. each frame
+        # of the mode-shape animation) must *replace* the previous shape, not
+        # stack another actor on top of it.  Clear first so the prior amplitude
+        # does not linger and draw over the new one.
+        self.clear_category("deformed")
         if not frames:
             return
         p = self.plotter

@@ -1099,3 +1099,59 @@ class TestNodeMarkersAndSelection:
         finally:
             renderer.clear()
             renderer.plotter.close()
+
+
+class TestRenderDeformedReplaces:
+    """``PyVistaRenderer.render_deformed`` replaces, never stacks, its overlay.
+
+    The mode-shape animation redraws the deformed shape every tick at a new
+    amplitude; if each redraw left its predecessor on screen the successive
+    shapes would draw over one another (the bug this guards against).
+    """
+
+    def test_a_second_call_replaces_the_previous_overlay(self):
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            disp = {"1": np.array([0.0, 0.0, 0.0]), "2": np.array([1.0, 0.0, 0.0])}
+            renderer.render_deformed([_frame()], disp, scale=1.0)
+            renderer.render_deformed([_frame()], disp, scale=2.0)
+
+            actors = renderer.actors("deformed")
+            assert len(actors) == 1, "the previous deformed shape was left on screen"
+            points = np.asarray(actors[0].mapper.dataset.points, dtype=float)
+            # Tip node (node 2) displaced 1.0 in X, scaled ×2 → x = 2.0.
+            assert points[1][0] == pytest.approx(2.0)
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+
+class TestSectionPaletteFromAssignments:
+    """The section palette must include assignment names, not just definitions.
+
+    A results archive's display model carries section *names* on its element
+    assignments but an empty ``sections`` dict; without the union the whole
+    model renders grey.
+    """
+
+    def test_names_include_assignments_when_sections_is_empty(self):
+        from types import SimpleNamespace
+
+        from fea_toolkit.plotting.viewer import _section_names
+
+        model = SimpleNamespace(
+            sections={},
+            frame_assignments={"1": "COL-300", "2": "BEAM-500"},
+            area_assignments={"A1": "SLAB-150"},
+        )
+        assert _section_names(model) == {"COL-300", "BEAM-500", "SLAB-150"}
+
+    def test_palette_colours_every_name(self):
+        from fea_toolkit.plotting.viewer import _section_palette
+
+        colors = _section_palette(["COL-300", "BEAM-500", "SLAB-150"])
+        assert set(colors) == {"COL-300", "BEAM-500", "SLAB-150"}
+        # Every name maps to a palette colour — none falls back to grey.
+        assert all(color != (0.5, 0.5, 0.5) for color in colors.values())

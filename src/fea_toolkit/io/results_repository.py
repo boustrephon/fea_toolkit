@@ -93,7 +93,9 @@ def _children_by_parent(ids: list, parents: list) -> dict:
     return children
 
 
-def mesh_model_from_geometry(geometry: dict) -> Any:
+def mesh_model_from_geometry(
+    geometry: dict, sections: Optional[dict] = None, restraints: Optional[dict] = None
+) -> Any:
     """Build a displayable ``MeshModel`` from an archive's geometry arrays.
 
     An archive carries enough geometry to *draw* a model — node coordinates,
@@ -113,6 +115,13 @@ def mesh_model_from_geometry(geometry: dict) -> Any:
         geometry: The arrays from :meth:`ResultsRepository.display_geometry`.
             Missing blocks are skipped, so a frame-only or shell-only archive
             rebuilds cleanly.
+        sections: Optional ``{name: Section}`` to attach to the rebuilt model.
+            A results archive stores section *names* but not definitions; pass
+            the source model's sections so a results view colours its elements
+            the same way the geometry views do.
+        restraints: Optional ``{node_id: Restraint}`` to attach, so a results
+            view draws the model's support symbols.  The archive itself carries
+            no restraints.
 
     Returns:
         A ``MeshModel`` ready for ``ModelViewer(mesh_model=...)``.
@@ -201,6 +210,8 @@ def mesh_model_from_geometry(geometry: dict) -> Any:
         area_elements=areas,
         area_assignments=area_assignments,
         frame_dist_loads=[],
+        sections=sections or {},
+        restraints=restraints or {},
     )
 
 
@@ -251,15 +262,24 @@ class ResultsRepository(ABC):
         element-local or global before it can orient them.
         """
 
-    def as_model(self) -> Any:
+    def as_model(self, sections: Optional[dict] = None, restraints: Optional[dict] = None) -> Any:
         """A **displayable** ``MeshModel`` built from this archive's geometry.
 
         What lets a results view draw the deformed — or simply the analysed —
         geometry without the ``.s2k`` it came from.  The model is for display
         only: an archive carries no materials, loads or restraints, and no unit
         system, so nothing here can be analysed.
+
+        Args:
+            sections: Optional ``{name: Section}`` to attach, so a results view
+                colours its elements the same way the geometry views do.  The
+                archive itself carries section names, not definitions.
+            restraints: Optional ``{node_id: Restraint}`` to attach, so a results
+                view draws the model's support symbols.
         """
-        return mesh_model_from_geometry(self.display_geometry())
+        return mesh_model_from_geometry(
+            self.display_geometry(), sections=sections, restraints=restraints
+        )
 
     def has_displacements(self, case: str) -> bool:
         """Whether *case* carries nodal displacement — the cheap pre-check.

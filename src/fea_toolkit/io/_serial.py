@@ -230,6 +230,9 @@ def _write_h5(path: str, arrays: dict[str, np.ndarray]) -> str:
 
     Organises data into groups matching the NPZ key hierarchy (``/`` in a
     key becomes a group).  String arrays are stored as variable-length UTF-8.
+    Numeric datasets are written with the built-in gzip filter (level 4), which
+    is readable by any HDF5 reader; scalar datasets and string tables are left
+    uncompressed.
     """
     try:
         import h5py
@@ -242,6 +245,16 @@ def _write_h5(path: str, arrays: dict[str, np.ndarray]) -> str:
             parts = key.split("/")
             dataset_name = parts[-1]
             group_path = "/".join(parts[:-1]) if len(parts) > 1 else ""
+
+            # gzip the numeric datasets (the bulk: coordinates, connectivity,
+            # results — they compress ~10x).  gzip requires chunking, which a
+            # scalar dataset cannot have, and the small string tables gain
+            # little, so those two cases stay uncompressed.
+            compress_kw = (
+                {"compression": "gzip", "compression_opts": 4}
+                if arr.dtype.kind not in {"U", "S"} and arr.ndim >= 1
+                else {}
+            )
 
             # Handle string arrays — h5py can't write NumPy fixed-width string dtype
             if arr.dtype.kind in {"U", "S"}:
@@ -257,9 +270,9 @@ def _write_h5(path: str, arrays: dict[str, np.ndarray]) -> str:
                     f.create_dataset(dataset_name, data=arr_obj, dtype=dt)
             elif group_path:
                 g = f.require_group(group_path)
-                g.create_dataset(dataset_name, data=arr)
+                g.create_dataset(dataset_name, data=arr, **compress_kw)
             else:
-                f.create_dataset(key, data=arr)
+                f.create_dataset(key, data=arr, **compress_kw)
     return path
 
 

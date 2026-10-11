@@ -6,6 +6,7 @@ results arrays and JSON payloads (no model stage).
 """
 
 import json
+import zipfile
 from typing import Optional
 
 import numpy as np
@@ -26,6 +27,7 @@ from fea_toolkit.gui.project import (
     tables_payload,
     views_payload,
     write_project,
+    write_project_zip,
     zip_project,
 )
 from fea_toolkit.workflow.steps import CASES, MODAL, PUSHOVER, RS, StepResult, Table
@@ -485,6 +487,58 @@ def test_zip_project_roundtrip(tmp_path):
 
     bundle = read_project(archive)
     assert bundle["manifest"]["active_view"] == "figure:pushover-plusx-uniform"
+
+
+def test_write_project_zip_roundtrip_and_compression(tmp_path):
+    manifest = build_manifest(
+        name="Admin",
+        source_label="Admin.s2k",
+        model_file="model.h5",
+        units={"F": "N"},
+        recipe=None,
+        views=_views(),
+        active_view="results:DEAD",
+        camera=None,
+        hidden_elem_ids=[],
+        display={},
+    )
+    notes = write_project_zip(
+        tmp_path / "Admin.zip",
+        manifest=manifest,
+        sap=None,
+        mesh=None,
+        results_arrays={"node_tag": np.array([1, 2]), "schema_version": np.array([3])},
+        figures={},
+        tables={},
+        model_fmt="npz",
+    )
+    assert notes == []
+
+    # The already-compressed member is stored; the text members are deflated.
+    with zipfile.ZipFile(tmp_path / "Admin.zip") as zf:
+        compress = {info.filename: info.compress_type for info in zf.infolist()}
+    assert compress["results.npz"] == zipfile.ZIP_STORED
+    assert compress["project.json"] == zipfile.ZIP_DEFLATED
+
+    bundle = read_project(tmp_path / "Admin.zip")
+    assert bundle["manifest"]["active_view"] == "results:DEAD"
+
+
+def test_zip_selective_stores_h5_and_npz(tmp_path):
+    from fea_toolkit.gui.project import _zip_selective
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "model.h5").write_bytes(b"h5")
+    (src / "results.npz").write_bytes(b"npz")
+    (src / "project.json").write_text("{}")
+
+    _zip_selective(src, tmp_path / "out.zip")
+    with zipfile.ZipFile(tmp_path / "out.zip") as zf:
+        compress = {info.filename: info.compress_type for info in zf.infolist()}
+    assert compress["model.h5"] == zipfile.ZIP_STORED
+    assert compress["results.npz"] == zipfile.ZIP_STORED
+    assert compress["project.json"] == zipfile.ZIP_DEFLATED
 
 
 def test_is_project(tmp_path):

@@ -87,6 +87,30 @@ def test_bad_show_extruded_falls_back_to_the_default():
     assert any("show_extruded" in note for note in notes)
 
 
+def test_visibility_toggles_default_to_shown():
+    assert DISPLAY_DEFAULTS.show_nodes is True
+    assert DISPLAY_DEFAULTS.show_frames is True
+    assert DISPLAY_DEFAULTS.show_shells is True
+    assert DISPLAY_DEFAULTS.show_restraints is True
+
+
+def test_visibility_toggles_are_applied():
+    settings, notes = resolve_display(
+        {"show_nodes": False, "show_frames": False, "show_shells": False, "show_restraints": False}
+    )
+    assert settings.show_nodes is False
+    assert settings.show_frames is False
+    assert settings.show_shells is False
+    assert settings.show_restraints is False
+    assert notes == []
+
+
+def test_bad_visibility_toggle_falls_back_to_the_default():
+    settings, notes = resolve_display({"show_nodes": "no"})
+    assert settings.show_nodes is DISPLAY_DEFAULTS.show_nodes
+    assert any("show_nodes" in note for note in notes)
+
+
 def test_unknown_extruded_detail_falls_back_to_the_default():
     settings, notes = resolve_display({"extruded_detail": "wireframe"})
     assert settings.extruded_detail == DISPLAY_DEFAULTS.extruded_detail

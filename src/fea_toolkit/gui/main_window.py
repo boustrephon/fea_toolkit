@@ -15,7 +15,6 @@ the viewport, plus the node / shell display toggles.
 
 import contextlib
 import gc
-import shutil
 from typing import Any, Optional
 
 from qtpy.QtCore import QItemSelection, QItemSelectionModel, QItemSelectionRange, Qt, QTimer, QUrl
@@ -267,6 +266,7 @@ class MainWindow(QMainWindow):
         self._reset_view_baseline = None
         self._store = None
         self._views = ViewRegistry()
+        self._reset_session_display()
         if isinstance(model, SAPModelData):
             self._store = InMemoryModelStore(model, source=source)
             self._views = ViewRegistry(self._store)
@@ -754,7 +754,7 @@ class MainWindow(QMainWindow):
         a["file.open_project"] = self._real_action(
             "Open project\u2026",
             self._on_open_project,
-            tip="Reload a saved project (directory or .fea zip) without re-running analyses",
+            tip="Reload a saved project (.zip archive) without re-running analyses",
         )
         a["file.export_tcl"] = self._placeholder("Export Tcl", "Milestone 7")
         a["file.export_image"] = self._placeholder("Export screenshot", "Milestone 7")
@@ -1397,8 +1397,15 @@ class MainWindow(QMainWindow):
         # A new model replaces the previous scene outright -- the backend
         # *appends* actors, so without this the old geometry would linger
         # behind the new one.  A results overlay belongs to *one* view's
-        # geometry, so the toggle is reset along with it.
-        self._reset_results_overlay()
+        # geometry, so a *view switch* remembers it (redrawn for the new case
+        # below) while a fresh model load resets it upstream in
+        # :meth:`_remember_source`.
+        results_intent = {
+            "deformed": self._actions["results.deformed"].isChecked(),
+            "animate": self._actions["results.animate"].isChecked(),
+            "forces": self._actions["results.forces"].isChecked(),
+        }
+        self._stop_animation()
         self._backend.clear()
 
         if isinstance(model, MeshModel):
@@ -1424,7 +1431,9 @@ class MainWindow(QMainWindow):
             )
 
         viewer.show_model(
-            show_nodes=True,
+            show_nodes=self._actions["view.show_nodes"].isChecked(),
+            show_frames=self._actions["view.show_frames"].isChecked(),
+            show_shells=self._actions["view.show_shells"].isChecked(),
             color_by_section=color_by_section,
             shell_opacity=float(self._shell_opacity.value()),
             shrink=float(self._shrink.value()),
@@ -1443,8 +1452,7 @@ class MainWindow(QMainWindow):
         # back to the displayed model, which simply has neither.
         self._inspector.set_source_model(self._store.raw() if self._store is not None else model)
         if rebuild_tree:
-            self._tree_model.set_model(model, self._views.views())
-        self._reset_display_toggles()
+            self._tree_model.set_model(self._tree_model_source(model), self._views.views())
         if camera is None:
             self._interactor.reset_camera()
         else:
@@ -1453,14 +1461,34 @@ class MainWindow(QMainWindow):
         self._set_model_actions_enabled(self._store is not None)
         self._set_analysis_actions_enabled()
         self._set_view_actions_enabled()
+        self._reapply_results_overlay(results_intent)
         self.log("Displayed model geometry.")
 
-    def _reset_display_toggles(self) -> None:
-        """Re-check the display toggles to match freshly rendered geometry.
+    def _tree_model_source(self, fallback: Any) -> Any:
+        """The model the Model Tree presents — the mesh, then raw, then *fallback*.
 
-        Every overlay is drawn again by :meth:`show_model`, so a toggle left
-        unchecked by the previous model would otherwise contradict what is on
-        screen.  Signals are blocked: there is nothing to re-render yet.
+        A results view's source is a display model rebuilt from the archive: it
+        carries geometry and section names but no supports, materials, groups or
+        loads.  The tree should present the *real* model, so it uses the store's
+        preprocessed (mesh) model when one exists, the parsed (raw) model
+        otherwise, and the view's source only with no store at all (a standalone
+        results archive).
+        """
+        if self._store is not None:
+            preprocessed = self._store.preprocessed()
+            if preprocessed is not None:
+                return preprocessed
+            raw = self._store.raw()
+            if raw is not None:
+                return raw
+        return fallback
+
+    def _reset_session_display(self) -> None:
+        """Reset the display and results toggles for a freshly opened model.
+
+        Called when a new model replaces the previous one — never when switching
+        views of the same model, where the user's visibility and overlay choices
+        must survive (see :meth:`_reapply_results_overlay`).
         """
         for key in (
             "view.show_nodes",
@@ -1468,17 +1496,61 @@ class MainWindow(QMainWindow):
             "view.show_shells",
             "view.show_restraints",
         ):
-            action = self._actions[key]
-            action.blockSignals(True)
-            action.setChecked(True)
-            action.blockSignals(False)
-
+            self._set_toggle_checked(key, True)
         # Extruded shapes is a user preference, not a per-model default: it
         # keeps the state the settings file loaded (off unless the user asked).
-        extruded = self._actions["view.show_extruded"]
-        extruded.blockSignals(True)
-        extruded.setChecked(self._display.show_extruded)
-        extruded.blockSignals(False)
+        self._set_toggle_checked("view.show_extruded", self._display.show_extruded)
+        self._stop_animation()
+        self._set_toggle_checked("results.animate", False)
+        self._set_toggle_checked("results.deformed", False)
+        self._sync_force_toggles(False)
+
+    def _reapply_results_overlay(self, intent: dict) -> None:
+        """Redraw the results overlay the user had on, for the newly shown view.
+
+        :meth:`show_model` clears the scene, so an overlay that was on must be
+        re-read from the new view's case (and the animation restarted) rather
+        than silently dropped.  A view that cannot supply the data is skipped —
+        its action was just disabled by :meth:`_set_view_actions_enabled`.
+        """
+        deformed = self._actions["results.deformed"]
+        if intent.get("deformed") and deformed.isEnabled():
+            self._on_deformed_toggled(True)
+        animate = self._actions["results.animate"]
+        if intent.get("animate") and animate.isEnabled():
+            self._on_animate_toggled(True)
+        if intent.get("forces") and self._actions["results.forces"].isEnabled():
+            self._on_forces_toggled(True)
+
+    def _preferred_open_view(self, saved_key: Optional[str]) -> Optional[Any]:
+        """The view a reopened project shows first: geometry, not a results view.
+
+        A saved ``active_view`` is often a results view (the last mode the user
+        animated); reopening straight into it hides the model's supports, groups
+        and loads.  Prefer the geometry views — meshed/processed first, then
+        unprocessed — and fall back to the saved view (or ``None``).
+        """
+        for key in ("meshed", "processed", "unprocessed"):
+            view = self._views.get(key)
+            if view is not None:
+                return view
+        return self._views.get(saved_key) if saved_key else None
+
+    @staticmethod
+    def _backfill_mesh_load_metadata(mesh: Any, sap: Any) -> None:
+        """Copy SAP load definitions onto a disk-loaded mesh that lacks them.
+
+        A project saved before ``MeshModel`` carried ``load_cases`` /
+        ``load_combinations`` / ``response_spectrum_functions`` holds a mesh
+        with empty dicts.  Preprocessing never changes those definitions, so
+        backfill them from the raw model at open time — the Model Tree then
+        shows Load Cases, Load Combinations and Response Spectra without a
+        re-save.
+        """
+        for attr in ("load_cases", "load_combinations", "response_spectrum_functions"):
+            source = getattr(sap, attr, None)
+            if source and not getattr(mesh, attr, None):
+                setattr(mesh, attr, source)
 
     def _update_units_label(self) -> None:
         """Show the model's unit system in the status bar."""
@@ -1576,10 +1648,7 @@ class MainWindow(QMainWindow):
         every table/figure registered by a recipe run invisible in the **Views**
         group.  This repopulates the tree without touching the viewport.
         """
-        model = self._model
-        if model is None and self._store is not None:
-            model = self._store.preprocessed() or self._store.raw()
-        self._tree_model.set_model(model, self._views.views())
+        self._tree_model.set_model(self._tree_model_source(self._model), self._views.views())
 
     def _show_table_view(self, view: View) -> None:
         """Render a ``table`` view — a check's findings as a read-only grid.
@@ -2071,19 +2140,6 @@ class MainWindow(QMainWindow):
         action.blockSignals(True)
         action.setChecked(checked)
         action.blockSignals(False)
-
-    def _reset_results_overlay(self) -> None:
-        """Forget the results overlay whose scene :meth:`show_model` replaced.
-
-        The backend's ``clear()`` has already removed the actor, so this only
-        has to put the toggle back — hence ``blockSignals`` in
-        :meth:`_set_toggle_checked`: re-entering the handler would try to
-        clear an actor that is gone.
-        """
-        self._stop_animation()
-        self._set_toggle_checked("results.animate", False)
-        self._set_toggle_checked("results.deformed", False)
-        self._sync_force_toggles(False)
 
     def _on_show_nodes(self, checked: bool) -> None:
         """Show or hide the node-marker overlay."""
@@ -3336,9 +3392,9 @@ class MainWindow(QMainWindow):
                     arrays.update(repository.raw())
 
     def _on_save_project(self) -> None:
-        """**File ▸ Save project…**: write the full session to a project directory.
+        """**File ▸ Save project…**: write the full session to a single ``.zip`` archive.
 
-        A project is a directory (``<name>.fea``) holding the model stage, the
+        A project is a zip archive (``<name>.zip``) holding the model stage, the
         results archive, the recipe, the ordered view list and the figure / table
         payloads — everything needed to reconstruct the session without re-running
         an analysis.
@@ -3353,30 +3409,13 @@ class MainWindow(QMainWindow):
 
         stem = Path(self._source_label).stem or "project"
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save project", f"{stem}.fea", "FEA project (*.fea)"
+            self, "Save project", f"{stem}.zip", "FEA project (*.zip)"
         )
         if not path:
             return
-        directory = Path(path)
-        if directory.suffix.lower() != ".fea":
-            directory = Path(f"{directory}.fea")
-        if directory.exists() and not directory.is_dir():
-            self.log(f"{directory} exists and is not a directory.", "error")
-            return
-        if directory.is_dir() and any(directory.iterdir()):
-            answer = QMessageBox.question(
-                self,
-                "Confirm overwrite",
-                f"{directory} is not empty.\nReplace its contents?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if answer != QMessageBox.StandardButton.Yes:
-                return
-            # Clear the existing contents before writing, so stale files from a
-            # previous save (e.g. a results.npz) cannot be loaded alongside the
-            # new manifest.
-            shutil.rmtree(directory)
+        target = Path(path)
+        if target.suffix.lower() != ".zip":
+            target = Path(f"{target}.zip")
 
         collected = project_mod.collect_project_results(
             self._last_run.results if self._last_run is not None else []
@@ -3401,8 +3440,8 @@ class MainWindow(QMainWindow):
             hidden_elem_ids=sorted(self._hidden_elem_ids),
             display=self._collect_display_values(),
         )
-        notes = project_mod.write_project(
-            directory,
+        notes = project_mod.write_project_zip(
+            target,
             manifest=manifest,
             sap=self._store.raw(),
             mesh=self._store.preprocessed(),
@@ -3412,24 +3451,29 @@ class MainWindow(QMainWindow):
         )
         for note in notes:
             self.log(note, "warn")
-        self.log(f"Saved project to {directory}.")
+        self.log(f"Saved project to {target}.")
 
     def _on_open_project(self) -> None:
-        # A project is a *directory* (``<name>.fea/``) — the canonical form the
-        # save action writes.  ``getOpenFileName`` is a file picker, so selecting
-        # a bundle folder with it just navigates *into* the folder instead of
-        # choosing it.  Use the directory picker; ``open_project_path`` still
-        # accepts a ``.fea`` zip when handed a path directly.
-        directory = QFileDialog.getExistingDirectory(self, "Open project", "")
-        if directory and not self.open_project_path(directory):
+        # A project is a single ``<name>.zip`` file (a zip), so the native file
+        # picker is the right tool — it lists and selects it without the macOS
+        # directory picker's quirk of hiding folders whose names carry a file
+        # extension.  ``open_project_path`` also still accepts a legacy ``.fea``
+        # directory when handed a path directly.
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open project",
+            "",
+            "FEA project (*.zip);;All files (*)",
+        )
+        if path and not self.open_project_path(path):
             QMessageBox.critical(
                 self,
                 "Open failed",
-                f"Could not open project:\n{directory}\n\nSee the message log.",
+                f"Could not open project:\n{path}\n\nSee the message log.",
             )
 
     def open_project_path(self, path: str) -> bool:
-        """Load a project (directory or ``.fea`` zip) and rebuild the session.
+        """Load a project (directory or ``.zip`` archive) and rebuild the session.
 
         Dialog-free so tests can drive it directly.  The model, results, tables
         and figures are read back from the bundle and re-registered as views — so
@@ -3442,7 +3486,7 @@ class MainWindow(QMainWindow):
         self.log(f"Opening project {path} …")
         try:
             if not is_project(path):
-                self.log(f"{path} is not a project (directory or .fea zip).", "error")
+                self.log(f"{path} is not a project (directory or .zip archive).", "error")
                 return False
             bundle = read_project(path)
         except Exception as exc:
@@ -3465,10 +3509,19 @@ class MainWindow(QMainWindow):
         self._save_view_state()
         self._remember_source(sap, source=source_label)
         if mesh is not None:
+            self._backfill_mesh_load_metadata(mesh, sap)
             self._store.set_preprocessed(mesh)
 
         geometry_sources = {"unprocessed": sap, "processed": mesh, "meshed": mesh}
-        display_model = repository.as_model() if repository is not None else None
+        # Results views render the archive's own geometry, which carries section
+        # *names* but not definitions, and no supports.  Attach the source
+        # model's sections and restraints so a results view colours and supports
+        # its elements exactly as the geometry views do.
+        display_model = (
+            repository.as_model(sections=sap.sections, restraints=sap.restraints)
+            if repository is not None
+            else None
+        )
 
         for entry in manifest.get("views") or []:
             kind = entry.get("kind")
@@ -3520,8 +3573,7 @@ class MainWindow(QMainWindow):
 
         self._apply_display_values(manifest.get("display") or {})
 
-        active_key = manifest.get("active_view")
-        active = self._views.get(active_key) if active_key else None
+        active = self._preferred_open_view(manifest.get("active_view"))
         if active is None:
             views = self._views.views()
             active = views[0] if views else None
@@ -3826,6 +3878,10 @@ class MainWindow(QMainWindow):
             "restraint_style": self._display.restraint_style,
             "show_extruded": self._display.show_extruded,
             "extruded_detail": self._display.extruded_detail,
+            "show_nodes": self._actions["view.show_nodes"].isChecked(),
+            "show_frames": self._actions["view.show_frames"].isChecked(),
+            "show_shells": self._actions["view.show_shells"].isChecked(),
+            "show_restraints": self._actions["view.show_restraints"].isChecked(),
         }
 
     def _apply_display_values(self, display: dict) -> None:
@@ -3871,6 +3927,10 @@ class MainWindow(QMainWindow):
             extruded_detail=resolved.extruded_detail,
         )
         self._set_toggle_checked("view.show_extruded", resolved.show_extruded)
+        self._set_toggle_checked("view.show_nodes", resolved.show_nodes)
+        self._set_toggle_checked("view.show_frames", resolved.show_frames)
+        self._set_toggle_checked("view.show_shells", resolved.show_shells)
+        self._set_toggle_checked("view.show_restraints", resolved.show_restraints)
 
     def _save_display_settings(self) -> None:
         """Write the display knobs to the settings file, best effort.

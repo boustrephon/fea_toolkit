@@ -162,6 +162,28 @@ class TestModelFromGeometry:
         assert "2" not in md.frame_elements
         assert "1" in md.frame_elements
 
+    def test_sections_can_be_attached_for_consistent_colouring(self):
+        """A results view can carry the source model's section definitions."""
+        from fea_toolkit.io.results_repository import mesh_model_from_geometry
+
+        sentinel_sections = {"UB300": object(), "Slab": object()}
+        md = mesh_model_from_geometry(_geometry(), sections=sentinel_sections)
+
+        assert set(md.sections) == {"UB300", "Slab"}
+        # Without the argument an archive carries names, not definitions.
+        assert mesh_model_from_geometry(_geometry()).sections == {}
+
+    def test_restraints_can_be_attached_for_support_symbols(self):
+        """A results view can carry the source model's supports."""
+        from fea_toolkit.io.results_repository import mesh_model_from_geometry
+
+        sentinel_restraints = {"1": object()}
+        md = mesh_model_from_geometry(_geometry(), restraints=sentinel_restraints)
+
+        assert set(md.restraints) == {"1"}
+        # Without the argument an archive carries no supports.
+        assert mesh_model_from_geometry(_geometry()).restraints == {}
+
     def test_the_rebuilt_model_agrees_with_the_reported_counts(self):
         """``as_model`` and ``geometry_counts`` must not disagree about size."""
         from fea_toolkit.io.results_repository import NpzResultsRepository

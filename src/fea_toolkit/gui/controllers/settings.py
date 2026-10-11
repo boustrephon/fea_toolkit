@@ -63,8 +63,8 @@ RESTRAINT_STYLES = ("block", "arrow")
 EXTRUDED_DETAILS = ("plates", "solid")
 
 #: Every field a ``display`` section may name (the numeric knobs plus the
-#: force-diagram quantity label, the restraint style and the extruded-frame
-#: toggle / detail).
+#: force-diagram quantity label, the restraint style, the extruded-frame
+#: toggle / detail, and the four element-visibility toggles).
 DISPLAY_FIELDS = frozenset(
     (
         *_DISPLAY_NUMERIC_FIELDS,
@@ -72,8 +72,15 @@ DISPLAY_FIELDS = frozenset(
         "restraint_style",
         "show_extruded",
         "extruded_detail",
+        "show_nodes",
+        "show_frames",
+        "show_shells",
+        "show_restraints",
     )
 )
+
+#: Boolean element-visibility toggles (defaulting to shown).
+_DISPLAY_BOOL_FIELDS = ("show_nodes", "show_frames", "show_shells", "show_restraints")
 
 
 @dataclass(frozen=True)
@@ -96,6 +103,10 @@ class DisplaySettings:
         extruded_detail: How an extruded frame is drawn — ``"plates"`` (the
             efficient open-surface representation) or ``"solid"`` (the closed
             perimeter with end caps).
+        show_nodes: Draw node markers.
+        show_frames: Draw the frame line skeleton.
+        show_shells: Draw area elements.
+        show_restraints: Draw support symbols.
     """
 
     shell_opacity: float = 0.7
@@ -106,6 +117,10 @@ class DisplaySettings:
     restraint_style: str = "block"
     show_extruded: bool = False
     extruded_detail: str = "plates"
+    show_nodes: bool = True
+    show_frames: bool = True
+    show_shells: bool = True
+    show_restraints: bool = True
 
 
 #: The defaults, as a reusable constant (callers may ``replace`` over it).
@@ -188,6 +203,17 @@ def resolve_display(config: Any = None) -> "tuple[DisplaySettings, list[str]]":
             )
         else:
             overrides["extruded_detail"] = detail
+
+    for key in _DISPLAY_BOOL_FIELDS:
+        if key in settings:
+            value = settings[key]
+            if not isinstance(value, bool):
+                notes.append(
+                    f"display setting {key!r} {value!r} is not a boolean; "
+                    f"using {getattr(DISPLAY_DEFAULTS, key)!r}"
+                )
+            else:
+                overrides[key] = value
 
     if not overrides:
         return DISPLAY_DEFAULTS, notes

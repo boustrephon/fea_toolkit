@@ -89,6 +89,18 @@ def test_opening_an_archive_registers_one_view_per_case(window, tmp_path):
     assert "Opened 2 results view(s)" in window._message_log.toPlainText()
 
 
+def test_visibility_toggles_survive_a_case_switch(window, tmp_path):
+    """Show-nodes / show-frames persist across a results-view switch, not reset."""
+    window.open_results_path(str(_write_archive(tmp_path)))
+
+    window._actions["view.show_nodes"].setChecked(False)
+    window._actions["view.show_frames"].setChecked(False)
+
+    assert window._select_entity_in_tree("views", "COMB1") is True
+    assert window._actions["view.show_nodes"].isChecked() is False
+    assert window._actions["view.show_frames"].isChecked() is False
+
+
 def test_the_archive_draws_without_a_model(window, tmp_path):
     """Self-contained: the view renders the geometry the archive carries."""
     window.open_results_path(str(_write_archive(tmp_path)))
@@ -219,15 +231,15 @@ class TestDeformedShape:
         window._deformed_scale.setValue(200.0)
         assert _deformed_points(window) is None
 
-    def test_switching_cases_drops_the_overlay(self, window, tmp_path):
-        """The shape belongs to one case's geometry, so a switch must clear it."""
+    def test_switching_cases_reapplies_the_overlay(self, window, tmp_path):
+        """The overlay follows the switch: it is redrawn for the new case, not dropped."""
         window.open_results_path(str(_write_archive(tmp_path, with_displacement=True)))
         window._actions["results.deformed"].trigger()
         assert _deformed_points(window) is not None
 
         assert window._select_entity_in_tree("views", "COMB1") is True
-        assert _deformed_points(window) is None
-        assert window._actions["results.deformed"].isChecked() is False
+        assert _deformed_points(window) is not None
+        assert window._actions["results.deformed"].isChecked() is True
 
     def test_clear_results_removes_the_overlay(self, window, tmp_path):
         window.open_results_path(str(_write_archive(tmp_path, with_displacement=True)))
@@ -401,15 +413,15 @@ class TestForceDiagrams:
 
         assert _flag_offset(window) == pytest.approx(1.0)  # still mz = 4 → 10 % of model
 
-    def test_switching_cases_drops_the_overlay(self, window, tmp_path):
+    def test_switching_cases_reapplies_the_overlay(self, window, tmp_path):
         window.open_results_path(str(_write_archive(tmp_path, with_forces=True)))
         window._actions["results.forces"].trigger()
         assert _flag_offset(window) is not None
 
         assert window._select_entity_in_tree("views", "COMB1") is True
-        assert _flag_offset(window) is None
-        assert window._actions["results.forces"].isChecked() is False
-        assert window._actions["view.show_forces"].isChecked() is False
+        assert _flag_offset(window) is not None
+        assert window._actions["results.forces"].isChecked() is True
+        assert window._actions["view.show_forces"].isChecked() is True
 
     def test_clear_results_removes_the_overlay(self, window, tmp_path):
         window.open_results_path(str(_write_archive(tmp_path, with_forces=True)))

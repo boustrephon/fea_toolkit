@@ -1,28 +1,27 @@
 # Project bundle — saving and reloading a GUI session
 
 `File ▸ Save project…` writes the complete desktop session — model, recipe,
-results, figures, the ordered view list and the viewport — to a **directory**
-named `<name>.fea`.  `File ▸ Open project…` reads it back and rebuilds the
-session **without re-running any analysis**.
+results, figures, the ordered view list and the viewport — to a single
+**`.zip` file** (a zip archive named `<name>.zip`).  `File ▸ Open project…`
+reads it back with the native file picker and rebuilds the session **without
+re-running any analysis**.
 
-The save dialog asks for a name and creates a directory, so **Open project…
-presents a folder picker** — select the `<name>.fea` folder itself (not the
-`project.json` inside it, and no need to compress it first).  The bundle is not
-a single file unless you pass it through `zip_project`.
+The bundle members are all canonical formats, so each is independently usable.
+`model.h5` (written with HDF5 gzip) and `results.npz` are already compressed, so
+the archive *stores* those members and only deflates the JSON text members.  The
+loader (`read_project` / `open_project_path`) also accepts a legacy `<name>.fea`
+*directory* when handed a path directly — `zip_project` converts one.
 
-The directory is the canonical form; the loader also accepts a `.fea`/`.zip`
-of it (see `zip_project`).  The bundle's members are all canonical formats, so
-each is independently usable.
+## Contents
 
-## File layout
+The `.zip` archive holds these members at its root:
 
 ```
-Admin_Building.fea/
-├── project.json    the manifest (recipe, views, active view, viewport, display)
-├── model.h5        the model stages — sap + mesh (write_model_file; .npz when h5py absent)
-├── results.npz     static + modal + response-spectrum arrays (the unified schema)
-├── figures.json    pushover ADRS figure data (adrs / pp / spectrum per direction)
-└── tables.json     table-view payloads (modal, response-spectrum)
+project.json    the manifest (recipe, views, active view, viewport, display)
+model.h5        the model stages — sap + mesh (write_model_file; .npz when h5py absent)
+results.npz     static + modal + response-spectrum arrays (the unified schema)
+figures.json    pushover ADRS figure data (adrs / pp / spectrum per direction)
+tables.json     table-view payloads (modal, response-spectrum)
 ```
 
 The implementation lives in `fea_toolkit/gui/project.py` (Qt-free and
@@ -54,13 +53,21 @@ OpenSees-free), wired into the window through `MainWindow._on_save_project` /
   ],
   "active_view": "figure:pushover-plusx",
   "viewport": { "camera_position": [[…],[…],[…]], "hidden_elem_ids": ["A-12"] },
-  "display": { "shell_opacity": 0.6, "shrink": 0.0, "…": "…" }
+  "display": {
+    "shell_opacity": 0.6, "shrink": 0.0,
+    "show_nodes": true, "show_frames": true, "show_shells": true, "show_restraints": true,
+    "…": "…"
+  }
 }
 ```
 
 `views[].kind` ∈ `geometry | results | table | figure`.  `order` preserves the
 Model Tree order; `case` / `table_key` / `figure_key` point a view at its
 payload.  Derived views (with `parent` + `selection`) are out of scope for v1.
+
+On load the **initial view is a geometry view** — `meshed`/`processed` first,
+then `unprocessed` — even when `active_view` names a results view: reopening
+straight into a mode shape would hide the model's supports, groups and loads.
 
 ### `figures.json`
 
@@ -137,7 +144,14 @@ re-running anything:
 - every view, in order — geometry, results, tables, and the regenerated ADRS
   figures — plus the active view
 - the camera, the hidden-element set, **and the display knobs** (the numeric
-  sliders, force quantity, restraint style, extruded-frame toggle and detail are
-  applied through `MainWindow._apply_display_values`, validated by
-  `resolve_display` so a stale manifest cannot set an out-of-range value)
+  sliders, force quantity, restraint style, extruded-frame toggle and detail,
+  and the element-visibility toggles — `show_nodes` / `show_frames` /
+  `show_shells` / `show_restraints` — are applied through
+  `MainWindow._apply_display_values`, validated by `resolve_display` so a stale
+  manifest cannot set an out-of-range value)
+- the **Model Tree**, which always presents the real model — the mesh when one
+  exists, else the raw SAP model — never a results view's display-only geometry;
+  and results views draw the model's section colours and support symbols (the
+  archive's display model is given `sections` and `restraints` from the source
+  model)
 
