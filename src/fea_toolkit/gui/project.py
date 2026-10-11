@@ -62,6 +62,24 @@ RESULTS_NAME = "results.npz"
 FIGURES_NAME = "figures.json"
 TABLES_NAME = "tables.json"
 
+#: Canonical project members written by :func:`write_project`.  Only these are
+#: extracted from an archive, and each must stay under the per-member size limit
+#: (see :data:`_MAX_MEMBER_BYTES`) — zip-bomb protection in :func:`read_project`.
+_PROJECT_MEMBERS = (
+    MANIFEST_NAME,
+    RESULTS_NAME,
+    FIGURES_NAME,
+    TABLES_NAME,
+    "model.h5",
+    "model.npz",
+)
+
+#: Uncompressed-size limit (bytes) for a single project member.  Legitimate
+#: project members (the model stage, the results archive) are far smaller than
+#: this for the models the toolkit targets; the bound only stops zip-bomb
+#: archives that expand a small compressed member into gigabytes.
+_MAX_MEMBER_BYTES = 1 << 30  # 1 GiB
+
 
 def detect_model_format() -> str:
     """Return the stage-file format to use for the project's model stage.
@@ -626,6 +644,24 @@ def is_project(path: str | Path) -> bool:
     return path.suffix.lower() in (".zip", ".fea")
 
 
+def _extract_project_members(zf: zipfile.ZipFile, destination: str) -> None:
+    """Extract only the canonical members, rejecting oversize entries.
+
+    Zip-bomb protection for :func:`read_project`: every member's uncompressed
+    size is checked first, and only the five canonical project members are
+    written to *destination*.  A member that exceeds :data:`_MAX_MEMBER_BYTES`
+    raises ``ValueError`` before any extraction happens.
+    """
+    for info in zf.infolist():
+        if info.file_size > _MAX_MEMBER_BYTES:
+            raise ValueError(
+                f"project member {info.filename!r} is too large "
+                f"({info.file_size} bytes > {_MAX_MEMBER_BYTES})"
+            )
+        if info.filename in _PROJECT_MEMBERS:
+            zf.extract(info, destination)
+
+
 def read_project(path: str | Path) -> dict:
     """Read a project directory (or a zip of one) back into memory.
 
@@ -639,7 +675,8 @@ def read_project(path: str | Path) -> dict:
         (``{key: figure data}``).
 
     Raises:
-        ValueError: If *path* is neither a project directory nor a zip.
+        ValueError: If *path* is neither a project directory nor a zip, or if a
+            member of a project archive exceeds the uncompressed-size limit.
     """
     path = Path(path)
     if path.is_dir():
@@ -650,7 +687,7 @@ def read_project(path: str | Path) -> dict:
         tmp = tempfile.mkdtemp(prefix="fea_project_")
         try:
             with zipfile.ZipFile(path) as zf:
-                zf.extractall(tmp)
+                _extract_project_members(zf, tmp)
             return _read_dir(Path(tmp))
         finally:
             shutil.rmtree(tmp, ignore_errors=True)

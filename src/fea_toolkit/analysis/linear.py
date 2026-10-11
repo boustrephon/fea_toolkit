@@ -446,8 +446,8 @@ def analysis_load_reaction_summary(
         expected_v = None
         ratio = None
         if total_weight is not None and seismic_coefficient is not None:
-            expected_v = float(total_weight) * float(seismic_coefficient)
-            if expected_v:
+            expected_v = _clean(total_weight) * _clean(seismic_coefficient)
+            if math.isfinite(expected_v) and expected_v != 0:
                 ratio = round(abs(v_cqc) / expected_v, 3)
         rows.append(
             {

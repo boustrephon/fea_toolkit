@@ -10,6 +10,7 @@ import zipfile
 from typing import Optional
 
 import numpy as np
+import pytest
 
 from fea_toolkit.analysis.base import AnalysisResult
 from fea_toolkit.gui.controllers.view_registry import FIGURE, GEOMETRY, RESULTS, TABLE, View
@@ -551,3 +552,35 @@ def test_is_project(tmp_path):
 
 def test_detect_model_format_is_h5_or_npz():
     assert detect_model_format() in ("h5", "npz")
+
+
+def test_read_project_rejects_oversize_member(tmp_path, monkeypatch):
+    """An archive member over the uncompressed-size limit is rejected."""
+    from fea_toolkit.gui import project as project_mod
+
+    zip_path = tmp_path / "bomb.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("project.json", "{}")
+        zf.writestr("results.npz", "x" * 64)
+
+    monkeypatch.setattr(project_mod, "_MAX_MEMBER_BYTES", 8)
+    with pytest.raises(ValueError, match="too large"):
+        project_mod.read_project(zip_path)
+
+
+def test_extract_project_members_is_selective(tmp_path):
+    """Only canonical members are extracted; other members are ignored."""
+    from fea_toolkit.gui import project as project_mod
+
+    zip_path = tmp_path / "p.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("project.json", "{}")
+        zf.writestr("extra.bin", b"not canonical")
+
+    dest = tmp_path / "out"
+    dest.mkdir()
+    with zipfile.ZipFile(zip_path) as zf:
+        project_mod._extract_project_members(zf, str(dest))
+
+    assert (dest / "project.json").is_file()
+    assert not (dest / "extra.bin").exists()

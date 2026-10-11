@@ -63,6 +63,11 @@ def test_static_rows_compare_applied_against_reaction(sample_md, sample_mesh):
     # so their signed sum (Δ) is ~0.
     assert abs(dead[f"Δ Fz ({fu})"]) < 0.05
 
+    wind = next(r for r in static if r["Analysis"] == "WIND")
+    # Lateral equilibrium: applied Fx and reaction Fx are opposite-signed,
+    # so their signed sum (Δ) is ~0.
+    assert abs(wind[f"Δ Fx ({fu})"]) < 0.05
+
 
 def test_rs_rows_render_base_shear_and_reactions(sample_md, sample_mesh):
     import openseespy.opensees as ops

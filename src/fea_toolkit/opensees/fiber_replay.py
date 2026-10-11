@@ -157,7 +157,7 @@ def replay_fiber_section(
             # [ε, κ_z, κ_y, φ] = [ux, rz, ry, rx], with uy/uz restrained.
             node2_dofs = (eps, 0.0, 0.0, phi, ky, kz)
             for dof, value in enumerate(node2_dofs, start=1):
-                ops.remove("sp", 2, dof)
+                ops.remove("sp", 2, dof, 2)
                 ops.sp(2, dof, value)
             if ops.analyze(1) != 0:
                 raise RuntimeError(f"replay step {k} failed to converge")

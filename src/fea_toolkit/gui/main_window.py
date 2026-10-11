@@ -3413,9 +3413,20 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
+        requested = path
         target = Path(path)
         if target.suffix.lower() != ".zip":
             target = Path(f"{target}.zip")
+        if str(target) != requested and target.exists():
+            answer = QMessageBox.question(
+                self,
+                "Confirm overwrite",
+                f"{target} already exists.\nOverwrite it?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
 
         collected = project_mod.collect_project_results(
             self._last_run.results if self._last_run is not None else []
