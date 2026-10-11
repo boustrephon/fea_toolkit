@@ -227,7 +227,7 @@ pushover — using the exact calls in §2.  Only run what the question asks for.
 
 | Result | How to read it |
 |---|---|
-| **Modal** — `periods`, `frequencies`, `modal_data` (`mx`/`my`/`mz`/`sum_mx`), `mode_shapes` | The fundamental period describes the structure's dynamic character; `sum_mx`/`sum_my` are the mass participation in each direction.  A mode below ~1 % participation is insignificant — the review's own filter is `--min-participation 1`.  See `docs/modal_analysis.md`. |
+| **Modal** — `periods`, `frequencies`, `modal_data` (`mx`/`my`/`mz`/`sum_mx`), `mode_shapes` | The fundamental period describes the structure's dynamic character; `sum_mx`/`sum_my` are the mass participation in each direction.  `--min-participation 1` is a review *display threshold* — it hides low-participation modes from the table, but it is **not** proof that a mode is insignificant.  Before excluding a mode from interpretation, check the response-specific effects for that mode (member forces, displacements, storey drifts).  See `docs/modal_analysis.md`. |
 | **Storey drift** — `storey_displacements` / `storey_drifts` / `modal_storey_drifts` | Drift ratio = inter-storey displacement ÷ storey height, computed via a CM-based rigid-body fit.  The toolkit computes the ratio (see `docs/storey_response.md`) but does **not** encode a code limit — quote GB 50011 / ASCE 7 by clause and compare. |
 | **Response spectrum** — base shear / overturning / roof displacement (via `model.review --response-spectrum` or `run_response_spectrum_analysis`) | CQC combines the modal responses (reducing to SRSS when modes are well separated); overturning is the moment of the storey shears about the base.  See `docs/model_review.md`, `docs/results_schema.md`. |
 | **Pushover** — `pushover_curves[dir] = {disp, force}` → `pushover_to_adrs` → `compute_performance_point` | The capacity curve's plateau is the structure's strength; convert to ADRS and intersect the demand spectrum to read the performance point and ductility demand.  See `docs/pushover_analysis.md`. |
@@ -235,7 +235,7 @@ pushover — using the exact calls in §2.  Only run what the question asks for.
 | **Euler brace buckling** — `check_brace_buckling` / `brace_buckling_check` (`P_cr`, `P_demand`, `ratio`) | `ratio = demand / P_cr`; approaching 1 means buckling governs.  The checker flags `ratio > 0.5` as worth attention. |
 | **Self-weight consistency** — `check_self_weight_consistency` (`expected`, `applied`, `discrepancy`, `passed`) | `expected` is computed from section geometry × unit weight, `applied` from the load totals.  A large `discrepancy` is a *model bug* (missing/mis-scaled self-weight), not an analysis artefact. |
 | **Connectivity** — `check_model_connectivity` (`orphan_nodes`, `shell_only_base_nodes`, `duplicate_coords`, `zero_area_sections`) | These are the defects that make the stiffness matrix singular — fix them before analysing. |
-| **Load/reaction equilibrium** — `run_static_analysis(extract_reactions=True)` → `load_reaction_check` (`applied_fz`, `reaction_fz`, `delta`) | `delta ≈ 0` confirms the loads balance; a large `delta` means a load was missed or double-counted. |
+| **Load/reaction equilibrium** — `run_static_analysis(extract_reactions=True)` → `load_reaction_check` (`applied_fz`, `reaction_fz`, `delta`) | `delta ≈ 0` checks **vertical** force balance only (applied vs. reacted `Fz`) — it does **not** check horizontal force or moment balance.  A large `delta` means a vertical load was missed or double-counted. |
 
 ### Where the results live
 
