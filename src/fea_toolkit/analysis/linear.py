@@ -282,6 +282,199 @@ def static_load_verification(md, mesh_model, config: Optional[dict] = None):
     return pd.DataFrame(rows)
 
 
+def _rs_analysis_label(key) -> str:
+    """Normalise an RS-result key to a ``RS-<DIR>`` analysis label.
+
+    Accepts a bare direction letter (``"X"`` / ``"x"``), a prefixed form
+    (``"rs_x"`` / ``"RS_X"`` / ``"RS-X"``), or an already-labelled key, and
+    returns the canonical ``RS-X`` form so callers can key ``rs_results`` any
+    convenient way without the summary picking up inconsistent labels.
+    """
+    k = str(key).strip().upper()
+    if k.startswith(("RS-", "RS_")):
+        k = k[3:]
+    return f"RS-{k}"
+
+
+def analysis_load_reaction_summary(
+    md,
+    mesh_model,
+    *,
+    config: Optional[dict] = None,
+    rs_results: Optional[dict] = None,
+    total_weight: Optional[float] = None,
+    seismic_coefficient: Optional[float] = None,
+) -> list[dict]:
+    """Compare applied loads against base reactions for every analysis.
+
+    A **pandas-free** companion to :func:`static_load_verification`: instead of
+    returning a ``DataFrame``, it returns a plain ``list[dict]`` — one row per
+    analysis — so it can be rendered as a table without the optional ``pandas``
+    dependency (e.g. inside Rhino 8's embedded CPython, or by a
+    :class:`~fea_toolkit.workflow.steps.Table`-rendering verb).
+
+    The static section reproduces :func:`static_load_verification`'s
+    applied-vs-reaction equilibrium check (one row per load pattern), and the
+    response-spectrum section adds one row per direction carrying the CQC base
+    shear and overturning moment.
+
+    Every row carries the same unit-labelled keys (``None`` where a column does
+    not apply to that analysis type):
+
+    - ``Analysis`` — the load-pattern name (static) or ``RS-X`` / ``RS-Y``.
+    - ``Type`` — ``"Static"`` or ``"Response Spectrum"``.
+    - ``Applied Fx/Fy/Fz (<force unit>)`` — per-pattern applied totals
+      (self-weight + gravity + joint + distributed); ``None`` for RS.
+    - ``Reaction Fx/Fy/Fz (<force unit>)`` — summed base reactions.
+    - ``Δ Fx/Fy/Fz (<force unit>)`` — signed applied + reaction, ~0 when
+      equilibrated; ``None`` for RS (no applied load in the static sense).
+    - ``Reaction Mx/My/Mz (<force·length unit>)`` — summed base moments with
+      overturning (see
+      :func:`~fea_toolkit.utils.sum_reactions_with_overturning`).
+    - ``Base shear V (<force unit>)`` / ``Base moment M (<force·length unit>)``
+      — the CQC-combined RS headline quantities; ``None`` for static rows.
+    - ``Expected V (<force unit>)`` / ``V ratio`` — the RS sanity check
+      ``Expected V = total_weight × seismic_coefficient`` and the ratio
+      ``|V| / Expected V``; present only when *total_weight* and
+      *seismic_coefficient* are both supplied (``None`` otherwise), and
+      ``None`` for static rows.
+
+    Args:
+        md: Parsed :class:`~fea_toolkit.model.sap_data.SAPModelData` — supplies
+            the load patterns and the unit labels (never a hardcoded force
+            unit).
+        mesh_model: Preprocessed :class:`~fea_toolkit.model.mesh_model.MeshModel`.
+        config: Optional ``AnalysisBuilder`` config.  ``create_shells`` is
+            derived from the mesh when not set (see :func:`_mesh_has_shells`),
+            so a shell-stiffened model is built with its areas.
+        rs_results: Optional ``{direction: rs_dict}`` mapping — each value is a
+            per-direction result from
+            :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.run_response_spectrum_analysis`,
+            read via ``base_reactions_cqc``, ``base_shear_cqc`` and
+            ``base_moment_cqc``.  ``None`` (or ``{}``) yields a static-only
+            summary.
+        total_weight: Optional total seismic weight (model force units), the
+            product of the model's total seismic mass and
+            :func:`~fea_toolkit.utils.g_from_units`.  Powers the RS
+            ``Expected V`` sanity column.
+        seismic_coefficient: Optional dimensionless base-shear coefficient
+            ``α = Sa(T1) / g`` for the fundamental period, in the model's own
+            units.  Multiplied by *total_weight* to give ``Expected V``.
+
+    Returns:
+        A ``list[dict]`` of rows — static patterns first (case-fold sorted),
+        then RS directions in the order of *rs_results* — with the column
+        layout above.
+    """
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+    from ..utils import sum_reactions_with_overturning
+
+    # Builder config: derive ``create_shells`` from the mesh so a shell model
+    # is built with its areas rather than as a mechanism (mirrors run_static_cases).
+    ab_config = {"element_type": "elasticBeamColumn", "verbose": False}
+    if _mesh_has_shells(mesh_model):
+        ab_config["create_shells"] = True
+    if config:
+        ab_config.update(config)
+
+    fu = md.units.get("F", "?")
+    lu = md.units.get("L", "?")
+    mu = f"{fu}·{lu}"
+
+    def _clean(v):
+        """Coerce a cell value to a finite float, else 0.0."""
+        try:
+            fv = float(v)
+        except (TypeError, ValueError):
+            return 0.0
+        return fv if math.isfinite(fv) else 0.0
+
+    rows: list[dict] = []
+
+    # ── Static section: applied vs reaction per load pattern ──────
+    ab = AnalysisBuilder(mesh_model, ab_config)
+    ab.build_domain()
+    # Apply ALL patterns once so the per-pattern applied totals
+    # (_sw/_gravity/_joint/_dist) are populated for every pattern.
+    ab.create_loads()
+
+    applied: dict[str, dict[str, float]] = {}
+    for _src in (
+        getattr(ab, "_sw_load_totals", {}),
+        getattr(ab, "_gravity_load_totals", {}),
+        getattr(ab, "_joint_load_totals", {}),
+        getattr(ab, "_dist_load_totals", {}),
+    ):
+        for pname, t in _src.items():
+            d = applied.setdefault(pname, dict.fromkeys(("fx", "fy", "fz", "mx", "my", "mz"), 0.0))
+            for _k in d:
+                d[_k] += _clean(t.get(_k, 0.0))
+
+    for pname in sorted(applied, key=str.casefold):
+        a = applied[pname]
+        result = ab.run_static_analysis(pattern_scales={pname: 1.0}, extract_reactions=True)
+        summed = sum_reactions_with_overturning(result.get("reactions", {}), mesh_model.nodes)
+        rows.append(
+            {
+                "Analysis": pname,
+                "Type": "Static",
+                f"Applied Fx ({fu})": round(_clean(a["fx"]), 1),
+                f"Applied Fy ({fu})": round(_clean(a["fy"]), 1),
+                f"Applied Fz ({fu})": round(_clean(a["fz"]), 1),
+                f"Reaction Fx ({fu})": round(_clean(summed.get("fx", 0.0)), 1),
+                f"Reaction Fy ({fu})": round(_clean(summed.get("fy", 0.0)), 1),
+                f"Reaction Fz ({fu})": round(_clean(summed.get("fz", 0.0)), 1),
+                f"Δ Fx ({fu})": round(_clean(a["fx"]) + _clean(summed.get("fx", 0.0)), 1),
+                f"Δ Fy ({fu})": round(_clean(a["fy"]) + _clean(summed.get("fy", 0.0)), 1),
+                f"Δ Fz ({fu})": round(_clean(a["fz"]) + _clean(summed.get("fz", 0.0)), 1),
+                f"Reaction Mx ({mu})": round(_clean(summed.get("mx", 0.0)), 1),
+                f"Reaction My ({mu})": round(_clean(summed.get("my", 0.0)), 1),
+                f"Reaction Mz ({mu})": round(_clean(summed.get("mz", 0.0)), 1),
+                f"Base shear V ({fu})": None,
+                f"Base moment M ({mu})": None,
+                f"Expected V ({fu})": None,
+                "V ratio": None,
+            }
+        )
+
+    # ── Response-spectrum section: base shear + overturning ──────
+    for key, rs in (rs_results or {}).items():
+        r = rs.get("base_reactions_cqc") or {}
+        v_cqc = _clean(rs.get("base_shear_cqc", 0.0))
+        m_cqc = _clean(rs.get("base_moment_cqc", 0.0))
+        expected_v = None
+        ratio = None
+        if total_weight is not None and seismic_coefficient is not None:
+            expected_v = float(total_weight) * float(seismic_coefficient)
+            if expected_v:
+                ratio = round(abs(v_cqc) / expected_v, 3)
+        rows.append(
+            {
+                "Analysis": _rs_analysis_label(key),
+                "Type": "Response Spectrum",
+                f"Applied Fx ({fu})": None,
+                f"Applied Fy ({fu})": None,
+                f"Applied Fz ({fu})": None,
+                f"Reaction Fx ({fu})": round(_clean(r.get("fx", 0.0)), 1),
+                f"Reaction Fy ({fu})": round(_clean(r.get("fy", 0.0)), 1),
+                f"Reaction Fz ({fu})": round(_clean(r.get("fz", 0.0)), 1),
+                f"Δ Fx ({fu})": None,
+                f"Δ Fy ({fu})": None,
+                f"Δ Fz ({fu})": None,
+                f"Reaction Mx ({mu})": round(_clean(r.get("mx", 0.0)), 1),
+                f"Reaction My ({mu})": round(_clean(r.get("my", 0.0)), 1),
+                f"Reaction Mz ({mu})": round(_clean(r.get("mz", 0.0)), 1),
+                f"Base shear V ({fu})": round(v_cqc, 1),
+                f"Base moment M ({mu})": round(m_cqc, 1),
+                f"Expected V ({fu})": round(expected_v, 1) if expected_v is not None else None,
+                "V ratio": ratio,
+            }
+        )
+
+    return rows
+
+
 def _mesh_has_shells(mesh_model) -> bool:
     """Whether a preprocessed model carries areas the builder must build as shells.
 

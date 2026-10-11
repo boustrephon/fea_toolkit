@@ -33,6 +33,44 @@ Only the response-spectrum, pushover, and nonlinear-dynamic functions depend
 on a preceding modal result — that dependency is expressed as a
 `modal_result` argument, not as an injected dependency graph.
 
+### Load–reaction summary (`analysis_load_reaction_summary`)
+
+A **pandas-free** summary of applied loads vs base reactions across every
+analysis, in one table.  Unlike the pandas-backed `static_load_verification()`
+(static patterns only), it also folds in the response-spectrum CQC base shear
+and overturning moment, and returns a plain `list[dict]` — one row per
+analysis — instead of a `DataFrame`, so it runs without the optional `pandas`
+dependency (e.g. inside Rhino 8's embedded CPython).
+
+```python
+from fea_toolkit.analysis import analysis_load_reaction_summary
+
+rows = analysis_load_reaction_summary(
+    md,
+    mesh_model,
+    rs_results={"X": rs_x, "Y": rs_y},   # optional — RS base shear/moment rows
+    total_weight=W,                       # optional — powers Expected V
+    seismic_coefficient=alpha,            # optional — α = Sa(T1) / g
+)
+```
+
+Each row carries unit-labelled keys: `Analysis`, `Type`
+(`Static` / `Response Spectrum`), `Applied Fx/Fy/Fz`, `Reaction Fx/Fy/Fz`,
+`Δ Fx/Fy/Fz` (signed applied + reaction, ~0 when equilibrated), and
+`Reaction Mx/My/Mz` (with overturning).  RS rows add `Base shear V`,
+`Base moment M`, and — when `total_weight` and `seismic_coefficient` are both
+supplied — `Expected V = W × α` and `V ratio = |V| / Expected V`.  Cells that
+don't apply to a row's analysis type are `None`.
+
+The static rows reproduce `static_load_verification()`'s equilibrium check
+(build the domain once, apply every pattern, solve per pattern); RS rows read
+`base_reactions_cqc`, `base_shear_cqc` and `base_moment_cqc` from each
+direction's result of
+`AnalysisBuilder.run_response_spectrum_analysis()`.  The function never
+hardcodes a force unit — labels come from `md.units`, and the expected-shear
+inputs are supplied by the caller (who derives them from the model mass and
+spectrum via `g_from_units()`).
+
 ### Spectrum units
 
 `T_spec` / `Sa_spec` are **in the model's own unit system** — the toolkit is

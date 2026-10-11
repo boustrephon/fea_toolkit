@@ -39,6 +39,7 @@ from .case_listing import (
 )
 from .combinations import build_combination_results
 from .linear import (
+    analysis_load_reaction_summary,
     run_case_set,
     run_linear_cases,
     run_static_cases,
@@ -73,6 +74,7 @@ __all__ = [
     "ElwoodColumnParameters",
     "ShearCapacityResult",
     "ShearFailureReport",
+    "analysis_load_reaction_summary",
     "axial_capacity_surface",
     "build_combination_results",
     "elwood_axial_deg_slope",

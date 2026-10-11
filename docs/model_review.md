@@ -250,7 +250,10 @@ Preprocessor → AnalysisBuilder pipeline and reports:
   contributes, per SAP2000's mass‑source rule.
 - **Load verification** (`analysis_config["load_verify"]` / `--load-verify`):
   per-pattern **applied vs reaction** equilibrium (`Applied`, `Reaction`
-  and `Δ` components) via `static_load_verification()`, as a table.
+  and `Δ` components) via `static_load_verification()`, as a table.  The
+  pandas-free, all-analyses form — static patterns **plus** the RS CQC base
+  shear/moment — is `analysis_load_reaction_summary()` (see
+  [Analysis Helpers](analysis.md)).
 - **Wind sanity check** (`analysis_config["wind_check"]` / `--wind-check`):
   wind loads against the bounding-box face areas, as a table — the
   structured `wind_sanity_data()` feeds the table, while
