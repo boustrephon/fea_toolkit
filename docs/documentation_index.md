@@ -27,7 +27,7 @@ for automated cross-referencing.
   Related: [Analysis Workflow](workflow.md) · [Builder Reference — Two-stage Pipeline](builder_reference.md) · [AnalysisBuilder Migration Plan](analysis_builder_migration_plan.md)
 
 - [LLM & AI Assistant Guide](llm_guide.md) — ✅ Complete
-  > Canonical goal-to-code mapping, full public API surface by domain, and key technical constraints — structured for language model consumption.
+  > Canonical goal-to-code mapping, full public API surface by domain, key technical constraints, and how to help an engineer interpret a model, its analyses and its results — structured for language model consumption.
   Tags: `llm`, `ai`, `guide`, `api-reference`, `usage`, `environment`
 
 - [Load Cases and Combinations](load_cases_and_combinations.md) — ✅ Complete
@@ -48,6 +48,11 @@ for automated cross-referencing.
   > The declarative workflow layer: a recipe is an ordered list of steps, each a verb applied to a Selection, saved as data. Architecture, verbs, and the two ways to make an element non-structural.
   Tags: `workflow`, `recipe`, `steps`, `architecture`, `gui`, `selection`, `verbs`, `declarative`
   Related: [Desktop GUI](gui.md) · [Desktop GUI Roadmap](gui_roadmap.md) · [Analysis Helpers](analysis.md) · [Analysis Workflow](workflow.md) · [Report Generation — Design Proposal](report_generation.md)
+
+- [Workflow Command Palette & Script Interop (Phase D)](workflow_palette.md) — 🚧 Draft
+  > Design record for the workflow layer's command palette (Ctrl+K) and script interop: a command string compiles into a Step via Selection.from_string and inserts into the recipe.
+  Tags: `workflow`, `palette`, `gui`, `recipe`, `steps`, `command`, `design`
+  Related: [Workflow Authoring — Steps and Recipes](workflow_authoring.md) · [Desktop GUI Roadmap](gui_roadmap.md)
 
 
 ## 🔬 Analysis Types
@@ -198,6 +203,11 @@ for automated cross-referencing.
   Tags: `io`, `serialisation`, `rhino`, `round-trip`, `hdf5`, `npz`
   Related: [Unified Results Schema](results_schema.md) · [Rhino 3-D Export](rhino_export.md) · [Analysis Workflow](workflow.md)
 
+- [Project Bundle — Saving and Reloading a GUI Session](project_bundle.md) — ✅ Complete
+  > File ▸ Save project… writes the full desktop session (model, recipe, results, figures, ordered view list and viewport) to a single .zip whose members are all canonical formats.
+  Tags: `gui`, `serialisation`, `zip`, `project`, `session`, `npz`, `hdf5`
+  Related: [Desktop GUI](gui.md) · [Model Stage File](model_stage_file.md) · [Unified Results Schema](results_schema.md) · [Workflow Authoring — Steps and Recipes](workflow_authoring.md)
+
 - [Unified Results Schema](results_schema.md) — ✅ Complete
   > The canonical unified NPZ results schema — the on-disk exchange format implemented by fea_toolkit.io.npz_writer.
   Tags: `schema`, `npz`, `results`, `io`
@@ -222,6 +232,54 @@ for automated cross-referencing.
   > PyVista-based 3D viewer, backend-agnostic renderer, interactive browser viewer, and HTML export.
   Tags: `visualisation`, `pyvista`, `viewer`, `html-export`, `interactive`
   Related: [Unified Results Schema](results_schema.md) · [Rhino 3-D Export](rhino_export.md) · [Report Generation — Design Proposal](report_generation.md)
+
+
+## 💾 I/O & Serialisation
+
+- [Model Stage File](model_stage_file.md) — ✅ Complete
+  > Self-describing NPZ/HDF5 export of SAPModelData + MeshModel stages, with lossless round-trip and Rhino/analysis consumption.
+  Tags: `io`, `serialisation`, `rhino`, `round-trip`, `hdf5`, `npz`
+  Related: [Unified Results Schema](results_schema.md) · [Rhino 3-D Export](rhino_export.md) · [Analysis Workflow](workflow.md)
+
+- [Pipeline Logging — One Event, Many Sinks](pipeline_logging.md) — ✅ Complete
+  > The fea_toolkit.io.log.PipelineLog contract: one (level, step, msg) event emitted once, rendered by many sinks (stdout, a JSON file, a Qt signal, the report's Analysis Log table).
+  Tags: `logging`, `pipeline`, `io`, `report`, `diagnostics`
+  Related: [Report Generation — Design Proposal](report_generation.md) · [Desktop GUI](gui.md) · [Analysis Workflow](workflow.md)
+
+
+## 🧮 OpenSees
+
+- [Custom OpenSeesPy local build — swap recipe](openseespy_local_build.md) — 🚧 Draft
+  > How to build a local OpenSeesPy wheel and swap it into the import chain on macOS arm64.
+  Tags: `openseespy`, `build`, `macos`, `fea-toolkit`
+
+
+## 📝 Model-Review Checklists
+
+- [Model-Review Checklists (ETABS & SAP2000)](ETABS_checklist.md) — ✅ Complete
+  > Per-program, per-jurisdiction structural FEA model-review checklists, generated from a single tagged source so shared content cannot drift.
+  Tags: `checklist`, `review`, `qa`, `etabs`, `sap2000`, `model-review`
+  Related: [Model-Review Checklist — ETABS (India (IS))](ETABS_checklist_is.md) · [Model-Review Checklist — ETABS (Mainland China (GB / JGJ))](ETABS_checklist_gb.md) · [Model-Review Checklist — ETABS (Hong Kong (Codes of Practice))](ETABS_checklist_hk.md) · [Model-Review Checklist — SAP2000 (Mainland China (GB / JGJ))](SAP2000_checklist_gb.md) · [Model-Review Checklist — SAP2000 (Hong Kong (Codes of Practice))](SAP2000_checklist_hk.md) · [SAP2000 Model Review & Checks](model_review.md)
+
+- [Model-Review Checklist — ETABS (Mainland China (GB / JGJ))](ETABS_checklist_gb.md) — ✅ Complete
+  > A workflow-oriented structural FEA model-review checklist for ETABS in Mainland China (GB / JGJ). A quality-assurance aid, not a design authority — verify every code reference before relying on it.
+  Tags: `checklist`, `review`, `qa`, `model-review`
+
+- [Model-Review Checklist — ETABS (Hong Kong (Codes of Practice))](ETABS_checklist_hk.md) — ✅ Complete
+  > A workflow-oriented structural FEA model-review checklist for ETABS in Hong Kong (Codes of Practice). A quality-assurance aid, not a design authority — verify every code reference before relying on it.
+  Tags: `checklist`, `review`, `qa`, `model-review`
+
+- [Model-Review Checklist — ETABS (India (IS))](ETABS_checklist_is.md) — ✅ Complete
+  > A workflow-oriented structural FEA model-review checklist for ETABS in India (IS). A quality-assurance aid, not a design authority — verify every code reference before relying on it.
+  Tags: `checklist`, `review`, `qa`, `model-review`
+
+- [Model-Review Checklist — SAP2000 (Mainland China (GB / JGJ))](SAP2000_checklist_gb.md) — ✅ Complete
+  > A workflow-oriented structural FEA model-review checklist for SAP2000 in Mainland China (GB / JGJ). A quality-assurance aid, not a design authority — verify every code reference before relying on it.
+  Tags: `checklist`, `review`, `qa`, `model-review`
+
+- [Model-Review Checklist — SAP2000 (Hong Kong (Codes of Practice))](SAP2000_checklist_hk.md) — ✅ Complete
+  > A workflow-oriented structural FEA model-review checklist for SAP2000 in Hong Kong (Codes of Practice). A quality-assurance aid, not a design authority — verify every code reference before relying on it.
+  Tags: `checklist`, `review`, `qa`, `model-review`
 
 
 ## 🛠️ Tool-Specific Workflows
@@ -295,38 +353,6 @@ for automated cross-referencing.
   Related: [Custom OpenSeesPy local build — swap recipe](openseespy_local_build.md) · [Rhino 3-D Export](rhino_export.md) · [Analysis Workflow](workflow.md)
 
 
-## 📦 Uncategorised
-
-- [Etabs Checklist](ETABS_checklist.md)
-
-- [Etabs Checklist Gb](ETABS_checklist_gb.md)
-
-- [Etabs Checklist Hk](ETABS_checklist_hk.md)
-
-- [Etabs Checklist Is](ETABS_checklist_is.md)
-
-- [Etabs Checklist Src](ETABS_checklist_src.md)
-
-- [Sap2000 Checklist Gb](SAP2000_checklist_gb.md)
-
-- [Sap2000 Checklist Hk](SAP2000_checklist_hk.md)
-
-
-## 📦 Io
-
-- [Model Stage File](model_stage_file.md) — ✅ Complete
-  > Self-describing NPZ/HDF5 export of SAPModelData + MeshModel stages, with lossless round-trip and Rhino/analysis consumption.
-  Tags: `io`, `serialisation`, `rhino`, `round-trip`, `hdf5`, `npz`
-  Related: [Unified Results Schema](results_schema.md) · [Rhino 3-D Export](rhino_export.md) · [Analysis Workflow](workflow.md)
-
-
-## 📦 Opensees
-
-- [Custom OpenSeesPy local build — swap recipe](openseespy_local_build.md) — 🚧 Draft
-  > How to build a local OpenSeesPy wheel and swap it into the import chain on macOS arm64.
-  Tags: `openseespy`, `build`, `macos`, `fea-toolkit`
-
-
 ---
 
 ## Tag Index
@@ -353,6 +379,7 @@ Tags across all documentation files:
 - **`build`** — [openseespy_local_build.md](openseespy_local_build.md)
 - **`capacity`** — [capacity.md](capacity.md), [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`capacity-spectrum`** — [csm_bilinearization.md](csm_bilinearization.md), [csm_test_model_plan.md](csm_test_model_plan.md)
+- **`checklist`** — [ETABS_checklist.md](ETABS_checklist.md), [ETABS_checklist_gb.md](ETABS_checklist_gb.md), [ETABS_checklist_hk.md](ETABS_checklist_hk.md), [ETABS_checklist_is.md](ETABS_checklist_is.md), [SAP2000_checklist_gb.md](SAP2000_checklist_gb.md), [SAP2000_checklist_hk.md](SAP2000_checklist_hk.md)
 - **`checks`** — [model_review.md](model_review.md)
 - **`classification`** — [element_classification.md](element_classification.md)
 - **`cleanup`** — [deprecation_plan.md](deprecation_plan.md), [linting_fix_plan.md](linting_fix_plan.md)
@@ -360,6 +387,7 @@ Tags across all documentation files:
 - **`codes`** — [capacity.md](capacity.md)
 - **`columns`** — [element_classification.md](element_classification.md)
 - **`combination`** — [load_cases_and_combinations.md](load_cases_and_combinations.md), [load_combinations.md](load_combinations.md)
+- **`command`** — [workflow_palette.md](workflow_palette.md)
 - **`composite`** — [load_combinations.md](load_combinations.md)
 - **`config`** — [element_properties_config.md](element_properties_config.md)
 - **`confinement`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
@@ -373,11 +401,11 @@ Tags across all documentation files:
 - **`dcr`** — [capacity.md](capacity.md)
 - **`declarative`** — [workflow_authoring.md](workflow_authoring.md)
 - **`deprecation`** — [deprecation_plan.md](deprecation_plan.md)
-- **`design`** — [capacity.md](capacity.md)
+- **`design`** — [capacity.md](capacity.md), [workflow_palette.md](workflow_palette.md)
 - **`design-proposal`** — [report_generation.md](report_generation.md)
 - **`desktop`** — [gui.md](gui.md)
 - **`development`** — [dev_notes.md](dev_notes.md)
-- **`diagnostics`** — [model_review.md](model_review.md)
+- **`diagnostics`** — [model_review.md](model_review.md), [pipeline_logging.md](pipeline_logging.md)
 - **`diaphragm`** — [diaphragm_constraints.md](diaphragm_constraints.md)
 - **`disclaimer`** — [licence.md](licence.md)
 - **`displacement`** — [storey_response.md](storey_response.md)
@@ -393,6 +421,7 @@ Tags across all documentation files:
 - **`elwood`** — [units_conversion.md](units_conversion.md)
 - **`end-to-end`** — [workflow.md](workflow.md)
 - **`environment`** — [llm_guide.md](llm_guide.md)
+- **`etabs`** — [ETABS_checklist.md](ETABS_checklist.md)
 - **`execution`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`export`** — [rhino_export.md](rhino_export.md), [tcl_export.md](tcl_export.md)
 - **`fea-toolkit`** — [openseespy_local_build.md](openseespy_local_build.md)
@@ -406,9 +435,9 @@ Tags across all documentation files:
 - **`gpl`** — [licence.md](licence.md)
 - **`gravity`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`ground-motion`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
-- **`gui`** — [gui.md](gui.md), [gui_roadmap.md](gui_roadmap.md), [workflow_authoring.md](workflow_authoring.md)
+- **`gui`** — [gui.md](gui.md), [gui_roadmap.md](gui_roadmap.md), [project_bundle.md](project_bundle.md), [workflow_authoring.md](workflow_authoring.md), [workflow_palette.md](workflow_palette.md)
 - **`guide`** — [llm_guide.md](llm_guide.md)
-- **`hdf5`** — [model_stage_file.md](model_stage_file.md), [report_generation.md](report_generation.md)
+- **`hdf5`** — [model_stage_file.md](model_stage_file.md), [project_bundle.md](project_bundle.md), [report_generation.md](report_generation.md)
 - **`hinges`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md)
 - **`html-export`** — [viewer.md](viewer.md)
 - **`identifiers`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
@@ -416,7 +445,7 @@ Tags across all documentation files:
 - **`interaction`** — [gui.md](gui.md)
 - **`interactive`** — [viewer.md](viewer.md)
 - **`internal`** — [parser_coverage.md](parser_coverage.md)
-- **`io`** — [json_serialization.md](json_serialization.md), [model_stage_file.md](model_stage_file.md), [results_schema.md](results_schema.md)
+- **`io`** — [json_serialization.md](json_serialization.md), [model_stage_file.md](model_stage_file.md), [pipeline_logging.md](pipeline_logging.md), [results_schema.md](results_schema.md)
 - **`joint`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`json`** — [json_serialization.md](json_serialization.md)
 - **`kip-in`** — [units_conversion.md](units_conversion.md)
@@ -429,6 +458,7 @@ Tags across all documentation files:
 - **`load-case`** — [load_cases_and_combinations.md](load_cases_and_combinations.md)
 - **`load-redistribution`** — [element_splitting.md](element_splitting.md)
 - **`loads`** — [load_cases_and_combinations.md](load_cases_and_combinations.md), [load_combinations.md](load_combinations.md)
+- **`logging`** — [pipeline_logging.md](pipeline_logging.md)
 - **`macos`** — [openseespy_local_build.md](openseespy_local_build.md)
 - **`mander`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`mcft`** — [shear_failure_modelling.md](shear_failure_modelling.md)
@@ -439,41 +469,46 @@ Tags across all documentation files:
 - **`modal`** — [modal_analysis.md](modal_analysis.md)
 - **`model`** — [load_combinations.md](load_combinations.md)
 - **`model-codec`** — [json_serialization.md](json_serialization.md)
+- **`model-review`** — [ETABS_checklist.md](ETABS_checklist.md), [ETABS_checklist_gb.md](ETABS_checklist_gb.md), [ETABS_checklist_hk.md](ETABS_checklist_hk.md), [ETABS_checklist_is.md](ETABS_checklist_is.md), [SAP2000_checklist_gb.md](SAP2000_checklist_gb.md), [SAP2000_checklist_hk.md](SAP2000_checklist_hk.md)
 - **`modifiers`** — [stiffness_factors.md](stiffness_factors.md)
 - **`mvlem`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
 - **`nonlinear`** — [element_properties_config.md](element_properties_config.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [pushover_analysis.md](pushover_analysis.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`notes`** — [dev_notes.md](dev_notes.md)
-- **`npz`** — [model_stage_file.md](model_stage_file.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
+- **`npz`** — [model_stage_file.md](model_stage_file.md), [project_bundle.md](project_bundle.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
 - **`opensees`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [tcl_export.md](tcl_export.md)
 - **`openseespy`** — [licence.md](licence.md), [openseespy_local_build.md](openseespy_local_build.md)
 - **`openseesrt`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`orchestration`** — [analysis.md](analysis.md)
 - **`packaging`** — [versioning.md](versioning.md)
+- **`palette`** — [workflow_palette.md](workflow_palette.md)
 - **`parser`** — [json_serialization.md](json_serialization.md), [parser_coverage.md](parser_coverage.md)
 - **`partial-fixity`** — [member_releases.md](member_releases.md)
 - **`phase-b`** — [force_diagram_unification.md](force_diagram_unification.md)
-- **`pipeline`** — [workflow.md](workflow.md)
+- **`pipeline`** — [pipeline_logging.md](pipeline_logging.md), [workflow.md](workflow.md)
 - **`planning`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [csm_test_model_plan.md](csm_test_model_plan.md), [deprecation_plan.md](deprecation_plan.md), [force_diagram_unification.md](force_diagram_unification.md), [gui_roadmap.md](gui_roadmap.md), [linting_fix_plan.md](linting_fix_plan.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [versioning.md](versioning.md)
 - **`plotting`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`post-processing`** — [storey_response.md](storey_response.md)
 - **`preprocessor`** — [builder_reference.md](builder_reference.md), [layered_analysis_workflow.md](layered_analysis_workflow.md)
+- **`project`** — [project_bundle.md](project_bundle.md)
 - **`pushover`** — [csm_bilinearization.md](csm_bilinearization.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [pushover_analysis.md](pushover_analysis.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`pyright`** — [linting_fix_plan.md](linting_fix_plan.md)
 - **`pyside6`** — [gui.md](gui.md), [gui_roadmap.md](gui_roadmap.md)
 - **`pyvista`** — [viewer.md](viewer.md)
 - **`pyvistaqt`** — [gui.md](gui.md), [gui_roadmap.md](gui_roadmap.md)
+- **`qa`** — [ETABS_checklist.md](ETABS_checklist.md), [ETABS_checklist_gb.md](ETABS_checklist_gb.md), [ETABS_checklist_hk.md](ETABS_checklist_hk.md), [ETABS_checklist_is.md](ETABS_checklist_is.md), [SAP2000_checklist_gb.md](SAP2000_checklist_gb.md), [SAP2000_checklist_hk.md](SAP2000_checklist_hk.md)
 - **`qt`** — [gui_roadmap.md](gui_roadmap.md)
 - **`rc`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
-- **`recipe`** — [workflow_authoring.md](workflow_authoring.md)
+- **`recipe`** — [workflow_authoring.md](workflow_authoring.md), [workflow_palette.md](workflow_palette.md)
 - **`refactor`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`reference`** — [builder_reference.md](builder_reference.md), [mander_confinement_validation.md](mander_confinement_validation.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`release`** — [versioning.md](versioning.md)
 - **`releases`** — [member_releases.md](member_releases.md)
+- **`report`** — [pipeline_logging.md](pipeline_logging.md)
 - **`reporter`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`reporting`** — [report_generation.md](report_generation.md)
 - **`response-spectrum`** — [model_review.md](model_review.md)
 - **`results`** — [load_cases_and_combinations.md](load_cases_and_combinations.md), [load_combinations.md](load_combinations.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
-- **`review`** — [model_review.md](model_review.md)
+- **`review`** — [ETABS_checklist.md](ETABS_checklist.md), [ETABS_checklist_gb.md](ETABS_checklist_gb.md), [ETABS_checklist_hk.md](ETABS_checklist_hk.md), [ETABS_checklist_is.md](ETABS_checklist_is.md), [SAP2000_checklist_gb.md](SAP2000_checklist_gb.md), [SAP2000_checklist_hk.md](SAP2000_checklist_hk.md), [model_review.md](model_review.md)
 - **`rhino`** — [model_stage_file.md](model_stage_file.md), [rhino_attributes.md](rhino_attributes.md), [rhino_export.md](rhino_export.md)
 - **`rigid-end-offset`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`rigidDiaphragm`** — [diaphragm_constraints.md](diaphragm_constraints.md)
@@ -481,15 +516,16 @@ Tags across all documentation files:
 - **`round-trip`** — [model_stage_file.md](model_stage_file.md)
 - **`runtime`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`s2k`** — [model_review.md](model_review.md)
-- **`sap2000`** — [member_releases.md](member_releases.md), [model_review.md](model_review.md), [parser_coverage.md](parser_coverage.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
+- **`sap2000`** — [ETABS_checklist.md](ETABS_checklist.md), [member_releases.md](member_releases.md), [model_review.md](model_review.md), [parser_coverage.md](parser_coverage.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`schema`** — [results_schema.md](results_schema.md)
 - **`scripting`** — [tcl_export.md](tcl_export.md)
 - **`sections`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`selection`** — [gui.md](gui.md), [workflow_authoring.md](workflow_authoring.md)
 - **`self-weight`** — [model_review.md](model_review.md)
 - **`semver`** — [versioning.md](versioning.md)
-- **`serialisation`** — [model_stage_file.md](model_stage_file.md)
+- **`serialisation`** — [model_stage_file.md](model_stage_file.md), [project_bundle.md](project_bundle.md)
 - **`serialization`** — [json_serialization.md](json_serialization.md)
+- **`session`** — [project_bundle.md](project_bundle.md)
 - **`settings`** — [gui.md](gui.md)
 - **`sfi-mvlem`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
 - **`shear`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [shear_failure_modelling.md](shear_failure_modelling.md), [storey_response.md](storey_response.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
@@ -498,7 +534,7 @@ Tags across all documentation files:
 - **`slabs`** — [element_classification.md](element_classification.md)
 - **`solver`** — [modal_analysis.md](modal_analysis.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`splitting`** — [element_splitting.md](element_splitting.md)
-- **`steps`** — [workflow_authoring.md](workflow_authoring.md)
+- **`steps`** — [workflow_authoring.md](workflow_authoring.md), [workflow_palette.md](workflow_palette.md)
 - **`stiffness`** — [stiffness_factors.md](stiffness_factors.md)
 - **`storage`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md)
 - **`storey`** — [diaphragm_constraints.md](diaphragm_constraints.md), [storey_response.md](storey_response.md)
@@ -522,12 +558,13 @@ Tags across all documentation files:
 - **`walls`** — [element_classification.md](element_classification.md)
 - **`warranty`** — [licence.md](licence.md)
 - **`wind`** — [model_review.md](model_review.md)
-- **`workflow`** — [layered_analysis_workflow.md](layered_analysis_workflow.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [workflow.md](workflow.md), [workflow_authoring.md](workflow_authoring.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
+- **`workflow`** — [layered_analysis_workflow.md](layered_analysis_workflow.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [workflow.md](workflow.md), [workflow_authoring.md](workflow_authoring.md), [workflow_palette.md](workflow_palette.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`xara`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [tcl_export.md](tcl_export.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md), [xara_pushover_workflow.md](xara_pushover_workflow.md), [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`yaml-config`** — [report_generation.md](report_generation.md)
 - **`yield-point`** — [csm_bilinearization.md](csm_bilinearization.md)
 - **`z-tolerance`** — [diaphragm_constraints.md](diaphragm_constraints.md)
 - **`zeroLength`** — [member_releases.md](member_releases.md)
+- **`zip`** — [project_bundle.md](project_bundle.md)
 
 To regenerate this index, run:
 

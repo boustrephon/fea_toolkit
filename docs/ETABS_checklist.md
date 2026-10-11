@@ -1,3 +1,12 @@
+---
+title: "Model-Review Checklists (ETABS & SAP2000)"
+description: "Per-program, per-jurisdiction structural FEA model-review checklists, generated from a single tagged source so shared content cannot drift."
+status: "complete"
+tags: [checklist, review, qa, etabs, sap2000, model-review]
+category: [checklists]
+related: [ETABS_checklist_is.md, ETABS_checklist_gb.md, ETABS_checklist_hk.md, SAP2000_checklist_gb.md, SAP2000_checklist_hk.md, model_review.md]
+---
+
 # Structural FEA Model Review Checklist (ETABS & SAP2000)
 
 The model-review checklist is published as **per-program, per-jurisdiction

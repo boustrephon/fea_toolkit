@@ -1,3 +1,12 @@
+---
+title: "Project Bundle — Saving and Reloading a GUI Session"
+description: "File ▸ Save project… writes the full desktop session (model, recipe, results, figures, ordered view list and viewport) to a single .zip whose members are all canonical formats."
+status: "complete"
+tags: [gui, serialisation, zip, project, session, npz, hdf5]
+category: [export-viz]
+related: [gui.md, model_stage_file.md, results_schema.md, workflow_authoring.md]
+---
+
 # Project bundle — saving and reloading a GUI session
 
 `File ▸ Save project…` writes the complete desktop session — model, recipe,

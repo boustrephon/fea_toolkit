@@ -1,3 +1,11 @@
+---
+title: "Model-Review Checklist — {program} ({jurisdiction})"
+description: "A workflow-oriented structural FEA model-review checklist for {program} in {jurisdiction}. A quality-assurance aid, not a design authority — verify every code reference before relying on it."
+status: "complete"
+tags: [checklist, review, qa, model-review]
+category: [checklists]
+---
+
 # Structural FEA Model Review Checklist
 
 ## A Workflow-Oriented Document for ETABS, SAP2000 and General Structural Analysis

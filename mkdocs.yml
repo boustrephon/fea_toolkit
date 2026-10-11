@@ -17,6 +17,7 @@ hooks:
 # Don't ship helper scripts to the rendered site.
 exclude_docs: |
   _*.py
+  ETABS_checklist_src.md
 
 theme:
   name: material
@@ -92,6 +93,8 @@ nav:
       - Builder Reference: builder_reference.md
       - Layered Analysis Workflow: layered_analysis_workflow.md
       - Typed Analysis Orchestration: analysis.md
+      - Workflow Authoring — Steps & Recipes: workflow_authoring.md
+      - Workflow Command Palette (planned): workflow_palette.md
   - Analysis Types:
       - Modal Analysis: modal_analysis.md
       - Pushover Analysis: pushover_analysis.md
@@ -118,6 +121,8 @@ nav:
       - M-VLEM Wall Analysis: mvlem_wall_analysis.md
       - CSM Bilinearisation: csm_bilinearization.md
       - CSM Test-Model Plan: csm_test_model_plan.md
+      - Load Cases and Combinations: load_cases_and_combinations.md
+      - Load Combinations: load_combinations.md
   - Export & Visualisation:
       - Model Stage File: model_stage_file.md
       - JSON Serialization: json_serialization.md
@@ -129,20 +134,29 @@ nav:
       - Results Schema: results_schema.md
       - Pushover Results Storage & Viz: pushover_results_storage_viz.md
       - Force-Diagram Unification: force_diagram_unification.md
-  - Reference & Planning:
+      - Project Bundle: project_bundle.md
+      - Pipeline Logging: pipeline_logging.md
+  - Model-Review Checklists:
+      - Checklist Index: ETABS_checklist.md
+      - ETABS — India: ETABS_checklist_is.md
+      - ETABS — Mainland China: ETABS_checklist_gb.md
+      - ETABS — Hong Kong: ETABS_checklist_hk.md
+      - SAP2000 — Mainland China: SAP2000_checklist_gb.md
+      - SAP2000 — Hong Kong: SAP2000_checklist_hk.md
+  - Planning & Reference:
+      - Development Notes: dev_notes.md
+      - Pending Work Register: _pending_work.md
+      - Versioning & Release Plan: versioning.md
+      - Desktop GUI Roadmap: gui_roadmap.md
+      - Migration Plan: analysis_builder_migration_plan.md
+      - Deprecation Plan: deprecation_plan.md
+      - Linting Fix Plan: linting_fix_plan.md
       - OpenSeesPy Local Build: openseespy_local_build.md
       - Vecchio & Emara Benchmark: vecchio_emara_benchmark.md
-      - Pending Work Register: _pending_work.md
   - Tool-Specific Workflows:
       - Xara/OpenSeesRT Tcl Runtime: xara_tcl_runtime_guide.md
       - Xara Pushover Workflow: xara_pushover_workflow.md
       - Xara Gravity & Solver: xara_gravity_and_solver.md
-  - Planning:
-      - Migration Plan: analysis_builder_migration_plan.md
-      - Deprecation Plan: deprecation_plan.md
-      - Development Notes: dev_notes.md
-      - Desktop GUI Roadmap: gui_roadmap.md
-      - Versioning & Release Plan: versioning.md
   - API Reference:
       - model: api/model.md
       - io: api/io.md

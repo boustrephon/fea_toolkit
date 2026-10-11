@@ -1,3 +1,12 @@
+---
+title: "Pipeline Logging — One Event, Many Sinks"
+description: "The fea_toolkit.io.log.PipelineLog contract: one (level, step, msg) event emitted once, rendered by many sinks (stdout, a JSON file, a Qt signal, the report's Analysis Log table)."
+status: "complete"
+tags: [logging, pipeline, io, report, diagnostics]
+category: [io]
+related: [report_generation.md, gui.md, workflow.md]
+---
+
 # Pipeline logging — one event, many sinks
 
 The toolkit routes its narrative diagnostics through a single

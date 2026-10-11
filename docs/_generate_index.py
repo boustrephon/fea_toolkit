@@ -24,6 +24,9 @@ CATEGORIES = [
     ("analysis-types", "🔬 Analysis Types"),
     ("model-features", "⚙️ Model Features"),
     ("export-viz", "🎨 Export & Visualisation"),
+    ("io", "💾 I/O & Serialisation"),
+    ("opensees", "🧮 OpenSees"),
+    ("checklists", "📝 Model-Review Checklists"),
     ("tool-specific", "🛠️ Tool-Specific Workflows"),
     ("planning", "📋 Planning & Historical"),
     ("about", "📜 Licence & Legal"),
@@ -101,7 +104,12 @@ def main():
     docs: list[tuple[str, dict]] = []
 
     for f in md_files:
-        if f.name.startswith("_") or f.name in ("README.md", "documentation_index.md", "index.md"):
+        if f.name.startswith("_") or f.name in (
+            "README.md",
+            "documentation_index.md",
+            "index.md",
+            "ETABS_checklist_src.md",
+        ):
             continue
         content = f.read_text(encoding="utf-8")
         fm = parse_frontmatter(content)
@@ -120,7 +128,7 @@ def main():
     lines = [HEADER]
 
     # ── Category sections ──
-    by_priority = {key: label for key, label in CATEGORIES}
+    by_priority = dict(CATEGORIES)
     displayed_cats = [c for c, _ in CATEGORIES]
     remaining = [c for c in cat_docs if c not in by_priority]
 

@@ -35,7 +35,9 @@ The goal is to create a Python package `fea_toolkit` that:
 ## LLM / AI Assistant Quick Start
 
 This section is designed for **language model (LLM) assistants** working with
-this codebase.  For a full reference, see [docs/llm_guide.md](docs/llm_guide.md).
+this codebase.  For a full reference, see [docs/llm_guide.md](docs/llm_guide.md) —
+including its section on *helping an engineer interpret a model, its analyses and
+its results*.
 
 ### Canonical 4-line pipeline
 
@@ -59,6 +61,7 @@ import fea_toolkit
 | Goal | Call |
 |------|------|
 | Parse a model | ``SAP2000Parser(path).parse().get_model_data()`` |
+| Review a model | ``python -m fea_toolkit.model.review model.s2k`` |
 | Filter elements | ``Selection(element_types=['Frame'], groups=['Lateral'])`` |
 | Plot 3D model | ``plot_mesh(builder)`` |
 | Plot deformed shape | ``plot_deformed_displacement_3d(builder, results, scale=100)`` |

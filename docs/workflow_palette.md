@@ -1,3 +1,12 @@
+---
+title: "Workflow Command Palette & Script Interop (Phase D)"
+description: "Design record for the workflow layer's command palette (Ctrl+K) and script interop: a command string compiles into a Step via Selection.from_string and inserts into the recipe."
+status: "draft"
+tags: [workflow, palette, gui, recipe, steps, command, design]
+category: [core-pipeline]
+related: [workflow_authoring.md, gui_roadmap.md]
+---
+
 # Workflow Phase D — the command palette and script interop (P31)
 
 > **Status: 🚧 Planned** — design record; not yet implemented.

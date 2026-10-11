@@ -1,6 +1,6 @@
 ---
 title: "LLM & AI Assistant Guide"
-description: "Canonical goal-to-code mapping, full public API surface by domain, and key technical constraints — structured for language model consumption."
+description: "Canonical goal-to-code mapping, full public API surface by domain, key technical constraints, and how to help an engineer interpret a model, its analyses and its results — structured for language model consumption."
 status: "complete"
 tags: [llm, ai, guide, api-reference, usage, environment]
 category: [core-pipeline]
@@ -9,7 +9,8 @@ category: [core-pipeline]
 
 This document is structured for **language model consumption**. It provides
 a canonical mapping from user goals to code, lists the full public API surface
-by category, and documents key technical constraints.
+by category, documents key technical constraints, and teaches how to help an
+engineer understand a model, its analyses and its results (§3).
 
 ---
 
@@ -194,7 +195,70 @@ see `.clinerules` §3.11.
 
 ---
 
-## 3. Visualisation Dispatch Rules
+## 3. Helping an engineer understand a model, its analyses and its results
+
+§2 maps a goal to a function call; this section maps an **engineer's question**
+to a *reading*.  The workflow is always **review → analyse → interpret**, and
+every limit you quote must come from a named code/clause or from a
+`governing_clause` the toolkit computed — never from memory.
+
+### Step 1 — Review the model (solver-free, before any analysis)
+
+Start every consultation with the standalone review.  It answers *"is this
+model sensible, complete and fully connected?"* and surfaces the modelling
+problems that precede a singular stiffness matrix or a silently wrong result:
+
+```bash
+python -m fea_toolkit.model.review model.s2k
+python -m fea_toolkit.model.review model.s2k --format markdown --out review.md
+python -m fea_toolkit.model.review model.s2k --analysis --num-modes 6          # + modal/static confirmation
+python -m fea_toolkit.model.review model.s2k --self-weight --brace-buckling    # solver-free physics
+python -m fea_toolkit.model.review model.s2k --response-spectrum               # GB 50011 CQC base shear
+```
+
+Full reference and every flag: `docs/model_review.md`.
+
+### Step 2 — Analyse the case the question needs
+
+Run in increasing sophistication — linear static → modal → response spectrum →
+pushover — using the exact calls in §2.  Only run what the question asks for.
+
+### Step 3 — Translate the numbers (evidence-based cheat-sheet)
+
+| Result | How to read it |
+|---|---|
+| **Modal** — `periods`, `frequencies`, `modal_data` (`mx`/`my`/`mz`/`sum_mx`), `mode_shapes` | The fundamental period describes the structure's dynamic character; `sum_mx`/`sum_my` are the mass participation in each direction.  A mode below ~1 % participation is insignificant — the review's own filter is `--min-participation 1`.  See `docs/modal_analysis.md`. |
+| **Storey drift** — `storey_displacements` / `storey_drifts` / `modal_storey_drifts` | Drift ratio = inter-storey displacement ÷ storey height, computed via a CM-based rigid-body fit.  The toolkit computes the ratio (see `docs/storey_response.md`) but does **not** encode a code limit — quote GB 50011 / ASCE 7 by clause and compare. |
+| **Response spectrum** — base shear / overturning / roof displacement (via `model.review --response-spectrum` or `run_response_spectrum_analysis`) | CQC combines the modal responses (reducing to SRSS when modes are well separated); overturning is the moment of the storey shears about the base.  See `docs/model_review.md`, `docs/results_schema.md`. |
+| **Pushover** — `pushover_curves[dir] = {disp, force}` → `pushover_to_adrs` → `compute_performance_point` | The capacity curve's plateau is the structure's strength; convert to ADRS and intersect the demand spectrum to read the performance point and ductility demand.  See `docs/pushover_analysis.md`. |
+| **DCR** — `capacity_dcr(demand, capacity)` against `moment_capacity` / `shear_capacity` / `wall_shear_check` (each returns a `CapacityResult` with `.value`, `.units`, `.governing_clause`) | **DCR ≤ 1 satisfied; DCR > 1 = demand exceeds capacity** — the member is overstressed.  Report the governing clause from the result; don't re-derive it.  See `docs/capacity.md`. |
+| **Euler brace buckling** — `check_brace_buckling` / `brace_buckling_check` (`P_cr`, `P_demand`, `ratio`) | `ratio = demand / P_cr`; approaching 1 means buckling governs.  The checker flags `ratio > 0.5` as worth attention. |
+| **Self-weight consistency** — `check_self_weight_consistency` (`expected`, `applied`, `discrepancy`, `passed`) | `expected` is computed from section geometry × unit weight, `applied` from the load totals.  A large `discrepancy` is a *model bug* (missing/mis-scaled self-weight), not an analysis artefact. |
+| **Connectivity** — `check_model_connectivity` (`orphan_nodes`, `shell_only_base_nodes`, `duplicate_coords`, `zero_area_sections`) | These are the defects that make the stiffness matrix singular — fix them before analysing. |
+| **Load/reaction equilibrium** — `run_static_analysis(extract_reactions=True)` → `load_reaction_check` (`applied_fz`, `reaction_fz`, `delta`) | `delta ≈ 0` confirms the loads balance; a large `delta` means a load was missed or double-counted. |
+
+### Where the results live
+
+- **In-process**: the result dicts returned by each `run_*` (keys in §2).
+- **On disk**: `write_results_npz()` / `builder.export_results()` → the unified
+  NPZ schema (`nid`/`eid`/`mid`/`dof`/`end`/`step`), read back with
+  `read_results_npz()` for standalone plotting — `docs/results_schema.md`.
+
+### Guardrails for the consultative role
+
+- **Cite, don't invent.**  Quote limits with the code and clause, or the
+  `governing_clause` the capacity module already attached.  Do not assert a
+  threshold the toolkit does not compute.
+- **Units first.**  Results are in the model's unit system (`md.units`); derive
+  gravity with `g_from_units()` — never hardcode (§5).
+- **Consistency ≠ compliance.**  A passing review means *internally coherent*,
+  not *code-compliant* — say so, and defer design decisions to the engineer.
+- **Never reproduce CSI material.**  Cite/link SAP2000®/CSI® documentation;
+  never paste manual text, tables or figures (`.clinerules` §5.8).
+
+---
+
+## 4. Visualisation Dispatch Rules
 
 | Input type | What to call |
 |------------|-------------|
@@ -219,7 +283,7 @@ already caused one frozen-animation bug by a guessed keyword.
 
 ---
 
-## 4. Known OpenSeesPy Constraints
+## 5. Known OpenSeesPy Constraints
 
 ### Broken features
 - **8-argument trapezoidal `eleLoad`**: broken in OpenSeesPy 3.8.0.0.
@@ -347,7 +411,7 @@ element therefore requires `UmfPack`.
 
 ---
 
-## 5. Selection Patterns (for targeted visualisation)
+## 6. Selection Patterns (for targeted visualisation)
 
 ### Basic filtering
 ```python
@@ -406,7 +470,7 @@ subset = sel.filter_model(model)
 
 ---
 
-## 6. Architecture Rules (Do NOT Violate)
+## 7. Architecture Rules (Do NOT Violate)
 
 | Rule | Why |
 |------|-----|
@@ -419,7 +483,7 @@ subset = sel.filter_model(model)
 | Use `field(default_factory=...)` for mutable defaults in dataclasses | Prevents shared mutable state |
 | Use PEP 585 built-in generics (`dict`, `list`, `tuple`, `set`) in annotations; import only `Optional`/`Union`/`Any`/`ClassVar`/`NamedTuple`/`TYPE_CHECKING` from `typing` | Python 3.9 floor already supports PEP 585; ruff `UP006`/`UP035` flag `typing.Dict`/`List`/`Tuple`/`Set` |
 | Never add `ndm`/`ndf` dispatch to the main workflow | Analysis is 3D-only (`ndm=3`, `ndf=6`); 2D OpenSees is test-only (`.clinerules` §3.11) |
-| Always catch `RuntimeError` from `AnalysisBuilder.run_static_analysis()` when non-convergence is acceptable | Raises on non-convergence (since commit `ba891f50`); never returns empty dicts on failure — see §7 |
+| Always catch `RuntimeError` from `AnalysisBuilder.run_static_analysis()` when non-convergence is acceptable | Raises on non-convergence (since commit `ba891f50`); never returns empty dicts on failure — see §8 |
 | Never `git push --mirror`, a wildcard refspec, `git bundle --all`, or share the repo folder including `.git` | Publishes the local-only `refs/cline/checkpoints/*`, which snapshot client data from `local/`/`data/`; the repo is public — see `.clinerules` §6.4 |
 | Don't disable or prune Cline's checkpointing unprompted | It is the per-step undo for LLM edits |
 
@@ -427,7 +491,7 @@ subset = sel.filter_model(model)
 
 ---
 
-## 7. Quick Debugging
+## 8. Quick Debugging
 
 ### ImportError
 ```python
@@ -544,7 +608,10 @@ loaded and resync:
 
 ---
 
-## 8. TODO — Add usage examples to function docstrings
+## 9. Contributor backlog — add usage examples to function docstrings
+
+> This is a **contributor** task list, not LLM guidance; it is tracked in
+> `docs/_pending_work.md`.  Sections 1–8 above are the LLM-facing contract.
 
 The following modules have Google-style docstrings with ``Args:`` and
 ``Returns:`` but **no usage examples**.  Adding a ``Examples:`` block to
