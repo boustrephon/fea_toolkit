@@ -1239,8 +1239,9 @@ unit point load for benchmark pushes — distinct from parsing user-supplied
 Source: `mkdocs.yml` header comment; `.github/workflows/docs.yml`.
 
 **What.** The docs site builds from a pinned MkDocs 1.x toolchain
-(`mkdocs==1.6.1`, `mkdocs-material==9.7.7`, `mkdocstrings[python]==1.0.6`,
-`mkdocstrings-python==2.0.5`, `mkdocs-gen-files==0.6.1`).  Two independent
+(`mkdocs==1.6.1`, `mkdocs-material==9.7.7`, `mkdocstrings[python]==1.0.7`,
+`mkdocstrings-python==2.0.9`, `mkdocs-gen-files==0.6.1`,
+`pymdown-extensions==12.2`).  Two independent
 packages now print advisory "MkDocs 2.0" notices at build start (neither is
 strict-failing):
 - `mkdocs-gen-files` via its `properdocs` dependency → silenced with

@@ -50,11 +50,11 @@ gui = [
 docs = [
     "mkdocs==1.6.1",
     "mkdocs-material==9.7.7",
-    "mkdocstrings[python]==1.0.6",
-    "mkdocstrings-python==2.0.5",
+    "mkdocstrings[python]==1.0.7",
+    "mkdocstrings-python==2.0.9",
     "mkdocs-gen-files==0.6.1",
-    # 12.2 breaks mkdocstrings 1.0.6 (Highlight.__init__ now requires `md`).
-    "pymdown-extensions==12.1",
+    # pymdown-extensions 12.2 needs mkdocstrings >=1.0.7 (Python >=3.11); pin together.
+    "pymdown-extensions==12.2",
     ]
 
 [tool.setuptools.packages.find]
