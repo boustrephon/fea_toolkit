@@ -130,8 +130,10 @@ class StoreyRigidBody:
     Attributes:
         storey: Storey name (e.g. ``"Storey 1"``).
         elevation: Storey Z coordinate.
-        x_cm, y_cm: Centre-of-mass coordinates of the storey nodes.
-        Ux, Uy: Average translational displacement at the CM.
+        x_cm: Centre-of-mass X coordinate of the storey nodes.
+        y_cm: Centre-of-mass Y coordinate of the storey nodes.
+        Ux: Average X translational displacement at the CM.
+        Uy: Average Y translational displacement at the CM.
         Rz: Twist (rotation about Z, radians, positive anticlockwise).
         rms_residual: RMS of the fit residual — small = good rigid-body fit.
         n_nodes: Number of nodes used in the fit (after outlier rejection).
@@ -278,9 +280,12 @@ def rigid_body_fit(
     with two-pass outlier rejection.
 
     Args:
-        ux, uy: Nodal displacements (1-D, same length).
-        x, y: Nodal coordinates.
-        x_cm, y_cm: Centre-of-mass coordinates.
+        ux: Nodal X displacements (1-D, same length).
+        uy: Nodal Y displacements (1-D, same length).
+        x: Nodal X coordinates.
+        y: Nodal Y coordinates.
+        x_cm: Centre-of-mass X coordinate.
+        y_cm: Centre-of-mass Y coordinate.
         outlier_threshold: Residual threshold in multiples of median
             absolute residual.  Nodes exceeding this are rejected.
 
@@ -395,7 +400,8 @@ def storey_displacements(
     Args:
         md: Parsed :class:`~fea_toolkit.model.sap_data.SAPModelData`.
         stories: List of :class:`StoryLevel` objects.
-        node_ux, node_uy: ``{node_id: displacement}`` for each DOF.
+        node_ux: ``{node_id: displacement}`` for the X DOF.
+        node_uy: ``{node_id: displacement}`` for the Y DOF.
         node_masses: Optional ``{node_id: mass}`` for CM calculation.
             ``None`` → geometric centroid.
         outlier_threshold: See :func:`rigid_body_fit`.
@@ -1182,8 +1188,10 @@ def build_storey_table(
         total_height: Total building height, used for moment fallback.
         base_val: ``"shear"`` or ``"moment"``.  Empty for
             displacement/drift.
-        _resultant_shear_fn, _resultant_moment_fn: Function references
-            (injected so call sites can pass their own).
+        _resultant_shear_fn: Function reference (injected so call sites
+            can pass their own).
+        _resultant_moment_fn: Function reference (injected so call sites
+            can pass their own).
     """
     import pandas as pd
 

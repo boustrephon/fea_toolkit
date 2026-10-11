@@ -48,17 +48,15 @@ def plot_pushover_curves(
 ) -> Optional[Any]:
     """Plot pushover capacity curves for all 4 directions.
 
-    Parameters
-    ----------
-    all_out : dict
-        Pushover results nested as ``{direction: {"results": ...,
-        "pp": {"converged": ..., "D_roof": ..., "V_base": ...}}}``.
-    units : dict, optional
-        Unit dict (e.g. ``md.units``) used for the base-shear axis label.
+    Args:
+        all_out: Pushover results nested as ``{direction: {"results":
+            ..., "pp": {"converged": ..., "D_roof": ..., "V_base":
+            ...}}}``.
+        units: Unit dict (e.g. ``md.units``) used for the base-shear axis
+            label.
 
-    Returns
-    -------
-    matplotlib.figure.Figure or None
+    Returns:
+        ``matplotlib.figure.Figure`` or ``None``.
     """
     try:
         import matplotlib.pyplot as plt
@@ -95,21 +93,18 @@ def plot_modal_participation(
     (semi-transparent, same colour) stacked on top.  A dashed line marks
     the 90 % threshold.
 
-    Parameters
-    ----------
-    df_modal : pd.DataFrame
-        DataFrame with columns ``Mode``, ``Mx (%)``, ``My (%)``, ``Mz (%)``,
-        ``Rx (%)``, ``Ry (%)``, ``Rz (%)`` — as produced by
-        :func:`fea_toolkit.io.report.modal_table_enhanced`.
-    min_participation : float
-        Minimum participation percentage (e.g. ``1.0``) — modes where ALL
-        translational DOFs are below this threshold are aggregated into a
-        single \"low modes\" bar.  The cumulative sums at the end of the
-        chart still include their contribution.  ``0.0`` = show all modes.
+    Args:
+        df_modal: DataFrame with columns ``Mode``, ``Mx (%)``, ``My (%)``,
+            ``Mz (%)``, ``Rx (%)``, ``Ry (%)``, ``Rz (%)`` — as produced by
+            :func:`fea_toolkit.io.report.modal_table_enhanced`.
+        min_participation: Minimum participation percentage (e.g. ``1.0``)
+            — modes where ALL translational DOFs are below this threshold
+            are aggregated into a single "low modes" bar.  The cumulative
+            sums at the end of the chart still include their contribution.
+            ``0.0`` = show all modes.
 
-    Returns
-    -------
-    matplotlib.figure.Figure or None
+    Returns:
+        ``matplotlib.figure.Figure`` or ``None``.
     """
     try:
         import matplotlib.pyplot as plt
@@ -267,21 +262,18 @@ def plot_rs_modal_analysis(
 ) -> Optional[Any]:
     """Two-panel figure: mass participation (top) + modal base shear (bottom).
 
-    Parameters
-    ----------
-    modal_props : dict
-        The ``modal_props`` dict from ``ops.modalProperties('-return', '-unorm')``.
-    modal_base_shear_x : list
-        Per-mode base shear values from RS analysis in X (kN).
-    modal_base_shear_y : list
-        Per-mode base shear values from RS analysis in Y (kN).
-    periods : list of float, optional
-        Modal periods in seconds.  If provided, shown on the x-axis
-        beneath each mode number.  ``None`` = mode numbers only.
+    Args:
+        modal_props: The ``modal_props`` dict from
+            ``ops.modalProperties('-return', '-unorm')``.
+        modal_base_shear_x: Per-mode base shear values from RS analysis in
+            X (kN).
+        modal_base_shear_y: Per-mode base shear values from RS analysis in
+            Y (kN).
+        periods: Modal periods in seconds.  If provided, shown on the
+            x-axis beneath each mode number.  ``None`` = mode numbers only.
 
-    Returns
-    -------
-    matplotlib.figure.Figure or None
+    Returns:
+        ``matplotlib.figure.Figure`` or ``None``.
     """
     try:
         import matplotlib.pyplot as plt
@@ -379,36 +371,27 @@ def plot_csm_4panel(
 ) -> Optional[Any]:
     """Generate a 2×2 ADRS Capacity Spectrum Method plot for all 4 directions.
 
-    Parameters
-    ----------
-    all_out : dict
-        Pushover output dict from ``run_pushover_4dir()`` or ``run_pushover_truss()``.
-    modal : dict
-        Modal analysis result (``run_modal_analysis`` output).
-    tg : float
-        Characteristic period (s).
-    zeta : float
-        Damping ratio.
-    alpha_max_rare : float
-        Rare-earthquake seismic influence coefficient.
-    g : float, optional
-        Gravitational acceleration in the model's own unit system.  Used
-        verbatim when given; ``None`` falls back to *units*, then to the
-        shared SI constant (9.80665 m/s²).
-    units : dict, optional
-        Model units dict (e.g. ``{"F": "N", "L": "mm", "T": "C"}``), so the
-        demand spectrum and the axis labels match the model units of the
-        ADRS capacity arrays.  Ignored when *g* is given.
-    out_dir : str, optional
-        If provided, save the figure as ``csm_4panel.png`` to this directory.
-    title : str, optional
-        Figure suptitle override (a project label, for example).  ``None``
-        derives one from *alpha_max_rare*, *tg* and *zeta*, so the default
-        always names the demand actually plotted.
+    Args:
+        all_out: Pushover output dict from ``run_pushover_4dir()`` or
+            ``run_pushover_truss()``.
+        modal: Modal analysis result (``run_modal_analysis`` output).
+        tg: Characteristic period (s).
+        zeta: Damping ratio.
+        alpha_max_rare: Rare-earthquake seismic influence coefficient.
+        g: Gravitational acceleration in the model's own unit system.
+            Used verbatim when given; ``None`` falls back to *units*, then
+            to the shared SI constant (9.80665 m/s²).
+        units: Model units dict (e.g. ``{"F": "N", "L": "mm", "T": "C"}``),
+            so the demand spectrum and the axis labels match the model
+            units of the ADRS capacity arrays.  Ignored when *g* is given.
+        out_dir: If provided, save the figure as ``csm_4panel.png`` to this
+            directory.
+        title: Figure suptitle override (a project label, for example).
+            ``None`` derives one from *alpha_max_rare*, *tg* and *zeta*, so
+            the default always names the demand actually plotted.
 
-    Returns
-    -------
-    matplotlib.figure.Figure or None
+    Returns:
+        ``matplotlib.figure.Figure`` or ``None``.
     """
     try:
         import matplotlib.pyplot as plt
@@ -635,23 +618,18 @@ def plot_storey_forces(
       together with :func:`~fea_toolkit.model.storey_response.storey_shears`
       (Option B / nodal summation approach).
 
-    Parameters
-    ----------
-    df_shear : pd.DataFrame
-        Columns ``Storey``, ``Elevation``, plus one column per load case.
-        First row must be the **Base** row (with base shear value).
-    df_moment : pd.DataFrame
-        Same structure for moment.
-    force_unit, moment_unit : str
-        Axis labels.
-    figsize : tuple
-        Figure dimensions.
-    n_points : int
-        Number of evaluation points along the height.
+    Args:
+        df_shear: DataFrame with columns ``Storey``, ``Elevation``, plus
+            one column per load case.  First row must be the **Base** row
+            (with base shear value).
+        df_moment: Same structure for moment.
+        force_unit: Axis label for force.
+        moment_unit: Axis label for moment.
+        figsize: Figure dimensions.
+        n_points: Number of evaluation points along the height.
 
-    Returns
-    -------
-    matplotlib.figure.Figure or None
+    Returns:
+        ``matplotlib.figure.Figure`` or ``None``.
     """
     try:
         import matplotlib.pyplot as plt
@@ -767,26 +745,21 @@ def plot_storey_displacements(
     Displacement and drift values are absolute.  Elevation on the y-axis,
     displacement/drift on the x-axis.
 
-    Parameters
-    ----------
-    df_disp : pd.DataFrame
-        Columns ``Storey``, ``Elevation``, ``Peak_disp`` (and optionally
-        ``Ux``, ``Uy``).  Peak displacement is the worst-node resultant.
-    df_drift : pd.DataFrame
-        Columns ``Storey``, ``Elevation``, ``Drift_peak`` (and optionally
-        ``Drift_X``, ``Drift_Y``).
-    disp_unit, drift_unit : str
-        Axis labels.
-    source_length_unit : str
-        Length unit of the raw data (``"m"``, ``"mm"``, etc.).  Defaults
-        to ``"m"`` (SI).  Use ``md.units.get("L", "m")`` from the model
-        metadata to derive the correct value.
-    figsize : tuple
-        Figure dimensions.
+    Args:
+        df_disp: DataFrame with columns ``Storey``, ``Elevation``,
+            ``Peak_disp`` (and optionally ``Ux``, ``Uy``).  Peak
+            displacement is the worst-node resultant.
+        df_drift: DataFrame with columns ``Storey``, ``Elevation``,
+            ``Drift_peak`` (and optionally ``Drift_X``, ``Drift_Y``).
+        disp_unit: Axis label for displacement.
+        drift_unit: Axis label for drift.
+        source_length_unit: Length unit of the raw data (``"m"``, ``"mm"``,
+            etc.).  Defaults to ``"m"`` (SI).  Use ``md.units.get("L",
+            "m")`` from the model metadata to derive the correct value.
+        figsize: Figure dimensions.
 
-    Returns
-    -------
-    matplotlib.figure.Figure or None
+    Returns:
+        ``matplotlib.figure.Figure`` or ``None``.
     """
     try:
         import matplotlib.pyplot as plt

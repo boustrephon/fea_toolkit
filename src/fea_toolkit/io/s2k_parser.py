@@ -684,9 +684,7 @@ class SAP2000Parser:
         names ``EndI``/``EndJ`` are also accepted.  When a frame appears in
         more than one variant table the first (newest) table wins.
 
-        Returns
-        -------
-        Dict[str, FrameEndOffset]
+        Returns:
             Mapping from frame ID to its I-end and J-end rigid offsets.
         """
         offsets: dict[str, FrameEndOffset] = {}
@@ -715,9 +713,7 @@ class SAP2000Parser:
         ``AREA MESH ASSIGNMENTS`` takes precedence because it is
         processed last in the loop.
 
-        Returns
-        -------
-        Dict[str, AreaMesh]
+        Returns:
             Mapping from area ID to its mesh control settings.
         """
         meshes: dict[str, AreaMesh] = {}
@@ -755,10 +751,9 @@ class SAP2000Parser:
     def _get_area_edge_constraints(self) -> dict[str, list[AreaEdgeConstraint]]:
         """Parse AREA EDGE CONSTRAINT ASSIGNMENTS table.
 
-        Returns
-        -------
-        Dict[str, List[AreaEdgeConstraint]]
-            Mapping from area ID to a list of its edge constraint assignments.
+        Returns:
+            Mapping from area ID to a list of its edge constraint
+            assignments.
         """
         constraints: dict[str, list[AreaEdgeConstraint]] = {}
         for rec in self._raw_tables.get("AREA EDGE CONSTRAINT ASSIGNMENTS", []):
@@ -785,11 +780,9 @@ class SAP2000Parser:
         axis (``{"Axis": "Z"}``) so downstream consumers (Preprocessor /
         AnalysisBuilder) can derive rigid-diaphragm storey levels.
 
-        Returns
-        -------
-        Dict[str, Constraint]
-            Mapping from constraint name (e.g. ``"D1"``, ``"BODY1"``)
-            to its :class:`Constraint` definition.
+        Returns:
+            Mapping from constraint name (e.g. ``"D1"``, ``"BODY1"``) to
+            its :class:`Constraint` definition.
         """
         constraints: dict[str, Constraint] = {}
         for table_name, records in self._raw_tables.items():
@@ -818,9 +811,7 @@ class SAP2000Parser:
     def _get_constraint_assignments(self) -> dict[str, str]:
         """Parse ``JOINT CONSTRAINT ASSIGNMENTS`` table.
 
-        Returns
-        -------
-        Dict[str, str]
+        Returns:
             Mapping from SAP joint ID (string) → constraint name.
         """
         assignments: dict[str, str] = {}
@@ -1167,9 +1158,7 @@ class SAP2000Parser:
         11     Shear centre
         =====  ===============
 
-        Returns
-        -------
-        Dict[str, int]
+        Returns:
             Mapping from frame ID to its cardinal point integer (1–11).
             An empty dict is returned when no cardinal point is available.
         """

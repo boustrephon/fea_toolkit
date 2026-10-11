@@ -308,15 +308,12 @@ def polygon_area_3d(pts):
     Uses the vector-area formula :math:`\\mathbf{A} = \\frac12 \\sum \\mathbf{r}_i \\times \\mathbf{r}_{i+1}`
     which works for any orientation (horizontal, vertical, or inclined).
 
-    Parameters
-    ----------
-    pts : list of (x, y, z) arrays or tuples
-        Polygon vertices in order (at least 3).
+    Args:
+        pts: Polygon vertices in order (at least 3), as a list of
+            ``(x, y, z)`` arrays or tuples.
 
-    Returns
-    -------
-    float
-        Polygon area (always \u2265 0).  Returns 0.0 if fewer than 3 vertices.
+    Returns:
+        Polygon area (always >= 0).  Returns 0.0 if fewer than 3 vertices.
     """
     if len(pts) < 3:
         return 0.0

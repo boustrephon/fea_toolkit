@@ -76,10 +76,12 @@ def compute_flag_parts(pt1, pt2, vn, Fi, Fj, scale, zero_tol=None):
     defence in depth, no part with coincident vertices is ever yielded.
 
     Args:
-        pt1, pt2: I-end and J-end node coordinates (array-like of length 3).
+        pt1: I-end node coordinates (array-like of length 3).
+        pt2: J-end node coordinates (array-like of length 3).
         vn: Unit vector for positive flag offset direction (array-like of
             length 3).
-        Fi, Fj: Force/moment values (original, un-negated).
+        Fi: I-end force/moment value (original, un-negated).
+        Fj: J-end force/moment value (original, un-negated).
         scale: Scale factor (display units per force/moment unit).
         zero_tol: Relative zero-snap fraction (see
             :func:`_snap_flag_noise`).  ``None`` → :data:`_FLAG_ZERO_SNAP_TOL`.

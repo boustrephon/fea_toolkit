@@ -959,12 +959,18 @@ def _render_scene(
         plotter: The ``pyvista.Plotter`` to render into.
         data: Mesh data dict from :func:`_resolve_mesh_data`.
         shrink: Fraction to shrink quads/lines toward centroid.
-        xlim, ylim, zlim: Optional ``(lo, hi)`` bounding-box filters.
-        show_nodes, show_orphan_nodes, show_mesh_nodes: Toggle node groups.
-        show_frames, show_shells: Toggle element groups.
+        xlim: Optional ``(lo, hi)`` X bounding-box filter.
+        ylim: Optional ``(lo, hi)`` Y bounding-box filter.
+        zlim: Optional ``(lo, hi)`` Z bounding-box filter.
+        show_nodes: Toggle the main node group.
+        show_orphan_nodes: Toggle the orphan-node group.
+        show_mesh_nodes: Toggle the mesh-node group.
+        show_frames: Toggle frame elements.
+        show_shells: Toggle shell elements.
         show_constraints: Draw edge constraint lines.
-        show_frame_labels, show_node_labels, show_area_labels: Toggle
-            text labels.
+        show_frame_labels: Toggle frame text labels.
+        show_node_labels: Toggle node text labels.
+        show_area_labels: Toggle area text labels.
         section_colors: Optional ``{section_name: color}`` overrides for
             frames / shells.
         node_colors: Optional ``{node_id: color}`` overrides for the node

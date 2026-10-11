@@ -143,8 +143,8 @@ def wind_sanity_check(md, df_linear, wind_case_x: str = "Wind+X", wind_case_y: s
         md: Model data (for node coordinates and units).
         df_linear: Linear analysis results; must contain ``Case``, ``Fx``,
             ``Fy`` columns.
-        wind_case_x, wind_case_y: Case names for the X and Y wind load
-            patterns.
+        wind_case_x: Case name for the X wind load pattern.
+        wind_case_y: Case name for the Y wind load pattern.
 
     Returns:
         Markdown paragraph with bounding-box summary and wind-pressure

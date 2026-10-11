@@ -651,43 +651,31 @@ def colour_from_npz(
 ) -> int:
     """Colour Rhino frame objects by a force/moment quantity from an NPZ file.
 
-    Parameters
-    ----------
-    npz_path : str
-        Path to the ``.npz`` results file.
-    quantity : str
-        Force/moment quantity, e.g. ``'Mz'``, ``'My'``, ``'Fx'``, ``'Fz'``.
-    use_local : bool
-        Use local‑coordinate forces (default ``True``).
-    combo : str or None
-        Load‑combination key (prefix).  ``None`` = primary results.
-    layer_filter : str
-        Optional layer name filter (glob).  Only objects on layers whose
-        full path matches will be coloured.  Example: ``"SAP2000/Frames/*"``
-    skip_locked : bool
-        Skip objects on locked layers (default ``True``).
-    verbose : bool
-        Print progress messages.
-    stage : str or None
-        Stage to promote for stage files (``None`` → auto, ``mesh``).
-    aggregate_parents : bool
-        Map child-element values back to their parent frame IDs
-        (max-abs envelope) so SAP-stage geometry can be coloured from
-        meshed-stage results.
-    scale_mode : str
-        ``"continuous"`` (default — smooth diverging ramp, only the global
-        min/max saturate) or ``"stepped"`` (discrete bands so mid-range
-        magnitudes get distinct colours).
-    n_steps : int
-        Number of bands for ``scale_mode="stepped"`` (odd ≥ 3).
-    clip_pct : float
-        Percent clipped off each end of the value range before colouring
-        (``0`` = raw min/max).  Clipping to the inner percentiles stops a
-        few extreme members from washing the bulk out to near-white.
+    Args:
+        npz_path: Path to the ``.npz`` results file.
+        quantity: Force/moment quantity, e.g. ``'Mz'``, ``'My'``, ``'Fx'``,
+            ``'Fz'``.
+        use_local: Use local-coordinate forces (default ``True``).
+        combo: Load-combination key (prefix).  ``None`` = primary results.
+        layer_filter: Optional layer name filter (glob).  Only objects on
+            layers whose full path matches will be coloured.  Example:
+            ``"SAP2000/Frames/*"``
+        skip_locked: Skip objects on locked layers (default ``True``).
+        verbose: Print progress messages.
+        stage: Stage to promote for stage files (``None`` → auto, ``mesh``).
+        aggregate_parents: Map child-element values back to their parent
+            frame IDs (max-abs envelope) so SAP-stage geometry can be
+            coloured from meshed-stage results.
+        scale_mode: ``"continuous"`` (default — smooth diverging ramp, only
+            the global min/max saturate) or ``"stepped"`` (discrete bands
+            so mid-range magnitudes get distinct colours).
+        n_steps: Number of bands for ``scale_mode="stepped"`` (odd ≥ 3).
+        clip_pct: Percent clipped off each end of the value range before
+            colouring (``0`` = raw min/max).  Clipping to the inner
+            percentiles stops a few extreme members from washing the bulk
+            out to near-white.
 
-    Returns
-    -------
-    int
+    Returns:
         Number of objects coloured.
     """
     # Load results
@@ -754,16 +742,13 @@ def colour_frame_by_npz_ratio(
     Example: colour by ``Mz / My`` to highlight members where one
     bending direction dominates.
 
-    Parameters
-    ----------
-    numerator, denominator : str
-        Quantity names (e.g. ``'Mz'``, ``'My'``).
-    use_local : bool
-        Use local-coordinate forces (default ``True``).
-    stage : str or None
-        Stage to promote for stage files (``None`` → auto).
-    **kwargs
-        Passed through to :func:`colour_from_npz` (e.g. ``layer_filter``).
+    Args:
+        numerator: Numerator quantity name (e.g. ``'Mz'``).
+        denominator: Denominator quantity name (e.g. ``'My'``).
+        use_local: Use local-coordinate forces (default ``True``).
+        stage: Stage to promote for stage files (``None`` → auto).
+        **kwargs: Passed through to :func:`colour_from_npz` (e.g.
+            ``layer_filter``).
     """
     data = _load_unified(npz_path, stage=stage)
     suffix = "_local" if use_local else ""
@@ -841,36 +826,25 @@ def create_result_flags(
     the previous objects on that layer).  Different quantities sit on
     separate sub‑layers so they can be toggled independently.
 
-    Parameters
-    ----------
-    npz_path : str
-        Path to the ``.npz`` results file.
-    quantity : str
-        Force/moment quantity, e.g. ``'Mz'``, ``'My'``, ``'Fx'``, ``'Fz'``.
-    use_local : bool
-        Use local‑coordinate forces (default ``True``).
-    scale_factor : float or None
-        Flag height per unit force/moment.  If ``None``, auto‑scaled so
-        the largest flag is 20 % of the model height.
-    layer_name : str or None
-        Name of the Rhino layer for the flags.  Default is
-        ``"SAP2000/Results/Flags/{quantity}"``.
-    verbose : bool
-        Print progress messages.
-    stage : str or None
-        Stage to promote for stage files (``None`` → auto).
-    pushover_direction : str or None
-        When set (e.g. ``\"+X\"``), source the flags from the per‑step
-        pushover frame forces for that direction instead of a static
-        case — useful for stage files whose only per‑element forces live
-        in the pushover arrays.
-    step : int or None
-        Pushover step index for *pushover_direction* (``None`` → last
-        step, i.e. peak).
+    Args:
+        npz_path: Path to the ``.npz`` results file.
+        quantity: Force/moment quantity, e.g. ``'Mz'``, ``'My'``, ``'Fx'``,
+            ``'Fz'``.
+        use_local: Use local-coordinate forces (default ``True``).
+        scale_factor: Flag height per unit force/moment.  If ``None``,
+            auto-scaled so the largest flag is 20 % of the model height.
+        layer_name: Name of the Rhino layer for the flags.  Default is
+            ``"SAP2000/Results/Flags/{quantity}"``.
+        verbose: Print progress messages.
+        stage: Stage to promote for stage files (``None`` → auto).
+        pushover_direction: When set (e.g. ``"+X"``), source the flags
+            from the per-step pushover frame forces for that direction
+            instead of a static case — useful for stage files whose only
+            per-element forces live in the pushover arrays.
+        step: Pushover step index for *pushover_direction* (``None`` →
+            last step, i.e. peak).
 
-    Returns
-    -------
-    int
+    Returns:
         Number of flags created.
     """
     # ── Rhino imports ──────────────────────────────────────────────
@@ -1223,24 +1197,16 @@ def create_all_result_flags(
     ``SAP2000/Results/Flags/{quantity}``.  Re‑running replaces only
     the flags on those specific layers — other geometry is untouched.
 
-    Parameters
-    ----------
-    npz_path : str
-        Path to the ``.npz`` / ``.h5`` results file.
-    use_local : bool
-        Use local‑coordinate forces (default ``True``).
-    combo : str or None
-        Load‑combination key (prefix).  ``None`` = primary results.
-    scale_factor : float or None
-        Flag height per unit force/moment.  ``None`` = auto‑scale.
-    verbose : bool
-        Print progress messages.
-    stage : str or None
-        Stage to promote for stage files (``None`` → auto).
+    Args:
+        npz_path: Path to the ``.npz`` / ``.h5`` results file.
+        use_local: Use local-coordinate forces (default ``True``).
+        combo: Load-combination key (prefix).  ``None`` = primary results.
+        scale_factor: Flag height per unit force/moment.  ``None`` =
+            auto-scale.
+        verbose: Print progress messages.
+        stage: Stage to promote for stage files (``None`` → auto).
 
-    Returns
-    -------
-    int
+    Returns:
         Total number of flags created.
     """
     total = 0
@@ -1280,21 +1246,15 @@ def mark_unconnected_edges(
     :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.detect_unconnected_edges`
     to visualise where slab meshes are discontinuous.
 
-    Parameters
-    ----------
-    reports : list of dict
-        Detection output (each entry has ``master_coords_i``,
-        ``master_coords_j``, ``slave_node``, ``coords``, etc.).
-    layer_name : str
-        Rhino layer for the edge lines (created if needed).
-    mark_slave_nodes : bool
-        Also draw small red dots at each slave node location.
-    verbose : bool
-        Print progress message.
+    Args:
+        reports: Detection output (each entry has ``master_coords_i``,
+            ``master_coords_j``, ``slave_node``, ``coords``, etc.).
+        layer_name: Rhino layer for the edge lines (created if needed).
+        mark_slave_nodes: Also draw small red dots at each slave node
+            location.
+        verbose: Print progress message.
 
-    Returns
-    -------
-    int
+    Returns:
         Number of edge lines created.
     """
     import Rhino

@@ -24,25 +24,17 @@ def read_peer_record(path: str) -> tuple[np.ndarray, np.ndarray]:
     auto-detects the header length by searching for a line that
     contains ``NPTS`` or a data line.
 
-    Parameters
-    ----------
-    path : str
-        Path to the ``.AT2`` file.
+    Args:
+        path: Path to the ``.AT2`` file.
 
-    Returns
-    -------
-    times : ndarray
-        Time points (s).
-    accel : ndarray
-        Acceleration values in **m/s²**.  PEER ``.AT2`` files store
-        acceleration in g; values are converted to the module's canonical
-        SI system at read time using
-        :data:`fea_toolkit.utils.DEFAULT_GRAVITY_MS2` (9.80665).
+    Returns:
+        ``(times, accel)`` tuple — time points (s) and acceleration values
+        in **m/s²**.  PEER ``.AT2`` files store acceleration in g; values
+        are converted to the module's canonical SI system at read time
+        using :data:`fea_toolkit.utils.DEFAULT_GRAVITY_MS2` (9.80665).
 
-    Raises
-    ------
-    ValueError
-        If the file cannot be parsed.
+    Raises:
+        ValueError: If the file cannot be parsed.
     """
     import re
 
@@ -94,23 +86,15 @@ def read_time_history_csv(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Read a simple CSV time history.
 
-    Parameters
-    ----------
-    path : str
-        CSV file path.
-    col_time : int
-        Zero-indexed column for time (s).
-    col_accel : int
-        Zero-indexed column for acceleration (m/s²).
-    skip_header : int
-        Number of header rows to skip.
+    Args:
+        path: CSV file path.
+        col_time: Zero-indexed column for time (s).
+        col_accel: Zero-indexed column for acceleration (m/s²).
+        skip_header: Number of header rows to skip.
 
-    Returns
-    -------
-    times : ndarray
-        Time points (s).
-    accel : ndarray
-        Acceleration values (m/s²).
+    Returns:
+        ``(times, accel)`` — time points (s) and acceleration values
+        (m/s²).
     """
     data = np.loadtxt(path, delimiter=",", skiprows=skip_header, ndmin=2)
     return data[:, col_time], data[:, col_accel]
@@ -122,19 +106,14 @@ def read_time_history_csv(
 def scale_to_pga(times: np.ndarray, accel: np.ndarray, target_pga: float) -> np.ndarray:
     """Scale accelerations to a target peak ground acceleration.
 
-    Parameters
-    ----------
-    times : ndarray
-        Time points (s) — accepted for API symmetry with other scaling
-        helpers but not used in the computation.
-    accel : ndarray
-        Acceleration values (same units as *target_pga*).
-    target_pga : float
-        Desired peak ground acceleration (same units as *accel*).
+    Args:
+        times: Time points (s) — accepted for API symmetry with other
+            scaling helpers but not used in the computation.
+        accel: Acceleration values (same units as *target_pga*).
+        target_pga: Desired peak ground acceleration (same units as
+            *accel*).
 
-    Returns
-    -------
-    ndarray
+    Returns:
         Scaled acceleration record.
     """
     current_pga = np.max(np.abs(accel))
@@ -154,22 +133,14 @@ def scale_to_target_sa(
     """Scale accelerations so the spectral acceleration at *period*
     matches *target_sa* (approximate single-point matching).
 
-    Parameters
-    ----------
-    times : ndarray
-        Time points (s).
-    accel : ndarray
-        Acceleration values (m/s²).
-    target_sa : float
-        Desired spectral acceleration at *period* (m/s²).
-    period : float
-        Period (s).
-    damping : float
-        Damping ratio for spectral acceleration.
+    Args:
+        times: Time points (s).
+        accel: Acceleration values (m/s²).
+        target_sa: Desired spectral acceleration at *period* (m/s²).
+        period: Period (s).
+        damping: Damping ratio for spectral acceleration.
 
-    Returns
-    -------
-    ndarray
+    Returns:
         Scaled acceleration record.
     """
     # Compute response spectrum via Newmark-beta linear acceleration integration
@@ -227,18 +198,12 @@ def scale_to_target_sa(
 def baseline_correct(times: np.ndarray, accel: np.ndarray, order: int = 3) -> np.ndarray:
     """Remove polynomial baseline drift from an acceleration record.
 
-    Parameters
-    ----------
-    times : ndarray
-        Time points (s).
-    accel : ndarray
-        Acceleration values.
-    order : int
-        Polynomial order for baseline fit (default 3).
+    Args:
+        times: Time points (s).
+        accel: Acceleration values.
+        order: Polynomial order for baseline fit (default 3).
 
-    Returns
-    -------
-    ndarray
+    Returns:
         Baseline-corrected acceleration.
     """
     coeffs = np.polyfit(times, accel, order)
@@ -255,12 +220,10 @@ def record_summary(times: np.ndarray, accel: np.ndarray) -> dict:
     ``accel`` must be in m/s² — the canonical unit of this module (see
     :func:`read_peer_record` / :func:`read_time_history_csv`).
 
-    Returns
-    -------
-    dict
-        Keys: ``"duration"``, ``"npts"``, ``"dt"``, ``"pga"``,
-        ``"pgv"`` (approximate), ``"ai"`` (Arias intensity),
-        ``"cav"`` (cumulative absolute velocity).
+    Returns:
+        Dict with keys ``"duration"``, ``"npts"``, ``"dt"``, ``"pga"``,
+        ``"pgv"`` (approximate), ``"ai"`` (Arias intensity), ``"cav"``
+        (cumulative absolute velocity).
     """
     dt = times[1] - times[0] if len(times) > 1 else 0.005
     duration = times[-1] - times[0]

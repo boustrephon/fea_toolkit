@@ -80,16 +80,13 @@ class ResponseSpectrum:
     site-specific hazard curve, etc.) can produce one via the factories
     below, so the pushover path never hardwires a particular design code.
 
-    Attributes
-    ----------
-    T : list of float
-        Period ordinates (s), ascending.
-    Sa : list of float
-        Spectral acceleration ordinates (model units, e.g. m/s²).
-    code : str
-        Optional design-code label (``"GB50011"``, ``"ASCE7-16"``, etc.).
-    description : str
-        Optional free-text note (e.g. ``"Rare, site class II"``).
+    Attributes:
+        T: Period ordinates (s), ascending.
+        Sa: Spectral acceleration ordinates (model units, e.g. m/s²).
+        code: Optional design-code label (``"GB50011"``, ``"ASCE7-16"``,
+            etc.).
+        description: Optional free-text note (e.g. ``"Rare, site class
+            II"``).
     """
 
     T: list[float]
@@ -116,33 +113,26 @@ class ResponseSpectrum:
         The damping-dependent shape factors γ, η₁, η₂ are derived from
         *zeta* using the GB 50011 §5.1.5 formulas.
 
-        Parameters
-        ----------
-        alpha_max : float
-            Seismic influence coefficient maximum (Table 5.1.4-1).
-        tg : float
-            Characteristic period (s) — site-class dependent (Table 5.1.4-2).
-        zeta : float
-            Damping ratio (default 0.05).
-        g : float, optional
-            Gravitational acceleration (m/s²).  Used verbatim when given;
-            ``None`` falls back to *units*, then to the shared SI constant
-            :data:`fea_toolkit.utils.DEFAULT_GRAVITY_MS2` (9.80665 m/s²).
-        units : dict, optional
-            Model units dict (e.g. ``{"F": "N", "L": "mm", "T": "C"}``).
-            Ignored when *g* is given; otherwise the spectrum is scaled into
-            the model's unit system (:func:`fea_toolkit.utils.g_from_units`).
-        T_max : float
-            Upper period bound (s, default 6.0).
-        n_pts : int
-            Number of ordinates (default 200).
-        description : str
-            Optional label stored on the instance.
+        Args:
+            alpha_max: Seismic influence coefficient maximum
+                (Table 5.1.4-1).
+            tg: Characteristic period (s) — site-class dependent
+                (Table 5.1.4-2).
+            zeta: Damping ratio (default 0.05).
+            g: Gravitational acceleration (m/s²).  Used verbatim when
+                given; ``None`` falls back to *units*, then to the shared
+                SI constant :data:`fea_toolkit.utils.DEFAULT_GRAVITY_MS2`
+                (9.80665 m/s²).
+            units: Model units dict (e.g. ``{"F": "N", "L": "mm", "T":
+                "C"}``).  Ignored when *g* is given; otherwise the spectrum
+                is scaled into the model's unit system
+                (:func:`fea_toolkit.utils.g_from_units`).
+            T_max: Upper period bound (s, default 6.0).
+            n_pts: Number of ordinates (default 200).
+            description: Optional label stored on the instance.
 
-        Returns
-        -------
-        ResponseSpectrum
-            The spectrum ordinates.
+        Returns:
+            The :class:`ResponseSpectrum` ordinates.
         """
         g = _resolve_g(g, units)
 
@@ -189,23 +179,16 @@ class ResponseSpectrum:
         to 0.25 Hz.  *pga* carries the caller's unit system — the
         returned accelerations have the same units.
 
-        Parameters
-        ----------
-        pga : float
-            Peak ground acceleration in the model's acceleration units.
-        zeta : float
-            Damping ratio (default 0.05).
-        T_max : float
-            Upper period bound (s, default 4.0).
-        n_pts : int
-            Number of ordinates (default 200).
-        description : str
-            Optional label stored on the instance.
+        Args:
+            pga: Peak ground acceleration in the model's acceleration
+                units.
+            zeta: Damping ratio (default 0.05).
+            T_max: Upper period bound (s, default 4.0).
+            n_pts: Number of ordinates (default 200).
+            description: Optional label stored on the instance.
 
-        Returns
-        -------
-        ResponseSpectrum
-            The spectrum ordinates.
+        Returns:
+            The :class:`ResponseSpectrum` ordinates.
         """
         # IEC 62271-207 defines branch transitions at 1.1, 8.0 and 33.0 Hz.
         # Sample those exact periods (1/1.1, 1/8, 1/33 s) in addition to
@@ -247,67 +230,51 @@ class ResponseSpectrum:
         §2.1(4)).  For the elastic displacement spectrum S_De(T) use
         :meth:`from_eurocode8_displacement`.
 
-        Parameters
-        ----------
-        ag_r : float
-            Reference peak ground acceleration on rock (type A ground),
-            in the caller's acceleration units (e.g. ``0.10`` for 0.10 g,
-            or ``0.981`` for m/s²).  The returned ordinates use the same
-            units.
-        gamma_i : float
-            Importance factor γI (EN 1998-1 §4.2.5, Table 4.3); the
-            design ground acceleration is ``a_g = gamma_i * ag_r``.
-            Defaults to 1.0.
-        ground_type : str
-            Ground type ``"A"``-``"E"`` (EN 1998-1 Table 3.1).  Ignored
-            for the vertical spectrum (``S = 1.0`` always).  Defaults to
-            ``"A"``.
-        spectrum_type : int
-            ``1`` (high seismicity, *M_s* > 5.5) or ``2`` (low
-            seismicity, *M_s* ≤ 5.5), selecting the parameter table
-            (EN 1998-1 Tables 3.2 / 3.3).  Defaults to 1.
-        q : float
-            Behaviour factor (EN 1998-1 §3.2.2.5); ``q = 1`` is the
-            non-dissipative case.  Ignored when *elastic* is True.
-            Defaults to 1.0.
-        zeta : float
-            Damping ratio (default 0.05).  Applied through the damping
-            correction ``η = √(10 / (5 + 100·ζ)) ≥ 0.55`` of §3.2.2.2(3),
-            which enters the **elastic** spectrum only.
-        vertical : bool
-            When ``True``, build the vertical spectrum: ``a_vg = 0.9 * a_g``,
-            ``S = 1.0``, ``T_B/T_C/T_D = 0.05/0.15/1.0`` s, amplification
-            ``3.0``.  Defaults to ``False`` (horizontal).
-        elastic : bool
-            When ``True``, build the *elastic* spectrum (§3.2.2.2
-            horizontal, §3.2.2.3 vertical) instead of the *design*
-            spectrum (§3.2.2.5): rising-branch intercept ``1`` (vs
-            ``2/3``), plateau ``η·a`` (vs ``2.5/q``), and no ``β·a_g``
-            lower bound.  Defaults to ``False``.
-        T_max : float
-            Upper period bound (s, default 4.0).
-        n_pts : int
-            Number of ordinates on the uniform grid (default 200).  The
-            branch corner periods *T_B*, *T_C*, *T_D* are sampled
-            explicitly.
-        description : str
-            Optional label stored on the instance.
+        Args:
+            ag_r: Reference peak ground acceleration on rock (type A
+                ground), in the caller's acceleration units (e.g. ``0.10``
+                for 0.10 g, or ``0.981`` for m/s²).  The returned ordinates
+                use the same units.
+            gamma_i: Importance factor γI (EN 1998-1 §4.2.5, Table 4.3);
+                the design ground acceleration is ``a_g = gamma_i * ag_r``.
+                Defaults to 1.0.
+            ground_type: Ground type ``"A"``-``"E"`` (EN 1998-1 Table 3.1).
+                Ignored for the vertical spectrum (``S = 1.0`` always).
+                Defaults to ``"A"``.
+            spectrum_type: ``1`` (high seismicity, *M_s* > 5.5) or ``2``
+                (low seismicity, *M_s* ≤ 5.5), selecting the parameter table
+                (EN 1998-1 Tables 3.2 / 3.3).  Defaults to 1.
+            q: Behaviour factor (EN 1998-1 §3.2.2.5); ``q = 1`` is the
+                non-dissipative case.  Ignored when *elastic* is True.
+                Defaults to 1.0.
+            zeta: Damping ratio (default 0.05).  Applied through the
+                damping correction ``η = √(10 / (5 + 100·ζ)) ≥ 0.55`` of
+                §3.2.2.2(3), which enters the **elastic** spectrum only.
+            vertical: When ``True``, build the vertical spectrum: ``a_vg =
+                0.9 * a_g``, ``S = 1.0``, ``T_B/T_C/T_D = 0.05/0.15/1.0`` s,
+                amplification ``3.0``.  Defaults to ``False`` (horizontal).
+            elastic: When ``True``, build the *elastic* spectrum (§3.2.2.2
+                horizontal, §3.2.2.3 vertical) instead of the *design*
+                spectrum (§3.2.2.5): rising-branch intercept ``1`` (vs
+                ``2/3``), plateau ``η·a`` (vs ``2.5/q``), and no ``β·a_g``
+                lower bound.  Defaults to ``False``.
+            T_max: Upper period bound (s, default 4.0).
+            n_pts: Number of ordinates on the uniform grid (default 200).
+                The branch corner periods *T_B*, *T_C*, *T_D* are sampled
+                explicitly.
+            description: Optional label stored on the instance.
 
-        Returns
-        -------
-        ResponseSpectrum
-            The spectrum ordinates, in the same acceleration units as
-            *ag_r*.
+        Returns:
+            The :class:`ResponseSpectrum` ordinates, in the same
+            acceleration units as *ag_r*.
 
-        Raises
-        ------
-        ValueError
-            If *ag_r* is negative or non-finite, *gamma_i* is not
-            positive, *ground_type* is not ``"A"``-``"E"``,
-            *spectrum_type* is not 1 or 2, *q* < 1, or *zeta* is outside
-            ``(0, 0.20]``.
+        Raises:
+            ValueError: If *ag_r* is negative or non-finite, *gamma_i* is
+                not positive, *ground_type* is not ``"A"``-``"E"``,
+                *spectrum_type* is not 1 or 2, *q* < 1, or *zeta* is outside
+                ``(0, 0.20]``.
 
-        Examples
+        Examples:
         --------
         Build the EN 1998-1 Type 2, ground A, γI = 1.4 spectrum and
         compare its 0.35 g plateau with the IEC 62271-207 RRS:
@@ -376,46 +343,35 @@ class ResponseSpectrum:
         unit system (e.g. m/s², s) they are lengths (m); the caller is
         responsible for unit consistency (see .clinerules §4.6).
 
-        Parameters
-        ----------
-        ag_r : float
-            Reference peak ground acceleration on rock, in the caller's
-            acceleration units.
-        gamma_i : float
-            Importance factor γI; ``a_g = gamma_i * ag_r``.  Default 1.0.
-        ground_type : str
-            Ground type ``"A"``-``"E"`` (ignored when *vertical*).
-        spectrum_type : int
-            1 (high seismicity) or 2 (low seismicity).
-        zeta : float
-            Damping ratio (default 0.05).
-        vertical : bool
-            When ``True``, use the vertical elastic spectrum (§3.2.2.3).
-        T_max : float
-            Upper period bound (s, default 4.0).
-        n_pts : int
-            Number of ordinates on the uniform grid (default 200); the
-            branch corners T_B, T_C, T_D are sampled explicitly.
-        description : str
-            Optional label stored on the instance.
+        Args:
+            ag_r: Reference peak ground acceleration on rock, in the
+                caller's acceleration units.
+            gamma_i: Importance factor γI; ``a_g = gamma_i * ag_r``.
+                Default 1.0.
+            ground_type: Ground type ``"A"``-``"E"`` (ignored when
+                *vertical*).
+            spectrum_type: 1 (high seismicity) or 2 (low seismicity).
+            zeta: Damping ratio (default 0.05).
+            vertical: When ``True``, use the vertical elastic spectrum
+                (§3.2.2.3).
+            T_max: Upper period bound (s, default 4.0).
+            n_pts: Number of ordinates on the uniform grid (default 200);
+                the branch corners T_B, T_C, T_D are sampled explicitly.
+            description: Optional label stored on the instance.
 
-        Returns
-        -------
-        ResponseSpectrum
-            The spectral-displacement ordinates (``Sa`` holds S_De).
+        Returns:
+            The :class:`ResponseSpectrum` spectral-displacement ordinates
+            (``Sa`` holds S_De).
 
-        Raises
-        ------
-        ValueError
-            Propagated from :func:`_eurocode8_spectrum`.
+        Raises:
+            ValueError: Propagated from :func:`_eurocode8_spectrum`.
 
-        Examples
-        --------
-        >>> s = ResponseSpectrum.from_eurocode8_displacement(
-        ...     ag_r=0.10, gamma_i=1.4, ground_type="A", spectrum_type=2
-        ... )
-        >>> s.code
-        'EC8-Type2-Displacement'
+        Examples:
+            >>> s = ResponseSpectrum.from_eurocode8_displacement(
+            ...     ag_r=0.10, gamma_i=1.4, ground_type="A", spectrum_type=2
+            ... )
+            >>> s.code
+            'EC8-Type2-Displacement'
         """
         _, tb, tc, td, _, _ = _ec8_params(ground_type, spectrum_type, vertical)
         T_spec = _ec8_sample_grid(tb, tc, td, T_max, n_pts)
@@ -456,21 +412,14 @@ class ResponseSpectrum:
         Use this for non-GB-50011 spectra (ASCE 7, site-specific hazard
         curves, user-defined).
 
-        Parameters
-        ----------
-        T : list of float
-            Period ordinates (s), ascending.
-        Sa : list of float
-            Spectral acceleration ordinates (model units).
-        code : str
-            Design-code label.
-        description : str
-            Free-text note.
+        Args:
+            T: Period ordinates (s), ascending.
+            Sa: Spectral acceleration ordinates (model units).
+            code: Design-code label.
+            description: Free-text note.
 
-        Returns
-        -------
-        ResponseSpectrum
-            The spectrum ordinates.
+        Returns:
+            The :class:`ResponseSpectrum` ordinates.
         """
         return cls(
             T=list(T),
@@ -482,14 +431,10 @@ class ResponseSpectrum:
     def interpolate(self, T_query: Any) -> np.ndarray:
         """Interpolate Sa onto *T_query* periods.
 
-        Parameters
-        ----------
-        T_query : array-like
-            Target period values (s).
+        Args:
+            T_query: Target period values (s).
 
-        Returns
-        -------
-        np.ndarray
+        Returns:
             Interpolated spectral acceleration values.
         """
         return np.interp(np.asarray(T_query), np.asarray(self.T), np.asarray(self.Sa))
@@ -586,28 +531,20 @@ def _iec_spectrum(T, pga, zeta: float = 0.05):
     has the same units (e.g. m/s² or g), so no gravity constant is
     hardcoded (see .clinerules §4.6).
 
-    Parameters
-    ----------
-    T : float or array-like
-        Period values (s) at which to evaluate the spectrum.
-    pga : float
-        Peak ground acceleration in the model's acceleration units.
-    zeta : float
-        Damping ratio (fraction of critical damping, default 0.05).
+    Args:
+        T: Period values (s) at which to evaluate the spectrum.
+        pga: Peak ground acceleration in the model's acceleration units.
+        zeta: Damping ratio (fraction of critical damping, default 0.05).
 
-    Returns
-    -------
-    float or np.ndarray
-        Spectral acceleration(s) in the same units as *pga* — a float
-        for scalar *T*, otherwise an array.
+    Returns:
+        Spectral acceleration(s) in the same units as *pga* — a float for
+        scalar *T*, otherwise an array.
 
-    Raises
-    ------
-    ValueError
-        If *pga* is not finite or is negative, *zeta* is non-positive or
-        exceeds 0.20 (the damping factor uses ``log(100 * zeta)``), or *T*
-        is negative or not finite.  ``T = 0`` is valid and maps to the
-        zero-period acceleration.
+    Raises:
+        ValueError: If *pga* is not finite or is negative, *zeta* is
+            non-positive or exceeds 0.20 (the damping factor uses
+            ``log(100 * zeta)``), or *T* is negative or not finite.
+            ``T = 0`` is valid and maps to the zero-period acceleration.
     """
     if zeta <= 0 or zeta > 0.20:
         raise ValueError("zeta must be in (0, 0.20] (damping factor uses log(100 * zeta))")
@@ -954,14 +891,12 @@ def _build_spectrum(
             are scaled into the model's unit system via
             :func:`fea_toolkit.utils.g_from_units`.
 
-    Returns
-    -------
-    tuple
-        ``(T_spec, Sa_spec, alpha_max, tg, zeta, label)`` where *T_spec* and
-        *Sa_spec* are lists of period (s) and spectral acceleration (m/s²),
-        *alpha_max* is the seismic influence coefficient, *tg* is the
-        characteristic period, *zeta* is the damping ratio, and *label* is
-        a human-readable level name.
+    Returns:
+        ``(T_spec, Sa_spec, alpha_max, tg, zeta, label)`` tuple where
+        *T_spec* and *Sa_spec* are lists of period (s) and spectral
+        acceleration (m/s²), *alpha_max* is the seismic influence
+        coefficient, *tg* is the characteristic period, *zeta* is the
+        damping ratio, and *label* is a human-readable level name.
     """
     # GB 50011 Table 5.1.4-1: α_max for each level
     alpha_frequent = {6: 0.04, 7: 0.08, 8: 0.16, 9: 0.32}
@@ -1028,18 +963,12 @@ def _build_spectrum(
 def _interp_sa(T_query, T_spec, Sa_spec):
     """Interpolate spectral acceleration values onto *T_query*.
 
-    Parameters
-    ----------
-    T_query : array-like
-        Target period values (s).
-    T_spec : array-like
-        Source period axis (s).
-    Sa_spec : array-like
-        Source spectral acceleration values (m/s²).
+    Args:
+        T_query: Target period values (s).
+        T_spec: Source period axis (s).
+        Sa_spec: Source spectral acceleration values (m/s²).
 
-    Returns
-    -------
-    np.ndarray
+    Returns:
         Interpolated acceleration values.
     """
     return np.interp(np.asarray(T_query), np.asarray(T_spec), np.asarray(Sa_spec))
@@ -1110,30 +1039,24 @@ def cqc_base_shear(
     Uses the Der Kiureghian (1980) correlation formula for CQC combination,
     with optional rigid cut‑off and missing‑mass correction.
 
-    Parameters
-    ----------
-    eff_masses : list of float
-        Effective modal masses for the direction of interest (e.g.
-        from ``modal_props["partiMassMX"]``).
-    periods : list of float
-        Modal periods (s).  Must be the same length as *eff_masses*.
-    spectrum_fn : callable
-        ``spectrum_fn(T)`` → spectral acceleration Sa(T) in **model units**
-        (e.g. m/s²).  Called once per mode plus once at T=0 for the
-        rigid cut‑off and missing‑mass correction.
-    damping : float
-        Damping ratio (default 0.05).
-    T_rigid : float, optional
-        Period threshold (s) — modes with *T < T_rigid* are treated as
-        rigid (response taken at Sa(0)) and combined via SRSS with the
-        flexible CQC result.  ``None`` means no rigid cut‑off.
-    total_mass : float, optional
-        Total mass of the structure for missing‑mass correction.  When
-        omitted, no missing‑mass correction is applied.
+    Args:
+        eff_masses: Effective modal masses for the direction of interest
+            (e.g. from ``modal_props["partiMassMX"]``).
+        periods: Modal periods (s).  Must be the same length as
+            *eff_masses*.
+        spectrum_fn: ``spectrum_fn(T)`` → spectral acceleration Sa(T) in
+            **model units** (e.g. m/s²).  Called once per mode plus once
+            at T=0 for the rigid cut-off and missing-mass correction.
+        damping: Damping ratio (default 0.05).
+        T_rigid: Period threshold (s) — modes with *T < T_rigid* are
+            treated as rigid (response taken at Sa(0)) and combined via
+            SRSS with the flexible CQC result.  ``None`` means no rigid
+            cut-off.
+        total_mass: Total mass of the structure for missing-mass
+            correction.  When omitted, no missing-mass correction is
+            applied.
 
-    Returns
-    -------
-    dict
+    Returns:
         ``modal_base_shear``: Per‑mode base shear before combination.
         ``base_shear_cqc``: CQC combination of flexible modes.
         ``base_shear_srss``: SRSS combination of all modes.
