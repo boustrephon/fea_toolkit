@@ -45,6 +45,14 @@ def run_static_analysis(
 
     Returns:
         :class:`AnalysisResult` whose ``data`` holds ``df_linear``.
+
+    Examples:
+        >>> from fea_toolkit import SAP2000Parser, preprocess_model
+        >>> from fea_toolkit.analysis import run_static_analysis
+        >>> md = SAP2000Parser("model.s2k").parse().get_model_data()
+        >>> mesh = preprocess_model(md, {"element_type": "elasticBeamColumn"})
+        >>> result = run_static_analysis(mesh, md)
+        >>> result.data["df_linear"]  # case → per-node displacement table
     """
     from fea_toolkit.analysis.linear import run_linear_cases
 

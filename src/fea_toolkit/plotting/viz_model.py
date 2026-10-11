@@ -1379,6 +1379,13 @@ def plot_mesh(
 
     Returns:
         ``pv.Plotter`` if *notebook* is True, otherwise ``None``.
+
+    Examples:
+        >>> from fea_toolkit import AnalysisBuilder, SAP2000Parser, plot_mesh, preprocess_model
+        >>> md = SAP2000Parser("model.s2k").parse().get_model_data()
+        >>> mesh = preprocess_model(md, {"element_type": "elasticBeamColumn"})
+        >>> builder = AnalysisBuilder(mesh, {}).build_domain()
+        >>> plot_mesh(builder)  # opens an interactive 3-D viewer
     """
     import pyvista as pv
 

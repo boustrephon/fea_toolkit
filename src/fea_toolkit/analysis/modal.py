@@ -33,6 +33,14 @@ def run_modal_analysis(
     Returns:
         :class:`AnalysisResult` whose ``data`` holds the modal result dict
         (periods, frequencies, mode shapes, participation factors).
+
+    Examples:
+        >>> from fea_toolkit import SAP2000Parser, preprocess_model
+        >>> from fea_toolkit.analysis import run_modal_analysis
+        >>> md = SAP2000Parser("model.s2k").parse().get_model_data()
+        >>> mesh = preprocess_model(md, {"element_type": "elasticBeamColumn"})
+        >>> result = run_modal_analysis(mesh, n_modes=12)
+        >>> result.data["periods"][:3]  # first three natural periods
     """
     from fea_toolkit.opensees.analysis_builder import run_modal
 

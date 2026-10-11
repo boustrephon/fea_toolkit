@@ -578,6 +578,12 @@ def write_results_npz(
 
     Returns:
         Absolute path to the saved file.
+
+    Examples:
+        >>> from fea_toolkit.io import write_results_npz
+        >>> out = write_results_npz("results.npz", md, static_results=static)
+        >>> print(out)
+        /absolute/path/to/results.npz
     """
     arrays = results_arrays(
         md,

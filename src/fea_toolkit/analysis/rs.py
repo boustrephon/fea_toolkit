@@ -46,6 +46,17 @@ def run_response_spectrum_analysis(
         the per-mode ``modal_base_shear``, the ``direction``, and the
         CQC-combined ``node_displacements`` (``{node_tag: (dx, dy, dz)}``)
         for a deformed-shape view.
+
+    Examples:
+        >>> from fea_toolkit import SAP2000Parser, preprocess_model
+        >>> from fea_toolkit.analysis import run_modal_analysis, run_response_spectrum_analysis
+        >>> md = SAP2000Parser("model.s2k").parse().get_model_data()
+        >>> mesh = preprocess_model(md, {"element_type": "elasticBeamColumn"})
+        >>> modal = run_modal_analysis(mesh, n_modes=12)
+        >>> T = [0.1, 0.2, 0.5, 1.0, 2.0]   # demand-spectrum periods
+        >>> Sa = [0.4, 0.4, 0.3, 0.15, 0.05]  # spectral accelerations
+        >>> rs = run_response_spectrum_analysis(mesh, modal, "X", T, Sa)
+        >>> rs.data["modal_base_shear"]  # per-mode base shear
     """
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 

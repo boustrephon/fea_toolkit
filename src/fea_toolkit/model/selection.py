@@ -1107,6 +1107,11 @@ class Selection:
         Returns:
             A new ``SAPModelData`` instance containing only the entities
             required by this selection.
+
+        Examples:
+            >>> from fea_toolkit import Selection
+            >>> cols = Selection.from_string("type=Frame section=COL")
+            >>> subset = cols.filter_model(md)  # self-contained subset model
         """
         from .sap_data import SAPModelData
 
@@ -1487,6 +1492,11 @@ class Selection:
             A ``Selection`` with ``element_types=['Frame']`` and
             ``sections`` populated from the model's brace-shape sections.
             Returns an empty Selection if no brace-shaped sections exist.
+
+        Examples:
+            >>> from fea_toolkit import Selection
+            >>> braces = Selection.from_brace_sections(md)
+            >>> braces.get_frame_ids(md)  # IDs of the brace-shaped frames
         """
         from .sap_data import (
             AngleSection,

@@ -124,6 +124,15 @@ def run_pushover_analysis(
     Returns:
         :class:`AnalysisResult` whose ``data`` holds the pushover result
         dict (capacity curve, ADRS, performance point).
+
+    Examples:
+        >>> from fea_toolkit import SAP2000Parser, preprocess_model
+        >>> from fea_toolkit.analysis import run_modal_analysis, run_pushover_analysis
+        >>> md = SAP2000Parser("model.s2k").parse().get_model_data()
+        >>> mesh = preprocess_model(md, {"element_type": "elasticBeamColumn"})
+        >>> modal = run_modal_analysis(mesh, n_modes=12)
+        >>> result = run_pushover_analysis(mesh, modal, directions="+X", max_disp_val=0.3)
+        >>> result.data["+X"]["pp"]["V_base"]  # performance-point base shear
     """
     config = config or {}
 

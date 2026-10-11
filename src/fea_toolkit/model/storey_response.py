@@ -435,6 +435,12 @@ def storey_displacements(
     pd.DataFrame
         Columns: Storey, Elevation, X_cm, Y_cm,
         Ux, Uy, Rz, Peak_disp, RMS_residual, R_max, N_nodes, N_outliers.
+
+    Examples
+    --------
+    >>> from fea_toolkit.model.storey_response import storey_displacements
+    >>> df = storey_displacements(md, stories, node_ux, node_uy)
+    >>> df["Peak_disp"].max()  # peak storey displacement
     """
     assign = assign_nodes_to_storeys(md, stories, z_tolerance)
     cm = storey_centroids(md, stories, node_masses, z_tolerance=z_tolerance)
