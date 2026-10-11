@@ -577,6 +577,18 @@ results; differing versions → re-validate):
 "$VENV/bin/python" -c "import sys, fea_toolkit; print(sys.executable); print(fea_toolkit.ops_version())"
 ```
 
+### Why a plain `pytest` run skips ~237 tests
+
+A Qt-less interpreter (no `[gui]` extra — `pyvistaqt`/`PySide6`/`qtpy` absent)
+skips every `needs_gui` test (~235 of them) plus the `rhino3dm` and `tabulate`
+`importorskip`s, so `pytest -q` there reports **"~237 skipped"**.  That is the
+marker gate doing its job, not breakage: install the `[gui]` extra
+(`pip install -e ".[gui]"`) and the same run drops to **1 skip** (`rhino3dm`,
+an optional Rhino-8-only dependency).  CI encodes this split deliberately — the
+`lint-and-test` matrix job does not install the extra, and a dedicated headless
+`gui` job runs `tests/test_gui_*.py`.  See `.clinerules` §5.5 and
+`tests/conftest.py`.
+
 ### `run_static_analysis()` raises `RuntimeError` on non-convergence
 
 Since commit ``ba891f50``, ``AnalysisBuilder.run_static_analysis()`` **raises

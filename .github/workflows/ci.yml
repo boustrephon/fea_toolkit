@@ -57,7 +57,7 @@ jobs:
           # IPython backs the *notebook* display path (pyvista's static-image
           # fallback) exercised by the notebook-mode plotting tests; a real
           # Jupyter session already provides it.
-          pip install ruff pytest h5py ipython
+          pip install ruff pytest h5py ipython tabulate
 
       - name: Register OpenSeesPy bundled libraries
         # The Linux OpenSeesPy wheel bundles libblas/liblapack/libgfortran

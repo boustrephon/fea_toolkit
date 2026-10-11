@@ -38,9 +38,6 @@ SAMPLE_AREAS_JSON = FIXTURES / "sample_areas.json"
 
 def test_parse_sample():
     """Test parsing of a sample .s2k file."""
-    if not SAMPLE_S2K.exists():
-        pytest.skip(f"Sample file not found: {SAMPLE_S2K}")
-
     parser = SAP2000Parser(SAMPLE_S2K)
     parser.parse()
     assert parser._raw_tables is not None
@@ -49,9 +46,6 @@ def test_parse_sample():
 
 def test_get_model_data():
     """Test conversion to SAPModelData."""
-    if not SAMPLE_S2K.exists():
-        pytest.skip(f"Sample file not found: {SAMPLE_S2K}")
-
     parser = SAP2000Parser(SAMPLE_S2K)
     parser.parse()
     model = parser.get_model_data()
@@ -66,9 +60,6 @@ def test_parse_returns_self_for_chaining():
     ``SAP2000Parser(path).parse().get_model_data()`` previously raised
     ``AttributeError`` because ``parse()`` returned ``None``.
     """
-    if not SAMPLE_S2K.exists():
-        pytest.skip(f"Sample file not found: {SAMPLE_S2K}")
-
     parser = SAP2000Parser(SAMPLE_S2K)
     assert parser.parse() is parser
 
@@ -266,9 +257,6 @@ TABLE:  "AREA LOADS - MYSTERY"
 
 def test_parse_areas_from_json():
     """Import area elements and shell sections from a JSON file."""
-    if not SAMPLE_AREAS_JSON.exists():
-        pytest.skip(f"Fixture not found: {SAMPLE_AREAS_JSON}")
-
     parser = SAP2000Parser.from_json(SAMPLE_AREAS_JSON)
     assert parser is not None
     assert "CONNECTIVITY - AREA" in parser._raw_tables
@@ -2319,10 +2307,7 @@ class TestMassSourceParser:
         """Verify MassSource is parsed from a sample S2K file."""
         from fea_toolkit.io.s2k_parser import SAP2000Parser
 
-        s2k_file = SAMPLE_S2K
-        if not s2k_file.exists():
-            pytest.skip("sample.s2k not available")
-        parser = SAP2000Parser(s2k_file)
+        parser = SAP2000Parser(SAMPLE_S2K)
         parser.parse()
         md = parser.get_model_data()
         assert hasattr(md, "mass_sources")
@@ -2342,11 +2327,7 @@ class TestMassSourceParser:
 @pytest.fixture(scope="module")
 def combos():
     """Parsed combinations from the ``sample_2.s2k`` fixture."""
-    s2k_file = FIXTURES / "sample_2.s2k"
-    if not s2k_file.exists():
-        pytest.skip("sample_2.s2k not available")
-    md = SAP2000Parser(s2k_file).parse().get_model_data()
-    return md.load_combinations
+    return SAP2000Parser(FIXTURES / "sample_2.s2k").parse().get_model_data().load_combinations
 
 
 class TestLoadCombinationParser:
@@ -2426,8 +2407,6 @@ class TestLoadCombinationParser:
 
     def test_sample_without_table(self):
         """``sample.s2k`` has no combinations — the field stays empty."""
-        if not SAMPLE_S2K.exists():
-            pytest.skip("sample.s2k not available")
         md = SAP2000Parser(SAMPLE_S2K).parse().get_model_data()
         assert md.load_combinations == {}
 
