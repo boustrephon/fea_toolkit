@@ -8,12 +8,11 @@ related: [gui.md, gui_roadmap.md, analysis.md, workflow.md, report_generation.md
 ---
 # Workflow Authoring — Steps and Recipes
 
-> **Status: ⚠️ Partial.** Phase A (the `fea_toolkit.workflow` package),
-> Phase B (the GUI's Recipe panel and the Model-menu presets) and Phase E
-> (the `modal` / `response_spectrum` / `pushover` verbs, with
-> `generate_report` composing the registry) have landed.  Phase C (the
-> `check` and `chart` verbs) is partial — the checks and the first chart
-> have landed, the rest await P32's results — and Phase D (the command
+> **Status: ⚠️ Partial.** Phases A, B and E — the `fea_toolkit.workflow`
+> package, the GUI's Recipe panel and Model-menu presets, and the
+> `modal` / `response_spectrum` / `pushover` verbs with `generate_report`
+> composing the registry — and Phase C (the `check` and `chart` verbs: all
+> checks and all five chart kinds) have landed.  Phase D (the command
 > palette) is planned; see [Roadmap](#roadmap).
 
 ## Why this layer exists

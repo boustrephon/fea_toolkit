@@ -10,11 +10,12 @@ category: [planning]
 ## Strategy — the next steps
 
 > The register is the single source of truth; this section is the
-> *sequencing layer* over it (maintained 2026-10-02).  The standalone plan
+> *sequencing layer* over it (maintained 2026-11-10).  The standalone plan
 > documents are historical records — `analysis_builder_migration_plan.md`,
-> `csm_test_model_plan.md` and `deprecation_plan.md` are ✅ complete, and
-> `linting_fix_plan.md`'s only open work is P9.  The **active front** is the
-> workflow/GUI layer (P30–P36).
+> `csm_test_model_plan.md`, `deprecation_plan.md` and `linting_fix_plan.md`
+> are ✅ complete (P9's Phase 3 triage resolved 2026-11-10 — baseline renewed,
+> the remaining diagnostics accepted as known-benign per `.clinerules` §11).
+> The **active front** is the workflow/GUI layer (P31, P35, P36).
 
 **Near term — finish the workflow layer.**
 
@@ -43,7 +44,10 @@ category: [planning]
 **Then — physics / feature gaps.**  P6b, P7 (fibre patches, Python-native NLD),
 then P19 / P23 / P25.
 
-**Opportunistic — Tier 4.**  P9 (linting Phase 3 triage) is the easiest win.
+**Opportunistic — Tier 4.**  ~~P9 (linting Phase 3 triage)~~ ✅ **resolved
+2026-11-10** — fresh `npx pyright src/` baseline recorded, no new real bugs,
+the remainder accepted as known-benign; only the `pd.Series.to_numpy()`
+convention is left tracked (non-blocking).
 
 **Guardrails that shape the work.**  Every verb delegates to the two-stage
 pipeline (a thin wrapper, never a reimplementation); `Selection` stays the
@@ -724,9 +728,9 @@ the **computed results** visible in the same way.  Three things:
    `table` and `figure`.  ✅ Landed so far: the three `model.checks` verbs, the
    `capacity.*` checks (`member_shear_capacity`, `wall_shear_check`,
    `hinge_length`), the `mesh_checks` verb (a `metric` choice over the
-   `mesh.checks` trio), and the `chart` verb's `storey_displacements` plot (the
-   one chart the solved static cases can feed — the others need P32's analysis
-   results).
+   `mesh.checks` trio), and all five `chart` kinds — `storey_displacements`,
+   `storey_forces`, `pushover`, `modal` (via `io.report.modal_participation_df`)
+   and `csm`.
 2. **The views those need.**  ✅ The GUI's **first figure view** (an embedded
    Matplotlib canvas) and a **check-table view** (a read-only grid) both landed,
    as lazy pages of the central stacked area beside the 3-D viewport.
@@ -1077,6 +1081,13 @@ recorder doc current in the meantime.
 
 #### P9 — Linting Phase 3 triage
 Source: `docs/linting_fix_plan.md` (status updates 2026-08-21 / 2026-09-17).
+
+**Status: ✅ Resolved 2026-11-10.**  Fresh `npx pyright src/` baseline
+(308 errors / 890 warnings / 157 files) recorded in `docs/linting_fix_plan.md`;
+no new real bugs (the one `reportUndefinedVariable` is a `chart.py` false
+positive, the `reportMissingImports` are the C-extension / optional-GUI deps),
+and the remainder accepted as known-benign (`.clinerules` §11).  Only the
+`pd.Series.to_numpy()` convention remains tracked (step 3 below).
 
 **What.** Phase 1 real bugs are fixed.  **The Phase 2 `pyrightconfig.json` is
 committed** (added 2026-08-02 in `2a0063d`, refined the same day in `8754551`);
