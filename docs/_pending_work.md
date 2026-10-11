@@ -26,10 +26,14 @@ category: [planning]
    composes the modal / RS / pushover verbs (its storage and rendering stages
    stay report-only); and the `Analysis ▸ Modal / Response spectrum / Pushover`
    entries are recipe presets.
-2. **P30 charts** — the remaining `chart` plots (`storey_forces`, pushover,
-   modal, CSM), consuming P32's results.  **Flag:** `storey_forces` may want
-   **P19** (member-interior force stations) — pull it forward if it blocks
-   rather than merely enhances.
+2. ~~**P30 charts** — the remaining `chart` plots (`storey_forces`, pushover,
+   modal, CSM), consuming P32's results~~ ✅ **Landed 2026-11-10.**  All four
+   `chart` kinds now draw from a preceding step's results: `storey_forces`
+   (sums a case's frame end forces into global per-level shear/moment via
+   `sum_storey_forces`), `pushover`, `modal` (reusing
+   `io.report.modal_participation_df`) and `csm`.  The earlier P19 flag proved
+   non-blocking — `sum_storey_forces`' `cut` mode already provided the member
+   force transport.
 3. **P36** — shell (area) result display (repository seam → per-case
    collection → renderer → GUI toggle).  Self-contained.
 4. **P35** — named selections first, then the `open`/`close`/`save`/`select`
@@ -692,16 +696,20 @@ GUI tests that document the menu bar and a view's provenance.
 Source: `docs/workflow_authoring.md` § *Roadmap* and § *Resolving the
 `generate_report` duality*.
 
-**Status: ⚠️ Partial** — the three model-check verbs (`check_connectivity`,
+**Status: ✅ Complete** — the three model-check verbs (`check_connectivity`,
 `check_self_weight`, `check_brace_buckling`) landed as `table` steps, a recipe's
 solved cases and combinations now **register as result views** (both `cases`
 verbs return the same in-memory archive, so one registration path serves a solve
 and a reduction alike), and the `chart` verb plus the GUI's **first figure
 view** and a **check-table view** landed.  The **capacity checks**
 (`member_shear_capacity`, `wall_shear_check`, `hinge_length`) and the
-**`mesh_checks` verb** have also landed, completing the check half of Phase C.
-Remaining: the other `plotting.report.*` charts (storey forces, pushover, modal,
-CSM), which need the results P32's analysis verbs produce.
+**`mesh_checks` verb** landed, completing the check half of Phase C.  The four
+remaining `plotting.report.*` charts — `storey_forces`, `pushover`, `modal`,
+`csm` — landed 2026-11-10, each reading a preceding step's results (never
+re-solving): `storey_forces` sums a case's frame end forces into global
+per-level shear/moment via `sum_storey_forces` (`cut` mode), `modal` reuses
+`io.report.modal_participation_df`, and `pushover` / `csm` plot the pushover
+step's `all_out` dict.  Phase C is complete.
 
 **What.** Phase A/B made the *model preparation* workflow explicit; Phase C makes
 the **computed results** visible in the same way.  Three things:
