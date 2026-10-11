@@ -109,10 +109,9 @@ class RecordingOpenSees(types.ModuleType):
     call is captured as a ``(name, args, kwargs)`` tuple and can be
     exported later as a standalone Python or Tcl script.
 
-    Parameters
-    ----------
-    wrapped:
-        The real ``openseespy.opensees`` module to forward calls to.
+    Args:
+        wrapped: The real ``openseespy.opensees`` module to forward calls
+            to.
     """
 
     def __init__(self, wrapped: types.ModuleType) -> None:
@@ -168,15 +167,12 @@ class RecordingOpenSees(types.ModuleType):
         single function that replays all commands in order.  It can be run
         directly or imported.
 
-        Parameters
-        ----------
-        path:
-            File path to write to.
-        func_name:
-            Name of the generated function (default ``"build_model"``).
+        Args:
+            path: File path to write to.
+            func_name: Name of the generated function (default
+                ``"build_model"``).
 
-        Raises
-        ------
+        Raises:
         ValueError
             If *func_name* is not a valid Python identifier or is a
             reserved keyword.
@@ -225,14 +221,11 @@ class RecordingOpenSees(types.ModuleType):
         ``model Basic`` command matching the recorded model
         dimensionality (or the *ndm* / *ndf* fallbacks).
 
-        Parameters
-        ----------
-        path:
-            File path to write to.
-        ndm:
-            Number of spatial dimensions (fallback if no ``model``
-            command was recorded).
-        ndf:
+        Args:
+            path: File path to write to.
+            ndm: Number of spatial dimensions (fallback if no ``model``
+                command was recorded).
+            ndf:
             Number of DOFs per node (fallback if no ``model``
             command was recorded).
         """
@@ -1172,10 +1165,8 @@ def parse_pushover_results(
             push).  Pass ``control_dof - 1`` when the push direction is
             *control_dof* = 1 (X), 2 (Y) or 3 (Z).
 
-    Returns
-    -------
-    dict
-        Keys:
+    Returns:
+        Dict with keys:
         - ``"control_disp"`` — 1-D ndarray of control node displacement
           at each converged step (from *disp_path*).
         - ``"base_shear"`` — 1-D ndarray of the push-direction base
@@ -1189,12 +1180,9 @@ def parse_pushover_results(
           per-step reaction channels from *reaction_path* (only when
           the file has the corresponding columns).
 
-    Raises
-    ------
-    FileNotFoundError
-        If *disp_path* or *bs_path* does not exist.
-    ValueError
-        If the files cannot be parsed as numeric data.
+    Raises:
+        FileNotFoundError: If *disp_path* or *bs_path* does not exist.
+        ValueError: If the files cannot be parsed as numeric data.
     """
     # ── Displacement ─────────────────────────────────────────────
     disp_data = np.genfromtxt(disp_path, invalid_raise=False)

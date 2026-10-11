@@ -1040,11 +1040,9 @@ class Preprocessor:
                 sub-nodes would create unnecessary intermediate nodes
                 with no shell connection.
 
-        Returns
-        -------
-        tuple
+        Returns:
             ``(new_elements, new_assignments, new_dist_loads,
-            frame_element_types, new_edge_loads)``.
+            frame_element_types, new_edge_loads)`` tuple.
         """
 
         from ..model.geometry import SpatialGrid, compute_t_location, point_on_segment
@@ -1330,9 +1328,7 @@ class Preprocessor:
            model carries explicit S2K diaphragm constraints.  The storey
            node clusters become the diaphragm components.
 
-        Returns
-        -------
-        tuple
+        Returns:
             ``(levels, components)`` where *levels* is the sorted list of
             Z elevations with horizontal diaphragm behaviour, and
             *components* is a list of ``(mean_z, [joint_id, ...])`` tuples

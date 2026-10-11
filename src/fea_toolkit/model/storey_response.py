@@ -127,27 +127,17 @@ logger = logging.getLogger(__name__)
 class StoreyRigidBody:
     """Rigid-body fit result for one storey under one load case.
 
-    Attributes
-    ----------
-    storey : str
-        Storey name (e.g. ``"Storey 1"``).
-    elevation : float
-        Storey Z coordinate.
-    x_cm, y_cm : float
-        Centre-of-mass coordinates of the storey nodes.
-    Ux, Uy : float
-        Average translational displacement at the CM.
-    Rz : float
-        Twist (rotation about Z, radians, positive anticlockwise).
-    rms_residual : float
-        RMS of the fit residual — small = good rigid-body fit.
-    n_nodes : int
-        Number of nodes used in the fit (after outlier rejection).
-    n_outliers : int
-        Number of nodes rejected as outliers.
-    peak_disp : float
-        Maximum resultant displacement at any node
-        (Ux, Uy + Rz lever-arm evaluated at all node positions).
+    Attributes:
+        storey: Storey name (e.g. ``"Storey 1"``).
+        elevation: Storey Z coordinate.
+        x_cm, y_cm: Centre-of-mass coordinates of the storey nodes.
+        Ux, Uy: Average translational displacement at the CM.
+        Rz: Twist (rotation about Z, radians, positive anticlockwise).
+        rms_residual: RMS of the fit residual — small = good rigid-body fit.
+        n_nodes: Number of nodes used in the fit (after outlier rejection).
+        n_outliers: Number of nodes rejected as outliers.
+        peak_disp: Maximum resultant displacement at any node
+            (Ux, Uy + Rz lever-arm evaluated at all node positions).
     """
 
     storey: str
@@ -180,18 +170,14 @@ def assign_nodes_to_storeys(md, stories, z_tolerance: float = 0.5):
     within ``z_tolerance/2``.  A node is never assigned to more than
     one storey.
 
-    Parameters
-    ----------
-    md : SAPModelData
-    stories : list[StoryLevel]
-    z_tolerance : float
-        Half-band for Z matching (nodes within this distance of a
-        storey elevation are assigned to that storey).
+    Args:
+        md: Parsed :class:`~fea_toolkit.model.sap_data.SAPModelData`.
+        stories: List of :class:`StoryLevel` objects.
+        z_tolerance: Half-band for Z matching (nodes within this distance
+            of a storey elevation are assigned to that storey).
 
-    Returns
-    -------
-    dict[str, list[str]]
-        ``{storey_name: [node_id, ...]}``
+    Returns:
+        ``{storey_name: [node_id, ...]}`` dict.
     """
     if not hasattr(md, "nodes"):
         return {}
@@ -233,21 +219,16 @@ def storey_centroids(
 ):
     """Compute centre of mass for each storey.
 
-    Parameters
-    ----------
-    md : SAPModelData
-    stories : list[StoryLevel]
-    node_masses : dict, optional
-        ``{node_id: mass}``.  If ``None``, geometric centroid
-        (equal weight per node) is used.
-    z_tolerance : float
-        Passed to :func:`assign_nodes_to_storeys` to ensure the same
-        node-to-storey assignment as used elsewhere.
+    Args:
+        md: Parsed :class:`~fea_toolkit.model.sap_data.SAPModelData`.
+        stories: List of :class:`StoryLevel` objects.
+        node_masses: Optional ``{node_id: mass}``.  If ``None``, the
+            geometric centroid (equal weight per node) is used.
+        z_tolerance: Passed to :func:`assign_nodes_to_storeys` to ensure
+            the same node-to-storey assignment as used elsewhere.
 
-    Returns
-    -------
-    dict[str, tuple[float, float]]
-        ``{storey_name: (x_cm, y_cm)}``
+    Returns:
+        ``{storey_name: (x_cm, y_cm)}`` dict.
     """
     assign = assign_nodes_to_storeys(md, stories, z_tolerance)
     centroids: dict[str, tuple[float, float]] = {}
@@ -296,21 +277,15 @@ def rigid_body_fit(
 
     with two-pass outlier rejection.
 
-    Parameters
-    ----------
-    ux, uy : np.ndarray
-        Nodal displacements (1-D, same length).
-    x, y : np.ndarray
-        Nodal coordinates.
-    x_cm, y_cm : float
-        Centre-of-mass coordinates.
-    outlier_threshold : float
-        Residual threshold in multiples of median absolute residual.
-        Nodes exceeding this are rejected.
+    Args:
+        ux, uy: Nodal displacements (1-D, same length).
+        x, y: Nodal coordinates.
+        x_cm, y_cm: Centre-of-mass coordinates.
+        outlier_threshold: Residual threshold in multiples of median
+            absolute residual.  Nodes exceeding this are rejected.
 
-    Returns
-    -------
-    Ux, Uy, Rz, rms_residual, n_used, n_rejected, mask
+    Returns:
+        ``(Ux, Uy, Rz, rms_residual, n_used, n_rejected, mask)`` tuple.
     """
     n = len(ux)
     x_tilde = x - x_cm
@@ -417,30 +392,23 @@ def storey_displacements(
 ) -> pd.DataFrame:
     """Compute rigid-body storey displacements for a load case.
 
-    Parameters
-    ----------
-    md : SAPModelData
-    stories : list[StoryLevel]
-    node_ux, node_uy : dict
-        ``{node_id: displacement}`` for each DOF.
-    node_masses : dict, optional
-        For CM calculation.  ``None`` → geometric centroid.
-    outlier_threshold : float
-        See :func:`rigid_body_fit`.
-    z_tolerance : float
-        See :func:`assign_nodes_to_storeys`.
+    Args:
+        md: Parsed :class:`~fea_toolkit.model.sap_data.SAPModelData`.
+        stories: List of :class:`StoryLevel` objects.
+        node_ux, node_uy: ``{node_id: displacement}`` for each DOF.
+        node_masses: Optional ``{node_id: mass}`` for CM calculation.
+            ``None`` → geometric centroid.
+        outlier_threshold: See :func:`rigid_body_fit`.
+        z_tolerance: See :func:`assign_nodes_to_storeys`.
 
-    Returns
-    -------
-    pd.DataFrame
-        Columns: Storey, Elevation, X_cm, Y_cm,
-        Ux, Uy, Rz, Peak_disp, RMS_residual, R_max, N_nodes, N_outliers.
+    Returns:
+        DataFrame with columns: Storey, Elevation, X_cm, Y_cm, Ux, Uy,
+        Rz, Peak_disp, RMS_residual, R_max, N_nodes, N_outliers.
 
-    Examples
-    --------
-    >>> from fea_toolkit.model.storey_response import storey_displacements
-    >>> df = storey_displacements(md, stories, node_ux, node_uy)
-    >>> df["Peak_disp"].max()  # peak storey displacement
+    Examples:
+        >>> from fea_toolkit.model.storey_response import storey_displacements
+        >>> df = storey_displacements(md, stories, node_ux, node_uy)
+        >>> df["Peak_disp"].max()  # peak storey displacement
     """
     assign = assign_nodes_to_storeys(md, stories, z_tolerance)
     cm = storey_centroids(md, stories, node_masses, z_tolerance=z_tolerance)
@@ -537,18 +505,20 @@ def storey_drifts(
 ) -> pd.DataFrame:
     """Compute inter-storey drift ratios from storey displacements.
 
-    Parameters
-    ----------
-    df_disp : pd.DataFrame
-        Output of :func:`storey_displacements`, sorted by elevation.
-    stories : list[StoryLevel]
-        Used to get elevation ordering (must match df_disp).
+    Args:
+        df_disp: Output of :func:`storey_displacements`, sorted by
+            elevation.
+        stories: List of :class:`StoryLevel` objects, used for elevation
+            ordering (must match *df_disp*).
 
-    Returns
-    -------
-    pd.DataFrame
-        Columns: Storey, Elevation (m), Drift_X, Drift_Y, Drift_Rz,
-        Drift_peak, h (m).
+    Returns:
+        DataFrame with columns: Storey, Elevation (m), Drift_X, Drift_Y,
+        Drift_Rz, Drift_peak, h (m).
+
+    Examples:
+        >>> from fea_toolkit.model.storey_response import storey_drifts
+        >>> df = storey_drifts(df_disp, stories)
+        >>> df["Drift_peak"].max()  # peak inter-storey drift ratio
     """
     if df_disp.empty or len(df_disp) < 2:
         return pd.DataFrame()
@@ -618,32 +588,32 @@ def modal_storey_drifts(
     data is provided, fits a rigid-body per storey, computes per-mode
     storey drifts, then combines with CQC.
 
-    Parameters
-    ----------
-    md : SAPModelData
-    stories : list[StoryLevel]
-    modal : dict
-        Modal analysis result (``run_modal_analysis`` output).
-    n_modes : int
-    damping : float
-    z_tolerance : float
-    spectrum_periods : list[float], optional
-        Period axis of the design spectrum (s).  If provided along
-        with *spectrum_accels*, each mode eigenvector is scaled by
-        the spectral displacement Sd = Sa / ω² before drift
-        computation.
-    spectrum_accels : list[float], optional
-        Spectral acceleration values (m/s²) corresponding to
-        *spectrum_periods*.
-    node_masses : dict, optional
-        ``{node_id: mass}``.  Passed to :func:`storey_displacements`
-        so the rigid-body fit uses the mass centroid.  ``None`` →
-        geometric centroid (equal weight per node).
+    Args:
+        md: Parsed :class:`~fea_toolkit.model.sap_data.SAPModelData`.
+        stories: List of :class:`StoryLevel` objects.
+        modal: Modal analysis result (``run_modal_analysis`` output).
+        n_modes: Number of modes to include.
+        damping: Damping ratio used for the CQC combination.
+        z_tolerance: Storey-assignment band (see
+            :func:`assign_nodes_to_storeys`).
+        spectrum_periods: Optional period axis of the design spectrum
+            (s).  If provided along with *spectrum_accels*, each mode
+            eigenvector is scaled by the spectral displacement
+            Sd = Sa / ω² before drift computation.
+        spectrum_accels: Optional spectral acceleration values (m/s²)
+            corresponding to *spectrum_periods*.
+        node_masses: Optional ``{node_id: mass}``.  Passed to
+            :func:`storey_displacements` so the rigid-body fit uses the
+            mass centroid.  ``None`` → geometric centroid (equal weight
+            per node).
 
-    Returns
-    -------
-    pd.DataFrame
-        CQC-combined drift per storey.
+    Returns:
+        DataFrame of CQC-combined drift per storey.
+
+    Examples:
+        >>> from fea_toolkit.model.storey_response import modal_storey_drifts
+        >>> df = modal_storey_drifts(md, stories, modal, n_modes=12)
+        >>> df["Drift_CQC"].max()  # peak CQC storey drift
     """
     shapes = modal.get("shapes", {})
     periods = modal.get("periods", [])
@@ -745,18 +715,22 @@ def storey_shears(
 ) -> pd.DataFrame:
     """Sum element-end forces at each storey level.
 
-    Parameters
-    ----------
-    md : SAPModelData
-    stories : list[StoryLevel]
-    element_forces : dict
-        ``{elem_id: {"F": [Fx, Fy, Fz, Mx, My, Mz], "node_i": ..., "node_j": ...}}``
-    z_tolerance : float
+    Args:
+        md: Parsed :class:`~fea_toolkit.model.sap_data.SAPModelData`.
+        stories: List of :class:`StoryLevel` objects.
+        element_forces: ``{elem_id: {"F": [Fx, Fy, Fz, Mx, My, Mz],
+            "node_i": ..., "node_j": ...}}``.
+        z_tolerance: Storey-assignment band (see
+            :func:`assign_nodes_to_storeys`).
 
-    Returns
-    -------
-    pd.DataFrame
-        Columns: Storey, Elevation, Fx, Fy, Fz, Mx, My, Mz.
+    Returns:
+        DataFrame with columns: Storey, Elevation, Fx, Fy, Fz, Mx, My,
+        Mz.
+
+    Examples:
+        >>> from fea_toolkit.model.storey_response import storey_shears
+        >>> df = storey_shears(md, stories, element_forces)
+        >>> df[["Storey", "Fx", "Fy"]]  # storey shear per level
     """
     assign = assign_nodes_to_storeys(md, stories, z_tolerance)
     # Build reverse map: node_id -> storey name
@@ -990,6 +964,11 @@ def sum_storey_forces(
     Raises:
         ValueError: On an unknown *cm_method* or *mode*, or a missing mass
             input for ``cm_method="mass"``.
+
+    Examples:
+        >>> from fea_toolkit.model.storey_response import sum_storey_forces
+        >>> levels = sum_storey_forces(node_xyz, members, z_tolerance=0.5)
+        >>> levels[0]["Fx"], levels[0]["Mz"]  # base shear and torsion
     """
     from .._cqc import lever_arm_moment
 
@@ -1194,22 +1173,17 @@ def build_storey_table(
     Merges per-case DataFrames from *data_dict* on ``["Storey", elev_col]``,
     then inserts a ``"Base"`` row at *min_z* using the base reactions.
 
-    Parameters
-    ----------
-    elev_col : str
-        Column name for elevation.
-    data_dict : dict
-        ``{case_name: pd.DataFrame}``.
-    min_z : float
-        Base elevation for the inserted row.
-    base_rxns : dict or None
-        ``{case_name: {"Fx": ..., "Fy": ..., "Mx": ..., "My": ...}}``.
-    total_height : float
-        Total building height, used for moment fallback.
-    base_val : str
-        ``"shear"`` or ``"moment"``.  Empty for displacement/drift.
-    _resultant_shear_fn, _resultant_moment_fn : callable
-        Function references (injected so call sites can pass their own).
+    Args:
+        elev_col: Column name for elevation.
+        data_dict: ``{case_name: pd.DataFrame}``.
+        min_z: Base elevation for the inserted row.
+        base_rxns: Optional ``{case_name: {"Fx": ..., "Fy": ..., "Mx":
+            ..., "My": ...}}``.
+        total_height: Total building height, used for moment fallback.
+        base_val: ``"shear"`` or ``"moment"``.  Empty for
+            displacement/drift.
+        _resultant_shear_fn, _resultant_moment_fn: Function references
+            (injected so call sites can pass their own).
     """
     import pandas as pd
 
@@ -1268,6 +1242,14 @@ def compute_linear_storey_responses(
         damping: Damping ratio used for the storey response-spectrum
             displacement combination (CQC).  Kept consistent with the
             primary RS analysis damping via ``generate_report()``.
+
+    Examples:
+        >>> from fea_toolkit.model.storey_response import compute_linear_storey_responses
+        >>> tables = compute_linear_storey_responses(
+        ...     md, mesh, stories, linear_cfg, df_linear, modal_result,
+        ...     T_spec, Sa_spec,
+        ... )
+        >>> tables["df_shear"]  # per-case storey shear table
     """
     config = {"element_type": "elasticBeamColumn", "verbose": False}
     modal = modal_result["modal"]
@@ -1562,36 +1544,39 @@ def group_shell_forces_by_section(
     Nxy/Ny over the section band before forming the DCR gives the
     engineering member-level demand.
 
-    Parameters
-    ----------
-    shell_sap_ids : Sequence[str]
-        Shell SAP IDs in recorded order (``pushover/{dir}/shell_sap_id``).
-    shell_parent_sap_id : Sequence[str]
-        Per-shell parent SAP ID (NPZ ``shell_parent_sap_id`` geometry
-        array), ``""`` for unparented shells.
-    shell_Nxy : np.ndarray
-        Per-step in-plane shear resultants, shape ``(N_step, N_shell)``.
-    shell_Ny : np.ndarray
-        Per-step vertical membrane resultants, shape ``(N_step, N_shell)``.
-    step_idx : int
-        Step index into the result arrays (e.g. the performance point).
+    Args:
+        shell_sap_ids: Shell SAP IDs in recorded order
+            (``pushover/{dir}/shell_sap_id``).
+        shell_parent_sap_id: Per-shell parent SAP ID (NPZ
+            ``shell_parent_sap_id`` geometry array), ``""`` for
+            unparented shells.
+        shell_Nxy: Per-step in-plane shear resultants, shape
+            ``(N_step, N_shell)``.
+        shell_Ny: Per-step vertical membrane resultants, shape
+            ``(N_step, N_shell)``.
+        step_idx: Step index into the result arrays (e.g. the
+            performance point).
 
-    Returns
-    -------
-    pd.DataFrame
-        One row per (parent, row-band) section with columns:
-        ``section``, ``parent``, ``row``, ``n_subs``, ``Nxy_avg``,
-        ``Ny_avg``.  Section labels are ``{parent}_section_{row}`` for
-        banded children, the bare parent ID for whole-parent sections,
-        and the SAP ID for unparented shells.
+    Returns:
+        DataFrame with one row per (parent, row-band) section and
+        columns ``section``, ``parent``, ``row``, ``n_subs``,
+        ``Nxy_avg``, ``Ny_avg``.  Section labels are
+        ``{parent}_section_{row}`` for banded children, the bare parent
+        ID for whole-parent sections, and the SAP ID for unparented
+        shells.
 
-    Raises
-    ------
-    ValueError
-        If ``shell_sap_ids`` and ``shell_parent_sap_id`` differ in
-        length, or if a child ID carries the ``{parent}_sub_`` prefix
-        with a malformed suffix (anything other than exactly
-        ``{row}_{col}``).
+    Raises:
+        ValueError: If ``shell_sap_ids`` and ``shell_parent_sap_id``
+            differ in length, or if a child ID carries the
+            ``{parent}_sub_`` prefix with a malformed suffix (anything
+            other than exactly ``{row}_{col}``).
+
+    Examples:
+        >>> from fea_toolkit.model.storey_response import group_shell_forces_by_section
+        >>> df = group_shell_forces_by_section(
+        ...     shell_sap_ids, shell_parent_sap_id, shell_Nxy, shell_Ny, step_idx
+        ... )
+        >>> df["Nxy_avg"].max()  # peak sectional-average shear
     """
     if len(shell_sap_ids) != len(shell_parent_sap_id):
         raise ValueError("shell_sap_ids and shell_parent_sap_id must have equal length")

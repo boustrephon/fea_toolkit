@@ -33,23 +33,16 @@ if TYPE_CHECKING:
 class StoryLevel:
     """A single identified storey level.
 
-    Attributes
-    ----------
-    name : str
-        Human-readable label (e.g. ``"Storey 1"``, ``"Roof"``).
-    elevation : float
-        Z-coordinate of the storey in model units.
-    method : str
-        Identification method: ``"s2k_table"`` | ``"diaphragm"`` |
-        ``"area_elements"`` | ``"node_clustering"``.
-    confidence : str
-        ``"high"`` | ``"medium"`` | ``"low"``.
-    bbox : tuple[float, float, float, float] or None
-        Estimated horizontal extent ``(x_min, x_max, y_min, y_max)``
-        of elements belonging to this storey, or ``None`` if unknown.
-    node_ids : list[str] or None
-        Node IDs belonging to this storey, as determined during
-        detection.  ``None`` if not available (e.g. s2k_table method).
+    Attributes:
+        name: Human-readable label (e.g. ``"Storey 1"``, ``"Roof"``).
+        elevation: Z-coordinate of the storey in model units.
+        method: Identification method: ``"s2k_table"`` | ``"diaphragm"``
+            | ``"area_elements"`` | ``"node_clustering"``.
+        confidence: ``"high"`` | ``"medium"`` | ``"low"``.
+        bbox: Estimated horizontal extent ``(x_min, x_max, y_min, y_max)``
+            of elements belonging to this storey, or ``None`` if unknown.
+        node_ids: Node IDs belonging to this storey, as determined during
+            detection.  ``None`` if not available (e.g. s2k_table method).
     """
 
     name: str
@@ -86,24 +79,19 @@ def identify_stories(
 ) -> list[StoryLevel]:
     """Identify likely storey levels from a parsed SAP2000 model.
 
-    Parameters
-    ----------
-    md : SAPModelData
-        Parsed model data.
-    raw_tables : dict, optional
-        The parser's ``_raw_tables`` dict (enables STORY-table lookup).
-    method : str
-        ``"auto"`` (try all strategies in priority order, default),
-        ``"s2k_table"``, ``"diaphragm"``, ``"area_elements"``,
-        or ``"node_clustering"``.
-    z_tolerance : float
-        Tolerance (in model length units) for grouping Z coordinates
-        into the same storey.
+    Args:
+        md: Parsed model data.
+        raw_tables: The parser's ``_raw_tables`` dict (enables STORY-table
+            lookup).
+        method: ``"auto"`` (try all strategies in priority order,
+            default), ``"s2k_table"``, ``"diaphragm"``,
+            ``"area_elements"``, or ``"node_clustering"``.
+        z_tolerance: Tolerance (in model length units) for grouping Z
+            coordinates into the same storey.
 
-    Returns
-    -------
-    list[StoryLevel]
-        Identified storeys sorted by elevation (lowest first).
+    Returns:
+        List of :class:`StoryLevel` identified storeys sorted by elevation
+        (lowest first).
     """
     if method == "auto":
         # Try strategies in priority order
@@ -367,14 +355,12 @@ def _get_area_vertices(md, ae):
 def _polygon_normal_and_area(pts):
     """Compute unit normal and area of a 3D polygon via Newell's method.
 
-    Parameters
-    ----------
-    pts : list of (node_id, x, y, z) or (x, y, z)
+    Args:
+        pts: List of ``(node_id, x, y, z)`` or ``(x, y, z)`` tuples.
 
-    Returns
-    -------
-    normal : np.ndarray   (3,) unit normal
-    area : float
+    Returns:
+        ``(normal, area)`` — a unit normal as a ``(3,)`` array and the
+        polygon area.
     """
     n = len(pts)
     nx = ny = nz = 0.0
@@ -525,24 +511,17 @@ def plot_stories(
 ) -> Optional[Any]:
     """Render a 3D view of the model with semi-transparent storey planes.
 
-    Parameters
-    ----------
-    md : SAPModelData
-        Parsed model data.
-    stories : list[StoryLevel]
-        Storey levels to visualise.
-    off_screen : bool
-        If True, suppress the PyVista rendering window.
-    window_size : tuple[int, int]
-        Output image size.
-    plane_opacity : float
-        Opacity of the storey plane fills (0 = invisible, 1 = solid).
+    Args:
+        md: Parsed model data.
+        stories: Storey levels to visualise.
+        off_screen: If True, suppress the PyVista rendering window.
+        window_size: Output image size.
+        plane_opacity: Opacity of the storey plane fills (0 = invisible,
+            1 = solid).
 
-    Returns
-    -------
-    matplotlib.figure.Figure or None
-        A matplotlib figure for embedding in Quarto reports, or ``None``
-        if PyVista is unavailable.
+    Returns:
+        A ``matplotlib.figure.Figure`` for embedding in Quarto reports, or
+        ``None`` if PyVista is unavailable.
     """
     try:
         import matplotlib.pyplot as plt

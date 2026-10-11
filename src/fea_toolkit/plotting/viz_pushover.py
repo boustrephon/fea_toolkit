@@ -407,6 +407,10 @@ def plot_plastic_hinge_formation(
     Returns:
         ``pv.Plotter`` if *notebook* or *plotter* was provided,
         otherwise ``None``.
+
+    Examples:
+        >>> from fea_toolkit.plotting.viz_pushover import plot_plastic_hinge_formation
+        >>> plot_plastic_hinge_formation(builder, direction="+X", step=10)
     """
     import numpy as np
 
@@ -614,32 +618,27 @@ def plot_plastic_hinge_heatmap(
     * **Yielding** (0.5 ≤ ratio < 1.0) — sampled at cmap position 0.5
     * **Yielded** (ratio ≥ 1.0) — sampled at cmap position 1.0
 
-    Parameters
-    ----------
-    data : AnalysisBuilder | dict | str
-        Pushover results: a built ``AnalysisBuilder`` (after
-        ``run_pushover_analysis()`` with ``record_pushover_steps=True``),
-        an NPZ dict from ``write_pushover_results_npz()``, or a path to
-        an NPZ file.
-    direction : str
-        Push direction — ``"+X"``, ``"-X"``, ``"+Y"``, ``"-Y"``.
-        Only used for NPZ data (key namespace).
-    title : str
-        Figure title.
-    xaxis : str
-        X‑axis mode: ``"step"`` (default) for push‑step index, or
-        ``"drift"`` for roof‑drift percentage (requires *drifts*).
-    drifts : list of float, optional
-        Roof‑drift percentage for each step.  Required when
-        ``xaxis="drift"``.
-    figsize : tuple
-        Matplotlib figure size ``(width, height)`` in inches.
-    save_path : str, optional
-        If given, save the figure to this path (PNG/PDF).
+    Args:
+        data: Pushover results — a built ``AnalysisBuilder`` (after
+            ``run_pushover_analysis()`` with ``record_pushover_steps=True``),
+            an NPZ dict from ``write_pushover_results_npz()``, or a path to
+            an NPZ file.
+        direction: Push direction — ``"+X"``, ``"-X"``, ``"+Y"``,
+            ``"-Y"``.  Only used for NPZ data (key namespace).
+        title: Figure title.
+        xaxis: X-axis mode: ``"step"`` (default) for push-step index, or
+            ``"drift"`` for roof-drift percentage (requires *drifts*).
+        drifts: Optional roof-drift percentage for each step.  Required
+            when ``xaxis="drift"``.
+        figsize: Matplotlib figure size ``(width, height)`` in inches.
+        save_path: Optional path to save the figure to (PNG/PDF).
 
-    Returns
-    -------
-    matplotlib.figure.Figure or None
+    Returns:
+        ``matplotlib.figure.Figure`` or ``None``.
+
+    Examples:
+        >>> from fea_toolkit.plotting.viz_pushover import plot_plastic_hinge_heatmap
+        >>> fig = plot_plastic_hinge_heatmap(builder, direction="+X", xaxis="drift", drifts=drifts)
     """
     try:
         import matplotlib.pyplot as plt
@@ -994,6 +993,10 @@ def plot_shell_damage_map(
     Returns:
         ``pv.Plotter`` if *notebook* or *plotter* was provided,
         otherwise ``None``.
+
+    Examples:
+        >>> from fea_toolkit.plotting.viz_pushover import plot_shell_damage_map
+        >>> plot_shell_damage_map(builder, direction="+X", step=10)
     """
     import numpy as np
 
@@ -1232,6 +1235,10 @@ def plot_pushover_envelope(
 
     Returns:
         ``pv.Plotter`` if *notebook* else ``None``.
+
+    Examples:
+        >>> from fea_toolkit.plotting.viz_pushover import plot_pushover_envelope
+        >>> plot_pushover_envelope(builder, quantity="Mz", direction="+X")
     """
     import numpy as np
 
@@ -1421,6 +1428,10 @@ def animate_pushover_deformation(
 
     Returns:
         ``pv.Plotter`` if *notebook* is True, otherwise ``None``.
+
+    Examples:
+        >>> from fea_toolkit.plotting.viz_pushover import animate_pushover_deformation
+        >>> animate_pushover_deformation(builder, direction="+X")
     """
     import numpy as np
 
@@ -1814,6 +1825,10 @@ def plot_frame_force_evolution(
 
     Returns:
         ``matplotlib.figure.Figure`` or ``None``.
+
+    Examples:
+        >>> from fea_toolkit.plotting.viz_pushover import plot_frame_force_evolution
+        >>> fig = plot_frame_force_evolution(builder, quantity="Mz", element_ids=["C1", "C2"])
     """
     try:
         import matplotlib.pyplot as plt
@@ -1955,6 +1970,10 @@ def plot_pushover_curve(
     Returns:
         The ``matplotlib.figure.Figure`` so the caller can ``.savefig()`` or
         ``.show()``.
+
+    Examples:
+        >>> from fea_toolkit.plotting.viz_pushover import plot_pushover_curve
+        >>> fig = plot_pushover_curve(pushover_results)
     """
     try:
         import matplotlib.pyplot as plt
@@ -2012,6 +2031,10 @@ def plot_pushover_curve_enhanced(
 
     Returns:
         The ``matplotlib.figure.Figure``.
+
+    Examples:
+        >>> from fea_toolkit.plotting.viz_pushover import plot_pushover_curve_enhanced
+        >>> fig = plot_pushover_curve_enhanced(pushover_results, design_disp=0.05)
     """
     try:
         import matplotlib.pyplot as plt
@@ -2130,6 +2153,10 @@ def plot_capacity_spectrum(
 
     Returns:
         The ``matplotlib.figure.Figure``.
+
+    Examples:
+        >>> from fea_toolkit.plotting.viz_pushover import plot_capacity_spectrum
+        >>> fig = plot_capacity_spectrum(capacity_adrs, spectrum_periods, spectrum_accels)
     """
     try:
         import matplotlib.pyplot as plt

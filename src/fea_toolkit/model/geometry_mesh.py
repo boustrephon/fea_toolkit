@@ -356,6 +356,12 @@ def mesh_area_elements(
     Returns:
         ``(area_elements, area_assignments, nodes, next_tag)`` with
         subdivided areas added and original areas marked inactive.
+
+    Examples:
+        >>> areas, assign, nodes, next_tag = mesh_area_elements(
+        ...     areas, assignments, nodes, area_mesh,
+        ...     next_tag=1, groups=groups, restraints=restraints,
+        ... )
     """
 
     # Coordinate-based node registry for subdividing areas.

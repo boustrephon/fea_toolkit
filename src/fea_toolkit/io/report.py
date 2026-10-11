@@ -848,18 +848,15 @@ def pushover_comparison_table(
     ``'triangular'``, ``'mode1'``), each direction produces one row
     per pattern, with the pattern name as part of the direction label.
 
-    Parameters
-    ----------
-    all_out : dict
-        ``{pattern_name: {direction: {"pp": {...}, ...}}}``.
-    linear_df : pd.DataFrame
-        Linear analysis results with ``Case``, ``Fx``, ``Fy`` columns.
-    patterns : list, optional
-        Pattern names to include (default: all keys in *all_out*).
+    Args:
+        all_out: ``{pattern_name: {direction: {"pp": {...}, ...}}}``.
+        linear_df: Linear analysis results with ``Case``, ``Fx``, ``Fy``
+            columns.
+        patterns: Pattern names to include (default: all keys in
+            *all_out*).
 
-    Returns
-    -------
-    pd.DataFrame
+    Returns:
+        DataFrame of performance points compared against linear results.
     """
     import pandas as pd
 

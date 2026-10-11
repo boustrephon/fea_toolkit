@@ -58,29 +58,18 @@ def split_elements_at_joints(
     Uses a :class:`SpatialGrid` with cell size auto-sized to about 1 %
     of model extent for fast bounding-box pre-filtering.
 
-    Parameters
-    ----------
-    nodes : dict
-        ``{node_id: {x, y, z}}``.
-    elements : dict
-        ``{elem_id: {i, j, id, ...}}``.
-    assignments : dict
-        ``{elem_id: section_name}`` — propagated to children.
-    dist_loads : dict
-        Distributed loads — split proportionally across children.
-    auto_mesh : dict
-        ``{elem_id: {AtJoints: bool}}``.
-    frame_dist_loads : dict
-        Legacy parameter (unused, kept for signature compat).
-    tol : float
-        Geometric tolerance (default 1e-6).
-    verbose : bool
-        Print progress if True.
+    Args:
+        nodes: ``{node_id: {x, y, z}}``.
+        elements: ``{elem_id: {i, j, id, ...}}``.
+        assignments: ``{elem_id: section_name}`` — propagated to children.
+        dist_loads: Distributed loads — split proportionally across children.
+        auto_mesh: ``{elem_id: {AtJoints: bool}}``.
+        frame_dist_loads: Legacy parameter (unused, kept for signature compat).
+        tol: Geometric tolerance (default 1e-6).
+        verbose: Print progress if True.
 
-    Returns
-    -------
-    tuple
-        ``(new_elements, new_assignments, new_dist_loads)`` with
+    Returns:
+        ``(new_elements, new_assignments, new_dist_loads)`` tuple with
         parent-child tracking and redistributed loads.
     """
     if not elements:
@@ -266,6 +255,12 @@ def split_elements(
     Returns:
         ``(new_elements, new_assignments, new_dist_loads)`` with parent-
         child tracking and redistributed loads.
+
+    Examples:
+        >>> new_elems, new_assign, new_loads = split_elements(
+        ...     nodes, elements, assignments, dist_loads,
+        ...     auto_mesh={"B1": {"AtJoints": True, "AtFrames": True}},
+        ... )
     """
     # Build node coords dict
 

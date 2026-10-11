@@ -139,19 +139,16 @@ def wind_sanity_data(
 def wind_sanity_check(md, df_linear, wind_case_x: str = "Wind+X", wind_case_y: str = "Wind+Y"):
     """Return a markdown paragraph checking wind loads against face area.
 
-    Parameters
-    ----------
-    md : SAPModelData
-        Model data (for node coordinates and units).
-    df_linear : pd.DataFrame
-        Linear analysis results; must contain ``Case``, ``Fx``, ``Fy`` columns.
-    wind_case_x, wind_case_y : str
-        Case names for the X and Y wind load patterns.
+    Args:
+        md: Model data (for node coordinates and units).
+        df_linear: Linear analysis results; must contain ``Case``, ``Fx``,
+            ``Fy`` columns.
+        wind_case_x, wind_case_y: Case names for the X and Y wind load
+            patterns.
 
-    Returns
-    -------
-    str
-        Markdown paragraph with bounding-box summary and wind-pressure table.
+    Returns:
+        Markdown paragraph with bounding-box summary and wind-pressure
+        table.
     """
     data = wind_sanity_data(md, df_linear, wind_case_x, wind_case_y)
     bb = data["bounding_box"]
@@ -198,19 +195,14 @@ def static_load_verification(md, mesh_model, config: Optional[dict] = None):
     :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.check_load_equilibrium`)
     into a single table with Applied, Reaction, and Δ columns.
 
-    Parameters
-    ----------
-    md : SAPModelData
-        Parsed model data.
-    mesh_model :
-        Pre-processed mesh model.
-    config : dict, optional
-        Builder configuration.
+    Args:
+        md: Parsed model data.
+        mesh_model: Pre-processed mesh model.
+        config: Optional builder configuration.
 
-    Returns
-    -------
-    pd.DataFrame
-        One row per load pattern with Applied/Reaction/Δ columns.
+    Returns:
+        DataFrame with one row per load pattern and Applied/Reaction/Δ
+        columns.
     """
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 

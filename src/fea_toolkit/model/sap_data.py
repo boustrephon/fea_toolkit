@@ -1599,14 +1599,10 @@ def patterns_from_case(lc: LoadCase) -> dict[str, float]:
 
     Reads the ``CASE - STATIC 1 - LOAD ASSIGNMENTS`` block of *lc*.
 
-    Parameters
-    ----------
-    lc : LoadCase
-        Static load case whose pattern assignments are to be extracted.
+    Args:
+        lc: Static load case whose pattern assignments are to be extracted.
 
-    Returns
-    -------
-    dict[str, float]
+    Returns:
         Mapping of load-pattern name to its scale factor.  Records that
         lack an explicit ``LoadSF`` default to ``1.0``; a missing or
         malformed assignment block yields an empty dict.

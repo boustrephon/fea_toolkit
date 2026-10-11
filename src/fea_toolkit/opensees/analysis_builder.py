@@ -639,8 +639,24 @@ def run_modal(
     Returns the same dict as :meth:`AnalysisBuilder.run_modal_analysis`.
 
     Args:
+        mesh_model: Pre-processed topology from the Preprocessor.
+        n_modes: Number of modes to extract (default 12).
+        config: Optional builder config dict forwarded to the
+            :class:`AnalysisBuilder` (default ``{"verbose": False}``).
         log: Optional :class:`~fea_toolkit.io.log.PipelineLog` forwarded to the
             :class:`AnalysisBuilder`; ``None`` derives one from ``config["verbose"]``.
+
+    Returns:
+        Dict with ``modal`` (periods, frequencies, mode shapes, participation
+        factors) and ``shapes`` keys.
+
+    Examples:
+        >>> from fea_toolkit import SAP2000Parser, preprocess_model
+        >>> from fea_toolkit.opensees.analysis_builder import run_modal
+        >>> md = SAP2000Parser("model.s2k").parse().get_model_data()
+        >>> mesh = preprocess_model(md, {"element_type": "elasticBeamColumn"})
+        >>> result = run_modal(mesh, n_modes=12)
+        >>> result["modal"]["periods"][:3]  # first three natural periods
     """
     from .analysis_builder import AnalysisBuilder
 
@@ -928,6 +944,13 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
         holds the captured failure).  When
         ``config["export_npz"]`` is set, ``npz`` holds the written path
         (or ``npz_error`` holds the captured failure).
+
+    Examples:
+        >>> from fea_toolkit import SAP2000Parser
+        >>> from fea_toolkit.opensees.analysis_builder import run_review_analysis
+        >>> md = SAP2000Parser("model.s2k").parse().get_model_data()
+        >>> review = run_review_analysis(md, {"num_modes": 6})
+        >>> review["periods"][:3]  # first three natural periods
     """
     # Lazy import avoids a hard dependency cycle (preprocessor → model only)
     # and keeps the module importable in dependency-light environments.

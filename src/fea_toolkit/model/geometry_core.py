@@ -378,13 +378,11 @@ class SpatialGrid:
     * ``_split_frames_at_shell_subdiv`` — find shell mesh nodes
       on frame segments
 
-    Parameters
-    ----------
-    cell_size : float, optional
-        Side length of each cubic cell (default 1.0).  Should be
-        roughly the same order of magnitude as typical node spacing
-        or query extent.  Auto-sized to about 1 percent of model extent in most
-        callers.
+    Args:
+        cell_size: Side length of each cubic cell (default 1.0).  Should
+            be roughly the same order of magnitude as typical node spacing
+            or query extent.  Auto-sized to about 1 percent of model
+            extent in most callers.
     """
 
     def __init__(self, cell_size: float = 1.0):
@@ -404,12 +402,9 @@ class SpatialGrid:
     def add_point(self, point_id: Any, coords: tuple[float, float, float]) -> None:
         """Store *point_id* at *coords* in the grid.
 
-        Parameters
-        ----------
-        point_id : Any
-            Identifier for the point (e.g. node ID string).
-        coords : tuple of float
-            (x, y, z) coordinate.
+        Args:
+            point_id: Identifier for the point (e.g. node ID string).
+            coords: ``(x, y, z)`` coordinate.
         """
         self.grid[self._cell(*coords)].append((point_id, coords))
 
@@ -418,19 +413,14 @@ class SpatialGrid:
     ) -> list[tuple[Any, tuple[float, float, float]]]:
         """Return all points whose cell overlaps the axis-aligned bounding box.
 
-        Parameters
-        ----------
-        mins : tuple of float
-            (x_min, y_min, z_min) of the query box.
-        maxs : tuple of float
-            (x_max, y_max, z_max) of the query box.
+        Args:
+            mins: ``(x_min, y_min, z_min)`` of the query box.
+            maxs: ``(x_max, y_max, z_max)`` of the query box.
 
-        Returns
-        -------
-        list of (point_id, (x, y, z))
-            Points in cells that intersect the bounding box.
-            The caller should filter further (e.g. with
-            point-on-segment) since the grid only provides
+        Returns:
+            List of ``(point_id, (x, y, z))`` for points in cells that
+            intersect the bounding box.  The caller should filter further
+            (e.g. with point-on-segment) since the grid only provides
             cell-level precision.
         """
         min_cell = self._cell(mins[0], mins[1], mins[2])

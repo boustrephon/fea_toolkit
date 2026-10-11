@@ -289,30 +289,24 @@ def generate_report(
     downstream helper can consume it without re-implementing the analysis
     orchestration.
 
-    Parameters
-    ----------
-    md : SAPModelData
-        Parsed model data from
-        :func:`~fea_toolkit.io.s2k_parser.SAP2000Parser`.
-    mesh_model : MeshModel, optional
-        Pre-processed mesh model.  When *None* (default), the
-        Preprocessor runs automatically.  Pass a pre-built
-        ``MeshModel`` to skip preprocessing (useful when calling
-        ``generate_report`` multiple times with different configs).
-    config : dict, optional
-        Configuration dictionary.  Keys follow ``_DEFAULT_CONFIG``.
-        Deep-merged on top of the defaults so you only need to
-        provide overrides.
-    out_dir : str, optional
-        Output directory for cached results and exported figures.
-        Defaults to ``./output``.
-    **overrides
-        Flat override keys using ``__`` as a nesting separator,
-        e.g. ``general__n_modes=6``.  Applied after *config*.
+    Args:
+        md: Parsed model data from
+            :func:`~fea_toolkit.io.s2k_parser.SAP2000Parser`.
+        mesh_model: Optional pre-processed mesh model.  When ``None``
+            (default), the Preprocessor runs automatically.  Pass a
+            pre-built ``MeshModel`` to skip preprocessing (useful when
+            calling ``generate_report`` multiple times with different
+            configs).
+        config: Optional configuration dictionary.  Keys follow
+            ``_DEFAULT_CONFIG``.  Deep-merged on top of the defaults so
+            you only need to provide overrides.
+        out_dir: Output directory for cached results and exported figures.
+            Defaults to ``./output``.
+        **overrides: Flat override keys using ``__`` as a nesting
+            separator, e.g. ``general__n_modes=6``.  Applied after
+            *config*.
 
-    Returns
-    -------
-    dict
+    Returns:
         Standardised result dictionary.  Key sections:
 
         * ``config`` — merged configuration used for this run

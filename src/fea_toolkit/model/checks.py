@@ -36,17 +36,12 @@ def check_model_connectivity(
     Call **before** creating a builder to detect model issues that
     will cause a singular stiffness matrix.
 
-    Parameters
-    ----------
-    md : SAPModelData
-        Parsed model data from ``parser.get_model_data()``.
-    tol : float
-        Coordinate tolerance for duplicate-node detection.
+    Args:
+        md: Parsed model data from ``parser.get_model_data()``.
+        tol: Coordinate tolerance for duplicate-node detection.
 
-    Returns
-    -------
-    dict
-        Keys ``orphan_nodes``, ``shell_only_base_nodes``,
+    Returns:
+        Dict with keys ``orphan_nodes``, ``shell_only_base_nodes``,
         ``duplicate_coords``, ``zero_area_sections``, ``summary``.
     """
     report: dict[str, Any] = {}
@@ -154,27 +149,19 @@ def check_brace_buckling(
     Computes P_cr = π²EI₂₂/(KL)² for each brace and optionally
     compares against provided axial demand.
 
-    Parameters
-    ----------
-    md : SAPModelData
-        The parsed model data.
-    brace_ids : set, optional
-        Set of element IDs to check.  Defaults to empty set.
-    K : float
-        Effective length factor (default 1.0 — pinned-pinned).
-    axial_demand : dict, optional
-        ``{elem_id: axial_force_N}`` dict with estimated compressive
-        demand (e.g. from a prior linear static analysis).  If provided,
-        the demand/capacity ratio is reported.
-    print_results : bool
-        If True, print a summary table.
+    Args:
+        md: The parsed model data.
+        brace_ids: Set of element IDs to check.  Defaults to empty set.
+        K: Effective length factor (default 1.0 — pinned-pinned).
+        axial_demand: ``{elem_id: axial_force_N}`` dict with estimated
+            compressive demand (e.g. from a prior linear static analysis).
+            If provided, the demand/capacity ratio is reported.
+        print_results: If True, print a summary table.
 
-    Returns
-    -------
-    dict
+    Returns:
         ``{elem_id: {'P_cr': ..., 'P_demand': ..., 'ratio': ...,
-                     'slenderness': ..., 'length': ..., 'section': ...,
-                     'A': ..., 'I22': ...}}``
+        'slenderness': ..., 'length': ..., 'section': ...,
+        'A': ..., 'I22': ...}}`` dict.
 
         ``A`` and ``I22`` are the *effective* values used in the
         ``P_cr``/``Slenderness`` computations (``I33`` used as the
@@ -410,26 +397,20 @@ def check_self_weight_consistency(
 ) -> dict[str, Any]:
     """Compare applied self-weight loads against expected values.
 
-    Parameters
-    ----------
-    md : SAPModelData
-        The parsed model data (used for frame/area geometry).
-    load_totals : dict, optional
-        Dict of ``{pattern_name: {fx, fy, fz, mx, my, mz}}`` from a
-        builder's ``load_totals`` attribute.  If None, only the
-        geometry-based expected total is computed.
-    atol : float, optional
-        Absolute tolerance for the check.  Defaults to 1% of expected.
-    verbose : bool
-        If True, print a summary.
+    Args:
+        md: The parsed model data (used for frame/area geometry).
+        load_totals: Dict of ``{pattern_name: {fx, fy, fz, mx, my, mz}}``
+            from a builder's ``load_totals`` attribute.  If None, only the
+            geometry-based expected total is computed.
+        atol: Absolute tolerance for the check.  Defaults to 1% of
+            expected.
+        verbose: If True, print a summary.
 
-    Returns
-    -------
-    dict
-        Keys ``expected``, ``applied``, ``discrepancy``, ``passed``,
-        ``tolerance``, ``by_section`` (expected weight per section) and
-        ``by_material`` (the same weight grouped by each section's
-        material).
+    Returns:
+        Dict with keys ``expected``, ``applied``, ``discrepancy``,
+        ``passed``, ``tolerance``, ``by_section`` (expected weight per
+        section) and ``by_material`` (the same weight grouped by each
+        section's material).
     """
     from fea_toolkit.model.geometry import polygon_area_3d
     from fea_toolkit.model.sap_data import ShellSection
@@ -542,16 +523,11 @@ def compute_hinge_length(
     - Pipe: Lp = 0.5 * outer_diameter
     - Other / unknown: Lp = 0.1 * L
 
-    Parameters
-    ----------
-    section : Section
-        The section object (must have ``shape`` attribute).
-    elem_length : float
-        Element length in consistent units.
+    Args:
+        section: The section object (must have ``shape`` attribute).
+        elem_length: Element length in consistent units.
 
-    Returns
-    -------
-    float
+    Returns:
         Plastic hinge length.
     """
     from fea_toolkit.model.sap_data import ISection, PipeSection

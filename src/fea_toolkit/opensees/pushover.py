@@ -91,72 +91,56 @@ def run_pushover_4dir(
     creates a lightweight ``AnalysisBuilder`` from the shared
     *mesh_model*.
 
-    Parameters
-    ----------
-    mesh_model : MeshModel
-        Shared MeshModel from Preprocessor.
-    modal_result : dict
-        Dict with ``'modal'`` and ``'shapes'`` keys.
-    gravity_patterns : dict, optional
-        Dict mapping pattern name → scale factor.
-    lateral_load_type : str
-        One of ``'uniform'``, ``'triangular'``, ``'mode1'``.
-    max_disp_val : float
-        Maximum control displacement magnitude (m).
-    num_steps : int
-        Number of push increments.
-    tg : float
-        Characteristic period for GB 50011 spectrum (s).
-    alpha_max_rare : float
-        Seismic influence coefficient (rare event).
-    zeta : float
-        Damping ratio.
-    spectrum : ResponseSpectrum, optional
-        Pre-computed demand spectrum (T/Sa).  When ``None`` a GB 50011
-        rare-event spectrum is built from *tg* / *alpha_max_rare*.
-    bilinearize_method : str
-        Bilinearisation method for the CSM performance point:
-        ``'composite'`` (default), ``'stiffness_change'``,
-        ``'equal_energy'``, or ``'rc'`` / ``'de_luca_10pct'`` (the
-        De Luca 10 %-secant rule for curved RC backbones).
-    bilinearize_config : dict, optional
-        Optional dict passed to the bilinearisation function.
-    verbose : bool
-        Print progress.
-    log : PipelineLog, optional
-        Optional :class:`~fea_toolkit.io.log.PipelineLog` (or a ``bool``)
-        to collect events; ``None`` derives one from *verbose*.
-    brace_type : str
-        ``'truss'`` (Hysteretic) or ``'beam'`` (subdivided).
-    brace_sections : list, optional
-        Section names to treat as braces.
-    rs_modal_base_shear : dict, optional
-        Per-direction RS base shear for mode validation
-        ``{"X": [...], "Y": [...]}``.
-    control_node_tag : int, optional
-        OpenSees node tag to use as the displacement-control node.  When
-        ``None`` the node nearest the plan centroid of the highest
-        significant floor level is selected (a naive ``max(z)`` can pick an
-        isolated rooftop appendage).
-    control_node_id : str, optional
-        SAP2000 node ID (string label) for the control node, alternative
-        to *control_node_tag*.
-    config : dict, optional
-        Builder config overrides merged over the direction's default
-        (e.g. ``record_pushover_steps=True`` to retain per-step results
-        for :func:`fea_toolkit.io.stage_writer.write_model_stages`).
-    return_builders : bool
-        When ``True``, each direction's ``AnalysisBuilder`` is retained
-        under ``all_out[label]["builder"]`` (needed to export per-step
-        frame/shell/node results).
+    Args:
+        mesh_model: Shared MeshModel from Preprocessor.
+        modal_result: Dict with ``'modal'`` and ``'shapes'`` keys.
+        gravity_patterns: Optional dict mapping pattern name → scale factor.
+        lateral_load_type: One of ``'uniform'``, ``'triangular'``,
+            ``'mode1'``.
+        max_disp_val: Maximum control displacement magnitude (m).
+        num_steps: Number of push increments.
+        tg: Characteristic period for GB 50011 spectrum (s).
+        alpha_max_rare: Seismic influence coefficient (rare event).
+        zeta: Damping ratio.
+        spectrum: Optional pre-computed demand spectrum (T/Sa).  When
+            ``None`` a GB 50011 rare-event spectrum is built from *tg* /
+            *alpha_max_rare*.
+        bilinearize_method: Bilinearisation method for the CSM performance
+            point: ``'composite'`` (default), ``'stiffness_change'``,
+            ``'equal_energy'``, or ``'rc'`` / ``'de_luca_10pct'`` (the
+            De Luca 10 %-secant rule for curved RC backbones).
+        bilinearize_config: Optional dict passed to the bilinearisation
+            function.
+        verbose: Print progress.
+        log: Optional :class:`~fea_toolkit.io.log.PipelineLog` (or a
+            ``bool``) to collect events; ``None`` derives one from
+            *verbose*.
+        brace_type: ``'truss'`` (Hysteretic) or ``'beam'`` (subdivided).
+        brace_sections: Section names to treat as braces.
+        rs_modal_base_shear: Per-direction RS base shear for mode
+            validation ``{"X": [...], "Y": [...]}``.
+        control_node_tag: OpenSees node tag to use as the
+            displacement-control node.  When ``None`` the node nearest the
+            plan centroid of the highest significant floor level is
+            selected (a naive ``max(z)`` can pick an isolated rooftop
+            appendage).
+        control_node_id: SAP2000 node ID (string label) for the control
+            node, alternative to *control_node_tag*.
+        config: Optional builder config overrides merged over the
+            direction's default (e.g. ``record_pushover_steps=True`` to
+            retain per-step results for
+            :func:`fea_toolkit.io.stage_writer.write_model_stages`).
+        return_builders: When ``True``, each direction's
+            ``AnalysisBuilder`` is retained under
+            ``all_out[label]["builder"]`` (needed to export per-step
+            frame/shell/node results).
 
-    Returns
-    -------
-    dict
+    Returns:
         ``{direction: {"results": ..., "adrs": ..., "pp": ...,
-        "spectrum": {"T": ..., "Sa": ...}, ...}}`` — ``spectrum`` is the
-        demand spectrum each direction's performance point was evaluated
-        against, so a caller can re-plot the ADRS demand curve faithfully.
+        "spectrum": {"T": ..., "Sa": ...}, ...}}`` dict — ``spectrum`` is
+        the demand spectrum each direction's performance point was
+        evaluated against, so a caller can re-plot the ADRS demand curve
+        faithfully.
     """
     from fea_toolkit.model.csm import check_modal_pushover_mode
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
@@ -336,71 +320,53 @@ def pushover_rc_openseespy(
     creates a lightweight ``AnalysisBuilder`` from the shared
     *mesh_model*.
 
-    Parameters
-    ----------
-    mesh_model : MeshModel
-        Shared MeshModel from Preprocessor (frozen topology).
-    modal_result : dict
-        Dict with ``'modal'`` and ``'shapes'`` keys.
-    directions : str
-        One of ``'4dir'`` (default), ``'+X'``, ``'-X'``, ``'+Y'``,
-        ``'-Y'``.  ``'4dir'`` runs all four; a single label runs only
-        that direction.
-    gravity_patterns : dict, optional
-        Dict mapping pattern name → scale factor.
-    lateral_load_type : str
-        One of ``'uniform'``, ``'triangular'``, ``'mode1'``.
-    max_disp : float
-        Maximum control displacement magnitude (m).
-    num_steps : int
-        Number of push increments.
-    tg : float
-        Characteristic period for GB 50011 spectrum (s).
-    alpha_max_rare : float
-        Seismic influence coefficient (rare event).
-    zeta : float
-        Damping ratio.
-    spectrum : ResponseSpectrum, optional
-        Pre-computed demand spectrum (T/Sa).  When ``None`` a GB 50011
-        rare-event spectrum is built from *tg* / *alpha_max_rare*.
-    config : dict, optional
-        RC builder config overrides merged over
-        ``_PUSHOVER_RC_DEFAULTS`` — e.g. ``beam_integration``,
-        ``nd_materials``, ``shell_layers``, ``rebar_Fy_override``.
-        CSM-level option: ``bilinearize_method`` (default
-        ``'composite'``; ``'rc'`` / ``'de_luca_10pct'`` selects the
-        De Luca 10 %-secant rule for curved RC backbones) and
-        ``bilinearize_config`` (dict passed to the bilinearisation
-        function).
-    verbose : bool
-        Print progress.
-    log : PipelineLog, optional
-        Optional :class:`~fea_toolkit.io.log.PipelineLog` (or a ``bool``)
-        to collect events; ``None`` derives one from *verbose*.
-    rs_modal_base_shear : dict, optional
-        Per-direction RS base shear for mode validation
-        ``{"X": [...], "Y": [...]}``.
-    node_mass_overrides : dict, optional
-        Mapping of node ID (SAP string label) → mass scale factor.
-        Applied after computed seismic masses are assigned, allowing
-        per-storey masonry/mass adjustments.
-    return_builders : bool, optional
-        When ``True``, each per-direction output dict also contains a
-        ``"builder"`` key holding the ``AnalysisBuilder`` instance so
-        callers can export recorded per-step results with
-        ``AnalysisBuilder.export_pushover_results()``.
-    control_node_tag : int, optional
-        OpenSees node tag to use as the displacement-control node.  When
-        ``None`` the node nearest the plan centroid of the highest
-        significant floor level is selected (a naive ``max(z)`` can pick an
-        isolated rooftop appendage).
-    control_node_id : str, optional
-        SAP2000 node ID (string label) for the control node, alternative
-        to *control_node_tag*.
+    Args:
+        mesh_model: Shared MeshModel from Preprocessor (frozen topology).
+        modal_result: Dict with ``'modal'`` and ``'shapes'`` keys.
+        directions: One of ``'4dir'`` (default), ``'+X'``, ``'-X'``,
+            ``'+Y'``, ``'-Y'``.  ``'4dir'`` runs all four; a single label
+            runs only that direction.
+        gravity_patterns: Optional dict mapping pattern name → scale factor.
+        lateral_load_type: One of ``'uniform'``, ``'triangular'``,
+            ``'mode1'``.
+        max_disp: Maximum control displacement magnitude (m).
+        num_steps: Number of push increments.
+        tg: Characteristic period for GB 50011 spectrum (s).
+        alpha_max_rare: Seismic influence coefficient (rare event).
+        zeta: Damping ratio.
+        spectrum: Optional pre-computed demand spectrum (T/Sa).  When
+            ``None`` a GB 50011 rare-event spectrum is built from *tg* /
+            *alpha_max_rare*.
+        config: Optional RC builder config overrides merged over
+            ``_PUSHOVER_RC_DEFAULTS`` — e.g. ``beam_integration``,
+            ``nd_materials``, ``shell_layers``, ``rebar_Fy_override``.
+            CSM-level option: ``bilinearize_method`` (default
+            ``'composite'``; ``'rc'`` / ``'de_luca_10pct'`` selects the
+            De Luca 10 %-secant rule for curved RC backbones) and
+            ``bilinearize_config`` (dict passed to the bilinearisation
+            function).
+        verbose: Print progress.
+        log: Optional :class:`~fea_toolkit.io.log.PipelineLog` (or a
+            ``bool``) to collect events; ``None`` derives one from
+            *verbose*.
+        rs_modal_base_shear: Per-direction RS base shear for mode
+            validation ``{"X": [...], "Y": [...]}``.
+        node_mass_overrides: Mapping of node ID (SAP string label) → mass
+            scale factor.  Applied after computed seismic masses are
+            assigned, allowing per-storey masonry/mass adjustments.
+        return_builders: When ``True``, each per-direction output dict also
+            contains a ``"builder"`` key holding the ``AnalysisBuilder``
+            instance so callers can export recorded per-step results with
+            ``AnalysisBuilder.export_pushover_results()``.
+        control_node_tag: OpenSees node tag to use as the
+            displacement-control node.  When ``None`` the node nearest the
+            plan centroid of the highest significant floor level is
+            selected (a naive ``max(z)`` can pick an isolated rooftop
+            appendage).
+        control_node_id: SAP2000 node ID (string label) for the control
+            node, alternative to *control_node_tag*.
 
-    Returns
-    -------
-    dict
+    Returns:
         ``{direction: {"results": ..., "adrs": ..., "pp": ...,
         "spectrum": {"T": ..., "Sa": ...}, ...}}`` — ``spectrum`` is the
         demand spectrum each direction's performance point was evaluated

@@ -34,35 +34,28 @@ def _build_deformed_mesh(
     Shell quads become ``[4, i, j, k, l]`` faces (not triangulated), so
     each quad maps to exactly one face — no cell‑count mismatch.
 
-    Parameters
-    ----------
-    segments : list of (p1, p2, di, dj) tuples
-        Frame segment data — each entry holds the two endpoints and their
-        displacement vectors.
-    seg_npoints : list of int
-        Number of subdivision points per segment (fixed from undeformed
-        length, so point count is invariant w.r.t. *amp*).
-    all_quads : list of (p1, p2, p3, p4, d1, d2, d3, d4) tuples
-        Shell quad data — four corners and their displacement vectors.
-    sec_idxs : list of int
-        Per-quad section index (one per entry in *all_quads*).  Used to
-        assign a ``section_idx`` cell scalar on the shell mesh.
-    scale : float
-        Base scale factor from the eigenvector normalisation.
-    amp : float
-        Amplitude multiplier for the current frame.
-    shrink : float
-        Fraction to shrink shell quads toward their centroid
-        (0.0 = full size, 0.1 = 10% gap at edges).  Applied to the
-        rest-position vertices before displacement so the point-count
-        invariant is preserved for animation.
+    Args:
+        segments: List of ``(p1, p2, di, dj)`` tuples — each entry holds
+            the two endpoints and their displacement vectors.
+        seg_npoints: Number of subdivision points per segment (fixed from
+            undeformed length, so point count is invariant w.r.t. *amp*).
+        all_quads: List of ``(p1, p2, p3, p4, d1, d2, d3, d4)`` tuples —
+            four corners and their displacement vectors.
+        sec_idxs: Per-quad section index (one per entry in *all_quads*).
+            Used to assign a ``section_idx`` cell scalar on the shell
+            mesh.
+        scale: Base scale factor from the eigenvector normalisation.
+        amp: Amplitude multiplier for the current frame.
+        shrink: Fraction to shrink shell quads toward their centroid
+            (0.0 = full size, 0.1 = 10% gap at edges).  Applied to the
+            rest-position vertices before displacement so the point-count
+            invariant is preserved for animation.
 
-    Returns
-    -------
-    tuple[pv.PolyData, pv.PolyData | None]
-        ``(frame_mesh, shell_mesh)`` — frame mesh contains ``lines`` only;
-        shell mesh contains quad ``faces`` with a ``section_idx`` cell
-        scalar.  *shell_mesh* is ``None`` when there are no shell elements.
+    Returns:
+        ``(frame_mesh, shell_mesh)`` tuple — frame mesh contains ``lines``
+        only; shell mesh contains quad ``faces`` with a ``section_idx``
+        cell scalar.  *shell_mesh* is ``None`` when there are no shell
+        elements.
     """
     import pyvista as pv
 
@@ -146,16 +139,12 @@ def _collapse_to_parents(data, source):
     are removed and replaced by a single entry representing the original
     unsplit parent element.  Unsplit elements pass through unchanged.
 
-    Parameters
-    ----------
-    data : dict
-        Mesh data dict from :func:`_resolve_mesh_data` (builder or NPZ path).
-    source : object
-        Original data source — used to resolve parent geometry.
+    Args:
+        data: Mesh data dict from :func:`_resolve_mesh_data` (builder or
+            NPZ path).
+        source: Original data source — used to resolve parent geometry.
 
-    Returns
-    -------
-    dict
+    Returns:
         Updated mesh data dict with children collapsed into parents.
     """
 
@@ -966,38 +955,29 @@ def _render_scene(
 ):
     """Render mesh geometry from resolved data into a PyVista plotter.
 
-    Parameters
-    ----------
-    plotter : pv.Plotter
-        The plotter to render into.
-    data : dict
-        Mesh data dict from :func:`_resolve_mesh_data`.
-    shrink : float
-        Fraction to shrink quads/lines toward centroid.
-    xlim, ylim, zlim : tuple or None
-        (lo, hi) bounding-box filters.
-    show_nodes, show_orphan_nodes, show_mesh_nodes : bool
-        Toggle node groups.
-    show_frames, show_shells : bool
-        Toggle element groups.
-    show_constraints : bool
-        Draw edge constraint lines.
-    show_frame_labels, show_node_labels, show_area_labels : bool
-        Toggle text labels.
-    section_colors : dict or None
-        ``{section_name: color}`` overrides for frames / shells.
-    node_colors : dict or None
-        ``{node_id: color}`` overrides for the node markers.  Nodes present
-        in the mapping are drawn on top of the plain markers, larger and in
-        the given colour; the remaining nodes stay black.  Keys are the node
-        IDs of *data* (SAP joint labels for an ``SAPModelData`` source).
-    selection_ids : tuple or None
-        Resolved ``(frame_ids, node_ids, area_ids)`` from
-        :func:`_selection_id_sets`.  Those elements are overdrawn with wide,
-        half-opaque *selection_color* marks — lines for frames, dots for
-        nodes, translucent faces for areas.
-    selection_color : str
-        Colour of the selection overlay (default ``"yellow"``).
+    Args:
+        plotter: The ``pyvista.Plotter`` to render into.
+        data: Mesh data dict from :func:`_resolve_mesh_data`.
+        shrink: Fraction to shrink quads/lines toward centroid.
+        xlim, ylim, zlim: Optional ``(lo, hi)`` bounding-box filters.
+        show_nodes, show_orphan_nodes, show_mesh_nodes: Toggle node groups.
+        show_frames, show_shells: Toggle element groups.
+        show_constraints: Draw edge constraint lines.
+        show_frame_labels, show_node_labels, show_area_labels: Toggle
+            text labels.
+        section_colors: Optional ``{section_name: color}`` overrides for
+            frames / shells.
+        node_colors: Optional ``{node_id: color}`` overrides for the node
+            markers.  Nodes present in the mapping are drawn on top of the
+            plain markers, larger and in the given colour; the remaining
+            nodes stay black.  Keys are the node IDs of *data* (SAP joint
+            labels for an ``SAPModelData`` source).
+        selection_ids: Optional resolved ``(frame_ids, node_ids,
+            area_ids)`` from :func:`_selection_id_sets`.  Those elements
+            are overdrawn with wide, half-opaque *selection_color* marks —
+            lines for frames, dots for nodes, translucent faces for areas.
+        selection_color: Colour of the selection overlay (default
+            ``"yellow"``).
     """
     import numpy as np
     import pyvista as pv
@@ -1456,6 +1436,10 @@ def compare_meshes(
 
     Returns:
         ``pv.Plotter`` if *notebook* is True, otherwise ``None``.
+
+    Examples:
+        >>> from fea_toolkit.plotting.viz_model import compare_meshes
+        >>> compare_meshes(builder_a, builder_b, labels=("Original", "Meshed"))
     """
     import pyvista as pv
 
@@ -1549,7 +1533,7 @@ def plot_deformed_displacement_3d(
     Returns:
         ``pv.Plotter`` if *notebook*, else ``None``.
 
-    Example::
+    Examples:
 
         # Static analysis
         from fea_toolkit.opensees.preprocessor import preprocess_model
@@ -1915,6 +1899,10 @@ def plot_mode_animation(
 
     Returns:
         ``pv.Plotter`` if *notebook*, else ``None``.
+
+    Examples:
+        >>> from fea_toolkit.plotting.viz_model import plot_mode_animation
+        >>> plot_mode_animation(builder, mode_shapes, mode=0)
     """
     import numpy as np
 
@@ -2215,18 +2203,19 @@ def plot_building_views(md, mesh_model=None, window_size=(1200, 900)):
     Uses the two-stage path when *mesh_model* is provided; otherwise the
     model data is used directly without a builder.
 
-    Parameters
-    ----------
-    md : SAPModelData
-        Parsed model data.
-    mesh_model : optional
-        Preprocessed mesh model for two-stage path.
-    window_size : tuple
-        PyVista window dimensions (width, height) in pixels.
+    Args:
+        md: Parsed :class:`~fea_toolkit.model.sap_data.SAPModelData`.
+        mesh_model: Optional preprocessed mesh model for the two-stage
+            path.
+        window_size: PyVista window dimensions (width, height) in pixels.
 
-    Returns
-    -------
-    matplotlib.figure.Figure or None
+    Returns:
+        ``matplotlib.figure.Figure`` or ``None`` (when matplotlib or
+        PyVista is unavailable).
+
+    Examples:
+        >>> from fea_toolkit.plotting.viz_model import plot_building_views
+        >>> fig = plot_building_views(md, mesh_model=mesh)
     """
     try:
         import matplotlib.pyplot as plt
@@ -2367,6 +2356,10 @@ def plot_model_comparison(
 
     When *mesh_model* is provided, uses it directly (no re-build needed).
     Otherwise falls back to the two-stage build path.
+
+    Examples:
+        >>> from fea_toolkit.plotting.viz_model import plot_model_comparison
+        >>> plot_model_comparison(md, mesh_model=mesh)
     """
     import copy
 

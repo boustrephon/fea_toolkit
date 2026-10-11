@@ -417,22 +417,19 @@ def _add_coloured_tube(plotter, p_i, p_j, val, max_abs_val):
 def _load_npz_for_plotting(npz_path: str, combo: str = None) -> dict:
     """Load a unified-format NPZ results file and build element‑centric arrays.
 
-    Parameters
-    ----------
-    npz_path : str
-        Path to the ``.npz`` results file.
-    combo : str or None
-        Static case name.  ``None`` = first available case.
+    Args:
+        npz_path: Path to the ``.npz`` results file.
+        combo: Static case name.  ``None`` = first available case.
 
-    Returns a dict with:
-        - elem_data: list of dicts (one per sub‑element) with keys:
-            sap_id, (x|y|z)_i, (x|y|z)_j, mid_z,
-            fx_i, fy_i, fz_i, mx_i, my_i, mz_i,
-            fx_j, fy_j, fz_j, mx_j, my_j, mz_j,
-            and ``_local`` variants
-        - metadata: always ``{}`` (reserved for future use)
-        - force_unit, length_unit: unit strings
-        - raw_data: the loaded npz dict
+    Returns:
+        Dict with:
+            - elem_data: list of dicts (one per sub-element) with keys:
+              sap_id, (x|y|z)_i, (x|y|z)_j, mid_z, fx_i, fy_i, fz_i,
+              mx_i, my_i, mz_i, fx_j, fy_j, fz_j, mx_j, my_j, mz_j, and
+              ``_local`` variants
+            - metadata: always ``{}`` (reserved for future use)
+            - force_unit, length_unit: unit strings
+            - raw_data: the loaded npz dict
     """
     from ..io.npz_reader import _get_static_cases, read_results
 

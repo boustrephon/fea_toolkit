@@ -197,14 +197,10 @@ class ConstraintMixin:
     def _get_local_axes(self, elem: FrameElement):
         """Return local (vx, vy, vz) unit vectors for a frame element.
 
-        Parameters
-        ----------
-        elem : FrameElement
-            Frame element from the MeshModel.
+        Args:
+            elem: Frame element from the MeshModel.
 
-        Returns
-        -------
-        tuple of np.ndarray
+        Returns:
             Local x, y, z unit vectors (3-element each).
         """
         node_i = self.mesh_model.nodes[elem.node_i]
@@ -217,16 +213,11 @@ class ConstraintMixin:
     def _global_to_local(self, elem: FrameElement, vec: np.ndarray) -> np.ndarray:
         """Transform a vector from global to local coordinates.
 
-        Parameters
-        ----------
-        elem : FrameElement
-            Frame element defining the local coordinate system.
-        vec : np.ndarray
-            3-element vector in global coordinates.
+        Args:
+            elem: Frame element defining the local coordinate system.
+            vec: 3-element vector in global coordinates.
 
-        Returns
-        -------
-        np.ndarray
+        Returns:
             3-element vector in local coordinates.
         """
         vx, vy, vz = self._get_local_axes(elem)

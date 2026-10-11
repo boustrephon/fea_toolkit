@@ -928,9 +928,7 @@ class StaticRunnerMixin:
 
         Must be called **after** :meth:`run_static_analysis`.
 
-        Returns
-        -------
-        dict
+        Returns:
             ``{area_sap_id: {
                 'elem_tag': int,
                 'node_tags': list[int],

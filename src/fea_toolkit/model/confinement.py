@@ -25,58 +25,43 @@ from dataclasses import dataclass
 class ConfinementData:
     """Input parameters for the Mander confinement model.
 
-    Parameters
-    ----------
-    fc : float
-        Unconfined concrete compressive strength (Pa).
-    tie_diameter : float
-        Diameter of transverse reinforcement (m).
-    tie_spacing : float
-        Centre-to-centre spacing of transverse reinforcement (m).
-    tie_fy : float
-        Yield strength of transverse reinforcement (Pa).
-    core_bc : float
-        Core dimension perpendicular to the x-axis (m),
-        measured to the centreline of the perimeter hoop.
-    core_dc : float
-        Core dimension perpendicular to the y-axis (m),
-        measured to the centreline of the perimeter hoop.
-    long_diameter : float, optional
-        Diameter of longitudinal bars (m).  Used to compute
-        clear spacing between tied bars.
-    long_count_x : int, optional
-        Number of longitudinal bars along the x-axis.
-    long_count_y : int, optional
-        Number of longitudinal bars along the y-axis.
-    tie_config : str
-        ``"standard"`` (perimeter hoop only), ``"cross_tie"``
-        (perimeter + cross-ties), or ``"spiral"`` (circular spiral
-        or circular hoops).  Determines the effective confinement
-        factor ``ke``.
-    cover : float, optional
-        Clear cover to the perimeter hoop (m).  Used to compute
-        the centreline core dimensions from overall section
-        dimensions when not provided directly.
-    overall_b : float, optional
-        Overall section width (m).  Used with *cover* to derive
-        ``core_bc``.
-    overall_h : float, optional
-        Overall section depth (m).  Used with *cover* to derive
-        ``core_dc``.
-    cross_tie_count_x : int, optional
-        Number of cross-tie legs in the x-direction (perimeter hoop
-        excluded).  Used to compute ``Ash_x`` and ``rho_x``.
-    cross_tie_count_y : int, optional
-        Number of cross-tie legs in the y-direction (perimeter hoop
-        excluded).  Used to compute ``Ash_y`` and ``rho_y``.
-    eps_su : float, optional
-        Ultimate strain of the transverse steel (default 0.1 for
-        ASTM A706).  Used in the spalling/ultimate strain formula.
-    ecu_max : float, optional
-        Upper bound for the confined ultimate (spalling) strain
-        (default 0.025).  The Priestley (1996) spalling formula can
-        predict very large strains; NZSEE C5 uses 0.05.  The value
-        is configurable.
+    Attributes:
+        fc: Unconfined concrete compressive strength (Pa).
+        tie_diameter: Diameter of transverse reinforcement (m).
+        tie_spacing: Centre-to-centre spacing of transverse reinforcement
+            (m).
+        tie_fy: Yield strength of transverse reinforcement (Pa).
+        core_bc: Core dimension perpendicular to the x-axis (m), measured
+            to the centreline of the perimeter hoop.
+        core_dc: Core dimension perpendicular to the y-axis (m), measured
+            to the centreline of the perimeter hoop.
+        long_diameter: Diameter of longitudinal bars (m).  Used to compute
+            clear spacing between tied bars.
+        long_count_x: Number of longitudinal bars along the x-axis.
+        long_count_y: Number of longitudinal bars along the y-axis.
+        tie_config: ``"standard"`` (perimeter hoop only), ``"cross_tie"``
+            (perimeter + cross-ties), or ``"spiral"`` (circular spiral or
+            circular hoops).  Determines the effective confinement factor
+            ``ke``.
+        cover: Clear cover to the perimeter hoop (m).  Used to compute the
+            centreline core dimensions from overall section dimensions when
+            not provided directly.
+        overall_b: Overall section width (m).  Used with *cover* to derive
+            ``core_bc``.
+        overall_h: Overall section depth (m).  Used with *cover* to derive
+            ``core_dc``.
+        cross_tie_count_x: Number of cross-tie legs in the x-direction
+            (perimeter hoop excluded).  Used to compute ``Ash_x`` and
+            ``rho_x``.
+        cross_tie_count_y: Number of cross-tie legs in the y-direction
+            (perimeter hoop excluded).  Used to compute ``Ash_y`` and
+            ``rho_y``.
+        eps_su: Ultimate strain of the transverse steel (default 0.1 for
+            ASTM A706).  Used in the spalling/ultimate strain formula.
+        ecu_max: Upper bound for the confined ultimate (spalling) strain
+            (default 0.025).  The Priestley (1996) spalling formula can
+            predict very large strains; NZSEE C5 uses 0.05.  The value is
+            configurable.
     """
 
     fc: float
@@ -166,22 +151,15 @@ class ConfinementData:
 class ConfinementResult:
     """Output of the Mander confinement model.
 
-    Attributes
-    ----------
-    fcc : float
-        Confined compressive strength (Pa).
-    ecc : float
-        Strain at confined peak stress.
-    ecu : float
-        Ultimate (spalling) strain of confined concrete.
-        Typically 0.004 for unconfined cover, 0.012–0.025
-        for well-confined core.
-    ke : float
-        Effective confinement coefficient.
-    rho_s : float
-        Volumetric ratio of transverse reinforcement.
-    f_l : float
-        Effective lateral confining stress (Pa).
+    Attributes:
+        fcc: Confined compressive strength (Pa).
+        ecc: Strain at confined peak stress.
+        ecu: Ultimate (spalling) strain of confined concrete.  Typically
+            0.004 for unconfined cover, 0.012–0.025 for well-confined
+            core.
+        ke: Effective confinement coefficient.
+        rho_s: Volumetric ratio of transverse reinforcement.
+        f_l: Effective lateral confining stress (Pa).
     """
 
     fcc: float
@@ -195,16 +173,12 @@ class ConfinementResult:
 def mander_confined(data: ConfinementData) -> ConfinementResult:
     """Compute confined concrete properties using Mander et al. (1988).
 
-    Parameters
-    ----------
-    data : ConfinementData
-        Confinement input parameters.
+    Args:
+        data: Confinement input parameters.
 
-    Returns
-    -------
-    ConfinementResult
-        Confined strength ``fcc``, strain ``ecc``, and intermediate
-        quantities (``ke``, ``rho_s``, ``f_l``).
+    Returns:
+        :class:`ConfinementResult` with confined strength ``fcc``, strain
+        ``ecc``, and intermediate quantities (``ke``, ``rho_s``, ``f_l``).
     """
     fc = data.fc
     fyh = data.tie_fy

@@ -393,53 +393,45 @@ class Selection:
     cannot resolve, so nothing is silently swallowed where it would have
     produced a misleading picture.
 
-    Parameters
-    ----------
-    element_types:
-        Filter by element type(s) — ``'Frame'``, ``'Area'``, ``'Node'``.
-        ``None`` means all types are eligible.
-    sections:
-        Filter by section/property name(s).  Applies to **Frame** and
-        **Area** elements (checks :attr:`SAPModelData.frame_assignments`
-        / :attr:`SAPModelData.area_assignments`).  ``None`` means all.
-    materials:
-        Filter by material name(s).  An element matches if its assigned
-        section's material is in this list.  ``None`` means all.
-    groups:
-        Filter by group name(s).  An element matches if it belongs to at
-        least one of the named groups.  ``None`` means all.
-    constraints:
-        Filter by SAP2000 joint-constraint name(s) — e.g. ``["Fix"]``.  A
-        **Node** matches when :attr:`SAPModelData.constraint_assignments`
-        maps it to one of these names, so ``BODY`` rigid bodies,
-        ``DIAPHRAGM``, ``EQUAL``, ``WELD``, … are all selectable without
-        knowing the constraint type.  Applies to Node elements only —
-        frames and areas are excluded when it is set.  Resolution needs
-        ``constraint_assignments``, which ``SAPModelData`` carries but
-        ``MeshModel`` / NPZ archives do not — those sources match no nodes.
-        ``None`` means all.
-    element_ids:
-        Filter by specific frame/area element ID(s).  Joints are named through
-        :attr:`node_ids`, never this field — a node selection that sets
-        ``element_ids`` without ``node_ids`` raises.  ``None`` means all.
-    node_ids:
-        Filter by specific node (joint) ID(s).  ``None`` means all.
-    elevation_range:
-        ``(z_min, z_max)`` tuple in model length units.  An element is
-        included if its **mid-height Z** coordinate falls within
-        ``[z_min, z_max]``.  For frame elements, mid-height = ``(z_i + z_j)
-        / 2``.  For area elements, mid-height = centroid Z of all vertex
-        nodes.  ``None`` (default) means no elevation filter.
-    story:
-        Filter by storey name(s) — e.g. ``["Roof", "Level 2"]``.  An
-        element is included if its mid-height Z is within ``story_z_tolerance``
-        of the named storey's elevation.  Requires ``storey_data`` to be
-        passed to :meth:`resolve_to_mesh_sets`.  ``None`` (default) means
-        no storey filter.
+    Args:
+        element_types: Filter by element type(s) — ``'Frame'``, ``'Area'``,
+            ``'Node'``.  ``None`` means all types are eligible.
+        sections: Filter by section/property name(s).  Applies to **Frame**
+            and **Area** elements (checks :attr:`SAPModelData.frame_assignments`
+            / :attr:`SAPModelData.area_assignments`).  ``None`` means all.
+        materials: Filter by material name(s).  An element matches if its
+            assigned section's material is in this list.  ``None`` means all.
+        groups: Filter by group name(s).  An element matches if it belongs
+            to at least one of the named groups.  ``None`` means all.
+        constraints: Filter by SAP2000 joint-constraint name(s) — e.g.
+            ``["Fix"]``.  A **Node** matches when
+            :attr:`SAPModelData.constraint_assignments` maps it to one of
+            these names, so ``BODY`` rigid bodies, ``DIAPHRAGM``, ``EQUAL``,
+            ``WELD``, … are all selectable without knowing the constraint
+            type.  Applies to Node elements only — frames and areas are
+            excluded when it is set.  Resolution needs
+            ``constraint_assignments``, which ``SAPModelData`` carries but
+            ``MeshModel`` / NPZ archives do not — those sources match no
+            nodes.  ``None`` means all.
+        element_ids: Filter by specific frame/area element ID(s).  Joints
+            are named through :attr:`node_ids`, never this field — a node
+            selection that sets ``element_ids`` without ``node_ids`` raises.
+            ``None`` means all.
+        node_ids: Filter by specific node (joint) ID(s).  ``None`` means all.
+        elevation_range: ``(z_min, z_max)`` tuple in model length units.  An
+            element is included if its **mid-height Z** coordinate falls
+            within ``[z_min, z_max]``.  For frame elements, mid-height =
+            ``(z_i + z_j) / 2``.  For area elements, mid-height = centroid Z
+            of all vertex nodes.  ``None`` (default) means no elevation
+            filter.
+        story: Filter by storey name(s) — e.g. ``["Roof", "Level 2"]``.  An
+            element is included if its mid-height Z is within
+            ``story_z_tolerance`` of the named storey's elevation.  Requires
+            ``storey_data`` to be passed to :meth:`resolve_to_mesh_sets`.
+            ``None`` (default) means no storey filter.
 
-    Examples
-    --------
-    Select all frame members in a lateral-resisting group:
+    Examples:
+        Select all frame members in a lateral-resisting group:
 
         >>> sel = Selection(element_types=['Frame'], groups=['Moment Frame'])
         >>> frame_ids = sel.get_frame_ids(model)

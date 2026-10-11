@@ -62,23 +62,17 @@ def _build_lateral_loads(
 ) -> dict[int, tuple]:
     """Build nodal lateral load pattern (uniform / triangular / mode1).
 
-    Parameters
-    ----------
-    mm : MeshModel
-        Frozen topology from the Preprocessor.
-    lateral_load_type : str
-        One of ``'uniform'``, ``'triangular'``, ``'mode1'``.
-    dir_index : int
-        Lateral direction index: 0=X, 1=Y, 2=Z.
-    shapes : dict, optional
-        Mode-shape dict (mode index → {node_tag: (dx, dy, dz)}) used
-        only by the ``'mode1'`` pattern.
+    Args:
+        mm: Frozen topology from the Preprocessor.
+        lateral_load_type: One of ``'uniform'``, ``'triangular'``,
+            ``'mode1'``.
+        dir_index: Lateral direction index: 0=X, 1=Y, 2=Z.
+        shapes: Optional mode-shape dict (mode index → {node_tag: (dx,
+            dy, dz)}) used only by the ``'mode1'`` pattern.
 
-    Returns
-    -------
-    dict
-        ``{node_tag: (fx, fy, fz)}`` — normalized weights (not scaled
-        by gravity or mass) for the Tcl ``pushover_tcl()`` helper.
+    Returns:
+        ``{node_tag: (fx, fy, fz)}`` dict — normalized weights (not
+        scaled by gravity or mass) for the Tcl ``pushover_tcl()`` helper.
     """
     lateral_loads: dict[int, tuple] = {}
     if lateral_load_type == "uniform":

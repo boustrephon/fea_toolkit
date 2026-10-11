@@ -130,17 +130,12 @@ class AnalysisCaseSpec:
     spec only describes how that shared model should be realized for one
     analysis run.
 
-    Parameters
-    ----------
-    name : str
-        User-facing case label.
-    analysis_type : str
-        Logical analysis kind, e.g. ``"static"``, ``"modal"``,
-        ``"response_spectrum"``, ``"pushover"``.
-    config : dict, optional
-        Case-specific overrides applied at analysis time.
-    kwargs : dict, optional
-        Additional solver or post-processing arguments for the case.
+    Attributes:
+        name: User-facing case label.
+        analysis_type: Logical analysis kind, e.g. ``"static"``,
+            ``"modal"``, ``"response_spectrum"``, ``"pushover"``.
+        config: Case-specific overrides applied at analysis time.
+        kwargs: Additional solver or post-processing arguments for the case.
     """
 
     name: str
@@ -161,17 +156,13 @@ class AnalysisCaseSpec:
 class AnalysisResult:
     """Result of one analysis execution.
 
-    Parameters
-    ----------
-    name : str
-        User-assigned label (e.g. ``"Pushover Steel"``).
-    analysis_type : str
-        Class name of the analysis that produced this result
-        (e.g. ``"StaticAnalysis"``).
-    data : dict
-        Dict of arrays, DataFrames, and figures produced by the analysis.
-    metadata : dict
-        Config snapshot, timestamps, log entries.
+    Attributes:
+        name: User-assigned label (e.g. ``"Pushover Steel"``).
+        analysis_type: Class name of the analysis that produced this
+            result (e.g. ``"StaticAnalysis"``).
+        data: Dict of arrays, DataFrames, and figures produced by the
+            analysis.
+        metadata: Config snapshot, timestamps, log entries.
     """
 
     name: str

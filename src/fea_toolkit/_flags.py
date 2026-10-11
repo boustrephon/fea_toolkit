@@ -75,26 +75,20 @@ def compute_flag_parts(pt1, pt2, vn, Fi, Fj, scale, zero_tol=None):
     never push a flag into a branch that builds a degenerate polygon.  As
     defence in depth, no part with coincident vertices is ever yielded.
 
-    Parameters
-    ----------
-    pt1, pt2 : array-like of length 3
-        I-end and J-end node coordinates.
-    vn : array-like of length 3
-        Unit vector for positive flag offset direction.
-    Fi, Fj : float
-        Force/moment values (original, un-negated).
-    scale : float
-        Scale factor (display units per force/moment unit).
-    zero_tol : float or None
-        Relative zero-snap fraction (see :func:`_snap_flag_noise`).
-        ``None`` → :data:`_FLAG_ZERO_SNAP_TOL`.
+    Args:
+        pt1, pt2: I-end and J-end node coordinates (array-like of length 3).
+        vn: Unit vector for positive flag offset direction (array-like of
+            length 3).
+        Fi, Fj: Force/moment values (original, un-negated).
+        scale: Scale factor (display units per force/moment unit).
+        zero_tol: Relative zero-snap fraction (see
+            :func:`_snap_flag_noise`).  ``None`` → :data:`_FLAG_ZERO_SNAP_TOL`.
 
-    Yields
-    ------
-    vertices : list of ndarray
-        Corner points in perimeter order (4 for a quad, 3 for a triangle).
-    col_val : float
-        Signed value for colour mapping (positive → red, negative → blue).
+    Yields:
+        vertices: Corner points in perimeter order (4 for a quad, 3 for a
+            triangle).
+        col_val: Signed value for colour mapping (positive → red, negative
+            → blue).
     """
     pt1 = np.asarray(pt1, dtype=float)
     pt2 = np.asarray(pt2, dtype=float)
