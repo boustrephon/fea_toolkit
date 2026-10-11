@@ -235,6 +235,42 @@ def _displacement_component(disp: dict, node_id: Any, node_tag: Any, component: 
     return 0.0
 
 
+_SHELL_FORCE_COMPONENTS = ("fx", "fy", "fxy", "mx", "my", "mxy")
+
+
+def _collect_case_shell_forces(
+    arrays: dict[str, np.ndarray], case: str, shell_forces: dict[str, dict[str, Any]]
+) -> None:
+    """Collect one case's per-shell resultants into ``static/<case>/shell_*``.
+
+    The per-case block mirrors the legacy global ``shell_forces/*`` block
+    (see :func:`_collect_shell_forces`) but is namespaced under the case so a
+    repository can serve shell forces per case — the shell counterpart of the
+    per-case ``fx_i`` … ``mz_j`` frame arrays.  The block is self-describing:
+    ``shell_sap_id`` indexes the component arrays against the geometry's own
+    ``shell_sap_id`` (a case may record fewer shells than the geometry draws).
+
+    Args:
+        arrays: The archive dict being assembled (mutated in place).
+        case: Static case label.
+        shell_forces: Dict from
+            :meth:`~fea_toolkit.opensees._runner_static.AnalysisBuilder.extract_static_shell_forces`
+            — ``{area_sap_id: {fx, fy, fxy, mx, my, mxy, elem_tag, sec_name}}``.
+    """
+    aids = list(shell_forces.keys())
+    arrays[make_static_key(case, "shell_sap_id")] = np.array(aids, dtype=str)
+    for component in _SHELL_FORCE_COMPONENTS:
+        arrays[make_static_key(case, f"shell_{component}")] = np.array(
+            [shell_forces[aid].get(component, 0.0) for aid in aids], dtype=float
+        )
+    arrays[make_static_key(case, "shell_elem_tag")] = np.array(
+        [shell_forces[aid].get("elem_tag", 0) for aid in aids], dtype=int
+    )
+    arrays[make_static_key(case, "shell_sec_name")] = np.array(
+        [shell_forces[aid].get("sec_name", "") for aid in aids], dtype=str
+    )
+
+
 def _collect_static(
     static_results: dict[str, Any],
     case_meta: Optional[dict[str, dict[str, str]]] = None,
@@ -306,9 +342,15 @@ def _collect_static(
                     dtype=float,
                 )
 
+        # Shell (area) resultants — a per-case ``shell_*`` block, self-indexed
+        # by its own ``shell_sap_id`` (see :func:`_collect_case_shell_forces`).
+        shell_forces = data.get("shell_forces")
+        if shell_forces:
+            _collect_case_shell_forces(arrays, case, shell_forces)
+
         # Scalar entries (including ``{"value": scalar}`` wrappers).
         # Keys already consumed above are skipped.
-        consumed = set(force_keys) | {"nodal_displacements"}
+        consumed = set(force_keys) | {"nodal_displacements", "shell_forces"}
         for key, raw_val in data.items():
             if key in consumed:
                 continue

@@ -135,6 +135,21 @@ FORCE_QUANTITY_LABELS: dict[str, str] = {
     "M3": "Mz",
 }
 
+#: Shell (area) stress/force resultant labels → the per-case ``shell_*`` array
+#: key underneath.  The shell overlay reads these keys from
+#: :meth:`fea_toolkit.io.results_repository.ResultsRepository.shell_forces`:
+#: ``fx``/``fy``/``fxy`` are the membrane resultants (``Nx``/``Ny``/``Nxy``)
+#: and ``mx``/``my``/``mxy`` the bending resultants (``Mx``/``My``/``Mxy``) —
+#: all per unit width, in model units.
+SHELL_FORCE_QUANTITY_LABELS: dict[str, str] = {
+    "Nx": "fx",
+    "Ny": "fy",
+    "Nxy": "fxy",
+    "Mx": "mx",
+    "My": "my",
+    "Mxy": "mxy",
+}
+
 
 @dataclass
 class FrameRelease:

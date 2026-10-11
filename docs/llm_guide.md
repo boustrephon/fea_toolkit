@@ -610,14 +610,15 @@ loaded and resync:
 
 ## 9. Contributor backlog — add usage examples to function docstrings
 
-> This is a **contributor** task list, not LLM guidance; it is tracked in
-> `docs/_pending_work.md`.  Sections 1–8 above are the LLM-facing contract.
+> **Complete (2026-12).**  All six items below have ``Examples:`` blocks now:
+> items 4–5 landed in `a927369c` and items 1–3, 6 in `ad2d0d35` / `4e78ad47`.
+> This section is retained as the historical task list; no item is open.
 
 The following modules have Google-style docstrings with ``Args:`` and
-``Returns:`` but **no usage examples**.  Adding a ``Examples:`` block to
-key public functions would dramatically improve LLM output quality
-(pattern-matching from docstring examples is one of the most reliable
-ways LLMs produce correct code).
+``Returns:`` but, at the time this list was written, **no usage examples**.
+Adding a ``Examples:`` block to key public functions dramatically improves LLM
+output quality (pattern-matching from docstring examples is one of the most
+reliable ways LLMs produce correct code).
 
 Priority order for adding docstring examples:
 

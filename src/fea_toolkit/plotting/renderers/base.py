@@ -297,6 +297,25 @@ class RenderBackend(ABC):
         ...
 
     @abstractmethod
+    def render_shell_scalar_field(
+        self,
+        shells: list[ShellGeom],
+        values: dict[str, float],  # area_id → scalar
+    ) -> None:
+        """Draw a per-shell scalar field as a colour overlay on area elements.
+
+        The shell counterpart of :meth:`render_force_flags`: each shell face is
+        coloured by its resultant on the same diverging scale (positive → warm,
+        negative → cool, saturated by ``|value| / max_abs``); a shell the
+        archive does not cover is left grey.
+
+        Args:
+            shells: List of shell geometries (undeformed).
+            values: ``{area_id: scalar}`` — one value per shell to colour.
+        """
+        ...
+
+    @abstractmethod
     def clear(self) -> None:
         """Remove all rendered geometry from the scene."""
         ...

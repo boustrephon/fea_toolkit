@@ -118,6 +118,35 @@ STATIC_LOCAL_FORCE_ARRAYS = [
 #: Full set of static array names (union) — kept for reference.
 STATIC_ARRAYS = STATIC_NODAL_ARRAYS + STATIC_FORCE_ARRAYS + STATIC_LOCAL_FORCE_ARRAYS
 
+#: Shell (area) stress/force resultants — membrane + bending per unit width,
+#: sized ``N_shell_result`` (the number of shells a static case actually
+#: recorded, which may be fewer than the geometry's ``N_shell`` when areas are
+#: loads-only or inactive).  The block is self-describing: ``shell_sap_id``
+#: indexes it against the geometry's own ``shell_sap_id``, exactly like the
+#: legacy global ``shell_forces/*`` block but **per case**
+#: (``static/<case>/shell_*``).  The component names match
+#: :meth:`~fea_toolkit.opensees._runner_static.AnalysisBuilder.extract_static_shell_forces`
+#: (``fx``/``fy``/``fxy`` are ``Nx``/``Ny``/``Nxy``; ``mx``/``my``/``mxy`` are
+#: ``Mx``/``My``/``Mxy``).
+STATIC_SHELL_COMPONENT_ARRAYS = [
+    "shell_fx",
+    "shell_fy",
+    "shell_fxy",
+    "shell_mx",
+    "shell_my",
+    "shell_mxy",
+]
+
+#: The full per-case shell block: the component arrays above plus the index
+#: arrays that keep it aligned with the geometry (``shell_sap_id``,
+#: ``shell_elem_tag``, ``shell_sec_name``).
+STATIC_SHELL_ARRAYS = [
+    "shell_sap_id",
+    "shell_elem_tag",
+    "shell_sec_name",
+    *STATIC_SHELL_COMPONENT_ARRAYS,
+]
+
 MODAL_ARRAYS: dict[str, tuple] = {
     "modal/period": ("N_mode", "float"),
     "modal/frequency": ("N_mode", "float"),

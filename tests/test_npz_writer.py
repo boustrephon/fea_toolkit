@@ -192,3 +192,46 @@ def test_tag_keyed_displacement_still_resolves():
     assert arrays["static/DEAD/node_dx"].tolist() == [
         float(nd.node_tag) for nd in md.nodes.values()
     ]
+
+
+def test_per_case_shell_forces_flow_through_the_in_memory_arrays():
+    """A case's shell resultants become ``static/<case>/shell_*`` arrays.
+
+    The shell overlay reads them through the repository's ``shell_forces``, so
+    the in-memory seam must carry them the same way it carries frame end
+    forces — no file, no ``AnalysisBuilder``.
+    """
+    from fea_toolkit.io.npz_writer import results_arrays
+
+    md = make_sample_model()
+    shell_forces = {
+        "A1": {
+            "elem_tag": 11,
+            "sec_name": "Slab",
+            "fx": 1.0,
+            "fy": 2.0,
+            "fxy": 3.0,
+            "mx": 4.0,
+            "my": 5.0,
+            "mxy": 6.0,
+        },
+        "A2": {
+            "elem_tag": 12,
+            "sec_name": "Slab",
+            "fx": 7.0,
+            "fy": 8.0,
+            "fxy": 9.0,
+            "mx": 10.0,
+            "my": 11.0,
+            "mxy": 12.0,
+        },
+    }
+    arrays = results_arrays(md, static_results={"DEAD": {"shell_forces": shell_forces}})
+
+    assert arrays["static/DEAD/shell_sap_id"].tolist() == ["A1", "A2"]
+    assert arrays["static/DEAD/shell_fx"].tolist() == [1.0, 7.0]
+    assert arrays["static/DEAD/shell_mxy"].tolist() == [6.0, 12.0]
+
+    repository = NpzResultsRepository(arrays)
+    assert repository.has_shell_forces("DEAD") is True
+    assert repository.shell_forces("DEAD")["A2"]["mxy"] == 12.0

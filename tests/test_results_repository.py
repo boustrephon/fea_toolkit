@@ -480,6 +480,92 @@ class TestElementForces:
         assert forces["2"] == {"fx_i": 0.0}
 
 
+# ═══════════════════════════════════════════════════════════════════
+# Shell (area) resultants — the shell-overlay input
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _shell_forces_archive() -> dict:
+    """Geometry plus a static case whose per-shell resultants cover two shells.
+
+    Component values encode ``100 * component_index + shell_index`` so a
+    mis-indexed component or shell is caught by the tests below.
+    """
+    arrays = {
+        "node_tag": np.array([1, 2, 3, 4], dtype=int),
+        "node_sap_id": np.array(["1", "2", "3", "4"], dtype=str),
+        "node_x": np.zeros(4),
+        "node_y": np.zeros(4),
+        "node_z": np.zeros(4),
+        "shell_eid": np.array([11, 12], dtype=int),
+        "shell_sap_id": np.array(["A1", "A2"], dtype=str),
+        "shell_sec_name": np.array(["Slab", "Slab"], dtype=str),
+        "shell_parent_sap_id": np.array(["", ""], dtype=str),
+        "shell_node_1": np.array([1, 2], dtype=int),
+        "shell_node_2": np.array([2, 3], dtype=int),
+        "shell_node_3": np.array([3, 4], dtype=int),
+        "shell_node_4": np.array([4, 1], dtype=int),
+        "static_case_labels": np.array(["DEAD"], dtype=str),
+        "static/DEAD/shell_sap_id": np.array(["A1", "A2"], dtype=str),
+        "static/DEAD/shell_elem_tag": np.array([11, 12], dtype=int),
+        "static/DEAD/shell_sec_name": np.array(["Slab", "Slab"], dtype=str),
+    }
+    for index, component in enumerate(("fx", "fy", "fxy", "mx", "my", "mxy")):
+        arrays[f"static/DEAD/shell_{component}"] = np.array(
+            [100.0 * index + 1, 100.0 * index + 2], dtype=float
+        )
+    return arrays
+
+
+class TestShellForces:
+    """The shell-overlay input: shell-keyed, per-case, self-describing."""
+
+    def test_has_shell_forces_is_the_cheap_pre_check(self):
+        """What a caller consults before offering to draw a shell overlay."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        repository = NpzResultsRepository(_shell_forces_archive())
+
+        assert repository.has_shell_forces("DEAD") is True
+        assert repository.has_shell_forces("NOT_A_CASE") is False
+
+    def test_shell_forces_rekeys_by_sap_id(self):
+        """Ids are the geometry's ``shell_sap_id`` — what the overlay looks up."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        forces = NpzResultsRepository(_shell_forces_archive()).shell_forces("DEAD")
+
+        assert sorted(forces) == ["A1", "A2"]
+        assert forces["A1"]["fx"] == 1.0
+        assert forces["A2"]["fx"] == 2.0
+        assert forces["A1"]["mxy"] == 501.0
+        assert forces["A2"]["mxy"] == 502.0
+
+    def test_an_archive_without_shell_forces_returns_empty(self):
+        """Shell force recording is optional: absence is a state, not an error."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        arrays = _shell_forces_archive()
+        for component in ("fx", "fy", "fxy", "mx", "my", "mxy"):
+            del arrays[f"static/DEAD/shell_{component}"]
+
+        assert NpzResultsRepository(arrays).shell_forces("DEAD") == {}
+        assert NpzResultsRepository(_shell_forces_archive()).shell_forces("NOT_A_CASE") == {}
+
+    def test_a_short_component_array_drops_only_itself(self):
+        """A truncated array covers fewer shells; every other component survives."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        arrays = _shell_forces_archive()
+        arrays["static/DEAD/shell_mxy"] = np.array([501.0])  # one of two shells
+
+        forces = NpzResultsRepository(arrays).shell_forces("DEAD")
+
+        assert forces["A1"]["mxy"] == 501.0
+        assert "mxy" not in forces["A2"]
+        assert forces["A2"]["mx"] == 302.0
+
+
 def test_metadata_reads_a_file_level_array():
     """Units and the coordinate system are written once, not per case."""
     from fea_toolkit.io.results_repository import NpzResultsRepository

@@ -810,6 +810,53 @@ class PyVistaRenderer(RenderBackend):
         )
         self._add_overlay(actor, "force_flags")
 
+    def render_shell_scalar_field(
+        self,
+        shells: list[ShellGeom],
+        values: dict[str, float],
+    ) -> None:
+        """Draw a per-shell scalar field as a colour overlay on area elements.
+
+        Each shell face is coloured by its value on the same diverging scale
+        the force-flag diagram uses (see :func:`_flag_rgb`): positive → warm,
+        negative → cool, saturated by ``|value| / max_abs``.  A shell the
+        archive does not cover is left grey — the same "missing" convention the
+        flag diagram's zero-skip follows.
+
+        Args:
+            shells: Shell geometries (undeformed) providing the faces to colour.
+            values: ``{area_id: scalar}`` — one value per shell to colour.
+        """
+        if not shells:
+            return
+        p = self.plotter
+        import pyvista as pv
+
+        max_abs = max((abs(value) for value in values.values()), default=0.0)
+
+        verts = np.vstack([s.vertices for s in shells])
+        faces, face_counts = _polygon_cells([s.vertices for s in shells])
+
+        cell_colors: list[tuple[float, float, float]] = []
+        for s, n_faces in zip(shells, face_counts):
+            value = values.get(s.area_id)
+            color = _flag_rgb(value, max_abs) if value is not None else (0.7, 0.7, 0.7)
+            cell_colors.extend([color] * n_faces)
+
+        mesh = pv.PolyData(verts, faces=faces)
+        mesh.cell_data["rgb"] = np.array(cell_colors, dtype=float)
+        actor = p.add_mesh(
+            mesh,
+            scalars="rgb",
+            rgb=True,
+            opacity=1.0,
+            show_edges=True,
+            edge_color="grey",
+            lighting=False,
+            show_scalar_bar=False,
+        )
+        self._add_overlay(actor, "shell_forces")
+
     # ── Scene management ─────────────────────────────────────────────
 
     def clear(self) -> None:

@@ -446,3 +446,123 @@ class TestForceDiagrams:
 
         assert _deformed_points(window) is None
         assert _flag_offset(window) is not None
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Shell results — the area-resultant overlay (P36)
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _write_shell_archive(tmp_path):
+    """A minimal shell-bearing archive: two quads, one case with resultants.
+
+    Component values are ``{1..6}`` on ``A1`` and ``{7..12}`` on ``A2``, so the
+    larger shell's face is always saturated red (positive max) whatever the
+    selected resultant, while ``A1``'s face colour identifies the quantity.
+    """
+    path = tmp_path / "shell_results.npz"
+    shell_forces = {
+        "A1": {"fx": 1.0, "fy": 2.0, "fxy": 3.0, "mx": 4.0, "my": 5.0, "mxy": 6.0},
+        "A2": {"fx": 7.0, "fy": 8.0, "fxy": 9.0, "mx": 10.0, "my": 11.0, "mxy": 12.0},
+    }
+    payload = {
+        "static/DEAD/shell_sap_id": np.array(["A1", "A2"], dtype=str),
+        "static/DEAD/shell_elem_tag": np.array([11, 12], dtype=int),
+        "static/DEAD/shell_sec_name": np.array(["Slab", "Slab"], dtype=str),
+    }
+    for component in ("fx", "fy", "fxy", "mx", "my", "mxy"):
+        payload[f"static/DEAD/shell_{component}"] = np.array(
+            [shell_forces[aid][component] for aid in ("A1", "A2")], dtype=float
+        )
+    np.savez_compressed(
+        path,
+        node_tag=np.array([1, 2, 3, 4], dtype=int),
+        node_sap_id=np.array(["1", "2", "3", "4"], dtype=str),
+        node_x=np.array([0.0, 4.0, 4.0, 0.0]),
+        node_y=np.array([0.0, 0.0, 4.0, 4.0]),
+        node_z=np.zeros(4),
+        frame_eid=np.array([], dtype=int),
+        frame_sap_id=np.array([], dtype=str),
+        frame_sec_name=np.array([], dtype=str),
+        frame_parent_sap_id=np.array([], dtype=str),
+        frame_node_i=np.array([], dtype=int),
+        frame_node_j=np.array([], dtype=int),
+        shell_eid=np.array([11, 12], dtype=int),
+        shell_sap_id=np.array(["A1", "A2"], dtype=str),
+        shell_sec_name=np.array(["Slab", "Slab"], dtype=str),
+        shell_parent_sap_id=np.array(["", ""], dtype=str),
+        shell_node_1=np.array([1, 1], dtype=int),
+        shell_node_2=np.array([2, 2], dtype=int),
+        shell_node_3=np.array([3, 3], dtype=int),
+        shell_node_4=np.array([4, 4], dtype=int),
+        static_case_labels=np.array(["DEAD"], dtype=str),
+        static_case_group=np.array(["DEAD"], dtype=str),
+        **payload,
+    )
+    return path
+
+
+def _shell_cell_colors(window):
+    """The shell overlay's per-face RGB (``None`` when there is no overlay)."""
+    actors = window._backend.actors("shell_forces")
+    if not actors:
+        return None
+    return np.asarray(actors[0].mapper.dataset.cell_data["rgb"], dtype=float)
+
+
+class TestShellResults:
+    """Results ▸ Shell results, driven through the real action and selector.
+
+    ``A2`` always carries the largest resultant, so its face is saturated red
+    whatever the quantity; ``A1``'s colour identifies which key was read.
+    """
+
+    def test_it_is_disabled_without_shell_resultants(self, window, tmp_path):
+        window.open_results_path(str(_write_archive(tmp_path, with_forces=True)))
+
+        assert window._actions["results.shell_forces"].isEnabled() is False
+        assert window._shell_quantity.isEnabled() is False
+
+    def test_it_is_enabled_once_a_case_carries_shell_resultants(self, window, tmp_path):
+        window.open_results_path(str(_write_shell_archive(tmp_path)))
+
+        assert window._actions["results.shell_forces"].isEnabled() is True
+        assert window._shell_quantity.isEnabled() is True
+
+    def test_the_selector_opens_on_nxy(self, window, tmp_path):
+        window.open_results_path(str(_write_shell_archive(tmp_path)))
+
+        assert window._shell_quantity.currentText() == "Nxy"
+
+    def test_it_draws_the_overlay(self, window, tmp_path):
+        window.open_results_path(str(_write_shell_archive(tmp_path)))
+        window._actions["results.shell_forces"].trigger()
+
+        colors = _shell_cell_colors(window)
+        assert colors is not None and colors.shape[0] == 2  # one face per shell
+        # A2 is the largest value in every resultant → saturated red.
+        assert colors[1] == pytest.approx([1.0, 0.1, 0.0], abs=1e-2)
+
+    def test_the_selector_reads_the_resultant_it_names(self, window, tmp_path):
+        """Nxy normalises by 9 (A1 red ≈ 0.53); Nx normalises by 7 (A1 red = 0.4)."""
+        window.open_results_path(str(_write_shell_archive(tmp_path)))
+        window._actions["results.shell_forces"].trigger()
+        assert _shell_cell_colors(window)[0][0] == pytest.approx(0.533, abs=1e-2)
+
+        window._shell_quantity.setCurrentText("Nx")
+
+        assert _shell_cell_colors(window)[0][0] == pytest.approx(0.4, abs=1e-2)
+
+    def test_the_selector_alone_never_starts_drawing(self, window, tmp_path):
+        window.open_results_path(str(_write_shell_archive(tmp_path)))
+        window._shell_quantity.setCurrentText("Nx")
+
+        assert _shell_cell_colors(window) is None
+
+    def test_clear_results_removes_the_overlay(self, window, tmp_path):
+        window.open_results_path(str(_write_shell_archive(tmp_path)))
+        window._actions["results.shell_forces"].trigger()
+        window._actions["results.clear"].trigger()
+
+        assert _shell_cell_colors(window) is None
+        assert window._actions["results.shell_forces"].isChecked() is False

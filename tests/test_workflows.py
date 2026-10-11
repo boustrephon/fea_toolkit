@@ -2497,6 +2497,46 @@ class TestShellSubdivision:
         finally:
             ops.wipe()
 
+    def test_shell_forces_reach_the_in_memory_case_archive(self, sample_shell_md):
+        """``run_case_set`` threads shell resultants through to the repository.
+
+        The shell overlay reads ``ResultsRepository.shell_forces(case)``, so
+        the in-memory run path must carry per-case shell resultants the same
+        way it carries frame end forces — no export, no file.
+        """
+        from fea_toolkit.analysis.linear import run_case_set
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
+        cfg = {
+            "element_type": "elasticBeamColumn",
+            "split_elements": False,
+            "verbose": False,
+            "create_shells": True,
+        }
+        mm = preprocess_model(sample_shell_md, cfg)
+        try:
+            result = run_case_set(
+                sample_shell_md,
+                mm,
+                {"DEAD": {"DEAD": 1.0}},
+                config={
+                    "element_type": "elasticBeamColumn",
+                    "verbose": False,
+                    "create_shells": True,
+                },
+            )
+            repository = NpzResultsRepository(result["arrays"])
+            assert repository.has_shell_forces("DEAD") is True
+            shell_forces = repository.shell_forces("DEAD")
+            assert shell_forces, "expected per-case shell forces through the in-memory path"
+            for aid, f in shell_forces.items():
+                assert {"fx", "fy", "fxy", "mx", "my", "mxy"} <= set(f), (
+                    f"shell {aid!r} missing resultants: {sorted(f)}"
+                )
+        finally:
+            ops.wipe()
+
 
 # ============================================================================
 # HDF5 reader round-trip

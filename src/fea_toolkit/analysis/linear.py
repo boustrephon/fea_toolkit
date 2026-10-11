@@ -549,8 +549,10 @@ def run_static_cases(
             :func:`_mesh_has_shells` — so a shell-stiffened model is built with
             its areas rather than as a mechanism.
         raw_out: Optional dict filled with each case's raw results —
-            ``raw_out[case] = {"nodal_displacements": ..., "element_forces": {...}}``
-            — the shape :func:`~fea_toolkit.io.npz_writer.results_arrays` accepts
+            ``raw_out[case] = {"nodal_displacements": ..., "element_forces": {...},
+            "shell_forces": {...}}`` (``shell_forces`` only when the model has
+            shell areas) — the shape
+            :func:`~fea_toolkit.io.npz_writer.results_arrays` accepts
             as ``static_results``.  A case that **fails** contributes no entry,
             so ``set(attempted) - set(raw_out)`` is the set that did not
             converge (see *attempted*).
@@ -665,6 +667,15 @@ def run_static_cases(
                     elem_forces = ab.static_element_force_arrays()
                     if elem_forces:
                         entry["element_forces"] = elem_forces
+                except Exception:
+                    pass
+                try:
+                    # Per-shell stress/force resultants (membrane + bending),
+                    # keyed by area SAP id — the shell counterpart of the frame
+                    # end forces above.  Empty for a frame-only model.
+                    shell_forces = ab.extract_static_shell_forces()
+                    if shell_forces:
+                        entry["shell_forces"] = shell_forces
                 except Exception:
                     pass
                 raw_out[case_name] = entry

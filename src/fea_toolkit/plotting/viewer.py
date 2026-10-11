@@ -681,6 +681,48 @@ class ModelViewer:
         )
         return self
 
+    def overlay_shell_forces(
+        self,
+        shell_forces: Optional[dict[str, dict]] = None,
+        quantity: str = "Nxy",
+    ) -> "ModelViewer":
+        """Overlay a per-shell scalar field (stress/force resultants) on areas.
+
+        The shell counterpart of :meth:`overlay_forces`: each area element is
+        coloured by the chosen resultant on the same diverging scale the flag
+        diagram uses.
+
+        Args:
+            shell_forces: ``{shell_id: {component: value}}`` — the shape
+                :meth:`~fea_toolkit.io.results_repository.ResultsRepository.shell_forces`
+                returns (keys ``fx``/``fy``/``fxy``/``mx``/``my``/``mxy``).
+            quantity: Resultant to colour by — a display label (``Nx``, ``Ny``,
+                ``Nxy``, ``Mx``, ``My``, ``Mxy``) or the array key underneath.
+
+        Returns:
+            ``self`` for chaining.
+        """
+        self._extract_geometry()
+
+        if not shell_forces:
+            logger.warning("Warning: no shell force data available.")
+            return self
+
+        from ..model.sap_data import SHELL_FORCE_QUANTITY_LABELS
+
+        key = SHELL_FORCE_QUANTITY_LABELS.get(quantity, quantity)
+        values: dict[str, float] = {}
+        for shell_id, entry in shell_forces.items():
+            if key in entry:
+                values[shell_id] = float(entry[key])
+
+        if not values:
+            logger.warning("Warning: no %s data found.", quantity)
+            return self
+
+        self._backend.render_shell_scalar_field(self._shells, values)
+        return self
+
     # ── Highlighting ─────────────────────────────────────────────────
 
     def _model_diagonal(self) -> float:
@@ -852,8 +894,21 @@ class ModelViewer:
         self._backend.clear_category("force_flags")
         return self
 
+    def clear_shell_forces(self) -> "ModelViewer":
+        """Remove the shell scalar-field overlay, leaving the model itself drawn.
+
+        The sibling of :meth:`clear_forces`: a shell overlay, a flag diagram and
+        a deformed shape are independent, so toggling one off must not disturb
+        the others.
+
+        Returns:
+            ``self`` for chaining.
+        """
+        self._backend.clear_category("shell_forces")
+        return self
+
     def clear_results(self) -> "ModelViewer":
-        """Remove every results overlay — the deformed shape and force flags.
+        """Remove every results overlay — the deformed shape, force flags and shells.
 
         The model, the node cloud and the annotations are untouched: this clears
         what a *results* action put there, which is what a "clear results"
@@ -864,6 +919,7 @@ class ModelViewer:
         """
         self.clear_deformed()
         self.clear_forces()
+        self.clear_shell_forces()
         return self
 
     def annotate(

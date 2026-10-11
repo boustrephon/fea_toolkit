@@ -69,6 +69,7 @@ DISPLAY_FIELDS = frozenset(
     (
         *_DISPLAY_NUMERIC_FIELDS,
         "force_quantity",
+        "shell_quantity",
         "restraint_style",
         "show_extruded",
         "extruded_detail",
@@ -96,6 +97,8 @@ class DisplaySettings:
         force_scale: Force-diagram size as % of the model diagonal, 0.1–1000.0.
         force_quantity: SAP local-DOF label for the drawn end-force component
             (a key of :data:`fea_toolkit.model.sap_data.FORCE_QUANTITY_LABELS`).
+        shell_quantity: Shell resultant label for the drawn area overlay (a key
+            of :data:`fea_toolkit.model.sap_data.SHELL_FORCE_QUANTITY_LABELS`).
         restraint_style: Support-symbol style — ``"block"`` (plates and discs,
             the default) or ``"arrow"`` (arrows and curls).
         show_extruded: Draw each frame as an extruded solid (its cross-section
@@ -114,6 +117,7 @@ class DisplaySettings:
     deformed_scale: float = 10.0
     force_scale: float = 10.0
     force_quantity: str = "M3"
+    shell_quantity: str = "Nxy"
     restraint_style: str = "block"
     show_extruded: bool = False
     extruded_detail: str = "plates"
@@ -173,6 +177,18 @@ def resolve_display(config: Any = None) -> "tuple[DisplaySettings, list[str]]":
             )
         else:
             overrides["force_quantity"] = label
+
+    if "shell_quantity" in settings:
+        label = str(settings["shell_quantity"])
+        from ...model.sap_data import SHELL_FORCE_QUANTITY_LABELS
+
+        if label not in SHELL_FORCE_QUANTITY_LABELS:
+            notes.append(
+                f"display setting 'shell_quantity' {label!r} is not a known shell "
+                f"resultant; using {DISPLAY_DEFAULTS.shell_quantity!r}"
+            )
+        else:
+            overrides["shell_quantity"] = label
 
     if "restraint_style" in settings:
         style = str(settings["restraint_style"])

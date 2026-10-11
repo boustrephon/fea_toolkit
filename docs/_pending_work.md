@@ -15,7 +15,7 @@ category: [planning]
 > `csm_test_model_plan.md`, `deprecation_plan.md` and `linting_fix_plan.md`
 > are ✅ complete (P9's Phase 3 triage resolved 2026-11-10 — baseline renewed,
 > the remaining diagnostics accepted as known-benign per `.clinerules` §11).
-> The **active front** is the workflow/GUI layer (P31, P35, P36).
+> The **active front** is the workflow/GUI layer (P31, P35).
 
 **Near term — finish the workflow layer.**
 
@@ -36,7 +36,8 @@ category: [planning]
    non-blocking — `sum_storey_forces`' `cut` mode already provided the member
    force transport.
 3. **P36** — shell (area) result display (repository seam → per-case
-   collection → renderer → GUI toggle).  Self-contained.
+   collection → renderer → GUI toggle).  ✅ **Landed 2026-12-10** — see the
+   P36 entry below.
 4. **P35** — named selections first, then the `open`/`close`/`save`/`select`
    document verbs.  **P31** (command palette) is independent input ergonomics
    and can run in parallel with any of the above.
@@ -1020,7 +1021,9 @@ helper), and the GUI's tree + selection-authoring surface.
 Source: the 2026-10-02 planning session (post-review); completes milestone 5's
 static-linear slice and pairs with the NPZ shell-force storage already landed.
 
-**Status: 🚧 Planned** — extraction and storage exist; the display seam does not.
+**Status: ✅ Landed (2026-12-10)** — the four seams below are in place:
+per-case ``shell_*`` schema arrays, the repository accessor pair, the in-memory
+collection, and the renderer + GUI overlay.
 
 **What.** Draw per-shell scalar fields (stress/force resultants — ``Nx``, ``Ny``,
 ``Nxy``, ``Mx``, ``My``, ``Mxy``) as a colour overlay on area elements, the
@@ -1047,6 +1050,20 @@ stress/damage-map precedent to reuse.  What is missing:
 ``io/results_schema.py``, ``io/npz_writer.py``, ``analysis/linear.py``,
 ``plotting/renderers/pyvista.py``, ``plotting/viewer.py``,
 ``gui/main_window.py`` and their tests.
+
+**Landed.** `ResultsRepository.shell_forces(case)` / `has_shell_forces(case)`
+mirror `element_forces` / `has_forces`; `STATIC_SHELL_ARRAYS` /
+`STATIC_SHELL_COMPONENT_ARRAYS` grow the static schema with the per-case
+`shell_*` block; `analysis/linear.run_static_cases` threads
+`extract_static_shell_forces` through per case and `npz_writer._collect_static`
+writes it; `ModelViewer.overlay_shell_forces` +
+`PyVistaRenderer.render_shell_scalar_field` draw the diverging colour overlay
+(reusing `_flag_rgb`), and `gui/main_window.py` adds the **Shell results**
+toggle + ``SHELL_FORCE_QUANTITY_LABELS`` selector (display setting
+``shell_quantity``).  Covered by `tests/test_results_repository.py`,
+`tests/test_npz_writer.py`, `tests/test_workflows.py::TestShellSubdivision`,
+`tests/test_renderers_pyvista.py::TestRenderShellScalarField`,
+`tests/test_gui_results.py::TestShellResults` and `tests/test_gui_settings.py`.
 
 #### P37 — Wire the missing-mass correction into the response-spectrum path
 

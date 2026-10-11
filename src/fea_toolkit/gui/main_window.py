@@ -905,6 +905,13 @@ class MainWindow(QMainWindow):
             checked=False,
             enabled=False,
         )
+        a["results.shell_forces"] = self._toggle_action(
+            "Shell results",
+            self._on_shell_forces_toggled,
+            tip="Draw the active load case's area stress/force resultants, in the chosen component",
+            checked=False,
+            enabled=False,
+        )
         a["results.animate"] = self._toggle_action(
             "Animate deformed shape",
             self._on_animate_toggled,
@@ -1002,6 +1009,7 @@ class MainWindow(QMainWindow):
         for key in (
             "results.deformed",
             "results.forces",
+            "results.shell_forces",
             "results.animate",
             "results.storey",
             "results.pushover_curve",
@@ -1062,6 +1070,22 @@ class MainWindow(QMainWindow):
         self._force_quantity.currentIndexChanged.connect(self._on_force_quantity_changed)
         self._force_quantity.setEnabled(False)  # until a view carries end forces
 
+        # Which area resultant a shell overlay shows.  The SAP stress-resultant
+        # names (Nx/Ny/Nxy/Mx/My/Mxy) read better than the schema's x/y keys;
+        # the combo holds the *label* and the handler passes the key underneath
+        # (see SHELL_FORCE_QUANTITY_LABELS).
+        from ..model.sap_data import SHELL_FORCE_QUANTITY_LABELS
+
+        self._shell_quantity = QComboBox(self)
+        self._shell_quantity.setObjectName("shell_quantity")
+        for label in SHELL_FORCE_QUANTITY_LABELS:
+            self._shell_quantity.addItem(label)
+        self._shell_quantity.setCurrentText(self._display.shell_quantity)
+        self._shell_quantity.setToolTip("Area resultant drawn as a shell overlay")
+        self._shell_quantity.setStatusTip("Area resultant drawn as a shell overlay")
+        self._shell_quantity.currentIndexChanged.connect(self._on_shell_quantity_changed)
+        self._shell_quantity.setEnabled(False)  # until a view carries shell resultants
+
         # Display quality knobs.  Opacity is an actor property, so it updates in
         # place; shrink is geometry and needs the model redrawn — the two are
         # wired differently for that reason.
@@ -1091,6 +1115,7 @@ class MainWindow(QMainWindow):
                 "@deformed_scale": ("Deform %", self._deformed_scale),
                 "@force_scale": ("Flags %", self._force_scale),
                 "@force_quantity": ("Force", self._force_quantity),
+                "@shell_quantity": ("Shell", self._shell_quantity),
                 "@shell_opacity": ("Shells", self._shell_opacity),
                 "@shrink": ("Shrink", self._shrink),
             }
@@ -1146,6 +1171,9 @@ class MainWindow(QMainWindow):
             "results.forces",
             "@force_scale",
             "@force_quantity",
+            None,
+            "results.shell_forces",
+            "@shell_quantity",
             None,
             "@shell_opacity",
             "@shrink",
@@ -1404,6 +1432,7 @@ class MainWindow(QMainWindow):
             "deformed": self._actions["results.deformed"].isChecked(),
             "animate": self._actions["results.animate"].isChecked(),
             "forces": self._actions["results.forces"].isChecked(),
+            "shell_forces": self._actions["results.shell_forces"].isChecked(),
         }
         self._stop_animation()
         self._backend.clear()
@@ -1504,6 +1533,7 @@ class MainWindow(QMainWindow):
         self._set_toggle_checked("results.animate", False)
         self._set_toggle_checked("results.deformed", False)
         self._sync_force_toggles(False)
+        self._set_toggle_checked("results.shell_forces", False)
 
     def _reapply_results_overlay(self, intent: dict) -> None:
         """Redraw the results overlay the user had on, for the newly shown view.
@@ -1521,6 +1551,8 @@ class MainWindow(QMainWindow):
             self._on_animate_toggled(True)
         if intent.get("forces") and self._actions["results.forces"].isEnabled():
             self._on_forces_toggled(True)
+        if intent.get("shell_forces") and self._actions["results.shell_forces"].isEnabled():
+            self._on_shell_forces_toggled(True)
 
     def _preferred_open_view(self, saved_key: Optional[str]) -> Optional[Any]:
         """The view a reopened project shows first: geometry, not a results view.
@@ -1800,6 +1832,13 @@ class MainWindow(QMainWindow):
         self._actions["results.forces"].setEnabled(has_forces)
         self._actions["view.show_forces"].setEnabled(has_forces)
         self._force_quantity.setEnabled(has_forces)
+        # The shell overlay is enabled exactly when the archive recorded shell
+        # resultants — and its quantity selector is greyed with it.
+        has_shell_forces = (
+            repository is not None and bool(case) and repository.has_shell_forces(case)
+        )
+        self._actions["results.shell_forces"].setEnabled(has_shell_forces)
+        self._shell_quantity.setEnabled(has_shell_forces)
         # Saving needs a result to write — the active view decides.
         self._actions["file.save_results"].setEnabled(repository is not None)
 
@@ -1884,6 +1923,8 @@ class MainWindow(QMainWindow):
         self._set_toggle_checked("results.deformed", False)
         self._clear_forces()
         self._sync_force_toggles(False)
+        self._clear_shell_forces()
+        self._set_toggle_checked("results.shell_forces", False)
         self.log("Cleared the results overlay.")
 
     def _active_results_source(self) -> tuple[Any, str]:
@@ -2126,6 +2167,60 @@ class MainWindow(QMainWindow):
         """Remove the force-flag overlay, leaving the model itself drawn."""
         if self._viewer is not None:
             self._viewer.clear_forces()
+
+    def _on_shell_forces_toggled(self, checked: bool) -> None:
+        """**Results ▸ Shell results**: colour areas by the active case's resultants.
+
+        The shell counterpart of the force-flag diagram: each area element is
+        coloured by the chosen resultant on the same diverging scale.  The
+        chosen quantity is a *label* (``Nx``/``Ny``/``Nxy``/``Mx``/``My``/
+        ``Mxy``) read through
+        :data:`~fea_toolkit.model.sap_data.SHELL_FORCE_QUANTITY_LABELS`.
+
+        Args:
+            checked: Whether the overlay should now be drawn.
+        """
+        if not checked:
+            self._clear_shell_forces()
+            return
+
+        shell_forces = self._active_shell_forces()
+        if not shell_forces:
+            self.log("No shell resultants in this view — nothing to draw.", "error")
+            self._set_toggle_checked("results.shell_forces", False)
+            return
+
+        from ..model.sap_data import SHELL_FORCE_QUANTITY_LABELS
+
+        label = self._shell_quantity.currentText()
+        self._viewer.overlay_shell_forces(
+            shell_forces,
+            quantity=SHELL_FORCE_QUANTITY_LABELS.get(label, label),
+        )
+        self._viewer.show()
+        self.log(f"Shell results: {label}.")
+
+    def _on_shell_quantity_changed(self, _index: int) -> None:
+        """Re-draw the shell overlay after the resultant changed.
+
+        Only when it is already on — choosing a resultant must not *start*
+        drawing, the same rule the force quantity selector follows.
+        """
+        if self._actions["results.shell_forces"].isChecked():
+            self._clear_shell_forces()
+            self._on_shell_forces_toggled(True)
+
+    def _active_shell_forces(self) -> dict:
+        """``{shell_id: {component: value}}`` for the active results view, else ``{}``."""
+        repository, case = self._active_results_source()
+        if repository is None or not case:
+            return {}
+        return repository.shell_forces(case)
+
+    def _clear_shell_forces(self) -> None:
+        """Remove the shell scalar-field overlay, leaving the model itself drawn."""
+        if self._viewer is not None:
+            self._viewer.clear_shell_forces()
 
     def _set_toggle_checked(self, key: str, checked: bool) -> None:
         """Set a results toggle without re-entering its handler.

@@ -90,6 +90,48 @@ class TestRenderForceFlags:
                 renderer.plotter.close()
 
 
+class TestRenderShellScalarField:
+    """``PyVistaRenderer.render_shell_scalar_field`` colours each shell face."""
+
+    def test_it_builds_one_overlay_actor(self):
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_shell_scalar_field([_shell()], {"1": 3.0})
+            assert len(renderer._actors) == 1
+            assert len(renderer.actors("shell_forces")) == 1
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+        assert renderer._actors == []
+
+    def test_a_shell_without_a_value_is_grey(self):
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_shell_scalar_field([_shell("1"), _shell("2")], {"1": 6.0})
+            colors = np.asarray(
+                renderer.actors("shell_forces")[0].mapper.dataset.cell_data["rgb"], dtype=float
+            )
+            assert colors.shape == (2, 3)
+            # "1" is the max value → saturated red; "2" is missing → grey.
+            assert colors[0] == pytest.approx([1.0, 0.1, 0.0], abs=1e-2)
+            assert colors[1] == pytest.approx([0.7, 0.7, 0.7], abs=1e-2)
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_empty_shells_is_a_noop(self):
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        renderer.render_shell_scalar_field([], {"1": 1.0})
+        assert renderer._actors == []
+        assert renderer._plotter is None
+
+
 class TestRenderExtrudedFrames:
     """``PyVistaRenderer.render_extruded_frames`` builds one non-pickable actor."""
 

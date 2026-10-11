@@ -53,6 +53,18 @@ def test_unknown_force_quantity_falls_back_to_the_default():
     assert any("force_quantity" in note for note in notes)
 
 
+def test_a_known_shell_quantity_is_accepted():
+    settings, notes = resolve_display({"shell_quantity": "Mx"})
+    assert settings.shell_quantity == "Mx"
+    assert notes == []
+
+
+def test_unknown_shell_quantity_falls_back_to_the_default():
+    settings, notes = resolve_display({"shell_quantity": "NOPE"})
+    assert settings.shell_quantity == DISPLAY_DEFAULTS.shell_quantity
+    assert any("shell_quantity" in note for note in notes)
+
+
 def test_restraint_style_defaults_to_block():
     assert DISPLAY_DEFAULTS.restraint_style == "block"
 

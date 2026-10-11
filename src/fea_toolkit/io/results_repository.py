@@ -33,6 +33,7 @@ from .results_schema import (
     STATIC_FORCE_ARRAYS,
     STATIC_LOCAL_FORCE_ARRAYS,
     STATIC_NODAL_ARRAYS,
+    STATIC_SHELL_COMPONENT_ARRAYS,
 )
 
 __all__ = ["NpzResultsRepository", "ResultsRepository", "mesh_model_from_geometry"]
@@ -43,6 +44,12 @@ __all__ = ["NpzResultsRepository", "ResultsRepository", "mesh_model_from_geometr
 #: rather than parsed out of the schema names, so the two lists fail loudly
 #: side by side instead of one silently deriving from the other.
 _FORCE_COMPONENTS = ("fx", "fy", "fz", "mx", "my", "mz")
+
+#: Shell resultants (membrane + bending per unit width), in the array spelling
+#: used both by ``extract_static_shell_forces`` and by the per-case ``shell_*``
+#: block.  Spelled out (not derived from the schema names) so the two lists
+#: fail loudly side by side — the same rule as :data:`_FORCE_COMPONENTS`.
+_SHELL_COMPONENTS = ("fx", "fy", "fxy", "mx", "my", "mxy")
 
 
 def _array_length(arrays: dict, name: str) -> int:
@@ -436,6 +443,58 @@ class ResultsRepository(ABC):
             return str(np.asarray(value).ravel()[0]) == "local"
         except (IndexError, TypeError, ValueError):
             return False
+
+    def has_shell_forces(self, case: str) -> bool:
+        """Whether *case* carries shell (area) resultants — the cheap pre-check.
+
+        The counterpart of :meth:`has_forces` for shell displays: shell force
+        recording is optional (only models whose areas are created as shell
+        elements produce them), so a caller deciding whether to *offer* the
+        overlay asks here rather than building the dict.
+
+        Args:
+            case: Static load-case label, as in :meth:`cases`.
+
+        Returns:
+            ``True`` when any per-case shell resultant array is present for
+            *case*.
+        """
+        arrays = self.arrays_for(case)
+        return any(name in arrays for name in STATIC_SHELL_COMPONENT_ARRAYS)
+
+    def shell_forces(self, case: str) -> dict:
+        """``{shell_id: {component: value}}`` for *case* — a shell overlay's input.
+
+        Reads the per-case ``shell_*`` block and re-keys it by ``shell_sap_id``,
+        the same shape :meth:`element_forces` gives frame consumers.  The
+        component keys are ``fx``/``fy``/``fxy`` (membrane) and
+        ``mx``/``my``/``mxy`` (bending), matching
+        :meth:`~fea_toolkit.opensees._runner_static.AnalysisBuilder.extract_static_shell_forces`.
+
+        Args:
+            case: Static load-case label, as in :meth:`cases`.
+
+        Returns:
+            ``{shell_id: {component: float}}`` in model units, one entry per
+            shell the archive covers with at least one component.  Empty when
+            the archive recorded no shell forces for *case* — a normal state,
+            not an error, so callers report it rather than raising.
+        """
+        arrays = self.arrays_for(case)
+        if not any(name in arrays for name in STATIC_SHELL_COMPONENT_ARRAYS):
+            return {}
+
+        shell_ids = _texts(arrays.get("shell_sap_id"))
+        forces: dict = {}
+        for index, shell_id in enumerate(shell_ids):
+            entry: dict = {}
+            for component in _SHELL_COMPONENTS:
+                value = _at_float(arrays.get(f"shell_{component}"), index)
+                if value is not None:
+                    entry[component] = value
+            if entry:
+                forces[shell_id] = entry
+        return forces
 
     @abstractmethod
     def table(self, *columns: str) -> dict:
