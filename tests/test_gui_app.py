@@ -114,6 +114,11 @@ def test_camera_actions_change_the_view(window):
     assert window._interactor.camera_position != before
 
 
+def test_animate_toggle_is_on_the_view_toolbar(window):
+    """The Animate toggle sits beside Deformed shape on the view toolbar."""
+    assert window._actions["results.animate"] in window._toolbar_view.actions()
+
+
 def test_open_path_renders_a_fixture(window):
     """``open_path`` parses a real .s2k and displays it (dialog-free)."""
     assert _FIXTURE.exists()

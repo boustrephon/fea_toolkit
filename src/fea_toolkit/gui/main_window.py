@@ -1168,6 +1168,7 @@ class MainWindow(QMainWindow):
             None,
             "results.deformed",
             "@deformed_scale",
+            "results.animate",
             "results.forces",
             "@force_scale",
             "@force_quantity",
