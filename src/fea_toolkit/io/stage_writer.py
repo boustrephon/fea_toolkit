@@ -22,8 +22,8 @@ Usage::
 
     from fea_toolkit.io.stage_writer import write_model_stages
 
-    write_model_stages(\"model.h5\", sap=md, mesh=mesh, config=config,
-                       static_results=static, fmt=\"h5\")
+    write_model_stages("model.h5", sap=md, mesh=mesh, config=config,
+                       static_results=static, fmt="h5")
 """
 
 from __future__ import annotations
@@ -276,7 +276,7 @@ def write_model_stages(
             (written under ``rs/node_*``).
         rs_shell_forces: Optional CQC-combined RS shell resultants from
             ``extract_rs_shell_forces()`` (written under ``rs/shell_*``).
-        fmt: ``\"npz\"`` (default) or ``\"h5\"``.
+        fmt: ``"npz"`` (default) or ``"h5"``.
         geometry: Write the lightweight geometry arrays (Rhino / PyVista
             fast path).
         dictionaries: Write the self-describing dictionary blocks
@@ -290,7 +290,7 @@ def write_model_stages(
         length_unit: Length-unit label for metadata.  ``None`` derives it
             from the model units.
         forces_coordinate_system: Coordinate system of recorded frame
-            end-forces (``\"local\"``).
+            end-forces (``"local"``).
         source_file: Optional source path recorded for provenance.
 
     Returns:
@@ -298,9 +298,10 @@ def write_model_stages(
 
     Raises:
         ValueError: If neither *sap* nor *mesh* is provided, *fmt* is
-            not ``\"npz\"`` / ``\"h5\"``, or *rs_element_forces* /
-            *rs_nodal_displacements* are supplied without *rs_results*
-            (they are sub-blocks of the ``rs/*`` stage).
+            not ``"npz"`` / ``"h5"``, or *rs_element_forces* /
+            *rs_nodal_displacements* / *rs_shell_forces* are supplied
+            without *rs_results* (they are sub-blocks of the ``rs/*``
+            stage).
     """
     if sap is None and mesh is None:
         raise ValueError("write_model_stages requires at least one of 'sap' or 'mesh'")

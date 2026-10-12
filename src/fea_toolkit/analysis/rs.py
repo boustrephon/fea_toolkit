@@ -46,10 +46,17 @@ def run_response_spectrum_analysis(
         record_frame_forces: When ``True`` (the default), extract the
             CQC-combined per-element local end forces (the ``rs/elem_*`` block
             consumed by the RS force diagram) and store them under
-            ``data["element_forces"]``.
+            ``data["element_forces"]``.  Costs an extra frame extraction pass:
+            with the default ``element_extraction="recorder"`` this is a
+            single all-modes run behind an Element recorder (read back from
+            one file, roughly ``n_modes`` times fewer Python/extension calls
+            than the per-mode loop).  Set to ``False`` to skip the pass.
         record_shell_forces: When ``True`` (the default), extract the
             CQC-combined per-shell stress resultants (the ``rs/shell_*`` block)
-            and store them under ``data["shell_forces"]``.
+            and store them under ``data["shell_forces"]``.  Costs one
+            ``ops.eleResponse(tag, "section", 1, "forces")`` call per
+            active shell per mode (``n_modes × n_shells`` calls).  Set to
+            ``False`` to skip this loop.
         element_extraction: Per-mode force-extraction strategy passed to
             :meth:`~fea_toolkit.opensees._runner_rs.AnalysisBuilder.extract_element_rs_forces`
             — ``"recorder"`` (the default; one all-modes pass behind an Element
