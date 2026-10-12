@@ -57,6 +57,32 @@ scoping primitive (P35's `selections` field must round-trip through
 unchanged through P32; heavy imports stay inside the verb functions so
 `import fea_toolkit.workflow` never loads OpenSees.
 
+### GUI/workflow follow-ups — the nine-item batch (2026-12-10)
+
+A review of the workflow/GUI layer produced a nine-item follow-up list.
+Status as of 2026-12-10:
+
+| # | Item | Status |
+|---|---|---|
+| 1 | RS frame + shell forces (record flags, recorder extraction, `rs/shell_*` block) | ✅ Landed 2026-12-10 |
+| 2 | Load/reaction summary table (static sums, RS base shear, summed reactions) | ⬜ pending |
+| 3 | Shell deformation — static / RS / modal (pushover shell animation deferred) | ⬜ pending |
+| 4 | `results.animate` toggle on the view toolbar | ✅ Landed 2026-12-10 |
+| 5 | Pushover profiling (part a) | ⬜ pending |
+| 6 + 7 | Recipe run-state markers (`Step.enabled` / `Step.status`) | ✅ Landed 2026-12-10 |
+| 8 | Document benign GUI console warnings (VTK / macOS) | ✅ Landed 2026-12-10 |
+| 9 | Named modal analyses + RS/pushover `modal_case` auto-resolution | ✅ Landed 2026-12-10 |
+
+**Item 1 detail (RS forces).**  The `response_spectrum` verb gained
+`record_frame_forces` / `record_shell_forces` (default `True`);
+`analysis/rs.py` wires `extract_element_rs_forces(extraction="recorder")` and
+the new `AnalysisBuilder.extract_rs_shell_forces()` into the result's `data`
+(`element_forces` / `shell_forces`), each best-effort; and the `rs/shell_*`
+block (self-indexed by `rs/shell_sap_id`, combined with the rule named by
+`rs/shell_combination`) joins `RS_ARRAYS` and the `write_results` /
+`write_model_stages` writers via `collect_rs_shell_force_arrays`.  The GUI
+project bundle threads both blocks through `collect_project_results`.
+
 ## PENDING (active — not yet done)
 
 > Priority-ordered register (maintained 2026-10-02).  Every pending item
