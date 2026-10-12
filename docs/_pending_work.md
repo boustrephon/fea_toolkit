@@ -83,6 +83,51 @@ block (self-indexed by `rs/shell_sap_id`, combined with the rule named by
 `write_model_stages` writers via `collect_rs_shell_force_arrays`.  The GUI
 project bundle threads both blocks through `collect_project_results`.
 
+**Upcoming items — detailed plan (2026-12-10).**
+
+**Item 2 — analysis summary table.**  `analysis_load_reaction_summary`
+(`analysis/linear.py:291`, pandas-free, tested) already renders applied vs
+reaction for static patterns + the RS CQC base shear/moment, but it *re-solves*
+the domain and is not wired to a GUI view — the `load_verification` verb
+(`workflow/verbs/load_verification.py`) still wraps the older pandas-backed
+`static_load_verification()`, and the GUI's `Analysis ▸ Run` path
+(`run_case_set`) discards the summed-reaction rows `run_static_cases` already
+computes.  Plan: (2.1) capture applied load-pattern totals **during** the
+solve — after `run_static_analysis` read `ab._sw_load_totals` /
+`_gravity_load_totals` / `_joint_load_totals` / `_dist_load_totals` and store
+`{case, applied, summed}` per case via a `summaries_out` side-channel on
+`run_static_cases`, threaded through `run_case_set`'s return; (2.2) split
+`analysis_load_reaction_summary` into a pure
+`render_load_reaction_rows(md, static_summaries, rs_results, total_weight,
+seismic_coefficient)` formatter plus the existing re-solving wrapper (delegating
+to it, so `tests/test_analysis_summary.py` still passes); (2.3) rewire the
+`load_verification` verb to read the solved `cases` summaries + `context.
+results["rs"]` and emit the `Table`, and register the same table from the
+non-recipe run path — one spelling, per anti-pattern 17.
+
+**Item 3 — shell deformation (static / RS / modal).**  Modal shell deformation
+already works (`npz_to_pyvista_modal_mesh` / `plot_mode_animation`); static
+shell displacement is computable (`npz_to_pyvista_shell_mesh(deformed_case=…)`),
+and RS now persists `node_displacements` + the `rs/node_*` block (Item 1).  The
+gap is the GUI results viewer: shells are not deformed for a selected static/RS
+case and the `animate` toggle does not move shells.  Plan: (3.1) apply the
+case's displacement field to shell vertices in the viewer (reuse
+`npz_reader._shift_shell`, not a new shift); (3.2) RS views pass
+`node_displacements` / `rs/node_*` through the same path; (3.3) extend the
+`animate` toggle so the sinusoidal amplitude reaches shells; (3.4) confirm the
+project bundle round-trips shell deformation.  Pushover shell animation is
+**deferred**.
+
+**Item 5(a) — pushover profiling.**  No runner change — measurement only.
+`run_pushover_analysis` (`_runner_pushover.py`) loops steps calling `_record_step`,
+whose per-step `ops.eleResponse` (frame `localForces` + shell `section 1 forces`)
+and `ops.nodeDisp` are the Python/extension-call hotspot.  Plan: profile a
+representative mid-size pushover (frames + shells, forces on) with `cProfile`
+(+ `viztracer` if available), then record a hotspots table + conclusion in
+`docs/dev_notes.md` / here, informing whether 5(b) parallelization/thinning is
+worthwhile (cheap knobs already exist: `pushover_step_stride`,
+`pushover_record_shell_forces=False`).
+
 ## PENDING (active — not yet done)
 
 > Priority-ordered register (maintained 2026-10-02).  Every pending item
