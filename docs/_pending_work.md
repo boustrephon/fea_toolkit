@@ -65,7 +65,7 @@ Status as of 2026-12-10:
 | # | Item | Status |
 |---|---|---|
 | 1 | RS frame + shell forces (record flags, recorder extraction, `rs/shell_*` block) | ✅ Landed 2026-12-10 |
-| 2 | Load/reaction summary table (static sums, RS base shear, summed reactions) | ✅ Landed 2026-12-10 |
+| 2 | Load/reaction summary table (static sums, RS base shear, summed reactions) | ✅ Landed 2026-10-12 |
 | 3 | Shell deformation — static / RS / modal (pushover shell animation deferred) | ⬜ pending |
 | 4 | `results.animate` toggle on the view toolbar | ✅ Landed 2026-12-10 |
 | 5 | Pushover profiling (part a) | ⬜ pending |
