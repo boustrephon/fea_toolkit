@@ -79,6 +79,9 @@ def run_static(context: StepContext, step: Step) -> list[StepResult]:
         should_cancel=context.cancel,
     )
     context.case_results.update(raw)
+    # Per-case applied + summed summaries — what a later load_verification step
+    # formats into the load/reaction table without a second solve.
+    context.results["static_summaries"] = result["summaries"]
 
     context.log(
         f"Static cases: {len(result['cases'])} solved ({case_names})"

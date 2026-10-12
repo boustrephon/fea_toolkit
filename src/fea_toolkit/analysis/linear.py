@@ -288,6 +288,41 @@ def _rs_analysis_label(key) -> str:
     return f"RS-{k}"
 
 
+def _applied_load_totals(ab) -> dict[str, dict[str, float]]:
+    """Merge a builder's per-source applied-load totals into one per-pattern dict.
+
+    :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.create_loads`
+    populates four ``{pattern: {fx, fy, fz, mx, my, mz}}`` dicts — self-weight,
+    gravity, joint and distributed — each already scaled by the pattern factor.
+    This merges them into ``{pattern: {6 components}}`` so callers can read the
+    total applied load per pattern (or per case) without knowing which source
+    contributed.
+
+    Args:
+        ab: A built :class:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder`
+            whose loads were just created (its ``_*_load_totals`` are fresh).
+
+    Returns:
+        ``{pattern: {fx, fy, fz, mx, my, mz}}`` — empty when the builder has
+        recorded no loads.
+    """
+    applied: dict[str, dict[str, float]] = {}
+    for src in (
+        getattr(ab, "_sw_load_totals", {}),
+        getattr(ab, "_gravity_load_totals", {}),
+        getattr(ab, "_joint_load_totals", {}),
+        getattr(ab, "_dist_load_totals", {}),
+    ):
+        for pname, t in (src or {}).items():
+            d = applied.setdefault(pname, dict.fromkeys(("fx", "fy", "fz", "mx", "my", "mz"), 0.0))
+            for k in d:
+                try:
+                    d[k] += float(t.get(k, 0.0))
+                except (TypeError, ValueError):
+                    continue
+    return applied
+
+
 def analysis_load_reaction_summary(
     md,
     mesh_model,
@@ -370,6 +405,65 @@ def analysis_load_reaction_summary(
     if config:
         ab_config.update(config)
 
+    # ── Static section: collect applied + summed per load pattern ──
+    ab = AnalysisBuilder(mesh_model, ab_config)
+    ab.build_domain()
+    # Apply ALL patterns once so the per-pattern applied totals
+    # (_sw/_gravity/_joint/_dist) are populated for every pattern.
+    ab.create_loads()
+    applied = _applied_load_totals(ab)
+
+    static_summaries: list[dict] = []
+    for pname in sorted(applied, key=str.casefold):
+        result = ab.run_static_analysis(pattern_scales={pname: 1.0}, extract_reactions=True)
+        summed = sum_reactions_with_overturning(result.get("reactions", {}), mesh_model.nodes)
+        static_summaries.append({"analysis": pname, "applied": applied[pname], "summed": summed})
+
+    return render_load_reaction_rows(
+        md,
+        static_summaries,
+        rs_results=rs_results,
+        total_weight=total_weight,
+        seismic_coefficient=seismic_coefficient,
+    )
+
+
+def render_load_reaction_rows(
+    md,
+    static_summaries: list[dict],
+    *,
+    rs_results: Optional[dict] = None,
+    total_weight: Optional[float] = None,
+    seismic_coefficient: Optional[float] = None,
+) -> list[dict]:
+    """Format already-collected applied/reaction summaries into display rows.
+
+    The pure, pandas-free formatting half of
+    :func:`analysis_load_reaction_summary`: it takes per-analysis
+    ``{analysis, applied, summed}`` entries — collected either by the re-solving
+    wrapper above (one per load pattern) or by :func:`run_static_cases` during a
+    solve (one per solved case) — plus the RS results, and returns one
+    unit-labelled row dict per analysis.  This is what lets the GUI's
+    load/reaction table be driven from results the analyses already produced
+    rather than a second pass.
+
+    Args:
+        md: Parsed :class:`~fea_toolkit.model.sap_data.SAPModelData` — supplies
+            the unit labels (never a hardcoded force unit).
+        static_summaries: ``[{"analysis": str, "applied": {fx, fy, fz, mx, my,
+            mz}, "summed": {fx, fy, fz, mx, my, mz}}, ...]`` in display order.
+        rs_results: Optional ``{direction: rs_dict}`` whose entries carry
+            ``base_reactions_cqc`` / ``base_shear_cqc`` / ``base_moment_cqc``.
+        total_weight: Optional total seismic weight for the ``Expected V``
+            sanity column.
+        seismic_coefficient: Optional dimensionless base-shear coefficient
+            ``α = Sa(T1) / g``.
+
+    Returns:
+        A ``list[dict]`` — static rows first (in *static_summaries* order),
+        then RS rows in *rs_results* order — with the column layout documented
+        on :func:`analysis_load_reaction_summary`.
+    """
     fu = md.units.get("F", "?")
     lu = md.units.get("L", "?")
     mu = f"{fu}·{lu}"
@@ -384,42 +478,22 @@ def analysis_load_reaction_summary(
 
     rows: list[dict] = []
 
-    # ── Static section: applied vs reaction per load pattern ──────
-    ab = AnalysisBuilder(mesh_model, ab_config)
-    ab.build_domain()
-    # Apply ALL patterns once so the per-pattern applied totals
-    # (_sw/_gravity/_joint/_dist) are populated for every pattern.
-    ab.create_loads()
-
-    applied: dict[str, dict[str, float]] = {}
-    for _src in (
-        getattr(ab, "_sw_load_totals", {}),
-        getattr(ab, "_gravity_load_totals", {}),
-        getattr(ab, "_joint_load_totals", {}),
-        getattr(ab, "_dist_load_totals", {}),
-    ):
-        for pname, t in _src.items():
-            d = applied.setdefault(pname, dict.fromkeys(("fx", "fy", "fz", "mx", "my", "mz"), 0.0))
-            for _k in d:
-                d[_k] += _clean(t.get(_k, 0.0))
-
-    for pname in sorted(applied, key=str.casefold):
-        a = applied[pname]
-        result = ab.run_static_analysis(pattern_scales={pname: 1.0}, extract_reactions=True)
-        summed = sum_reactions_with_overturning(result.get("reactions", {}), mesh_model.nodes)
+    for entry in static_summaries:
+        a = entry.get("applied", {})
+        summed = entry.get("summed", {})
         rows.append(
             {
-                "Analysis": pname,
+                "Analysis": entry.get("analysis", ""),
                 "Type": "Static",
-                f"Applied Fx ({fu})": round(_clean(a["fx"]), 1),
-                f"Applied Fy ({fu})": round(_clean(a["fy"]), 1),
-                f"Applied Fz ({fu})": round(_clean(a["fz"]), 1),
+                f"Applied Fx ({fu})": round(_clean(a.get("fx", 0.0)), 1),
+                f"Applied Fy ({fu})": round(_clean(a.get("fy", 0.0)), 1),
+                f"Applied Fz ({fu})": round(_clean(a.get("fz", 0.0)), 1),
                 f"Reaction Fx ({fu})": round(_clean(summed.get("fx", 0.0)), 1),
                 f"Reaction Fy ({fu})": round(_clean(summed.get("fy", 0.0)), 1),
                 f"Reaction Fz ({fu})": round(_clean(summed.get("fz", 0.0)), 1),
-                f"Δ Fx ({fu})": round(_clean(a["fx"]) + _clean(summed.get("fx", 0.0)), 1),
-                f"Δ Fy ({fu})": round(_clean(a["fy"]) + _clean(summed.get("fy", 0.0)), 1),
-                f"Δ Fz ({fu})": round(_clean(a["fz"]) + _clean(summed.get("fz", 0.0)), 1),
+                f"Δ Fx ({fu})": round(_clean(a.get("fx", 0.0)) + _clean(summed.get("fx", 0.0)), 1),
+                f"Δ Fy ({fu})": round(_clean(a.get("fy", 0.0)) + _clean(summed.get("fy", 0.0)), 1),
+                f"Δ Fz ({fu})": round(_clean(a.get("fz", 0.0)) + _clean(summed.get("fz", 0.0)), 1),
                 f"Reaction Mx ({mu})": round(_clean(summed.get("mx", 0.0)), 1),
                 f"Reaction My ({mu})": round(_clean(summed.get("my", 0.0)), 1),
                 f"Reaction Mz ({mu})": round(_clean(summed.get("mz", 0.0)), 1),
@@ -520,6 +594,7 @@ def run_static_cases(
     *,
     config: Optional[dict] = None,
     raw_out: Optional[dict] = None,
+    summaries_out: Optional[list] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
     on_progress: Optional[Callable[[int, str, int], None]] = None,
     attempted: Optional[list[str]] = None,
@@ -556,6 +631,15 @@ def run_static_cases(
             as ``static_results``.  A case that **fails** contributes no entry,
             so ``set(attempted) - set(raw_out)`` is the set that did not
             converge (see *attempted*).
+        summaries_out: Optional list filled with one ``{"case": name,
+            "applied": {...}, "summed": {...}}`` entry per **solved** case —
+            ``applied`` is the case's factored applied-load totals (summed over
+            its patterns) and ``summed`` its summed base reactions with
+            overturning (the same 6-component dict
+            :func:`~fea_toolkit.utils.sum_reactions_with_overturning` returns).
+            This is the input :func:`render_load_reaction_rows` formats, so the
+            load/reaction summary table is driven from the solve itself rather
+            than a second pass.
         should_cancel: Optional zero-argument callable polled between cases; when
             it returns ``True`` the run stops and the rows collected so far are
             returned.
@@ -647,6 +731,22 @@ def run_static_cases(
             mx = summed["mx"]
             my = summed["my"]
             mz = summed["mz"]
+
+            # ── Applied vs reaction summary (load/reaction table) ────
+            # The builder's per-source totals were just (re)built for this
+            # case's patterns, so summing the case's own patterns gives the
+            # factored applied load — no second pass needed.
+            if summaries_out is not None:
+                applied = dict.fromkeys(("fx", "fy", "fz", "mx", "my", "mz"), 0.0)
+                totals = _applied_load_totals(ab)
+                for pname in patterns:
+                    t = totals.get(pname)
+                    if t:
+                        for k in applied:
+                            applied[k] += t[k]
+                summaries_out.append(
+                    {"case": case_name, "applied": applied, "summed": dict(summed)}
+                )
             disp = results.get("nodal_displacements", {})
             max_roof_disp = 0.0
             if disp:
@@ -761,21 +861,26 @@ def run_case_set(
 
     Returns:
         ``{"arrays": {name: ndarray}, "cases": [name, ...], "failed": [...],
-        "unreduced": [...], "cancelled": bool}`` — ``"failed"`` are the
-        *attempted* cases that did not solve, ``"unreduced"`` the combinations
-        that could not be formed from what did, and a case skipped by
-        cancellation is reported only through ``"cancelled"``.
+        "unreduced": [...], "cancelled": bool, "summaries": [...]}`` —
+        ``"failed"`` are the *attempted* cases that did not solve,
+        ``"unreduced"`` the combinations that could not be formed from what
+        did, a case skipped by cancellation is reported only through
+        ``"cancelled"``, and ``"summaries"`` is the per-solved-case
+        ``{"case", "applied", "summed"}`` list
+        :func:`render_load_reaction_rows` formats into the load/reaction table.
     """
     from ..io.npz_writer import results_arrays
     from .combinations import build_combination_results
 
     raw: dict = {} if raw_out is None else raw_out
     attempted: list[str] = []
+    summaries: list = []
     run_static_cases(
         mesh_model,
         cases,
         config=config,
         raw_out=raw,
+        summaries_out=summaries,
         should_cancel=should_cancel,
         on_progress=on_progress,
         attempted=attempted,
@@ -807,6 +912,7 @@ def run_case_set(
         "failed": sorted(set(attempted) - set(raw)),
         "unreduced": unreduced,
         "cancelled": cancelled,
+        "summaries": summaries,
     }
 
 

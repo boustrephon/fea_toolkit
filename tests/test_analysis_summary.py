@@ -12,6 +12,7 @@ from examples.sample_model import make_sample_model
 from fea_toolkit.analysis.linear import (
     _rs_analysis_label,
     analysis_load_reaction_summary,
+    render_load_reaction_rows,
 )
 from fea_toolkit.opensees.preprocessor import Preprocessor
 
@@ -153,3 +154,80 @@ def test_rs_expected_shear_sanity_is_opt_in(sample_md, sample_mesh):
     x = next(r for r in rows if r["Type"] == "Response Spectrum")
     assert x[f"Expected V ({fu})"] == 200.0  # total_weight × seismic_coefficient
     assert x["V ratio"] == 0.5  # |V| / Expected V
+
+
+def test_render_load_reaction_rows_formats_static_and_rs():
+    """``render_load_reaction_rows`` is the pure formatting half.
+
+    It takes pre-collected ``{analysis, applied, summed}`` summaries plus RS
+    results and produces the same unit-labelled rows as the re-solving wrapper —
+    no OpenSees domain, no second pass.
+    """
+    md = make_sample_model()
+    static_summaries = [
+        {
+            "analysis": "DEAD",
+            "applied": {"fx": 0.0, "fy": 0.0, "fz": -50.0, "mx": 0.0, "my": 0.0, "mz": 0.0},
+            "summed": {"fx": 0.0, "fy": 0.0, "fz": 50.0, "mx": 0.0, "my": 0.0, "mz": 0.0},
+        },
+    ]
+    rs = {
+        "X": {
+            "base_shear_cqc": 120.0,
+            "base_moment_cqc": 360.0,
+            "base_reactions_cqc": {
+                "fx": 120.0,
+                "fy": 0.0,
+                "fz": 0.0,
+                "mx": 0.0,
+                "my": 360.0,
+                "mz": 0.0,
+            },
+        },
+    }
+    rows = render_load_reaction_rows(md, static_summaries, rs_results=rs)
+
+    fu = md.units.get("F", "?")
+    mu = f"{fu}·{md.units.get('L', '?')}"
+    assert [r["Type"] for r in rows] == ["Static", "Response Spectrum"]
+    static_row = rows[0]
+    assert static_row["Analysis"] == "DEAD"
+    assert static_row[f"Δ Fz ({fu})"] == 0.0  # applied -50 + reaction +50
+    rs_row = rows[1]
+    assert rs_row["Analysis"] == "RS-X"
+    assert rs_row[f"Base shear V ({fu})"] == 120.0
+    assert rs_row[f"Base moment M ({mu})"] == 360.0
+
+
+def test_run_case_set_returns_applied_and_summed_summaries(sample_md, sample_mesh):
+    """``run_case_set`` returns per-case applied + summed summaries.
+
+    The load/reaction table is driven from the solve itself: each solved case
+    carries its factored applied totals and its summed base reactions, so the
+    summary needs no second pass.
+    """
+    import openseespy.opensees as ops
+
+    from fea_toolkit.analysis.linear import run_case_set
+
+    try:
+        result = run_case_set(
+            sample_md,
+            sample_mesh,
+            {"DEAD": {"DEAD": 1.0}, "WIND": {"WIND": 1.0}},
+        )
+    finally:
+        ops.wipe()
+
+    summaries = result["summaries"]
+    assert len(summaries) == 2
+    by_case = {s["case"]: s for s in summaries}
+    assert set(by_case) == {"DEAD", "WIND"}
+    for s in summaries:
+        assert set(s["applied"]) == {"fx", "fy", "fz", "mx", "my", "mz"}
+        assert set(s["summed"]) == {"fx", "fy", "fz", "mx", "my", "mz"}
+    # Self-weight DEAD case: applied vertical load is non-zero and its signed
+    # sum with the reaction is near zero (equilibrium).
+    dead = by_case["DEAD"]
+    assert abs(dead["applied"]["fz"]) > 0.0
+    assert abs(dead["applied"]["fz"] + dead["summed"]["fz"]) < 1e-6

@@ -4011,11 +4011,51 @@ class MainWindow(QMainWindow):
                 model=model,
                 activate=False,
             )
+
+        # ── Load/reaction summary table (driven from the solve) ─────
+        summaries = result.get("summaries") or []
+        if summaries and self._store is not None:
+            self._show_load_reaction_summary(self._store.raw(), summaries)
+
         self.log(f"Run complete: {len(cases)} case(s) available as views.")
 
         first = self._views.get(f"{_RESULTS_KEY_PREFIX}{cases[0]}")
         if first is not None:
             self._show_view(first, rebuild_tree=True)
+
+    def _show_load_reaction_summary(self, md: Any, summaries: list) -> None:
+        """Register the load/reaction summary table from a solve's summaries.
+
+        The per-case ``{case, applied, summed}`` entries the run already
+        produced are formatted (pandas-free) into one table view — no second
+        solve — mirroring the recipe ``load_verification`` step's output.
+        """
+        from ..analysis.linear import render_load_reaction_rows
+        from ..workflow.steps import Table
+
+        rows = render_load_reaction_rows(md, summaries)
+        if not rows:
+            return
+        columns = tuple(rows[0].keys())
+
+        def _cell(value):
+            if value is None:
+                return ""
+            if isinstance(value, bool):
+                return str(value)
+            if isinstance(value, float):
+                return f"{value:.1f}"
+            return str(value)
+
+        table = Table(
+            title="Load/reaction summary",
+            columns=columns,
+            rows=tuple(tuple(_cell(row[column]) for column in columns) for row in rows),
+        )
+        view = self._views.add_table(
+            _table_key(table.title), table.title, table, source="Analysis run"
+        )
+        self._show_view(view, rebuild_tree=True)
 
     def _analysis_failed(self, message: str) -> None:
         """Report a run failure, leaving the display alone."""

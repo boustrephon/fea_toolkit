@@ -1,11 +1,16 @@
 """The ``load_verification`` verb — applied loads vs base reactions.
 
-Wraps :func:`~fea_toolkit.analysis.linear.static_load_verification`, which builds
-the OpenSees domain once, applies every load pattern, runs a static solve per
-pattern, and compares the summed applied loads against the summed base reactions.
-The difference Δ should be near zero, confirming equilibrium — the same check the
-report's "Static load verification" table presents, surfaced as a ``table`` step
-so the GUI and a report share one computation.
+The **load/reaction summary** table: one row per solved static case (applied
+loads, summed base reactions, and the signed Δ equilibrium check) plus one row
+per response-spectrum direction (CQC base shear and overturning moment).
+
+When a preceding :mod:`~fea_toolkit.workflow.verbs.run_static` step has solved
+cases, the verb reads the per-case applied + summed summaries that step stored
+on the context and formats them with
+:func:`~fea_toolkit.analysis.linear.render_load_reaction_rows` — no second
+solve.  Otherwise it falls back to the re-solving
+:func:`~fea_toolkit.analysis.linear.analysis_load_reaction_summary` (one row per
+load pattern), so the step still works standalone after just a ``mesh``.
 """
 
 from typing import Any
@@ -29,12 +34,9 @@ LOAD_VERIFICATION_PARAMS: dict[str, ParamSpec] = {
 
 
 def _cell(value: Any) -> str:
-    """Render one cell as a string — floats to one decimal, everything else verbatim.
-
-    :func:`~fea_toolkit.analysis.linear.static_load_verification` already rounds
-    the applied/reaction/Δ values to one decimal place, so a fixed ``.1f`` keeps
-    that precision without scientific notation for large force totals.
-    """
+    """Render one cell as a string — floats to one decimal, ``None`` empty."""
+    if value is None:
+        return ""
     if isinstance(value, bool):
         return str(value)
     if isinstance(value, float):
@@ -42,41 +44,76 @@ def _cell(value: Any) -> str:
     return str(value)
 
 
+def _rs_result_dicts(context: StepContext) -> dict:
+    """``{direction: rs_result_dict}`` from the run's response-spectrum results.
+
+    Reads the per-direction results a
+    :mod:`~fea_toolkit.workflow.verbs.response_spectrum` step stored on
+    ``context.results["rs"]`` and unwraps each ``AnalysisResult`` to its
+    ``data["rs_result"]`` dict — the shape
+    :func:`~fea_toolkit.analysis.linear.render_load_reaction_rows` reads.
+    """
+    rs = context.results.get("rs") or {}
+    out: dict = {}
+    for direction, result in rs.items():
+        data = getattr(result, "data", None) or {}
+        rs_dict = data.get("rs_result") or {}
+        if isinstance(rs_dict, dict) and rs_dict:
+            out[str(direction).upper()] = rs_dict
+    return out
+
+
 def run_load_verification(context: StepContext, step: Step) -> list[StepResult]:
-    """Compare each load pattern's applied loads against its base reactions.
+    """Render the load/reaction summary across the run's analyses.
 
     Args:
         context: The run's working state.  ``model_data`` supplies the load
-            patterns; ``model`` must be the prepared topology (a ``mesh`` step
-            normally precedes this one).
-        step: The step to run; ``params["config"]`` overrides the builder.
+            patterns and unit labels; ``model`` must be the prepared topology
+            (a ``mesh`` step normally precedes this one).  When a ``run_static``
+            step has run, its per-case ``static_summaries`` and any
+            ``response_spectrum`` results are read from ``context.results``.
+        step: The step to run; ``params["config"]`` overrides the builder for
+            the standalone re-solve fallback.
 
     Returns:
-        One :data:`~fea_toolkit.workflow.steps.TABLE` result whose payload is the
-        applied/reaction/Δ comparison, one row per load pattern — or no result
-        when the model defines no load patterns.
+        One :data:`~fea_toolkit.workflow.steps.TABLE` result whose payload is
+        the applied/reaction/Δ comparison — or no result when there is nothing
+        to check.
 
     Raises:
         ValueError: If a parameter is not declared by this verb.
     """
-    from ...analysis.linear import static_load_verification
+    from ...analysis.linear import analysis_load_reaction_summary, render_load_reaction_rows
 
     params: dict[str, Any] = validate_params(
         "load_verification", LOAD_VERIFICATION_PARAMS, step.params
     )
-    if not context.model_data.load_patterns:
-        context.log("Load verification: the model defines no load patterns — nothing to check")
+    md = context.model_data
+    rs_results = _rs_result_dicts(context)
+
+    if not md.load_patterns and not rs_results:
+        context.log("Load/reaction summary: the model has no loads to check")
         return []
 
-    frame = static_load_verification(context.model_data, context.model, params["config"] or None)
+    static_summaries = context.results.get("static_summaries")
+    if static_summaries:
+        # Drive from the solve a preceding run_static step already did.
+        rows = render_load_reaction_rows(md, static_summaries, rs_results=rs_results or None)
+    else:
+        # Standalone: re-solve one pattern at a time (folds in any RS that ran).
+        rows = analysis_load_reaction_summary(
+            md, context.model, config=params["config"] or None, rs_results=rs_results or None
+        )
 
-    rows = tuple(
-        tuple(_cell(cell) for cell in row) for row in frame.itertuples(index=False, name=None)
-    )
+    if not rows:
+        context.log("Load/reaction summary: nothing to check")
+        return []
+
+    columns = tuple(rows[0].keys())
     table = Table(
-        title="Load verification",
-        columns=tuple(str(column) for column in frame.columns),
-        rows=rows,
+        title="Load/reaction summary",
+        columns=columns,
+        rows=tuple(tuple(_cell(row[column]) for column in columns) for row in rows),
     )
-    context.log(f"Load verification: {len(frame)} load pattern(s) checked")
-    return [StepResult(kind=TABLE, label="Load verification", payload=table)]
+    context.log(f"Load/reaction summary: {len(rows)} analysis row(s)")
+    return [StepResult(kind=TABLE, label="Load/reaction summary", payload=table)]

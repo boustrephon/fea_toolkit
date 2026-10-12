@@ -40,6 +40,7 @@ from .case_listing import (
 from .combinations import build_combination_results
 from .linear import (
     analysis_load_reaction_summary,
+    render_load_reaction_rows,
     run_case_set,
     run_linear_cases,
     run_static_cases,
@@ -89,6 +90,7 @@ __all__ = [
     "list_patterns",
     "list_static_cases",
     "member_shear_capacity",
+    "render_load_reaction_rows",
     "report_shear_failure",
     "run_case_set",
     "run_linear_cases",

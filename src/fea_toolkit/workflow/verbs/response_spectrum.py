@@ -233,6 +233,8 @@ def run_response_spectrum(context: StepContext, step: Step) -> list[StepResult]:
         record_frame_forces=params["record_frame_forces"],
         record_shell_forces=params["record_shell_forces"],
     )
-    context.results["rs"] = result
+    # Keyed by direction so a later summary step (e.g. load_verification) can
+    # read every direction the run produced, not just the last one.
+    context.results.setdefault("rs", {})[str(params["direction"]).upper()] = result
     context.log(f"Response spectrum ({params['direction']}): complete")
     return [StepResult(kind=RS, label=f"Response spectrum ({params['direction']})", payload=result)]

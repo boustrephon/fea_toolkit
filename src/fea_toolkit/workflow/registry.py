@@ -158,7 +158,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         params=LOAD_VERIFICATION_PARAMS,
         kind=TABLE,
         needs=("geometry",),
-        help="Compare each load pattern's applied loads against its base reactions.",
+        help="Load/reaction summary — applied loads vs summed reactions per static case, plus RS base shear/moment.",
     ),
     "modal": StepSpec(
         verb="modal",

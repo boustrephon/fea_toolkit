@@ -1327,15 +1327,34 @@ class TestEndToEnd:
 
         assert [result.kind for result in run.results] == ["geometry", "table"]
         table = run.results[-1].payload
-        assert table.title == "Load verification"
-        # One row per load pattern, pairing Applied / Reaction with a Δ column.
+        assert table.title == "Load/reaction summary"
+        # One row per analysis, pairing Applied / Reaction with a Δ column.
         columns = table.columns
-        assert columns[0] == "Load Pattern"
+        assert columns[0] == "Analysis"
         assert any(c.startswith("Applied Fx") for c in columns)
         assert any(c.startswith("Reaction Fx") for c in columns)
-        assert any(c.startswith("ΔFx") for c in columns)
+        assert any(c.startswith("Δ Fx") for c in columns)
         assert len(table.rows) >= 1
         assert all(isinstance(cell, str) for row in table.rows for cell in row)
+
+    def test_load_verification_consumes_solved_summaries(self):
+        """A run_static + load_verification drives the table from the solve.
+
+        The summaries a ``run_static`` step stores on the context are formatted
+        directly — the load/reaction table needs no second pass.
+        """
+        from examples.sample_model import make_sample_model
+
+        recipe = Recipe(steps=[Step("mesh"), Step("run_static"), Step("load_verification")])
+        run = run_recipe(recipe, make_sample_model())
+
+        assert [result.kind for result in run.results] == ["geometry", "cases", "table"]
+        table = run.results[-1].payload
+        assert table.title == "Load/reaction summary"
+        assert table.columns[0] == "Analysis"
+        assert len(table.rows) >= 1
+        # Every analysis label is non-empty (a solved case name).
+        assert all(row[0] for row in table.rows)
 
     def test_load_verification_without_load_patterns_returns_nothing(self):
         """A model with no load patterns has nothing to verify — no table, no solve."""

@@ -143,6 +143,22 @@ def test_a_second_case_is_added_beside_the_first(window):
     assert window._views.get("results:WIND") is not None
 
 
+def test_a_run_registers_the_load_reaction_summary_table(window):
+    """The run registers a load/reaction summary table beside the case views."""
+    _preprocess(window)
+
+    assert window.run_analysis({"DEAD": {"DEAD": 1.0}}) is True
+    _spin(window)
+
+    view = window._views.get("table:load/reaction-summary")
+    assert view is not None
+    table = window._views.table("table:load/reaction-summary")
+    assert table is not None
+    assert table.title == "Load/reaction summary"
+    assert table.columns[0] == "Analysis"
+    assert len(table.rows) >= 1
+
+
 def test_a_combination_is_reduced_to_its_own_view(window):
     _preprocess(window)
 
