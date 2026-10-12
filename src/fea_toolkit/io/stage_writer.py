@@ -230,6 +230,7 @@ def write_model_stages(
     rs_results: Optional[dict] = None,
     rs_element_forces: Optional[dict] = None,
     rs_nodal_displacements: Optional[dict] = None,
+    rs_shell_forces: Optional[dict] = None,
     fmt: str = "npz",
     geometry: bool = True,
     dictionaries: bool = True,
@@ -273,6 +274,8 @@ def write_model_stages(
         rs_nodal_displacements: Optional CQC-combined RS nodal
             displacements from ``compute_rs_nodal_displacements()``
             (written under ``rs/node_*``).
+        rs_shell_forces: Optional CQC-combined RS shell resultants from
+            ``extract_rs_shell_forces()`` (written under ``rs/shell_*``).
         fmt: ``\"npz\"`` (default) or ``\"h5\"``.
         geometry: Write the lightweight geometry arrays (Rhino / PyVista
             fast path).
@@ -307,9 +310,10 @@ def write_model_stages(
     # force / nodal displacement blocks are only meaningful alongside it.
     # Rejecting the combination keeps both the ``"rs"`` analysis type and the
     # written arrays honest (mirrors ``unified_writer.write_results``).
-    if (rs_element_forces or rs_nodal_displacements) and not rs_results:
+    if (rs_element_forces or rs_nodal_displacements or rs_shell_forces) and not rs_results:
         raise ValueError(
-            "rs_results is required when rs_element_forces or rs_nodal_displacements are provided"
+            "rs_results is required when rs_element_forces, rs_nodal_displacements "
+            "or rs_shell_forces are provided"
         )
 
     from .results_schema import SCHEMA_VERSION
@@ -397,6 +401,7 @@ def write_model_stages(
             collect_rs_arrays,
             collect_rs_element_force_arrays,
             collect_rs_nodal_displacement_arrays,
+            collect_rs_shell_force_arrays,
         )
 
         if rs_results:
@@ -410,6 +415,8 @@ def write_model_stages(
             arrays.update(collect_rs_element_force_arrays(rs_element_forces))
         if rs_nodal_displacements:
             arrays.update(collect_rs_nodal_displacement_arrays(rs_nodal_displacements))
+        if rs_shell_forces:
+            arrays.update(collect_rs_shell_force_arrays(rs_shell_forces))
     if analysis_types:
         arrays["analysis_types"] = np.array(analysis_types, dtype=str)
 

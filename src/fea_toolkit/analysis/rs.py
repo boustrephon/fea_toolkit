@@ -24,6 +24,9 @@ def run_response_spectrum_analysis(
     name: str = "ResponseSpectrum",
     config: Optional[dict] = None,
     log: Optional["PipelineLog"] = None,
+    record_frame_forces: bool = True,
+    record_shell_forces: bool = True,
+    element_extraction: Optional[str] = "recorder",
 ) -> AnalysisResult:
     """Run response spectrum analysis for one direction.
 
@@ -40,12 +43,24 @@ def run_response_spectrum_analysis(
         config: Optional config dict, recorded in the result metadata.
         log: Optional :class:`~fea_toolkit.io.log.PipelineLog` (or a ``bool``)
             forwarded to the :class:`AnalysisBuilder` that runs the RS pass.
+        record_frame_forces: When ``True`` (the default), extract the
+            CQC-combined per-element local end forces (the ``rs/elem_*`` block
+            consumed by the RS force diagram) and store them under
+            ``data["element_forces"]``.
+        record_shell_forces: When ``True`` (the default), extract the
+            CQC-combined per-shell stress resultants (the ``rs/shell_*`` block)
+            and store them under ``data["shell_forces"]``.
+        element_extraction: Per-mode force-extraction strategy passed to
+            :meth:`~fea_toolkit.opensees._runner_rs.AnalysisBuilder.extract_element_rs_forces`
+            — ``"recorder"`` (the default; one all-modes pass behind an Element
+            recorder) or ``"per_mode"``.  ``None`` defers to the builder config.
 
     Returns:
         :class:`AnalysisResult` whose ``data`` holds the RS result dict,
-        the per-mode ``modal_base_shear``, the ``direction``, and the
-        CQC-combined ``node_displacements`` (``{node_tag: (dx, dy, dz)}``)
-        for a deformed-shape view.
+        the per-mode ``modal_base_shear``, the ``direction``, the CQC-combined
+        ``node_displacements`` (``{node_tag: (dx, dy, dz)}``) for a
+        deformed-shape view, and — when requested — the combined
+        ``element_forces`` and ``shell_forces`` blocks.
 
     Examples:
         >>> from fea_toolkit import SAP2000Parser, preprocess_model
@@ -59,6 +74,8 @@ def run_response_spectrum_analysis(
         >>> rs.data["modal_base_shear"]  # per-mode base shear
     """
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+    from ..io.log import coerce_log
 
     modal_data = modal_result.data
     if not isinstance(modal_data, dict):
@@ -116,13 +133,57 @@ def run_response_spectrum_analysis(
                 damping_ratio=damping,
             )
         except Exception as exc:
-            from ..io.log import coerce_log
-
             coerce_log(log).warn(
                 "rs",
                 f"Could not compute CQC-combined nodal displacements: {exc}",
             )
             node_displacements = {}
+
+    # ── Element-level combined forces (opt-in, default on) ──────────
+    # The recorder path is the cheap strategy: one all-modes pass behind an
+    # Element recorder instead of ``n_modes × n_elements`` eleResponse calls
+    # (verified bit-identical to the per-mode loop).  Best-effort — a model
+    # whose element types the recorder cannot lay out still reports its base
+    # shears and displacements.
+    element_forces: dict = {}
+    if record_frame_forces:
+        try:
+            element_forces = dict(
+                ab.extract_element_rs_forces(
+                    num_modes=n_modes,
+                    modal_periods=periods,
+                    spectrum_periods=T_spec,
+                    spectrum_accels=Sa_spec,
+                    direction=direction,
+                    damping_ratio=damping,
+                    combination="cqc",
+                    extraction=element_extraction,
+                    print_results=False,
+                )
+            )
+            element_forces["direction"] = direction
+        except Exception as exc:
+            coerce_log(log).warn("rs", f"Could not extract RS element forces: {exc}")
+            element_forces = {}
+
+    # ── Shell (area) combined resultants (opt-in, default on) ───────
+    shell_forces: dict = {}
+    if record_shell_forces:
+        try:
+            shell_forces = ab.extract_rs_shell_forces(
+                num_modes=n_modes,
+                modal_periods=periods,
+                spectrum_periods=T_spec,
+                spectrum_accels=Sa_spec,
+                direction=direction,
+                damping_ratio=damping,
+                combination="cqc",
+                print_results=False,
+            )
+            shell_forces["direction"] = direction
+        except Exception as exc:
+            coerce_log(log).warn("rs", f"Could not extract RS shell forces: {exc}")
+            shell_forces = {}
 
     return AnalysisResult(
         name=name,
@@ -132,6 +193,8 @@ def run_response_spectrum_analysis(
             "modal_base_shear": modal_base_shear,
             "direction": direction,
             "node_displacements": node_displacements,
+            "element_forces": element_forces,
+            "shell_forces": shell_forces,
         },
         metadata={
             "direction": direction,

@@ -3448,7 +3448,12 @@ class MainWindow(QMainWindow):
         The pushover per-step history is persisted as ``pushover/<direction>/…``.
         """
         from ..io.npz_writer import collect_pushover_arrays
-        from ..io.unified_writer import collect_modal_arrays, collect_rs_arrays
+        from ..io.unified_writer import (
+            collect_modal_arrays,
+            collect_rs_arrays,
+            collect_rs_element_force_arrays,
+            collect_rs_shell_force_arrays,
+        )
         from .project import (
             mode_shape_arrays,
             pushover_displacement_arrays,
@@ -3462,6 +3467,16 @@ class MainWindow(QMainWindow):
         rs = collected.get("rs") or {}
         if rs:
             arrays.update(collect_rs_arrays(rs.get("rs_x"), rs.get("rs_y")))
+
+        # Element/shell RS forces are single-direction blocks in the schema
+        # (no direction axis), so the first direction wins — mirroring the
+        # review path's first-direction convention.
+        rs_element_forces = collected.get("rs_element_forces") or {}
+        if rs_element_forces:
+            arrays.update(collect_rs_element_force_arrays(next(iter(rs_element_forces.values()))))
+        rs_shell_forces = collected.get("rs_shell_forces") or {}
+        if rs_shell_forces:
+            arrays.update(collect_rs_shell_force_arrays(next(iter(rs_shell_forces.values()))))
 
         mesh = self._store.preprocessed() if self._store is not None else None
         if mesh is not None:

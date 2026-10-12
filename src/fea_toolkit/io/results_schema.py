@@ -228,6 +228,24 @@ RS_ARRAYS: dict[str, tuple] = {
     "rs/node_dx": ("N_node", "float"),
     "rs/node_dy": ("N_node", "float"),
     "rs/node_dz": ("N_node", "float"),
+    # Shell (area) combined stress resultants — OPTIONAL: written only when a
+    # producer supplies ``rs_shell_forces``.  Self-indexed by
+    # ``rs/shell_sap_id`` (a run records only its active shells, which may be
+    # fewer than the geometry's ``N_shell`` when areas are loads-only or
+    # inactive), so the component arrays carry no fixed dimension token.
+    # Component names match the static per-case ``shell_*`` block
+    # (``fx``/``fy``/``fxy`` are Nx/Ny/Nxy; ``mx``/``my``/``mxy`` are
+    # Mx/My/Mxy), combined across modes with the rule named by
+    # ``rs/shell_combination``.
+    "rs/shell_sap_id": ("", "str"),
+    "rs/shell_combination": ("", "str"),
+    "rs/shell_direction": ("", "str"),
+    "rs/shell_fx": ("", "float"),
+    "rs/shell_fy": ("", "float"),
+    "rs/shell_fxy": ("", "float"),
+    "rs/shell_mx": ("", "float"),
+    "rs/shell_my": ("", "float"),
+    "rs/shell_mxy": ("", "float"),
 }
 
 # ── Pushover per-step results (direction-keyed) ───────────────────────────
@@ -590,7 +608,9 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
             # block but does not compute element-level RS forces; a
             # per-mode/combined-scalars-only producer writes neither.
             # ``collect_rs_arrays()`` always writes the remaining keys.
-            _optional_rs = {k for k in RS_ARRAYS if k.startswith(("rs/elem_", "rs/node_"))}
+            _optional_rs = {
+                k for k in RS_ARRAYS if k.startswith(("rs/elem_", "rs/node_", "rs/shell_"))
+            }
             for key, (shape_desc, dtype_str) in RS_ARRAYS.items():
                 arr = data.get(key)
                 if arr is None:

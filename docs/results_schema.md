@@ -354,6 +354,10 @@ pair against ``modal/node_tag``.  This layout is compatible with PyVista::
 | `rs/node_dx` | `(N_node,)` | `float` | CQC‑combined nodal displacement X (m) |
 | `rs/node_dy` | `(N_node,)` | `float` | CQC‑combined nodal displacement Y (m) |
 | `rs/node_dz` | `(N_node,)` | `float` | CQC‑combined nodal displacement Z (m) |
+| `rs/shell_sap_id` | `(N_shell_recorded,)` | `str` | SAP2000 area ID — **optional block**, self‑indexed |
+| `rs/shell_combination` | `()` | `str` | Modal combination rule used: `"cqc"` (default) or `"srss"` |
+| `rs/shell_direction` | `()` | `str` | Excitation direction the block refers to (`"X"` / `"Y"` / `"Z"`) |
+| `rs/shell_fx` … `rs/shell_mxy` | `(N_shell_recorded,)` | `float` | Combined resultants: `fx`/`fy`/`fxy` = Nx/Ny/Nxy; `mx`/`my`/`mxy` = Mx/My/Mxy |
 
 **Local end-force layout**
 
@@ -424,6 +428,12 @@ and appear only when the producer supplies the corresponding data:
   (``_load_deformed_arrays(data, "rs")``) takes no direction argument, so
   multi‑direction producers should export one direction (the model review
   exports the first configured direction, X by default).
+* `rs/shell_*` — written when `rs_shell_forces` (from
+  ``AnalysisBuilder.extract_rs_shell_forces()``) is passed.  The block is
+  **self‑indexed** by `rs/shell_sap_id`: it records only the shells the run
+  actually analysed (loads‑only / inactive areas are omitted), so its length
+  may be fewer than the geometry's `N_shell`.  The six resultants are combined
+  across modes with the rule named by `rs/shell_combination`.
 
 The legacy per-mode `rs/sa_*` (spectral acceleration), `rs/eff_mass_*`
 (effective mass) and `rs/v_total_*` (total base shear: SRSS of CQC + rigid +

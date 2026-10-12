@@ -73,6 +73,16 @@ RS_PARAMS: dict[str, ParamSpec] = {
             "empty to use the only modal result present."
         ),
     ),
+    "record_frame_forces": ParamSpec(
+        default=True,
+        type=bool,
+        help="Record CQC-combined frame end forces (the element-level RS force diagram).",
+    ),
+    "record_shell_forces": ParamSpec(
+        default=True,
+        type=bool,
+        help="Record CQC-combined shell (area) stress resultants.",
+    ),
     "name": ParamSpec(
         default="ResponseSpectrum",
         type=str,
@@ -220,6 +230,8 @@ def run_response_spectrum(context: StepContext, step: Step) -> list[StepResult]:
         n_modes=params["n_modes"],
         name=params["name"],
         log=context.pipeline_log,
+        record_frame_forces=params["record_frame_forces"],
+        record_shell_forces=params["record_shell_forces"],
     )
     context.results["rs"] = result
     context.log(f"Response spectrum ({params['direction']}): complete")

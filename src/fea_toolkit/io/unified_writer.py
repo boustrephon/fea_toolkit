@@ -359,6 +359,56 @@ def collect_rs_nodal_displacement_arrays(
     return arrays
 
 
+#: Shell (area) stress-resultant components written by
+#: :func:`collect_rs_shell_force_arrays`, matching the record keys produced by
+#: ``AnalysisBuilder.extract_rs_shell_forces`` and the static per-case
+#: ``shell_*`` block (``fx``/``fy``/``fxy`` are Nx/Ny/Nxy; ``mx``/``my``/``mxy``
+#: are Mx/My/Mxy).
+_RS_SHELL_COMPONENTS = ("fx", "fy", "fxy", "mx", "my", "mxy")
+
+
+def collect_rs_shell_force_arrays(
+    rs_shell_forces: Optional[dict[str, Any]] = None,
+) -> dict[str, np.ndarray]:
+    """Extract shell-level RS stress-resultant arrays (combined across modes).
+
+    Expects *rs_shell_forces* to have the structure returned by
+    ``extract_rs_shell_forces()``::
+
+        {
+            "shell_results": [
+                {"shell_id": "A1", "fx": 3.0, "fy": 10.0, ..., "mxy": -12.0},
+                ...
+            ],
+            "combination": "cqc",
+        }
+
+    Writes ``rs/shell_sap_id``, the combination rule (``rs/shell_combination``)
+    and the six resultants ``rs/shell_fx`` … ``rs/shell_mxy`` — one row per
+    recorded shell, self-indexed by ``rs/shell_sap_id``.
+    """
+    arrays: dict[str, np.ndarray] = {}
+    if not rs_shell_forces:
+        return arrays
+
+    results = rs_shell_forces.get("shell_results", [])
+    if not results:
+        return arrays
+
+    arrays["rs/shell_sap_id"] = np.array([r["shell_id"] for r in results], dtype=str)
+    arrays["rs/shell_combination"] = np.array(
+        [str(rs_shell_forces.get("combination") or "cqc")], dtype=str
+    )
+    arrays["rs/shell_direction"] = np.array(
+        [str(rs_shell_forces.get("direction") or "")], dtype=str
+    )
+    for component in _RS_SHELL_COMPONENTS:
+        arrays[f"rs/shell_{component}"] = np.array(
+            [r.get(component, 0.0) for r in results], dtype=float
+        )
+    return arrays
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Metadata
 # ═══════════════════════════════════════════════════════════════════
@@ -424,6 +474,7 @@ def write_results(
     rs_results: Optional[dict[str, dict]] = None,
     rs_element_forces: Optional[dict[str, Any]] = None,
     rs_nodal_displacements: Optional[dict[int, tuple]] = None,
+    rs_shell_forces: Optional[dict[str, Any]] = None,
     pushover_results: Optional[dict[str, tuple]] = None,
     fmt: str = "npz",
     config: Optional[dict] = None,
@@ -445,6 +496,9 @@ def write_results(
         modal_result: Dict from ``run_modal_analysis()``.
         mode_shapes: Dict of mode shape eigenvectors ``{mode_idx: {tag: (dx,dy,dz)}}``.
         rs_results: Dict with keys ``rs_x``, ``rs_y`` from ``run_rs()``.
+        rs_shell_forces: Optional dict from ``extract_rs_shell_forces()``,
+            written under the optional ``rs/shell_*`` block (requires
+            *rs_results*).
         pushover_results: Pushover per-step results per direction as
             ``{direction: (step_results, results)}`` — written under
             ``pushover/{direction}/{load_type}/...`` via
@@ -489,9 +543,10 @@ def write_results(
     # per-direction base shears).  Rejecting the combination up front keeps the
     # ``analysis_types`` manifest honest — a force-only call must not advertise
     # an ``"rs"`` stage that has no base data behind it.
-    if (rs_element_forces or rs_nodal_displacements) and not rs_results:
+    if (rs_element_forces or rs_nodal_displacements or rs_shell_forces) and not rs_results:
         raise ValueError(
-            "rs_results is required when rs_element_forces or rs_nodal_displacements are provided"
+            "rs_results is required when rs_element_forces, rs_nodal_displacements "
+            "or rs_shell_forces are provided"
         )
 
     # Collect all arrays
@@ -525,6 +580,10 @@ def write_results(
     # RS nodal displacements
     if rs_nodal_displacements:
         arrays.update(collect_rs_nodal_displacement_arrays(rs_nodal_displacements))
+
+    # RS shell resultants
+    if rs_shell_forces:
+        arrays.update(collect_rs_shell_force_arrays(rs_shell_forces))
 
     # Pushover per-step results (per direction)
     analysis_types: list[str] = []

@@ -47,6 +47,15 @@ _RS_FORCE_COMPONENTS = (
 #:    ``docs/deprecation_plan.md``.
 _RS_LEGACY_ALIASES = {"Vy_i": "Fy_i", "Vy_j": "Fy_j", "Vz_i": "Fz_i", "Vz_j": "Fz_j"}
 
+#: Shell (area) stress-resultant component order produced by
+#: ``ops.eleResponse(tag, "section", 1, "forces")`` — the same six-component
+#: block :meth:`~fea_toolkit.opensees._runner_static.AnalysisBuilder.extract_static_shell_forces`
+#: reads (``fx``/``fy``/``fxy`` are the membrane resultants Nx/Ny/Nxy;
+#: ``mx``/``my``/``mxy`` the bending resultants Mx/My/Mxy).  The first six of
+#: the eight floats ShellMITC4 returns; the last two (volume, thickness) are
+#: not force resultants and are dropped.
+_RS_SHELL_COMPONENTS = ("fx", "fy", "fxy", "mx", "my", "mxy")
+
 #: Significant digits requested from the Element recorder.
 #:
 #: The recorder's default is **6** significant digits — enough for a force
@@ -706,6 +715,128 @@ class RsRunnerMixin:
 
         return {
             "element_results": element_results,
+            "modal_periods": modal_periods,
+            "omega": omega,
+            "combination": combination,
+        }
+
+    def extract_rs_shell_forces(
+        self,
+        num_modes: int,
+        modal_periods: list[float],
+        spectrum_periods: list[float],
+        spectrum_accels: list[float],
+        direction: str = "X",
+        damping_ratio: float = 0.05,
+        combination: str = "cqc",
+        print_results: bool = True,
+    ) -> dict[str, Any]:
+        """Run RS analysis and return CQC/SRSS-combined shell stress resultants.
+
+        The shell counterpart of :meth:`extract_element_rs_forces`: runs the
+        mode-by-mode ``responseSpectrumAnalysis`` loop, reads each active
+        shell's membrane/bending resultants with
+        ``ops.eleResponse(tag, "section", 1, "forces")`` — the same call
+        :meth:`~fea_toolkit.opensees._runner_static.AnalysisBuilder.extract_static_shell_forces`
+        uses — and combines the six resultants across modes with CQC (default)
+        or SRSS.
+
+        Args:
+            num_modes: Number of modes to include.
+            modal_periods: Natural periods of each mode (s).
+            spectrum_periods: Period axis of the response spectrum (s).
+            spectrum_accels: Spectral acceleration values (m/s^2).
+            direction: Excitation direction — ``'X'``, ``'Y'``, or ``'Z'``.
+            damping_ratio: Damping ratio for the CQC correlation coefficient.
+            combination: Modal combination rule — ``'cqc'`` (default) or
+                ``'srss'``.
+            print_results: If True, print a summary table.
+
+        Returns:
+            Dictionary with ``shell_results`` — a list of dicts, one per active
+            area, keyed by ``shell_id`` and carrying the combined ``fx``/``fy``/
+            ``fxy``/``mx``/``my``/``mxy`` resultants — plus ``modal_periods``,
+            ``omega`` and ``combination``.
+        """
+        combination = str(combination or "cqc").lower()
+        if combination not in ("cqc", "srss"):
+            raise ValueError(f"combination must be 'cqc' or 'srss', got {combination!r}")
+
+        self._log.info("rs", "Extracting shell RS forces...")
+
+        num_modes = min(num_modes, len(modal_periods))
+        if num_modes == 0:
+            raise ValueError("No modal periods available for RS shell forces")
+
+        omega = [2.0 * math.pi / T if T > 0 else 0.0 for T in modal_periods[:num_modes]]
+        damp_ratios = [damping_ratio] * num_modes
+        dof = {"X": 1, "Y": 2, "Z": 3}[direction]
+
+        SPECTRUM_TS_TAG = 9999
+        with contextlib.suppress(Exception):
+            ops.remove("timeSeries", SPECTRUM_TS_TAG)
+        ops.timeSeries(
+            "Path", SPECTRUM_TS_TAG, "-time", *spectrum_periods, "-values", *spectrum_accels
+        )
+
+        # Active shells in a fixed order shared by the per-mode force array and
+        # the result records built from it.  Mirrors extract_static_shell_forces:
+        # loads-only areas carry no shell element, and inactive parents are
+        # skipped.
+        areas = self.mesh_model.area_elements
+        loads_only = self.mesh_model.loads_only_area_ids
+        shell_ids: list[str] = []
+        for aid, area in areas.items():
+            if aid in loads_only:
+                continue
+            if getattr(area, "inactive", False):
+                continue
+            if self._shell_tag_map.get(aid) is None:
+                continue
+            shell_ids.append(aid)
+
+        forces = np.zeros((len(shell_ids), len(_RS_SHELL_COMPONENTS), num_modes), dtype=float)
+        for mode in range(1, num_modes + 1):
+            ops.responseSpectrumAnalysis(SPECTRUM_TS_TAG, dof, "-mode", mode)
+            for row, aid in enumerate(shell_ids):
+                try:
+                    raw = ops.eleResponse(self._shell_tag_map[aid], "section", 1, "forces")
+                except Exception:
+                    raw = None
+                if not raw or len(raw) < len(_RS_SHELL_COMPONENTS):
+                    continue
+                forces[row, :, mode - 1] = raw[: len(_RS_SHELL_COMPONENTS)]
+
+        if combination == "srss":
+            combined = srss_combine_matrix(forces)
+        else:
+            combined = cqc_combine_matrix(forces, cqc_rho_matrix(omega, damp_ratios))
+
+        shell_results = []
+        for row, aid in enumerate(shell_ids):
+            record: dict[str, Any] = {"shell_id": aid}
+            for c, component in enumerate(_RS_SHELL_COMPONENTS):
+                record[component] = float(combined[row, c])
+            shell_results.append(record)
+
+        if print_results:
+            print(
+                f"\n===== RESPONSE SPECTRUM SHELL RESULTS ({direction}, "
+                f"{combination.upper()}) ====="
+            )
+            header = (
+                f"{'Shell':>10} {'Nx':>12} {'Ny':>12} {'Nxy':>12} {'Mx':>12} {'My':>12} {'Mxy':>12}"
+            )
+            print(header)
+            print("-" * len(header))
+            for r in shell_results:
+                print(
+                    f"{r['shell_id']:>10} {r['fx']:12.3e} {r['fy']:12.3e} "
+                    f"{r['fxy']:12.3e} {r['mx']:12.3e} {r['my']:12.3e} {r['mxy']:12.3e}"
+                )
+
+        return {
+            "shell_results": shell_results,
             "modal_periods": modal_periods,
             "omega": omega,
             "combination": combination,

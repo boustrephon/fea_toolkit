@@ -135,6 +135,12 @@ class TestAnalysisFunctions:
         assert "direction" in params
         assert "T_spec" in params
 
+    def test_run_rs_records_forces_by_default(self):
+        params = inspect.signature(run_response_spectrum_analysis).parameters
+        assert params["record_frame_forces"].default is True
+        assert params["record_shell_forces"].default is True
+        assert params["element_extraction"].default == "recorder"
+
     def test_run_pushover_signature(self):
         params = inspect.signature(run_pushover_analysis).parameters
         assert "material_type" in params

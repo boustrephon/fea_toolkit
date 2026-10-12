@@ -180,16 +180,20 @@ def collect_project_results(results: list) -> dict:
         A dict with keys ``static_arrays`` (the merged ``CASES`` archive arrays),
         ``modal`` / ``mode_shapes`` (from the ``MODAL`` payload), ``rs`` (``rs_x``
         / ``rs_y``), ``rs_nodal_displacements`` (``{direction: {node_tag: (dx, dy,
-        dz)}}``), and ``pushover`` (``{(direction, load_type): entry}``), plus
-        ``pushover_results`` (``{(direction, load_type): result dict}``) and
-        ``pushover_step_results`` (``{(direction, load_type): [per-step dicts]}``)
-        when the run recorded per-step data.
+        dz)}}``), ``rs_element_forces`` / ``rs_shell_forces``
+        (``{direction: extract_*_rs_forces() payload}``), and ``pushover``
+        (``{(direction, load_type): entry}``), plus ``pushover_results``
+        (``{(direction, load_type): result dict}``) and ``pushover_step_results``
+        (``{(direction, load_type): [per-step dicts]}``) when the run recorded
+        per-step data.
     """
     static_arrays: dict = {}
     modal: Optional[dict] = None
     mode_shapes: Optional[dict] = None
     rs: dict = {}
     rs_nodal_displacements: dict = {}
+    rs_element_forces: dict = {}
+    rs_shell_forces: dict = {}
     pushover: dict = {}
     pushover_results: dict = {}
     pushover_step_results: dict = {}
@@ -215,6 +219,12 @@ def collect_project_results(results: list) -> dict:
                 node_disp = data.get("node_displacements")
                 if isinstance(node_disp, dict) and node_disp:
                     rs_nodal_displacements[direction] = node_disp
+                element_forces = data.get("element_forces")
+                if isinstance(element_forces, dict) and element_forces.get("element_results"):
+                    rs_element_forces[direction] = element_forces
+                shell_forces = data.get("shell_forces")
+                if isinstance(shell_forces, dict) and shell_forces.get("shell_results"):
+                    rs_shell_forces[direction] = shell_forces
         elif kind == PUSHOVER:
             data = getattr(payload, "data", None)
             if isinstance(data, dict):
@@ -240,6 +250,8 @@ def collect_project_results(results: list) -> dict:
         "mode_shapes": mode_shapes,
         "rs": rs,
         "rs_nodal_displacements": rs_nodal_displacements,
+        "rs_element_forces": rs_element_forces,
+        "rs_shell_forces": rs_shell_forces,
         "pushover": pushover,
         "pushover_results": pushover_results,
         "pushover_step_results": pushover_step_results,

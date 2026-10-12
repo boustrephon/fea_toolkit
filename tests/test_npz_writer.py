@@ -235,3 +235,69 @@ def test_per_case_shell_forces_flow_through_the_in_memory_arrays():
     repository = NpzResultsRepository(arrays)
     assert repository.has_shell_forces("DEAD") is True
     assert repository.shell_forces("DEAD")["A2"]["mxy"] == 12.0
+
+
+def test_rs_shell_forces_write_and_validate(tmp_path):
+    """``rs_shell_forces`` writes the optional ``rs/shell_*`` block and validates.
+
+    The RS shell block is self-indexed by ``rs/shell_sap_id`` and combined with
+    the rule named by ``rs/shell_combination``; ``validate_arrays`` treats it as
+    an optional sub-block of the ``rs`` stage (it requires ``rs_results``).
+    """
+    from fea_toolkit.io.results_schema import validate_arrays
+    from fea_toolkit.io.unified_writer import collect_rs_shell_force_arrays, write_results
+
+    md = make_sample_model()
+    rs_shell = {
+        "shell_results": [
+            {"shell_id": "A1", "fx": 1.0, "fy": 2.0, "fxy": 3.0, "mx": 4.0, "my": 5.0, "mxy": 6.0},
+            {
+                "shell_id": "A2",
+                "fx": 7.0,
+                "fy": 8.0,
+                "fxy": 9.0,
+                "mx": 10.0,
+                "my": 11.0,
+                "mxy": 12.0,
+            },
+        ],
+        "combination": "cqc",
+        "direction": "X",
+    }
+    arrays = collect_rs_shell_force_arrays(rs_shell)
+    assert arrays["rs/shell_sap_id"].tolist() == ["A1", "A2"]
+    assert arrays["rs/shell_fx"].tolist() == [1.0, 7.0]
+    assert arrays["rs/shell_mxy"].tolist() == [6.0, 12.0]
+    assert arrays["rs/shell_combination"].tolist() == ["cqc"]
+    assert arrays["rs/shell_direction"].tolist() == ["X"]
+
+    def _rs(direction_label):
+        return {
+            "modal_periods": [1.0, 0.5, 0.25],
+            "spectral_accels": [0.4, 0.3, 0.2],
+            "effective_masses": [10.0, 5.0, 2.0],
+            "modal_base_shear": [4.0, 3.0, 2.0],
+            "base_shear_cqc": 5.0,
+            "base_shear_srss": 5.4,
+            "base_shear_total": 5.0,
+            "base_moment_cqc": 20.0,
+            "base_moment_srss": 21.0,
+            "roof_disp_cqc": 0.02,
+            "roof_disp_srss": 0.021,
+        }
+
+    node_tags = sorted(node.node_tag for node in md.nodes.values())
+    mode_shapes = {0: dict.fromkeys(node_tags, (0.001, 0.0, 0.0))}
+
+    path = write_results(
+        str(tmp_path / "rs_shell.npz"),
+        model=md,
+        modal_result={"periods": [1.0, 0.5, 0.25]},
+        mode_shapes=mode_shapes,
+        rs_results={"rs_x": _rs("x"), "rs_y": _rs("y")},
+        rs_shell_forces=rs_shell,
+    )
+    with np.load(path, allow_pickle=False) as data:
+        messages = validate_arrays(dict(data))
+    errors = [m for m in messages if not m.startswith("[WARN]")]
+    assert not errors, f"validation errors: {errors}"

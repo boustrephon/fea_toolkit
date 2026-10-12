@@ -2537,6 +2537,131 @@ class TestShellSubdivision:
         finally:
             ops.wipe()
 
+    def test_extract_rs_shell_forces(self, sample_shell_md):
+        """``extract_rs_shell_forces`` returns CQC-combined shell resultants.
+
+        Runs a modal + response-spectrum pass on the slab model and checks the
+        per-mode CQC combination yields one record per active shell, carrying
+        the six membrane/bending resultants.
+        """
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
+        cfg = {
+            "element_type": "elasticBeamColumn",
+            "split_elements": False,
+            "verbose": False,
+            "create_shells": True,
+        }
+        mm = preprocess_model(sample_shell_md, cfg)
+        b = AnalysisBuilder(mm, cfg)
+        b.build_domain()
+        try:
+            b.compute_seismic_masses()
+            modal = b.run_modal_analysis(num_modes=3, print_results=False)
+            periods = modal["periods"]
+            assert periods, "modal analysis returned no periods"
+            T = [0.0, 0.1, 0.5, 1.0, 3.0]
+            Sa = [0.5, 1.0, 1.0, 0.5, 0.2]
+            result = b.extract_rs_shell_forces(
+                num_modes=len(periods),
+                modal_periods=periods,
+                spectrum_periods=T,
+                spectrum_accels=Sa,
+                direction="X",
+                damping_ratio=0.05,
+                print_results=False,
+            )
+            shell_results = result["shell_results"]
+            assert shell_results, "expected at least one shell resultant record"
+            assert result["combination"] == "cqc"
+            for r in shell_results:
+                assert r["shell_id"], "shell record missing its SAP id"
+                assert {"fx", "fy", "fxy", "mx", "my", "mxy"} <= set(r), (
+                    f"shell {r['shell_id']!r} missing resultants: {sorted(r)}"
+                )
+        finally:
+            ops.wipe()
+
+    def test_rs_facade_records_forces_by_default(self, sample_shell_md):
+        """The RS facade stores combined frame + shell forces on the result.
+
+        ``run_response_spectrum_analysis`` wires ``extract_element_rs_forces``
+        (recorder path) and ``extract_rs_shell_forces`` into ``data``, so the
+        recipe verb carries them without a second solve.
+        """
+        from fea_toolkit.analysis.modal import run_modal_analysis
+        from fea_toolkit.analysis.rs import run_response_spectrum_analysis
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
+        cfg = {
+            "element_type": "elasticBeamColumn",
+            "split_elements": False,
+            "verbose": False,
+            "create_shells": True,
+        }
+        mm = preprocess_model(sample_shell_md, cfg)
+        try:
+            modal = run_modal_analysis(mm, n_modes=3, config={"create_shells": True})
+            T = [0.0, 0.1, 0.5, 1.0, 3.0]
+            Sa = [0.5, 1.0, 1.0, 0.5, 0.2]
+            rs = run_response_spectrum_analysis(
+                mm,
+                modal,
+                "X",
+                T,
+                Sa,
+                n_modes=3,
+                config={"create_shells": True},
+            )
+            element_forces = rs.data["element_forces"]
+            assert element_forces.get("element_results"), (
+                "expected frame element forces through the recorder path"
+            )
+            shell_forces = rs.data["shell_forces"]
+            assert shell_forces.get("shell_results"), "expected shell resultants through the facade"
+        finally:
+            ops.wipe()
+
+    def test_rs_facade_skips_forces_when_disabled(self, sample_shell_md):
+        """``record_*_forces=False`` drops the force blocks but keeps the rest.
+
+        Force extraction is opt-out: a run that only needs base shear and the
+        deformed shape sets both flags off and the result carries empty force
+        blocks rather than raising.
+        """
+        from fea_toolkit.analysis.modal import run_modal_analysis
+        from fea_toolkit.analysis.rs import run_response_spectrum_analysis
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
+        cfg = {
+            "element_type": "elasticBeamColumn",
+            "split_elements": False,
+            "verbose": False,
+            "create_shells": True,
+        }
+        mm = preprocess_model(sample_shell_md, cfg)
+        try:
+            modal = run_modal_analysis(mm, n_modes=3, config={"create_shells": True})
+            T = [0.0, 0.1, 0.5, 1.0, 3.0]
+            Sa = [0.5, 1.0, 1.0, 0.5, 0.2]
+            rs = run_response_spectrum_analysis(
+                mm,
+                modal,
+                "X",
+                T,
+                Sa,
+                n_modes=3,
+                config={"create_shells": True},
+                record_frame_forces=False,
+                record_shell_forces=False,
+            )
+            assert rs.data["element_forces"] == {}
+            assert rs.data["shell_forces"] == {}
+            assert "base_shear_cqc" in rs.data["rs_result"]
+        finally:
+            ops.wipe()
+
 
 # ============================================================================
 # HDF5 reader round-trip

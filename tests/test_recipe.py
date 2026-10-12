@@ -401,6 +401,16 @@ class TestModalCaseSelection:
         assert RS_PARAMS["modal_case"].default == ""
         assert PUSHOVER_PARAMS["modal_case"].default == ""
 
+    def test_response_spectrum_records_forces_by_default(self):
+        """RS force recording is opt-out (default ON), unlike pushover's."""
+
+        from fea_toolkit.workflow.verbs.response_spectrum import RS_PARAMS
+
+        assert "record_frame_forces" in RS_PARAMS
+        assert "record_shell_forces" in RS_PARAMS
+        assert RS_PARAMS["record_frame_forces"].default is True
+        assert RS_PARAMS["record_shell_forces"].default is True
+
     def test_resolve_modal_result_returns_the_sole_result(self):
         from types import SimpleNamespace
 
