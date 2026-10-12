@@ -796,6 +796,10 @@ class RsRunnerMixin:
             shell_ids.append(aid)
 
         forces = np.zeros((len(shell_ids), len(_RS_SHELL_COMPONENTS), num_modes), dtype=float)
+        # Track which shells answered with a valid section-force response in at
+        # least one mode; a shell that never answered must not be reported with
+        # its zero-initialised resultants as a valid zero demand.
+        responded = np.zeros(len(shell_ids), dtype=bool)
         for mode in range(1, num_modes + 1):
             ops.responseSpectrumAnalysis(SPECTRUM_TS_TAG, dof, "-mode", mode)
             for row, aid in enumerate(shell_ids):
@@ -806,6 +810,7 @@ class RsRunnerMixin:
                 if not raw or len(raw) < len(_RS_SHELL_COMPONENTS):
                     continue
                 forces[row, :, mode - 1] = raw[: len(_RS_SHELL_COMPONENTS)]
+                responded[row] = True
 
         if combination == "srss":
             combined = srss_combine_matrix(forces)
@@ -814,6 +819,13 @@ class RsRunnerMixin:
 
         shell_results = []
         for row, aid in enumerate(shell_ids):
+            if not responded[row]:
+                self._log.warning(
+                    "rs",
+                    f"Shell {aid} returned no section-force response in any mode; "
+                    "omitting it from the RS shell results.",
+                )
+                continue
             record: dict[str, Any] = {"shell_id": aid}
             for c, component in enumerate(_RS_SHELL_COMPONENTS):
                 record[component] = float(combined[row, c])

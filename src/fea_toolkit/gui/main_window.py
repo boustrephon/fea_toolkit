@@ -3469,14 +3469,18 @@ class MainWindow(QMainWindow):
             arrays.update(collect_rs_arrays(rs.get("rs_x"), rs.get("rs_y")))
 
         # Element/shell RS forces are single-direction blocks in the schema
-        # (no direction axis), so the first direction wins — mirroring the
-        # review path's first-direction convention.
+        # (no direction axis), so one direction must serve both.  Pick the
+        # first direction present in either mapping — mirroring the review
+        # path's first-direction convention — and collect each block only when
+        # it recorded that direction, so the two blocks can never disagree.
         rs_element_forces = collected.get("rs_element_forces") or {}
-        if rs_element_forces:
-            arrays.update(collect_rs_element_force_arrays(next(iter(rs_element_forces.values()))))
         rs_shell_forces = collected.get("rs_shell_forces") or {}
-        if rs_shell_forces:
-            arrays.update(collect_rs_shell_force_arrays(next(iter(rs_shell_forces.values()))))
+        directions = list(dict.fromkeys([*rs_element_forces, *rs_shell_forces]))
+        rs_force_direction = directions[0] if directions else None
+        if rs_force_direction is not None and rs_force_direction in rs_element_forces:
+            arrays.update(collect_rs_element_force_arrays(rs_element_forces[rs_force_direction]))
+        if rs_force_direction is not None and rs_force_direction in rs_shell_forces:
+            arrays.update(collect_rs_shell_force_arrays(rs_shell_forces[rs_force_direction]))
 
         mesh = self._store.preprocessed() if self._store is not None else None
         if mesh is not None:

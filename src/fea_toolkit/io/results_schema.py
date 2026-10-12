@@ -232,20 +232,21 @@ RS_ARRAYS: dict[str, tuple] = {
     # producer supplies ``rs_shell_forces``.  Self-indexed by
     # ``rs/shell_sap_id`` (a run records only its active shells, which may be
     # fewer than the geometry's ``N_shell`` when areas are loads-only or
-    # inactive), so the component arrays carry no fixed dimension token.
+    # inactive), so the block is sized ``N_rs_shell`` — resolved in
+    # ``validate_arrays`` from the length of ``rs/shell_sap_id``.
     # Component names match the static per-case ``shell_*`` block
     # (``fx``/``fy``/``fxy`` are Nx/Ny/Nxy; ``mx``/``my``/``mxy`` are
     # Mx/My/Mxy), combined across modes with the rule named by
     # ``rs/shell_combination``.
-    "rs/shell_sap_id": ("", "str"),
+    "rs/shell_sap_id": ("N_rs_shell", "str"),
     "rs/shell_combination": ("", "str"),
     "rs/shell_direction": ("", "str"),
-    "rs/shell_fx": ("", "float"),
-    "rs/shell_fy": ("", "float"),
-    "rs/shell_fxy": ("", "float"),
-    "rs/shell_mx": ("", "float"),
-    "rs/shell_my": ("", "float"),
-    "rs/shell_mxy": ("", "float"),
+    "rs/shell_fx": ("N_rs_shell", "float"),
+    "rs/shell_fy": ("N_rs_shell", "float"),
+    "rs/shell_fxy": ("N_rs_shell", "float"),
+    "rs/shell_mx": ("N_rs_shell", "float"),
+    "rs/shell_my": ("N_rs_shell", "float"),
+    "rs/shell_mxy": ("N_rs_shell", "float"),
 }
 
 # ── Pushover per-step results (direction-keyed) ───────────────────────────
@@ -470,6 +471,9 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
         if arr is not None:
             dims["N_shell"] = len(arr)
             break
+    rs_shell_id = data.get("rs/shell_sap_id")
+    if rs_shell_id is not None:
+        dims["N_rs_shell"] = len(rs_shell_id)
     for key in ("modal/period", "modal/frequency"):
         arr = data.get(key)
         if arr is not None:

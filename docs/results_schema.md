@@ -414,7 +414,7 @@ the 2D RS renderer and archives written before this change read them.  They are
 `rs/period`, `rs/v_base_*`, the combined `rs/v_*`, `rs/m_*` and
 `rs/roof_disp_*` scalars are always written by ``collect_rs_arrays()``
 (missing moment/roof inputs default to `0.0`), so they are **required**
-whenever ``"rs"`` appears in `analysis_types`.  Two blocks are **optional**
+whenever ``"rs"`` appears in `analysis_types`.  Three blocks are **optional**
 and appear only when the producer supplies the corresponding data:
 
 * `rs/elem_*` — written when `rs_element_forces` (from
