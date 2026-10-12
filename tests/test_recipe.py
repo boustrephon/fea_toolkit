@@ -447,6 +447,26 @@ class TestModalCaseSelection:
         context = SimpleNamespace(results={"modal": result})
         assert resolve_modal_result(context) is result
 
+    def test_resolve_modal_result_rejects_a_name_against_a_bare_result(self):
+        from types import SimpleNamespace
+
+        from fea_toolkit.workflow.verbs.modal import resolve_modal_result
+
+        context = SimpleNamespace(results={"modal": object()})
+        with pytest.raises(ValueError, match="cannot verify"):
+            resolve_modal_result(context, "MODAL")
+
+    def test_run_modal_rejects_a_duplicate_name(self, monkeypatch):
+        import fea_toolkit.analysis.modal as analysis_modal
+        from fea_toolkit.workflow.steps import StepContext
+        from fea_toolkit.workflow.verbs.modal import run_modal
+
+        context = StepContext(model_data=_slab_model(), model=object())
+        context.results["modal"] = {"dup": object()}
+        monkeypatch.setattr(analysis_modal, "run_modal_analysis", lambda *a, **k: object())
+        with pytest.raises(ValueError, match="already exists"):
+            run_modal(context, Step("modal", params={"name": "dup"}))
+
     def test_resolve_default_modal_case_prefers_the_spectrum_reference(self):
         from types import SimpleNamespace
 
@@ -1065,6 +1085,15 @@ class TestFailuresAndCancellation:
         assert info.value.index == 1
         assert info.value.verb == "response_spectrum"
         assert "needs 'modal'" in str(info.value.cause)
+
+    def test_a_non_optional_failure_carries_the_partial_run_state(self):
+        recipe = Recipe(steps=[Step("mesh"), Step("response_spectrum")])
+        with pytest.raises(StepError) as info:
+            run_recipe(recipe, _slab_model())
+        assert info.value.step_status == [
+            (0, "mesh", "ok"),
+            (1, "response_spectrum", "failed"),
+        ]
 
     def test_an_optional_failure_is_recorded_and_the_run_continues(self):
         recipe = Recipe(

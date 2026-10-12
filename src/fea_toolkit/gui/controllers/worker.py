@@ -53,6 +53,10 @@ class TaskWorker(QThread):
         super().__init__(parent)
         self._task = task
         self._cancel = Event()
+        #: The exception the task raised, if any — kept so a ``failed`` handler
+        #: can inspect it (e.g. a ``StepError``'s partial run state) beyond the
+        #: string the :attr:`failed` signal carries.
+        self.error: Any = None
 
     # ── Cancellation ─────────────────────────────────────────────────
 
@@ -104,6 +108,7 @@ class TaskWorker(QThread):
         except Exception as exc:
             # Reported rather than allowed to escape the thread, where Qt would
             # print it and the caller would never learn it failed.
+            self.error = exc
             self.failed.emit(f"{type(exc).__name__}: {exc}")
             return
         finally:

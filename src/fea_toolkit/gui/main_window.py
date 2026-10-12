@@ -2499,10 +2499,18 @@ class MainWindow(QMainWindow):
         if edited is None:
             return
         if verb in ("response_spectrum", "pushover"):
-            self._ensure_modal_precursor(default_modal)
+            from dataclasses import replace
+
+            selected = self._ensure_modal_precursor(default_modal)
+            # The precursor actually enabled may not carry *default_modal*'s name
+            # (a recipe's own modal step wins when the model's case name is
+            # absent), so realign the step's ``modal_case`` with it when the
+            # dialog's prefill was accepted unchanged.
+            if selected and edited.params.get("modal_case", "") == default_modal:
+                edited = replace(edited, params={**edited.params, "modal_case": selected})
         self._preset_step(edited, label)
 
-    def _ensure_modal_precursor(self, default_name: str = "") -> None:
+    def _ensure_modal_precursor(self, default_name: str = "") -> str:
         """Ensure an *enabled* ``modal`` step precedes the spectrum/pushover step.
 
         ``response_spectrum`` and ``pushover`` declare
@@ -2514,18 +2522,44 @@ class MainWindow(QMainWindow):
         with ``name`` set to *default_name* (the model's modal case), so the
         spectrum / pushover step's ``modal_case`` prefill resolves to the same
         name.
+
+        With several modal steps, the one whose ``name`` matches *default_name*
+        is preferred (the model's modal case); only when none matches does the
+        first modal step stand in, so the returned name always matches the step
+        the run will actually execute.
+
+        Args:
+            default_name: The model's preferred modal-case name, or ``""``.
+
+        Returns:
+            The ``name`` of the modal step now enabled (or added), so the caller
+            can align the spectrum / pushover step's ``modal_case`` with it.
         """
-        panel = self._recipe_panel
-        for index, step in enumerate(panel.recipe.steps):
-            if step.verb == "modal":
-                if not step.enabled:
-                    panel.recipe.set_enabled(index, True)
-                return
         from ..workflow import STEP_SPECS
 
+        panel = self._recipe_panel
         fallback = STEP_SPECS["modal"].params["name"].default
+
+        def _modal_name(step: Any) -> str:
+            return (step.params or {}).get("name") or fallback
+
+        chosen = None
+        for index, step in enumerate(panel.recipe.steps):
+            if step.verb != "modal":
+                continue
+            if chosen is None:
+                chosen = index
+            if default_name and _modal_name(step) == default_name:
+                chosen = index
+                break
+        if chosen is not None:
+            if not panel.recipe.steps[chosen].enabled:
+                panel.recipe.set_enabled(chosen, True)
+            return _modal_name(panel.recipe.steps[chosen])
+
         name = default_name or fallback
         panel.add_step("modal", params={"name": name} if name != fallback else None)
+        return name
 
     def _on_recipe_run(self) -> None:
         """**Recipe ▸ Run recipe**: run the panel's steps on a worker.
@@ -3092,11 +3126,18 @@ class MainWindow(QMainWindow):
         The pipeline messages collected by ``_collect`` on the worker thread are
         flushed here (on the GUI thread) before the error, so the diagnostics that
         led up to the failure appear before it — matching the success path's flush
-        in :meth:`_recipe_finished`.
+        in :meth:`_recipe_finished`.  A non-optional ``StepError`` carries the
+        partial run state, so the steps that completed before the failure are
+        still committed (unchecked, like a successful run) instead of being
+        re-run next time.
         """
         for pending in getattr(self, "_recipe_messages", None) or []:
             self.log(pending)
         self._recipe_messages = None
+        error = getattr(self._worker, "error", None)
+        step_status = getattr(error, "step_status", None)
+        if step_status:
+            self._recipe_panel.apply_run_outcomes(step_status)
         self.log(f"Recipe failed: {message}", "error")
 
     def _preprocess_ended(self) -> None:

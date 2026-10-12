@@ -64,7 +64,9 @@ def resolve_modal_result(context: StepContext, modal_case: str = "") -> Any:
       silently-different model).
 
     A bare :class:`~fea_toolkit.analysis.base.AnalysisResult` is also accepted
-    (the pre-named slot), so a caller that set the context directly still works.
+    (the pre-named slot), so a caller that set the context directly still works
+    — but only when *modal_case* is empty, since a bare result carries no name
+    to verify a requested one against.
 
     Args:
         context: The run's working state.
@@ -90,6 +92,12 @@ def resolve_modal_result(context: StepContext, modal_case: str = "") -> Any:
             return next(iter(modal.values()))
         raise ValueError(
             f"multiple modal results available ({sorted(modal)}); choose one with modal_case"
+        )
+    # A bare (pre-named) result carries no name to verify, so it is only
+    # resolvable when no *modal_case* was requested.
+    if modal_case:
+        raise ValueError(
+            f"cannot verify modal result {modal_case!r}: the context holds a single unnamed result"
         )
     return modal
 
@@ -142,7 +150,9 @@ def run_modal(context: StepContext, step: Step) -> list[StepResult]:
         the modal :class:`~fea_toolkit.analysis.base.AnalysisResult`.
 
     Raises:
-        ValueError: If a parameter is not declared by this verb.
+        ValueError: If a parameter is not declared by this verb, or a result
+            named ``params["name"]`` is already stored — a recipe must give
+            each modal step a distinct ``name``.
     """
     from ...analysis.modal import run_modal_analysis
 
@@ -155,6 +165,12 @@ def run_modal(context: StepContext, step: Step) -> list[StepResult]:
         config=params["config"] or None,
         log=context.pipeline_log,
     )
-    context.results.setdefault("modal", {})[params["name"]] = result
+    modal_results = context.results.setdefault("modal", {})
+    if params["name"] in modal_results:
+        raise ValueError(
+            f"a modal result named {params['name']!r} already exists; "
+            "give each modal step a distinct 'name'"
+        )
+    modal_results[params["name"]] = result
     context.log(f"Modal: {params['n_modes']} modes requested")
     return [StepResult(kind=MODAL, label="Modal", payload=result)]

@@ -353,10 +353,21 @@ class StepError(RuntimeError):
         index: Zero-based position of the failing step in the recipe.
         verb: The failing step's verb.
         cause: The exception the implementation raised.
+        step_status: The partial ``(index, verb, status)`` run state recorded
+            before the failure — the steps that completed (and the failing one,
+            as ``"failed"``) — so a caller can persist them instead of re-running
+            the work that already succeeded.  ``None`` when not provided.
     """
 
-    def __init__(self, index: int, verb: str, cause: BaseException) -> None:
+    def __init__(
+        self,
+        index: int,
+        verb: str,
+        cause: BaseException,
+        step_status: Optional[list] = None,
+    ) -> None:
         super().__init__(f"step {index} ({verb}) failed: {type(cause).__name__}: {cause}")
         self.index = index
         self.verb = verb
         self.cause = cause
+        self.step_status = step_status

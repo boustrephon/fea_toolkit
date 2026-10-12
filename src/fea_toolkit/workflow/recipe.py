@@ -147,18 +147,24 @@ class Recipe:
         if not 0 <= index < len(self.steps):
             raise IndexError(f"step index {index} out of range")
 
-        def _enable_precursors(i: int) -> None:
+        def _enable_precursors(i: int, seen: Optional[set[int]] = None) -> None:
+            if seen is None:
+                seen = set()
+            if i in seen:
+                return
+            seen.add(i)
             spec = STEP_SPECS.get(self.steps[i].verb)
             if spec is None:
                 return
             for need in spec.needs:
-                for j in range(i):
+                for j in range(i - 1, -1, -1):
                     candidate = self.steps[j]
                     producer = STEP_SPECS.get(candidate.verb)
                     if producer is not None and producer.kind == need:
                         if not candidate.enabled:
                             self.steps[j] = replace(candidate, enabled=True)
-                        _enable_precursors(j)
+                        _enable_precursors(j, seen)
+                        break
 
         self.steps[index] = replace(self.steps[index], enabled=enabled)
         if enabled:
@@ -459,7 +465,10 @@ def run_recipe(
             run.step_status.append((index, step.verb, "failed"))
             _notify(index, step.verb, "failed")
             if not step.optional:
-                raise StepError(index, step.verb, exc) from exc
+                # Preserve the partial run state on the error, so a caller that
+                # catches it (the GUI's failure path) can still commit the steps
+                # that completed before this one rather than re-running them.
+                raise StepError(index, step.verb, exc, step_status=list(run.step_status)) from exc
             run.failures.append((index, step.verb, message))
             context.log(
                 f"recipe: step {index} ({step.verb}) failed and is optional — continuing: {message}"
