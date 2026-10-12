@@ -65,10 +65,10 @@ Status as of 2026-12-10:
 | # | Item | Status |
 |---|---|---|
 | 1 | RS frame + shell forces (record flags, recorder extraction, `rs/shell_*` block) | ✅ Landed 2026-12-10 |
-| 2 | Load/reaction summary table (static sums, RS base shear, summed reactions) | ✅ Landed 2026-10-12 |
-| 3 | Shell deformation — static / RS / modal (pushover shell animation deferred) | ⬜ pending |
+| 2 | Load/reaction summary table (static sums, RS base shear, summed reactions) | ✅ Landed 2026-12-10 |
+| 3 | Shell deformation — static / RS / modal (pushover shell animation deferred) | ✅ Landed 2026-12-10 |
 | 4 | `results.animate` toggle on the view toolbar | ✅ Landed 2026-12-10 |
-| 5 | Pushover profiling (part a) | ⬜ pending |
+| 5 | Pushover profiling (part a) | ✅ Landed 2026-12-10 (measured — no change warranted) |
 | 6 + 7 | Recipe run-state markers (`Step.enabled` / `Step.status`) | ✅ Landed 2026-12-10 |
 | 8 | Document benign GUI console warnings (VTK / macOS) | ✅ Landed 2026-12-10 |
 | 9 | Named modal analyses + RS/pushover `modal_case` auto-resolution | ✅ Landed 2026-12-10 |
@@ -102,27 +102,37 @@ wrapper only when no preceding `run_static` result exists.  The GUI's
 `_show_load_reaction_summary` — one spelling, per anti-pattern 17.
 
 **Item 3 — shell deformation (static / RS / modal).**  Modal shell deformation
-already works (`npz_to_pyvista_modal_mesh` / `plot_mode_animation`); static
-shell displacement is computable (`npz_to_pyvista_shell_mesh(deformed_case=…)`),
-and RS now persists `node_displacements` + the `rs/node_*` block (Item 1).  The
-gap is the GUI results viewer: shells are not deformed for a selected static/RS
-case and the `animate` toggle does not move shells.  Plan: (3.1) apply the
-case's displacement field to shell vertices in the viewer (reuse
-`npz_reader._shift_shell`, not a new shift); (3.2) RS views pass
-`node_displacements` / `rs/node_*` through the same path; (3.3) extend the
-`animate` toggle so the sinusoidal amplitude reaches shells; (3.4) confirm the
-project bundle round-trips shell deformation.  Pushover shell animation is
+already worked (`npz_to_pyvista_modal_mesh` / `plot_mode_animation`), and the NPZ
+static path already supported `npz_to_pyvista_shell_mesh(deformed_case=…)`; the
+gap was the **interactive `ModelViewer` overlay** the GUI drives, which drew
+displaced frame centrelines only.  Landed 2026-12-10:
+`ShellGeom` carries the SAP node IDs of its vertices (`node_ids`), populated by
+`ModelViewer._extract_geometry` from `AreaElement.node_ids`; the
+`RenderBackend.render_deformed` contract and its PyVista implementation take an
+optional `shells` list and displace each shell face by the displacement of the
+nodes it sits on (same `_polygon_cells` face-building as `render_shells`, so a
+warped quad stays a quad); and `ModelViewer.overlay_deformed` passes the
+extracted shells through — so static, RS and modal steps deform shells alongside
+frames, and the `animate` toggle (which re-calls `overlay_deformed` each tick)
+oscillates them too.  `_auto_amplification` now measures a shell-only model from
+its own vertices instead of falling back to 1:1.  Tests:
+`tests/test_renderers_pyvista.py::TestRenderDeformedShells` (per-vertex shift,
+no-node-id fallback, replace-not-stack) and
+`tests/test_gui_results.py::TestShellDeformation` (a slab with no frames deforms
+its shell through the real action, auto-scaled).  Pushover shell animation is
 **deferred**.
 
-**Item 5(a) — pushover profiling.**  No runner change — measurement only.
-`run_pushover_analysis` (`_runner_pushover.py`) loops steps calling `_record_step`,
-whose per-step `ops.eleResponse` (frame `localForces` + shell `section 1 forces`)
-and `ops.nodeDisp` are the Python/extension-call hotspot.  Plan: profile a
-representative mid-size pushover (frames + shells, forces on) with `cProfile`
-(+ `viztracer` if available), then record a hotspots table + conclusion in
-`docs/dev_notes.md` / here, informing whether 5(b) parallelization/thinning is
-worthwhile (cheap knobs already exist: `pushover_step_stride`,
-`pushover_record_shell_forces=False`).
+**Item 5(a) — pushover profiling.**  Measured 2026-12-10, no runner change.  A
+mid-size elastic model (84 frames + 16 shells, 45 nodes, 30 steps) was profiled
+with `cProfile` plus a wall-clock A/B (recording off / node-disp-only /
+everything-on).  The hypothesis — that `_record_step`'s `ops.eleResponse` /
+`ops.nodeDisp` is the hotspot — is **refuted**: `ops.analyze` (the solver) is
+~54 % of the profile; `_record_step` is ~9 % (and `eleResponse`/`nodeDisp`
+individually ~1.6 µs / ~0.7 µs).  Turning the force blocks on costs ~20 ms
+(~25 %) at this size; node-disp-only (the verb default) is within noise of off.
+Full write-up and the 5(b) conclusion (parallelization/thinning **not**
+warranted — `pushover_step_stride` and the per-block flags are the answer):
+`docs/dev_notes.md` → *Pushover profiling*.
 
 ## PENDING (active — not yet done)
 

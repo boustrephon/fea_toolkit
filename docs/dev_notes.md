@@ -1305,3 +1305,70 @@ present after the incident).
   the stash/restore less fragile) is a separate tooling decision — see
   `.pre-commit-config.yaml`.
 
+## Pushover profiling — where the per-step time actually goes
+
+Measured 2026-12-10 for the nine-item GUI/workflow follow-up (Item 5a), under
+the OpenSeesPy venv, with `cProfile` plus a wall-clock A/B.  The goal was to
+confirm or refute the hypothesis that the per-step *recording* path
+(`_record_step` → `ops.eleResponse` + `ops.nodeDisp` in
+`opensees/_runner_pushover.py`) is the pushover hotspot worth optimising
+(Item 5b).  **It is not.**
+
+### The model
+
+A representative mid-size model built in the profiling script (not committed):
+2-bay × 2-bay × 4-storey steel moment frame — **84 frames** (36 columns +
+48 beams), **16 floor shells** (4 quads/level), **45 nodes** — elastic sections,
+`uniform` lateral load, 30 push steps.  Elastic on purpose: the point was to
+isolate the recording cost, and recording is identical for elastic and fiber
+elements.  (`/tmp/profile_pushover.py` builds it; `/tmp/profile_ab.py` runs the A/B.)
+
+### cProfile, cumulative (30 steps, everything recorded)
+
+| Function | ncalls | tottime | share |
+|---|---|---|---|
+| `ops.analyze` (the solver) | 31 | 0.077 s | **~54 %** |
+| `_record_step` (the recording wrapper) | 30 | 0.012 s | ~9 % |
+| `ops.reactions` (base shear) | 32 | 0.006 s | ~4 % |
+| `ops.eleResponse` | 3084 | 0.005 s | ~3.5 % |
+| `ops.nodeDisp` | 1426 | 0.001 s | ~0.7 % |
+| `_normalise_frame_response` | 2520 | 0.002 s | ~1.4 % |
+
+### Wall-clock A/B (30 steps, solver excluded from the delta)
+
+| Recording config | time |
+|---|---|
+| recording off | 79.7 ms |
+| node-disp only (the verb default) | 76.8 ms |
+| everything on (frame + shell forces) | 99.2 ms |
+
+### Reading
+
+1. **The solver is the hotspot** — `ops.analyze` is ~54 % of the whole profile,
+   and that is for an *elastic* model.  A realistic fibre/nonlinear pushover has
+   a far more expensive `analyze` (Newton iterations + material constitutive
+   integration), so recording becomes an even *smaller* fraction of the total.
+2. **Recording is cheap per call but linear in volume.**  `ops.eleResponse`
+   (~1.6 µs) and `ops.nodeDisp` (~0.7 µs) are individually trivial; the cost is
+   `elements × steps` round-trips (3000 `eleResponse` + 1350 `nodeDisp` over the
+   30 recorded steps).  Most of `_record_step`'s own 0.012 s is the Python
+   loop — dict/list construction and normalisation — not the C calls.
+3. **The cheap default already exists.**  `pushover_record_node_disp=True` with
+   frame/shell forces off (the verb's default — `store_frame_forces` /
+   `store_shell_forces` default `False`) is within noise of recording off.  Only
+   turning the force blocks on costs real time (~20 ms, ~25 %, at this size).
+4. **`pushover_step_stride` is the whole answer to "thinning".**  Subsampling the
+   retained history by N divides the recording cost by N, and it is already a
+   first-class `pushover` verb parameter.
+
+### Conclusion (Item 5b)
+
+Parallelising or otherwise optimising `_record_step` is **not warranted** — the
+recording path is ~10 % of a pushover (and less on a real fibre model), it is
+already opt-in per block, and the dominant `ops.analyze` cost lives inside the
+OpenSees C library where Python-side work cannot reach it.  The only recording
+lever worth recommending is the existing `pushover_step_stride` (and turning off
+`store_shell_forces` when shell resultants are not being reviewed).  No runner
+change was made.
+
+
