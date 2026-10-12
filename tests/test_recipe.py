@@ -374,6 +374,121 @@ class TestAnalysisVerbs:
             resolve_spectrum(context, source="auto_seismic", name="", T_spec=[], Sa_spec=[])
 
 
+class TestModalCaseSelection:
+    """Multiple modal analyses, and the RS/pushover ``modal_case`` selection."""
+
+    @staticmethod
+    def _load_case(name, case_type, modal_case="", case_data=None):
+        from fea_toolkit.model.sap_data import LoadCase
+
+        return LoadCase(
+            case_name=name,
+            case_type=case_type,
+            design_type_option="Prog Det",
+            design_type="Other",
+            design_action_option="Prog Det",
+            design_action="Other",
+            modal_case=modal_case,
+            case_data=case_data or {},
+        )
+
+    def test_spectrum_and_pushover_declare_modal_case(self):
+        from fea_toolkit.workflow.verbs.pushover import PUSHOVER_PARAMS
+        from fea_toolkit.workflow.verbs.response_spectrum import RS_PARAMS
+
+        assert "modal_case" in RS_PARAMS
+        assert "modal_case" in PUSHOVER_PARAMS
+        assert RS_PARAMS["modal_case"].default == ""
+        assert PUSHOVER_PARAMS["modal_case"].default == ""
+
+    def test_resolve_modal_result_returns_the_sole_result(self):
+        from types import SimpleNamespace
+
+        from fea_toolkit.workflow.verbs.modal import resolve_modal_result
+
+        result = object()
+        context = SimpleNamespace(results={"modal": {"MODAL": result}})
+        assert resolve_modal_result(context) is result
+        assert resolve_modal_result(context, "MODAL") is result
+
+    def test_resolve_modal_result_selects_by_name(self):
+        from types import SimpleNamespace
+
+        from fea_toolkit.workflow.verbs.modal import resolve_modal_result
+
+        first, second = object(), object()
+        context = SimpleNamespace(results={"modal": {"A": first, "B": second}})
+        assert resolve_modal_result(context, "B") is second
+
+    def test_resolve_modal_result_requires_a_choice_when_ambiguous(self):
+        from types import SimpleNamespace
+
+        from fea_toolkit.workflow.verbs.modal import resolve_modal_result
+
+        context = SimpleNamespace(results={"modal": {"A": object(), "B": object()}})
+        with pytest.raises(ValueError, match="multiple modal results"):
+            resolve_modal_result(context)
+
+    def test_resolve_modal_result_raises_without_a_modal_result(self):
+        from types import SimpleNamespace
+
+        from fea_toolkit.workflow.verbs.modal import resolve_modal_result
+
+        context = SimpleNamespace(results={})
+        with pytest.raises(ValueError, match="no modal result"):
+            resolve_modal_result(context)
+
+    def test_resolve_modal_result_accepts_a_bare_result(self):
+        from types import SimpleNamespace
+
+        from fea_toolkit.workflow.verbs.modal import resolve_modal_result
+
+        result = object()
+        context = SimpleNamespace(results={"modal": result})
+        assert resolve_modal_result(context) is result
+
+    def test_resolve_default_modal_case_prefers_the_spectrum_reference(self):
+        from types import SimpleNamespace
+
+        from fea_toolkit.workflow.verbs.modal import resolve_default_modal_case
+
+        md = SimpleNamespace(
+            load_cases={
+                "MODAL": self._load_case(
+                    "MODAL", "LinModal", case_data={"CASE - MODAL 1 - GENERAL": {}}
+                ),
+                "SPECX": self._load_case(
+                    "SPECX",
+                    "LinRespSpec",
+                    modal_case="MODAL",
+                    case_data={"CASE - RESPONSE SPECTRUM": {}},
+                ),
+            }
+        )
+        assert resolve_default_modal_case(md) == "MODAL"
+
+    def test_resolve_default_modal_case_falls_back_to_the_first_modal(self):
+        from types import SimpleNamespace
+
+        from fea_toolkit.workflow.verbs.modal import resolve_default_modal_case
+
+        md = SimpleNamespace(
+            load_cases={
+                "MODAL1": self._load_case("MODAL1", "LinModal"),
+                "MODAL2": self._load_case("MODAL2", "LinModal"),
+            }
+        )
+        assert resolve_default_modal_case(md) == "MODAL1"
+
+    def test_resolve_default_modal_case_returns_empty_without_a_modal(self):
+        from types import SimpleNamespace
+
+        from fea_toolkit.workflow.verbs.modal import resolve_default_modal_case
+
+        assert resolve_default_modal_case(SimpleNamespace(load_cases={})) == ""
+        assert resolve_default_modal_case(SimpleNamespace()) == ""
+
+
 class TestRecipeSerialisation:
     """A recipe is data: it round-trips, and it refuses what it cannot mean."""
 
@@ -435,6 +550,73 @@ class TestRecipeSerialisation:
         recipe = Recipe()
         recipe.add("mesh", params={"split_slabs_at_walls": True})
         assert recipe.to_dict()["steps"][0]["params"] == {"split_slabs_at_walls": True}
+
+    def test_run_state_round_trips_through_the_dict(self):
+        """A step's enabled/status survive the editable serialisation."""
+        from dataclasses import replace
+
+        recipe = Recipe(steps=[Step("mesh")])
+        recipe.steps[0] = replace(recipe.steps[0], enabled=False, status="ok")
+        rebuilt = Recipe.from_dict(recipe.to_dict())
+        assert rebuilt.steps[0].enabled is False
+        assert rebuilt.steps[0].status == "ok"
+        assert rebuilt.to_dict() == recipe.to_dict()
+
+    def test_an_untouched_step_has_no_status_key(self):
+        """A pending step omits ``status`` (and a fresh recipe stays lean)."""
+        recipe = Recipe(steps=[Step("mesh")])
+        step_dict = recipe.to_dict()["steps"][0]
+        assert "status" not in step_dict
+        assert step_dict["enabled"] is True
+
+    def test_the_python_export_strips_run_state(self):
+        """The exported script describes the workflow, not its last run."""
+        from dataclasses import replace
+
+        recipe = self._recipe()
+        recipe.steps[0] = replace(recipe.steps[0], enabled=False, status="ok")
+        tree = ast.parse(recipe.to_python())
+        literal = next(
+            node.value
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and any(getattr(target, "id", "") == "RECIPE" for target in node.targets)
+        )
+        for step_dict in ast.literal_eval(literal)["steps"]:
+            assert "enabled" not in step_dict
+            assert "status" not in step_dict
+
+    def test_set_enabled_cascades_to_precursors(self):
+        """Checking a step enables every step it needs, transitively."""
+        recipe = Recipe(
+            steps=[
+                Step("mesh"),
+                Step("modal"),
+                Step("response_spectrum"),
+            ]
+        )
+        recipe.set_enabled(2, False)
+        recipe.set_enabled(1, False)
+        recipe.set_enabled(0, False)
+        recipe.set_enabled(2, True)
+        assert [step.enabled for step in recipe.steps] == [True, True, True]
+
+    def test_set_enabled_unchecking_does_not_cascade(self):
+        """Disabling a step never touches its precursors."""
+        recipe = Recipe(
+            steps=[
+                Step("mesh"),
+                Step("modal"),
+                Step("response_spectrum"),
+            ]
+        )
+        recipe.set_enabled(2, False)
+        assert recipe.steps[0].enabled is True
+        assert recipe.steps[1].enabled is True
+
+    def test_set_enabled_rejects_an_out_of_range_index(self):
+        with pytest.raises(IndexError, match="out of range"):
+            Recipe().set_enabled(0, True)
 
     def test_the_python_export_compiles(self):
         compile(self._recipe().to_python(), "<recipe>", "exec")
@@ -894,6 +1076,28 @@ class TestFailuresAndCancellation:
         run = run_recipe(recipe, _slab_model())
         assert [failure[1] for failure in run.failures] == ["run_static"]
         assert run.results[0].label == "Meshed"
+
+    def test_a_disabled_step_is_skipped_without_needs_validation(self):
+        """A disabled step is skipped — it neither runs nor checks its needs."""
+        from dataclasses import replace
+
+        recipe = Recipe(steps=[Step("run_static")])  # would need 'geometry'
+        recipe.steps[0] = replace(recipe.steps[0], enabled=False)
+        run = run_recipe(recipe, _slab_model())
+        assert run.results == []
+        assert run.failures == []
+        assert run.step_status == [(0, "run_static", "skipped")]
+
+    def test_a_disabled_precursor_fails_the_enabled_step_that_needs_it(self):
+        """Skipping a step its successor needs surfaces as the successor's failure."""
+        from dataclasses import replace
+
+        recipe = Recipe(steps=[Step("mesh"), Step("run_static")])
+        recipe.steps[0] = replace(recipe.steps[0], enabled=False)
+        with pytest.raises(StepError) as info:
+            run_recipe(recipe, _slab_model())
+        assert info.value.index == 1
+        assert "needs 'geometry'" in str(info.value.cause)
 
     def test_cancellation_stops_the_run_at_a_step_boundary(self):
         recipe = Recipe(steps=[Step("mesh"), Step("mesh")])

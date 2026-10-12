@@ -101,7 +101,7 @@ class TestPanel:
         panel.add_step("mesh")
         panel.add_step("run_static")
         assert panel._table.rowCount() == 2
-        assert panel._table.item(1, 0).text() == "2. run_static"
+        assert panel._table.item(1, 1).text() == "2. run_static"
 
     def test_an_edit_via_the_dialog_reaches_the_step(self, window, monkeypatch):
         from fea_toolkit.workflow import Step
@@ -123,7 +123,7 @@ class TestPanel:
         panel = window._recipe_panel
         panel.add_step("mesh", optional=True)
         assert panel.recipe.steps[0].optional is True
-        assert "(optional)" in panel._table.item(0, 0).text()
+        assert "(optional)" in panel._table.item(0, 1).text()
 
     def test_a_step_carries_the_selection_it_was_given(self, window):
         from fea_toolkit.model.selection import Selection
@@ -159,6 +159,42 @@ class TestPanel:
         assert window._recipe_panel._table.rowCount() == 1
         assert window._recipe_panel.recipe.steps[0].params == {"split_slabs_at_walls": True}
 
+    def test_the_run_checkbox_controls_the_step_enabled_flag(self, window):
+        from qtpy.QtWidgets import QCheckBox
+
+        panel = window._recipe_panel
+        panel.add_step("mesh")
+        checkbox = panel._table.cellWidget(0, 0).findChild(QCheckBox)
+        assert checkbox.isChecked() is True
+        checkbox.setChecked(False)
+        assert panel.recipe.steps[0].enabled is False
+
+    def test_checking_a_step_enables_its_precursors(self, window):
+        from qtpy.QtWidgets import QCheckBox
+
+        panel = window._recipe_panel
+        panel.add_step("mesh")
+        panel.add_step("modal")
+        panel.add_step("response_spectrum")
+        for index in range(3):
+            checkbox = panel._table.cellWidget(index, 0).findChild(QCheckBox)
+            checkbox.setChecked(False)
+        assert [step.enabled for step in panel.recipe] == [False, False, False]
+        checkbox = panel._table.cellWidget(2, 0).findChild(QCheckBox)
+        checkbox.setChecked(True)
+        assert [step.enabled for step in panel.recipe] == [True, True, True]
+
+    def test_apply_run_outcomes_persists_the_tick(self, window):
+        panel = window._recipe_panel
+        panel.add_step("mesh")
+        panel.add_step("mesh")
+        panel.apply_run_outcomes([(0, "mesh", "ok"), (1, "mesh", "ok")])
+        assert panel.recipe.steps[0].status == "ok"
+        assert panel.recipe.steps[0].enabled is False
+        assert panel.recipe.steps[1].status == "ok"
+        assert panel.recipe.steps[1].enabled is False
+        assert panel._table.item(0, 2).text() == "\u2713"
+
 
 class TestRunOrder:
     """A recipe runs its steps in order, and the panel shows the workflow."""
@@ -183,9 +219,9 @@ class TestRunOrder:
         window._actions["recipe.run"].trigger()
         _await(window)
 
-        assert panel._table.columnCount() == 2
-        assert panel._table.item(0, 1).text() == "\u2713"  # green tick
-        assert panel._table.item(1, 1).text() == "\u2713"
+        assert panel._table.columnCount() == 3
+        assert panel._table.item(0, 2).text() == "\u2713"  # green tick
+        assert panel._table.item(1, 2).text() == "\u2713"
 
     def test_an_empty_recipe_warns_rather_than_running(self, window):
         window._on_recipe_run()

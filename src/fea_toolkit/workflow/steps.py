@@ -190,12 +190,22 @@ class Step:
         optional: When ``True``, a failure is logged and the recipe continues at
             the next step.  The default (``False``) stops the run — a
             silently-skipped step is a silently-different model.
+        enabled: Whether the step should run.  ``False`` is the user's "skip this
+            step" intent: :func:`~fea_toolkit.workflow.recipe.run_recipe` skips a
+            disabled step without validating its ``needs`` or running it.  This is
+            *run state*, distinct from ``optional`` (which is about how a failure
+            is handled once a step runs).
+        status: The step's last run outcome — ``""`` (pending), ``"ok"``,
+            ``"failed"``, ``"cancelled"`` or ``"skipped"``.  Persisted so a
+            recipe saved after a run still shows which steps succeeded.
     """
 
     verb: str
     selection: Optional[Selection] = None
     params: dict[str, Any] = field(default_factory=dict)
     optional: bool = False
+    enabled: bool = True
+    status: str = ""
 
 
 @dataclass(frozen=True)

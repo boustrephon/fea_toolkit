@@ -43,14 +43,34 @@ def _step_to_dict(step: Any) -> dict:
     Returns:
         A JSON-native mapping.  ``selection`` is the selection expression, or
         ``None`` for "no selection at all" — an empty *expression* stays ``""``,
-        because the two mean different things to a verb.
+        because the two mean different things to a verb.  ``enabled`` is always
+        written (like ``optional``); ``status`` only when non-empty, so an
+        untouched recipe stays a list of ``verb``/``selection``/``params``.
     """
-    return {
+    data = {
         "verb": step.verb,
         "selection": step.selection.to_string() if step.selection is not None else None,
         "params": copy.deepcopy(step.params),
         "optional": bool(step.optional),
+        "enabled": bool(step.enabled),
     }
+    if step.status:
+        data["status"] = str(step.status)
+    return data
+
+
+def _strip_run_state(data: dict) -> dict:
+    """Drop the run-state keys from a recipe's dict form.
+
+    ``enabled`` / ``status`` are the *editable* form's run state; the
+    :meth:`Recipe.to_python` script is an *authoring* artefact and should
+    describe what the recipe does, not how its last run went — so the exported
+    ``RECIPE`` is written with every step enabled and its status reset.
+    """
+    steps = []
+    for step in data.get("steps") or []:
+        steps.append({k: v for k, v in step.items() if k not in ("enabled", "status")})
+    return {"name": data.get("name", ""), "steps": steps}
 
 
 @dataclass
@@ -99,6 +119,50 @@ class Recipe:
         step = Step(verb=verb, selection=selection, params=dict(params or {}), optional=optional)
         self.steps.append(step)
         return step
+
+    def set_enabled(self, index: int, enabled: bool) -> None:
+        """Set a step's ``enabled`` flag; enabling cascades to its precursors.
+
+        Checking a step means "run this", so every step it *needs* must run too:
+        the transitive :attr:`~fea_toolkit.workflow.steps.StepSpec.needs` closure
+        is walked backwards and each disabled precursor is enabled.  Unchecking
+        does **not** cascade — disabling a step only ever removes work, never
+        adds it.
+
+        A precursor is matched by the *kind* it produces (the same set
+        :func:`run_recipe` tracks), so a recipe with several steps of one kind
+        enables the nearest earlier producer.
+
+        Args:
+            index: Zero-based step position in the recipe.
+            enabled: The new run flag.
+
+        Raises:
+            IndexError: If *index* is out of range.
+        """
+        from dataclasses import replace
+
+        from .registry import STEP_SPECS
+
+        if not 0 <= index < len(self.steps):
+            raise IndexError(f"step index {index} out of range")
+
+        def _enable_precursors(i: int) -> None:
+            spec = STEP_SPECS.get(self.steps[i].verb)
+            if spec is None:
+                return
+            for need in spec.needs:
+                for j in range(i):
+                    candidate = self.steps[j]
+                    producer = STEP_SPECS.get(candidate.verb)
+                    if producer is not None and producer.kind == need:
+                        if not candidate.enabled:
+                            self.steps[j] = replace(candidate, enabled=True)
+                        _enable_precursors(j)
+
+        self.steps[index] = replace(self.steps[index], enabled=enabled)
+        if enabled:
+            _enable_precursors(index)
 
     # ── Serialisation ────────────────────────────────────────────────
 
@@ -164,6 +228,8 @@ class Recipe:
                     selection=selection,
                     params=given,
                     optional=bool(raw.get("optional", False)),
+                    enabled=bool(raw.get("enabled", True)),
+                    status=str(raw.get("status", "")),
                 )
             )
         return cls(steps=steps, name=str(data.get("name", "")))
@@ -210,7 +276,7 @@ class Recipe:
             The script source.  It compiles (``compile()`` succeeds) and, with
             a real model path, runs.
         """
-        body = pformat(self.to_dict(), width=88, sort_dicts=False)
+        body = pformat(_strip_run_state(self.to_dict()), width=88, sort_dicts=False)
         return (
             _HEADER
             + "\n\n"
@@ -253,10 +319,11 @@ class RecipeRun:
     results: list = field(default_factory=list)
     failures: list = field(default_factory=list)
     cancelled: bool = False
-    #: ``(step index, verb, "ok" | "failed" | "cancelled")`` in completion order,
-    #: so a caller can show which steps ran and how they ended without re-deriving
-    #: it from ``results`` / ``failures`` (a successful step may produce no
-    #: result, and a tolerated failure appears here as well as in ``failures``).
+    #: ``(step index, verb, "ok" | "failed" | "cancelled" | "skipped")`` in
+    #: completion order, so a caller can show which steps ran and how they ended
+    #: without re-deriving it from ``results`` / ``failures`` (a successful step
+    #: may produce no result, a tolerated failure appears here as well as in
+    #: ``failures``, and a *disabled* step is recorded ``"skipped"``).
     step_status: list = field(default_factory=list)
 
 
@@ -351,6 +418,15 @@ def run_recipe(
             if on_step is not None:
                 with contextlib.suppress(Exception):
                     on_step(index, verb, status)
+
+        if not step.enabled:
+            # A disabled step is the user's "skip this" intent: it neither runs
+            # nor has its ``needs`` validated (a precursor it lacks must not
+            # stop a run that never reaches it).
+            run.step_status.append((index, step.verb, "skipped"))
+            _notify(index, step.verb, "skipped")
+            context.log(f"recipe: step {index} ({step.verb}) skipped (disabled)")
+            continue
 
         _notify(index, step.verb, "running")
         try:

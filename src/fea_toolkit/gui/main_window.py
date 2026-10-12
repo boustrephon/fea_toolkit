@@ -2484,26 +2484,47 @@ class MainWindow(QMainWindow):
             return
 
         from ..workflow import Step
+        from ..workflow.verbs.modal import resolve_default_modal_case
         from .views.step_dialog import StepDialog
 
-        edited = StepDialog.edit(Step(verb=verb), self, store.raw())
+        default_modal = resolve_default_modal_case(store.raw())
+        prefill: dict = {}
+        if verb == "modal" and default_modal:
+            prefill["name"] = default_modal
+        elif verb in ("response_spectrum", "pushover") and default_modal:
+            prefill["modal_case"] = default_modal
+
+        edited = StepDialog.edit(Step(verb=verb, params=prefill), self, store.raw())
         if edited is None:
             return
         if verb in ("response_spectrum", "pushover"):
-            self._ensure_modal_precursor()
+            self._ensure_modal_precursor(default_modal)
         self._preset_step(edited, label)
 
-    def _ensure_modal_precursor(self) -> None:
-        """Append a default ``modal`` step when the recipe has none.
+    def _ensure_modal_precursor(self, default_name: str = "") -> None:
+        """Ensure an *enabled* ``modal`` step precedes the spectrum/pushover step.
 
         ``response_spectrum`` and ``pushover`` declare
-        ``needs=("geometry", "modal")``, so a preset for either must run after
-        a modal step has produced the modal result.  Prepending a default modal
-        step keeps the preset self-contained; the user can edit it afterwards
-        like any other step.
+        ``needs=("geometry", "modal")``, so a preset for either must run after a
+        modal step has produced the modal result.  A modal step that already ran
+        is unchecked (auto-"No" after a run), so it is re-enabled — and, through
+        the ``set_enabled`` cascade, its geometry precursor too — rather than
+        appending a duplicate.  When the recipe has no modal step, one is added
+        with ``name`` set to *default_name* (the model's modal case), so the
+        spectrum / pushover step's ``modal_case`` prefill resolves to the same
+        name.
         """
-        if not any(s.verb == "modal" for s in self._recipe_panel.recipe.steps):
-            self._recipe_panel.add_step("modal")
+        panel = self._recipe_panel
+        for index, step in enumerate(panel.recipe.steps):
+            if step.verb == "modal":
+                if not step.enabled:
+                    panel.recipe.set_enabled(index, True)
+                return
+        from ..workflow import STEP_SPECS
+
+        fallback = STEP_SPECS["modal"].params["name"].default
+        name = default_name or fallback
+        panel.add_step("modal", params={"name": name} if name != fallback else None)
 
     def _on_recipe_run(self) -> None:
         """**Recipe ▸ Run recipe**: run the panel's steps on a worker.
@@ -2618,6 +2639,9 @@ class MainWindow(QMainWindow):
 
         run, messages = payload
         self._last_run = run
+        # Persist each step's outcome onto the recipe (a step that ran "ok" is
+        # unchecked), so the run state survives save → reopen.
+        self._recipe_panel.apply_run_outcomes(run.step_status)
         for message in messages:
             self.log(message)
         for result in run.results:

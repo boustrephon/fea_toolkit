@@ -16,6 +16,7 @@ from typing import Any
 from ..config_keys import BUILDER_CONFIG_KEYS
 from ..steps import PUSHOVER, ParamSpec, Step, StepContext, StepResult, validate_params
 from ._tcl import EXPORT_TCL_PARAMS, maybe_export_tcl
+from .modal import resolve_modal_result
 
 __all__ = ["PUSHOVER_PARAMS", "run_pushover"]
 
@@ -89,6 +90,14 @@ PUSHOVER_PARAMS: dict[str, ParamSpec] = {
         help="Retain per-step section deformations (ε, κ_y, κ_z, φ) at each frame "
         "integration point — the condensed fiber-reconstruction key.",
     ),
+    "modal_case": ParamSpec(
+        default="",
+        type=str,
+        help=(
+            "Name of the modal step whose first mode shapes the lateral load.  "
+            "Leave empty to use the only modal result present."
+        ),
+    ),
     "name": ParamSpec(
         default="Pushover",
         type=str,
@@ -115,6 +124,7 @@ def run_pushover(context: StepContext, step: Step) -> list[StepResult]:
     Args:
         context: The run's working state.  ``model`` and ``results["modal"]``
             must already be present (``mesh`` then ``modal`` steps precede this).
+            The modal result is chosen by the step's ``modal_case`` parameter.
         step: The step to run.
 
     Returns:
@@ -152,7 +162,7 @@ def run_pushover(context: StepContext, step: Step) -> list[StepResult]:
 
     result = run_pushover_analysis(
         context.model,
-        context.results["modal"],
+        resolve_modal_result(context, params["modal_case"]),
         material_type=params["material_type"],
         gravity_patterns=params["gravity_patterns"] or None,
         lateral_load_type=params["lateral_load_type"],

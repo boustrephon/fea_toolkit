@@ -19,6 +19,7 @@ from qtpy.QtCore import Qt, Signal
 from qtpy.QtGui import QBrush, QColor
 from qtpy.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -89,16 +90,19 @@ class RecipePanel(QWidget):
         outer.setContentsMargins(4, 4, 4, 4)
 
         row = QHBoxLayout()
-        self._table = QTableWidget(0, 2, self)
+        self._table = QTableWidget(0, 3, self)
         self._table.setObjectName("table_recipe_steps")
-        self._table.setHorizontalHeaderLabels(["Step", "Status"])
+        self._table.setHorizontalHeaderLabels(["Run", "Step", "Status"])
         self._table.verticalHeader().setVisible(False)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.ResizeToContents
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self._table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents
         )
         self._table.currentCellChanged.connect(self._on_current_cell_changed)
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -256,12 +260,40 @@ class RecipePanel(QWidget):
             item = QTableWidgetItem(label)
             if step.selection is not None:
                 item.setToolTip(f"selection: {step.selection}")
-            self._table.setItem(index, 0, item)
+            self._table.setItem(index, 1, item)
+            self._table.setCellWidget(index, 0, self._make_run_toggle(index, step.enabled))
             self._refresh_status_cell(index)
         self._table.blockSignals(False)
         if 0 <= self._selected < len(self._recipe):
             self._table.selectRow(self._selected)
         self._update_summary()
+
+    def _make_run_toggle(self, index: int, checked: bool) -> QWidget:
+        """A centred ``Run`` checkbox for step *index*, bound to its ``enabled``.
+
+        ``setChecked`` runs before the ``toggled`` signal is connected, so
+        building the table never re-fires the handler.
+        """
+        checkbox = QCheckBox(self._table)
+        checkbox.setChecked(checked)
+        checkbox.setToolTip("Run this step")
+        checkbox.toggled.connect(lambda state: self._on_run_toggled(index, state))
+        container = QWidget(self._table)
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(checkbox)
+        return container
+
+    def _on_run_toggled(self, index: int, checked: bool) -> None:
+        """Apply a Run-checkbox change, cascading to precursors when checked."""
+        if not (0 <= index < len(self._recipe)):
+            return
+        if self._recipe.steps[index].enabled == checked:
+            return
+        self._recipe.set_enabled(index, checked)
+        self._reload_list()
+        self.changed.emit()
 
     def _on_current_cell_changed(self, row: int, _col: int, _prev_row: int, _prev_col: int) -> None:
         """Track the newly selected step and refresh its summary."""
@@ -271,10 +303,19 @@ class RecipePanel(QWidget):
     # ── Run status ───────────────────────────────────────────────────
 
     def reset_statuses(self) -> None:
-        """Clear every step's run status (pending), e.g. before a new run."""
+        """Clear every step's run status (pending), e.g. before a new run.
+
+        Both the transient live status and the step's persisted ``status`` are
+        reset; the ``enabled`` flags are left alone (they are the user's "run
+        this" selection for the run that is about to start).
+        """
+        from dataclasses import replace
+
         self._statuses = {}
         self._table.blockSignals(True)
-        for index in range(len(self._recipe)):
+        for index, step in enumerate(self._recipe):
+            if step.status:
+                self._recipe.steps[index] = replace(step, status="")
             self._refresh_status_cell(index)
         self._table.blockSignals(False)
 
@@ -291,13 +332,46 @@ class RecipePanel(QWidget):
         self._statuses[index] = status
         self._refresh_status_cell(index)
 
+    def apply_run_outcomes(self, step_status: Any) -> None:
+        """Commit a run's outcomes onto the steps, so they persist with the recipe.
+
+        A step that finished ``"ok"`` is unchecked (``enabled=False``) and marked
+        done; a ``"failed"`` or ``"cancelled"`` step keeps its run flag but
+        records its outcome; a ``"skipped"`` step (already disabled) is left as
+        it is.
+
+        Args:
+            step_status: The ``(index, verb, status)`` tuples from
+                :class:`~fea_toolkit.workflow.recipe.RecipeRun.step_status`.
+        """
+        from dataclasses import replace
+
+        changed = False
+        for index, _verb, status in step_status:
+            if status == "skipped" or not (0 <= index < len(self._recipe)):
+                continue
+            step = self._recipe.steps[index]
+            enabled = False if status == "ok" else step.enabled
+            if step.status != status or step.enabled != enabled:
+                self._recipe.steps[index] = replace(step, status=status, enabled=enabled)
+                changed = True
+        if changed:
+            self._reload_list()
+            self.changed.emit()
+
     def _refresh_status_cell(self, index: int) -> None:
-        """Render the status glyph for step *index* into the Status column."""
-        glyph, color = _STATUS_GLYPHS.get(self._statuses.get(index, ""), ("", None))
-        item = self._table.item(index, 1)
+        """Render the status glyph for step *index* into the Status column.
+
+        The live run status (the transient ``_statuses`` map) wins; otherwise the
+        step's persisted ``status`` is shown, so a recipe re-opened after a run
+        still carries its outcome glyph.
+        """
+        status = self._statuses.get(index) or self._recipe.steps[index].status
+        glyph, color = _STATUS_GLYPHS.get(status or "", ("", None))
+        item = self._table.item(index, 2)
         if item is None:
             item = QTableWidgetItem()
-            self._table.setItem(index, 1, item)
+            self._table.setItem(index, 2, item)
         item.setText(glyph)
         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         if color is not None:

@@ -18,6 +18,7 @@ from typing import Any
 
 from ..steps import RS, ParamSpec, Step, StepContext, StepResult, validate_params
 from ._tcl import EXPORT_TCL_PARAMS, maybe_export_tcl
+from .modal import resolve_modal_result
 
 __all__ = ["RS_PARAMS", "resolve_spectrum", "run_response_spectrum"]
 
@@ -63,6 +64,14 @@ RS_PARAMS: dict[str, ParamSpec] = {
         type=int,
         help="Number of modes to include; leave at 'all' to use every mode.",
         allow_none=True,
+    ),
+    "modal_case": ParamSpec(
+        default="",
+        type=str,
+        help=(
+            "Name of the modal step whose result this spectrum combines.  Leave "
+            "empty to use the only modal result present."
+        ),
     ),
     "name": ParamSpec(
         default="ResponseSpectrum",
@@ -177,7 +186,9 @@ def run_response_spectrum(context: StepContext, step: Step) -> list[StepResult]:
     Args:
         context: The run's working state.  ``model`` and ``results["modal"]``
             must already be present (``mesh`` then ``modal`` steps precede this).
-        step: The step to run.  ``params`` supplies the direction and spectrum.
+            The modal result is chosen by the step's ``modal_case`` parameter.
+        step: The step to run.  ``params`` supplies the direction, spectrum and
+            the modal result to combine.
 
     Returns:
         One :data:`~fea_toolkit.workflow.steps.RS` result whose payload is
@@ -201,7 +212,7 @@ def run_response_spectrum(context: StepContext, step: Step) -> list[StepResult]:
 
     result = run_response_spectrum_analysis(
         context.model,
-        context.results["modal"],
+        resolve_modal_result(context, params["modal_case"]),
         direction=params["direction"],
         T_spec=T_spec,
         Sa_spec=Sa_spec,
