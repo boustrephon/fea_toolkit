@@ -3477,9 +3477,9 @@ class MainWindow(QMainWindow):
         rs_shell_forces = collected.get("rs_shell_forces") or {}
         directions = list(dict.fromkeys([*rs_element_forces, *rs_shell_forces]))
         rs_force_direction = directions[0] if directions else None
-        if rs_force_direction is not None and rs_force_direction in rs_element_forces:
+        if rs and rs_force_direction is not None and rs_force_direction in rs_element_forces:
             arrays.update(collect_rs_element_force_arrays(rs_element_forces[rs_force_direction]))
-        if rs_force_direction is not None and rs_force_direction in rs_shell_forces:
+        if rs and rs_force_direction is not None and rs_force_direction in rs_shell_forces:
             arrays.update(collect_rs_shell_force_arrays(rs_shell_forces[rs_force_direction]))
 
         mesh = self._store.preprocessed() if self._store is not None else None

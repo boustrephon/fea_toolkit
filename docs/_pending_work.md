@@ -65,7 +65,7 @@ Status as of 2026-12-10:
 | # | Item | Status |
 |---|---|---|
 | 1 | RS frame + shell forces (record flags, recorder extraction, `rs/shell_*` block) | ✅ Landed 2026-12-10 |
-| 2 | Load/reaction summary table (static sums, RS base shear, summed reactions) | ⬜ pending |
+| 2 | Load/reaction summary table (static sums, RS base shear, summed reactions) | ✅ Landed 2026-12-10 |
 | 3 | Shell deformation — static / RS / modal (pushover shell animation deferred) | ⬜ pending |
 | 4 | `results.animate` toggle on the view toolbar | ✅ Landed 2026-12-10 |
 | 5 | Pushover profiling (part a) | ⬜ pending |
@@ -85,25 +85,21 @@ project bundle threads both blocks through `collect_project_results`.
 
 **Upcoming items — detailed plan (2026-12-10).**
 
-**Item 2 — analysis summary table.**  `analysis_load_reaction_summary`
-(`analysis/linear.py:291`, pandas-free, tested) already renders applied vs
-reaction for static patterns + the RS CQC base shear/moment, but it *re-solves*
-the domain and is not wired to a GUI view — the `load_verification` verb
-(`workflow/verbs/load_verification.py`) still wraps the older pandas-backed
-`static_load_verification()`, and the GUI's `Analysis ▸ Run` path
-(`run_case_set`) discards the summed-reaction rows `run_static_cases` already
-computes.  Plan: (2.1) capture applied load-pattern totals **during** the
-solve — after `run_static_analysis` read `ab._sw_load_totals` /
-`_gravity_load_totals` / `_joint_load_totals` / `_dist_load_totals` and store
-`{case, applied, summed}` per case via a `summaries_out` side-channel on
-`run_static_cases`, threaded through `run_case_set`'s return; (2.2) split
-`analysis_load_reaction_summary` into a pure
+**Item 2 detail (load/reaction summary).**  The table is driven from the solve
+itself: `run_static_cases` gained a `summaries_out` side-channel capturing one
+`{analysis, applied, summed}` entry per solved case (`applied` = the case's
+factored applied-load totals summed over its patterns; `summed` = its summed
+base reactions with overturning via `sum_reactions_with_overturning`), and
+`run_case_set` threads those entries through its `"summaries"` return.
+`analysis_load_reaction_summary` was split into the pure
 `render_load_reaction_rows(md, static_summaries, rs_results, total_weight,
-seismic_coefficient)` formatter plus the existing re-solving wrapper (delegating
-to it, so `tests/test_analysis_summary.py` still passes); (2.3) rewire the
-`load_verification` verb to read the solved `cases` summaries + `context.
-results["rs"]` and emit the `Table`, and register the same table from the
-non-recipe run path — one spelling, per anti-pattern 17.
+seismic_coefficient)` formatter plus the existing re-solving wrapper (which
+delegates to it), and the `load_verification` verb now reads the solved
+summaries from `context.results["static_summaries"]` plus
+`context.results["rs"]` and emits the `Table`, falling back to the re-solving
+wrapper only when no preceding `run_static` result exists.  The GUI's
+`Analysis ▸ Run` path registers the same table via
+`_show_load_reaction_summary` — one spelling, per anti-pattern 17.
 
 **Item 3 — shell deformation (static / RS / modal).**  Modal shell deformation
 already works (`npz_to_pyvista_modal_mesh` / `plot_mode_animation`); static

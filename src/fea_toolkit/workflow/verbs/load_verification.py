@@ -96,7 +96,7 @@ def run_load_verification(context: StepContext, step: Step) -> list[StepResult]:
         return []
 
     static_summaries = context.results.get("static_summaries")
-    if static_summaries:
+    if static_summaries is not None:
         # Drive from the solve a preceding run_static step already did.
         rows = render_load_reaction_rows(md, static_summaries, rs_results=rs_results or None)
     else:

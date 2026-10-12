@@ -221,7 +221,7 @@ def test_run_case_set_returns_applied_and_summed_summaries(sample_md, sample_mes
 
     summaries = result["summaries"]
     assert len(summaries) == 2
-    by_case = {s["case"]: s for s in summaries}
+    by_case = {s["analysis"]: s for s in summaries}
     assert set(by_case) == {"DEAD", "WIND"}
     for s in summaries:
         assert set(s["applied"]) == {"fx", "fy", "fz", "mx", "my", "mz"}

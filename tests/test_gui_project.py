@@ -358,6 +358,8 @@ def test_collect_project_results_empty_run():
         "mode_shapes": None,
         "rs": {},
         "rs_nodal_displacements": {},
+        "rs_element_forces": {},
+        "rs_shell_forces": {},
         "pushover": {},
         "pushover_results": {},
         "pushover_step_results": {},

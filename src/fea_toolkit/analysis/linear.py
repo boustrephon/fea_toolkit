@@ -631,7 +631,7 @@ def run_static_cases(
             as ``static_results``.  A case that **fails** contributes no entry,
             so ``set(attempted) - set(raw_out)`` is the set that did not
             converge (see *attempted*).
-        summaries_out: Optional list filled with one ``{"case": name,
+        summaries_out: Optional list filled with one ``{"analysis": name,
             "applied": {...}, "summed": {...}}`` entry per **solved** case —
             ``applied`` is the case's factored applied-load totals (summed over
             its patterns) and ``summed`` its summed base reactions with
@@ -745,7 +745,7 @@ def run_static_cases(
                         for k in applied:
                             applied[k] += t[k]
                 summaries_out.append(
-                    {"case": case_name, "applied": applied, "summed": dict(summed)}
+                    {"analysis": case_name, "applied": applied, "summed": dict(summed)}
                 )
             disp = results.get("nodal_displacements", {})
             max_roof_disp = 0.0
@@ -866,7 +866,7 @@ def run_case_set(
         ``"unreduced"`` the combinations that could not be formed from what
         did, a case skipped by cancellation is reported only through
         ``"cancelled"``, and ``"summaries"`` is the per-solved-case
-        ``{"case", "applied", "summed"}`` list
+        ``{"analysis", "applied", "summed"}`` list
         :func:`render_load_reaction_rows` formats into the load/reaction table.
     """
     from ..io.npz_writer import results_arrays

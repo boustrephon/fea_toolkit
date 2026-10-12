@@ -1345,7 +1345,16 @@ class TestEndToEnd:
         """
         from examples.sample_model import make_sample_model
 
-        recipe = Recipe(steps=[Step("mesh"), Step("run_static"), Step("load_verification")])
+        recipe = Recipe(
+            steps=[
+                Step("mesh"),
+                Step(
+                    "run_static",
+                    params={"cases": {"DEAD": {"DEAD": 1.0}, "WIND": {"WIND": 1.0}}},
+                ),
+                Step("load_verification"),
+            ]
+        )
         run = run_recipe(recipe, make_sample_model())
 
         assert [result.kind for result in run.results] == ["geometry", "cases", "table"]
