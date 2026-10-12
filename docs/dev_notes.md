@@ -702,6 +702,41 @@ hit the same race.  `main_window._freeze_gc_once()` (a `gc.freeze()` before the
 handoff) is the stop-gap there; the deepcopy itself has since been replaced by
 copy-on-write — see the next section.
 
+## Benign console noise in the GUI
+
+Two lines that appear on the console when the GUI runs are **noise, not
+defects**; neither is actionable in our code, and both are safe to ignore.
+
+### `TSMSendMessageToUIServer` (macOS only)
+
+macOS's Text Services Manager logs a `TSMSendMessageToUIServer` message from
+the UI-server process when an app's text services are probed.  It is emitted by
+the **operating system**, not by the toolkit, appears once per session, and has
+no bearing on the viewport or the analysis.  Do not chase it.
+
+### VTK "Camera view up vector … and view direction … are parallel"
+
+`vtkCamera::SetViewUp` warns when the up vector is (anti-)parallel to the view
+direction.  **Our own camera presets never trigger it** — verified against
+PyVista 0.46.4:
+
+- `MainWindow._view_xy` / `_view_xz` / `_view_yz` delegate to PyVista's
+  `view_xy` / `view_xz` / `view_yz`, which pass a perpendicular up vector from
+  `view_vectors` (`xy → up = (0, 1, 0)`, `xz/yz → up = (0, 0, 1)`).
+- `view_isometric` uses `get_default_cam_pos`, whose up is `(0, 0, 1)` against a
+  diagonal view direction.
+- `plotting.viz_common._set_isometric_view` sets `camera_position = [pos, focal,
+  (0, 0, 1)]` with a diagonal position→focal vector — never parallel.
+
+If the warning *is* seen, it comes from upstream: either the camera-orientation
+widget (`add_camera_orientation_widget`) or terrain-style interaction at the
+moment the user orbits to an exactly top-down view (elevation 90°), where keeping
+`Z` vertical while looking straight down makes up and direction briefly parallel.
+It is harmless.  Before "fixing" it, re-check the paragraph above against the
+installed PyVista — a *perpendicular* up vector is already the rule, so any
+"fix" that re-specifies one is a no-op (`.clinerules` §12 — verify, do not
+guess).
+
 ## Copy-on-write replaces the model deepcopy (Preprocessor)
 
 `Preprocessor.run()` has always promised not to mutate the caller's
