@@ -162,6 +162,11 @@ Overlays the deformed shape.  If *displacements* is ``None``, reads
 (populated by ``run_static_analysis()``); otherwise pass
 ``{node_id: (dx, dy, dz)}``.
 
+Both **frames and shells** deform: frame centrelines and shell faces are
+displaced by the nodes they sit on, so a slab bends with the frame it is
+attached to.  A shell-only model (a slab with no frames) is auto-scaled from
+its own vertices.
+
 ```python
 viewer.overlay_forces(elem_forces=None, quantity="Mz",
                       use_local=True, scale_factor=None)

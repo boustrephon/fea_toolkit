@@ -250,6 +250,82 @@ class TestDeformedShape:
         assert window._actions["results.deformed"].isChecked() is False
 
 
+def _write_shell_disp_archive(tmp_path):
+    """A quad slab with a displacement field, for the deformed-shell path.
+
+    The four corners carry a +X sway proportional to their X coordinate (nodes 2
+    and 3 move 1.0 m), so the deformed quad is a recognisable shear of the flat
+    one and assertable exactly.
+    """
+    path = tmp_path / "shell_disp.npz"
+    np.savez_compressed(
+        path,
+        node_tag=np.array([1, 2, 3, 4], dtype=int),
+        node_sap_id=np.array(["1", "2", "3", "4"], dtype=str),
+        node_x=np.array([0.0, 4.0, 4.0, 0.0]),
+        node_y=np.array([0.0, 0.0, 4.0, 4.0]),
+        node_z=np.zeros(4),
+        frame_eid=np.array([], dtype=int),
+        frame_sap_id=np.array([], dtype=str),
+        frame_sec_name=np.array([], dtype=str),
+        frame_parent_sap_id=np.array([], dtype=str),
+        frame_node_i=np.array([], dtype=int),
+        frame_node_j=np.array([], dtype=int),
+        shell_eid=np.array([11], dtype=int),
+        shell_sap_id=np.array(["A1"], dtype=str),
+        shell_sec_name=np.array(["Slab"], dtype=str),
+        shell_parent_sap_id=np.array([""], dtype=str),
+        shell_node_1=np.array([1], dtype=int),
+        shell_node_2=np.array([2], dtype=int),
+        shell_node_3=np.array([3], dtype=int),
+        shell_node_4=np.array([4], dtype=int),
+        static_case_labels=np.array(["DEAD"], dtype=str),
+        static_case_group=np.array(["DEAD"], dtype=str),
+        **{
+            "static/DEAD/node_dx": np.array([0.0, 1.0, 1.0, 0.0]),
+            "static/DEAD/node_dy": np.zeros(4),
+            "static/DEAD/node_dz": np.zeros(4),
+        },
+    )
+    return path
+
+
+def _deformed_shell_points(window):
+    """The deformed shell overlay's vertices (``None`` when there is none).
+
+    The deformed category holds a frame-centreline actor (lines) and, now, a
+    shell actor (faces); this returns the *faces* one, which is the shell.
+    """
+    for actor in window._backend.actors("deformed"):
+        dataset = actor.mapper.dataset
+        if getattr(dataset, "n_faces", 0) > 0:
+            return np.asarray(dataset.points, dtype=float)
+    return None
+
+
+class TestShellDeformation:
+    """Deformed shape displaces shell faces, not just frame centrelines.
+
+    A slab with no frames at all still deforms: its shell vertices take the
+    displacement of the nodes they sit on, auto-scaled to ten percent of the
+    model (now measured from the shell itself).
+    """
+
+    def test_a_slab_deforms_its_shell(self, window, tmp_path):
+        window.open_results_path(str(_write_shell_disp_archive(tmp_path)))
+        assert window._actions["results.deformed"].isEnabled() is True
+        window._actions["results.deformed"].trigger()
+
+        points = _deformed_shell_points(window)
+        assert points is not None, "no deformed shell overlay was drawn"
+        # Auto-scale: max |disp| 1.0 m → 10 % of the model diagonal (sqrt(4²+4²)).
+        sway = 0.1 * (4.0**2 + 4.0**2) ** 0.5
+        assert points[0] == pytest.approx([0.0, 0.0, 0.0])  # node 1 fixed
+        assert points[1] == pytest.approx([4.0 + sway, 0.0, 0.0])  # node 2
+        assert points[2] == pytest.approx([4.0 + sway, 4.0, 0.0])  # node 3
+        assert points[3] == pytest.approx([0.0, 4.0, 0.0])  # node 4 fixed
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Force diagrams — M7's second results action
 # ═══════════════════════════════════════════════════════════════════

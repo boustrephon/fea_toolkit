@@ -308,11 +308,13 @@ class ModelViewer:
                 continue
             sec = md.area_assignments.get(aid, "")
             verts = []
+            node_ids = []
             for nid in ae.node_ids:
                 nd = md.nodes.get(nid)
                 if nd is None:
                     break
                 verts.append([nd.x, nd.y, nd.z])
+                node_ids.append(nid)
             if len(verts) < 3:
                 continue
             self._shells.append(
@@ -320,6 +322,7 @@ class ModelViewer:
                     area_id=aid,
                     section=sec,
                     vertices=np.array(verts, dtype=float),
+                    node_ids=tuple(node_ids),
                 )
             )
 
@@ -529,6 +532,7 @@ class ModelViewer:
             displacements,
             scale=scale,
             color=color,
+            shells=self._shells,
         )
         return self
 
@@ -541,9 +545,14 @@ class ModelViewer:
         diagonal, so a millimetre model and a metre model both read the same
         way.
         """
-        if not self._frames:
+        if self._frames:
+            all_pts = np.vstack([f.start for f in self._frames] + [f.end for f in self._frames])
+        elif self._shells:
+            # A shell-only model (a slab with no frames) still deserves the same
+            # auto-scale: measure its size from the shell vertices, not 1:1.
+            all_pts = np.vstack([s.vertices for s in self._shells])
+        else:
             return 1.0
-        all_pts = np.vstack([f.start for f in self._frames] + [f.end for f in self._frames])
         model_size = max(float(np.linalg.norm(np.ptp(all_pts, axis=0))), 1.0)
         max_disp = max(
             (float(np.linalg.norm(np.asarray(d, dtype=float)[:3])) for d in displacements.values()),

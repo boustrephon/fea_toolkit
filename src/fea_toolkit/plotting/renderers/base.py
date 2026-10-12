@@ -29,6 +29,7 @@ class ShellGeom:
     area_id: str
     section: str
     vertices: np.ndarray  # shape (N, 3) — polygon vertices in order
+    node_ids: tuple[str, ...] = ()  # SAP node IDs of the vertices, in order
 
 
 @dataclass
@@ -262,14 +263,19 @@ class RenderBackend(ABC):
         displacements: dict[str, np.ndarray],  # node_id → (dx, dy, dz)
         scale: float = 1.0,
         color: tuple[float, float, float] = (0.3, 0.6, 1.0),
+        shells: Optional[list[ShellGeom]] = None,
     ) -> None:
-        """Draw deformed frame elements.
+        """Draw deformed frame elements and shell faces.
 
         Args:
             frames: List of frame geometries (undeformed).
             displacements: ``{node_id: (dx, dy, dz)}``.
             scale: Amplification factor.
             color: Deformed shape colour, RGB in 0..1 range.
+            shells: List of shell geometries (undeformed).  Each shell's
+                vertices are displaced by the node they belong to
+                (:attr:`ShellGeom.node_ids`); a shell without per-vertex node
+                ids is drawn undisplaced.
         """
         ...
 

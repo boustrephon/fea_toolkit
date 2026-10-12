@@ -489,8 +489,6 @@ def npz_to_pyvista_modal_mesh(
 
     return f_pts, f_lines, s_pts, s_faces
 
-    return f_pts, f_lines, s_pts, s_faces
-
 
 # ── Rhino adapter ─────────────────────────────────────────────────────────
 

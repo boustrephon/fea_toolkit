@@ -1170,6 +1170,90 @@ class TestRenderDeformedReplaces:
             renderer.plotter.close()
 
 
+class TestRenderDeformedShells:
+    """``PyVistaRenderer.render_deformed`` displaces shell faces with their nodes.
+
+    The static/RS deformed shape must move shells alongside frames; a shell's
+    vertices are keyed to the nodes they sit on, so each corner takes the
+    displacement of its own node.
+    """
+
+    def _deformable_shell(self, node_ids=("1", "2", "3", "4")):
+        from fea_toolkit.plotting.renderers.base import ShellGeom
+
+        return ShellGeom(
+            area_id="A1",
+            section="SLAB",
+            vertices=np.array(
+                [[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [2.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
+                dtype=float,
+            ),
+            node_ids=node_ids,
+        )
+
+    def test_a_shell_deforms_with_its_nodes(self):
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            disp = {
+                "1": np.array([0.0, 0.0, 0.0]),
+                "2": np.array([1.0, 0.0, 0.0]),
+                "3": np.array([1.0, 1.0, 0.0]),
+                "4": np.array([0.0, 1.0, 0.0]),
+            }
+            renderer.render_deformed([], disp, scale=1.0, shells=[self._deformable_shell()])
+            points = np.asarray(renderer.actors("deformed")[0].mapper.dataset.points, dtype=float)
+            # Corner 1 (node "1") is fixed; corner 2 (node "2") is (2,0,0) + (1,0,0).
+            assert points[0] == pytest.approx([0.0, 0.0, 0.0])
+            assert points[1] == pytest.approx([3.0, 0.0, 0.0])
+            assert points[2] == pytest.approx([3.0, 2.0, 0.0])
+            assert points[3] == pytest.approx([0.0, 2.0, 0.0])
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_a_shell_without_node_ids_stays_put(self):
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_deformed(
+                [],
+                {"1": np.array([9.0, 9.0, 9.0])},
+                scale=1.0,
+                shells=[self._deformable_shell(node_ids=())],
+            )
+            points = np.asarray(renderer.actors("deformed")[0].mapper.dataset.points, dtype=float)
+            # No node ids → no displacement applied, whatever the field says.
+            assert points[1] == pytest.approx([2.0, 0.0, 0.0])
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_a_second_call_replaces_the_shell_overlay(self):
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            disp = {
+                "1": np.zeros(3),
+                "2": np.array([1.0, 0.0, 0.0]),
+                "3": np.array([1.0, 1.0, 0.0]),
+                "4": np.array([0.0, 1.0, 0.0]),
+            }
+            renderer.render_deformed([], disp, scale=1.0, shells=[self._deformable_shell()])
+            renderer.render_deformed([], disp, scale=2.0, shells=[self._deformable_shell()])
+
+            actors = renderer.actors("deformed")
+            assert len(actors) == 1, "the previous deformed shell was left on screen"
+            points = np.asarray(actors[0].mapper.dataset.points, dtype=float)
+            assert points[1][0] == pytest.approx(4.0)  # (2,0,0) + (1,0,0) × 2
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+
 class TestSectionPaletteFromAssignments:
     """The section palette must include assignment names, not just definitions.
 

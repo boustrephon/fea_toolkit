@@ -705,36 +705,67 @@ class PyVistaRenderer(RenderBackend):
         displacements: dict[str, np.ndarray],
         scale: float = 1.0,
         color: tuple[float, float, float] = (0.3, 0.6, 1.0),
+        shells: Optional[list[ShellGeom]] = None,
     ) -> None:
         # The deformed shape is a single overlay: re-drawing it (e.g. each frame
         # of the mode-shape animation) must *replace* the previous shape, not
         # stack another actor on top of it.  Clear first so the prior amplitude
         # does not linger and draw over the new one.
         self.clear_category("deformed")
-        if not frames:
+        if not frames and not shells:
             return
         p = self.plotter
         import pyvista as pv
 
+        # ── Frame centreline ──
         n = len(frames)
-        pts = np.zeros((n * 2, 3))
-        lines = np.zeros((n, 3), dtype=int)
-        for idx, f in enumerate(frames):
-            d_i = displacements.get(f.node_i, np.zeros(3))
-            d_j = displacements.get(f.node_j, np.zeros(3))
-            pts[idx * 2] = f.start + d_i * scale
-            pts[idx * 2 + 1] = f.end + d_j * scale
-            lines[idx] = [2, idx * 2, idx * 2 + 1]
+        if n:
+            pts = np.zeros((n * 2, 3))
+            lines = np.zeros((n, 3), dtype=int)
+            for idx, f in enumerate(frames):
+                d_i = displacements.get(f.node_i, np.zeros(3))
+                d_j = displacements.get(f.node_j, np.zeros(3))
+                pts[idx * 2] = f.start + d_i * scale
+                pts[idx * 2 + 1] = f.end + d_j * scale
+                lines[idx] = [2, idx * 2, idx * 2 + 1]
 
-        mesh = pv.PolyData(pts, lines=lines)
-        actor = p.add_mesh(
-            mesh,
-            color=color,
-            opacity=0.7,
-            line_width=2,
-            show_scalar_bar=False,
-        )
-        self._add_overlay(actor, "deformed")
+            mesh = pv.PolyData(pts, lines=lines)
+            actor = p.add_mesh(
+                mesh,
+                color=color,
+                opacity=0.7,
+                line_width=2,
+                show_scalar_bar=False,
+            )
+            self._add_overlay(actor, "deformed")
+
+        # ── Shell faces ──
+        if shells:
+            shifted: list[np.ndarray] = []
+            for s in shells:
+                verts = s.vertices
+                if len(s.node_ids) == len(verts):
+                    verts = np.asarray(
+                        [
+                            verts[k] + displacements.get(nid, np.zeros(3)) * scale
+                            for k, nid in enumerate(s.node_ids)
+                        ],
+                        dtype=float,
+                    )
+                shifted.append(verts)
+            faces, _ = _polygon_cells(shifted)
+            if len(faces):
+                shell_mesh = pv.PolyData(np.vstack(shifted), faces=faces)
+                shell_actor = p.add_mesh(
+                    shell_mesh,
+                    color=color,
+                    opacity=0.35,
+                    show_edges=True,
+                    edge_color=color,
+                    lighting=False,  # warped quads have no unique normal
+                    show_scalar_bar=False,
+                )
+                self._add_overlay(shell_actor, "deformed")
 
     # ── Force flags ──────────────────────────────────────────────────
 
