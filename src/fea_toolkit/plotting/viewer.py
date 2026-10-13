@@ -165,11 +165,22 @@ def _offset_frame_endpoints(
     offset = getattr(md, "frame_end_offsets", {}).get(elem.elem_id)
     if offset is None:
         return start, end
+    end_i = offset.end_i
+    end_j = offset.end_j
+    # Clamp the combined longitudinal offsets to 0.99 times the member length,
+    # exactly as the Rhino export does, so offsets that exceed the member
+    # length cannot fold the drawn flexible span back on itself.
+    length = float(np.linalg.norm(end - start))
+    total_offset = end_i + end_j
+    if total_offset > length * 0.99:
+        scale = length * 0.99 / max(total_offset, 1e-12)
+        end_i *= scale
+        end_j *= scale
     off_i, off_j = frame_end_offsets_global(
         end - start,
         float(getattr(elem, "angle", 0.0)),
-        offset.end_i,
-        offset.end_j,
+        end_i,
+        end_j,
         offset.off_y_i,
         offset.off_z_i,
         offset.off_y_j,

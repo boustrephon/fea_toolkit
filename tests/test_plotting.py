@@ -285,3 +285,28 @@ def test_offset_frame_endpoints_applies_rigid_offsets():
     start, end = _offset_frame_endpoints(_MD(), elem, ni, nj)
     np.testing.assert_allclose(start, [0.0, 0.0, 0.0])
     np.testing.assert_allclose(end, [5.0, 0.0, 0.0])
+
+
+def test_offset_frame_endpoints_clamps_longitudinal_offsets():
+    """Combined longitudinal offsets over the member length clamp to 0.99 x it."""
+    from fea_toolkit.model.sap_data import FrameElement, FrameEndOffset
+    from fea_toolkit.plotting.viewer import _offset_frame_endpoints
+
+    class _MD:
+        def __init__(self):
+            self.frame_end_offsets = {}
+
+    class _N:
+        def __init__(self, x, y, z):
+            self.x, self.y, self.z = x, y, z
+
+    elem = FrameElement("F1", 1, "1", "2")
+    ni, nj = _N(0.0, 0.0, 0.0), _N(5.0, 0.0, 0.0)
+
+    # end_i + end_j = 6.0 > 0.99 * 5.0 -> clamped to 0.99 * length, leaving a
+    # flexible span of 0.01 * length between the drawn endpoints (matching the
+    # Rhino export's clamp in rhino/geometry.py::_get_frame_points).
+    md = _MD()
+    md.frame_end_offsets = {"F1": FrameEndOffset(end_i=3.0, end_j=3.0)}
+    start, end = _offset_frame_endpoints(md, elem, ni, nj)
+    assert float(np.linalg.norm(end - start)) == pytest.approx(0.01 * 5.0)
