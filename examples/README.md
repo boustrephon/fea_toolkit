@@ -12,6 +12,7 @@ python examples/basic_usage.py --sample
 python examples/static_analysis.py --sample
 python examples/pushover_analysis.py --sample
 python examples/modal_rs_analysis.py --sample
+python examples/cft_column_pushover.py
 
 # Or your own model
 python examples/basic_usage.py /path/to/model.s2k
@@ -25,6 +26,7 @@ python examples/basic_usage.py /path/to/model.s2k
 | `basic_usage.py` | **Core workflow** — parse .s2k, enrich sections, build OpenSees model, run static analysis with equilibrium checks. Start here. | `.s2k` / `--sample` |
 | `static_analysis.py` | **Static analysis + force diagrams** — parse, build, run a load combination, extract element forces, plot 2D/3D moment, shear, and axial diagrams. | `.s2k` / `--sample` |
 | `pushover_analysis.py` | **Non-linear pushover** — two-stage gravity + lateral push with fiber sections. Demonstrates all four lateral load patterns (`uniform`, `triangular`, `mode1`, `pattern`). Exports PNG and SVG plots. | `.s2k` / `--sample` |
+| `cft_column_pushover.py` | **Concrete-filled steel pipe (CFT/CHS) pushover** — builds a programmatic fixed-base CHS cantilever (`ConcreteFilledPipeSection`: steel pipe ring + unconfined C40 fill) and runs a two-stage gravity + displacement-controlled pushover through the role-based fiber contract, then plots the capacity curve. The fill is unconfined until the CFT confinement model lands (`docs/cft_confinement_plan.md`). | None (self-contained) |
 | `modal_rs_analysis.py` | **Modal + response spectrum** — seismic masses, eigenvalue analysis, CQC response spectrum (GB 50011), element-level RS forces, missing mass correction. | `.s2k` / `--sample` |
 | `linear_workflow.py` | **Full linear workflow** — parse → mesh/split/constraints → floating-node cleanup → static/modal/response-spectrum analysis → summary tables and mode-shape plots/GIFs. The model path is always user-supplied (no hardcoded default); pass a `.s2k` file or `--sample`. | `.s2k` / `--sample` |
 | `wall_pushover_compare.py` | **RC wall pushover comparison** — runs the converging toolkit paths (**MVLEM_3D** and **LayeredShell/ShellNLDKGQ**) on the same 4 m × 0.3 m wall at three heights (H/W = 0.5, 1.0, 2.0), unified gravity (P = 0.20·fc·Ag = 7200 kN) + displacement-controlled protocol, overlaid capacity curves (one figure, three subplots), optional Tcl + OpenSeesPy script export, optional `--fiber` opt-in flexure-only reference.  Results in `docs/mvlem_wall_analysis.md` §7.1. | None (self-contained) |
