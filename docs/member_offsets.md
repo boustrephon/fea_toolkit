@@ -53,7 +53,7 @@ stiffness is missing entirely.  This is the correctness gap P38 addresses.
 | Option | Mechanism | Applies to | Notes |
 |---|---|---|---|
 | `"jntOffset"` (**default**) | `-jntOffset` in `geomTransf` | Linear, PDelta, Corotational | native; exact; no extra nodes/MPC/stiff beams; offsets are **global** (needs a local→global rotation); fixed-vector small-offset assumption |
-| `"beam"` | stiff elastic beams (≈1000× member stiffness) | all | universal fallback; ill-conditions under PDelta; adds orphan-node bookkeeping |
+| `"beam"` | stiff elastic beams (≈1000× member stiffness) | all | universal fallback; ill-conditions under PDelta; adds orphan-node bookkeeping; under-counts rigid-zone mass (see §9) |
 | `"mpc"` | `rigidLink("beam")` | all | true MPCs; **silently breaks** with diaphragm / BODY constraints (DOF conflict) |
 
 **Default is `"jntOffset"`.**  It is the native CSI-equivalent ("always fully
@@ -178,4 +178,13 @@ back-compatibility (`True` → `"mpc"`, `False` → `"jntOffset"`).
   ``tests/test_analysis_csm.py``.
 - **Fixed-vector approximation** for `Corotational` large-displacement models —
   document, and keep `"beam"` as the escape hatch.
+- **Stiff-beam mass deficit** (`"beam"` fallback only).  The rigid links are
+  emitted massless (`-mass 0.0`, `Elastic` section with no density), and the
+  member is shortened by the longitudinal offsets `end_i + end_j`, so the
+  rigid-zone self-weight/mass `A × ρ × (end_i + end_j)` is **under-counted**,
+  not over-counted.  Only the **axial** offsets reduce the mass — the lateral
+  cardinal-point offsets are perpendicular to the member axis (and, in the
+  `"beam"` path, never reach the analysis model), so they neither add nor
+  remove mass.  The `"jntOffset"` default keeps the full reference-line
+  geometry and therefore has no such deficit.
 - **Partial rigidity** (`rigid_factor`) remains out of scope (tracked as P16).
