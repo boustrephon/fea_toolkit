@@ -588,14 +588,24 @@ def geomTransf(transf_type: str, tag: int, *args: Any) -> None:
         # Corotational (large displacements, for buckling/braces)
         geomTransf('Corotational', tag, vecXx, vecXy, vecXz)
 
-        # With joint offsets (rigid end zones)
+        # With joint offsets (rigid end zones).  Supported by ``Linear``,
+        # ``PDelta`` and ``Corotational`` in both 2D and 3D.  The six offset
+        # components are specified in GLOBAL coordinates (rotate the local
+        # end offsets with
+        # ``fea_toolkit.model.geometry_core.frame_end_offsets_global``).
         geomTransf('Linear', tag, vecXx, vecXy, vecXz,
+                   '-jntOffset', dXi, dYi, dZi, dXj, dYj, dZj)
+        geomTransf('PDelta', tag, vecXx, vecXy, vecXz,
+                   '-jntOffset', dXi, dYi, dZi, dXj, dYj, dZj)
+        geomTransf('Corotational', tag, vecXx, vecXy, vecXz,
                    '-jntOffset', dXi, dYi, dZi, dXj, dYj, dZj)
 
     Args:
         transf_type: ``'Linear'``, ``'PDelta'``, or ``'Corotational'``.
         tag: Transformation tag.
-        *args: Vector components or options.
+        *args: Vector components (the local x-axis ``vecxz`` in global
+            coordinates), optionally followed by ``'-jntOffset'`` and the two
+            3-component global offset vectors (I-end then J-end).
     """
     ...
 

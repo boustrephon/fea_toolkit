@@ -151,7 +151,7 @@ each joint back to the reference line.
    builder's offset-link emission now resolves the flag through
    `_rigid_offset_method()` rather than reading the legacy boolean directly)
    and warn when it coexists with diaphragms/BODY constraints.
-5. **Stub.**  Extend `typings/openseespy/opensees/__init__.pyi` `geomTransf`
+5. **Stub.** ✅  Extend `typings/openseespy/opensees/__init__.pyi` `geomTransf`
    docstring with the `PDelta`/`Corotational` `-jntOffset` forms and a
    global-coordinates clarification.
 6. **GUI / Rhino parity.**  Thread the same `frame_end_offsets_global()` through
