@@ -53,12 +53,10 @@ from ..utils import (
     DEFAULT_E_S_PA,
     DEFAULT_EPS_C,
     DEFAULT_FC_PA,
-    DEFAULT_FY_REBAR_PA,
     DEFAULT_FY_STEEL_PA,
-    RC_NO_TIE_CONFINEMENT_FACTOR,
-    RC_NO_TIE_EPSC_FACTOR,
     stress_scale_factor,
 )
+from ._fiber_role_materials import fiber_role_material_tcl
 
 
 def _emit_fiber_role_material_tcl(
@@ -72,63 +70,13 @@ def _emit_fiber_role_material_tcl(
 ) -> None:
     """Append the ``uniaxialMaterial`` Tcl line for one fiber role.
 
-    Mirrors :meth:`AnalysisBuilder._create_fiber_role_material`: the role
-    fixes the OpenSees law, while :meth:`Section.fiber_role_material` resolves
-    the backing SAP2000 material.  Strengths/moduli authored in SI (Pa) fall
-    through the shared ``*_PA`` defaults scaled to model units.
+    Delegates to :func:`_fiber_role_materials.resolve_fiber_role_material` —
+    the single source of truth shared with the OpenSeesPy domain and the
+    SAPModelData Tcl exporter — and formats its ``(law, args)`` result as Tcl.
     """
     mat_name = sec.fiber_role_material(role)
     mat = mesh_model.materials.get(mat_name) if mat_name else None
-
-    if role == "steel":
-        if mat is not None and (mat.type or "").lower() == "steel":
-            Fy = mat.Fy if mat.Fy and mat.Fy > 0 else DEFAULT_FY_STEEL_PA * _ssf
-            E_mod = mat.E_mod if mat.E_mod and mat.E_mod > 0 else DEFAULT_E_S_PA * _ssf
-        else:
-            Fy = DEFAULT_FY_STEEL_PA * _ssf
-            E_mod = DEFAULT_E_S_PA * _ssf
-        lines.append(f"uniaxialMaterial Steel01 {tag} {Fy:g} {E_mod:g} 0.01")
-    elif role == "rebar":
-        Fy_rebar = config.get("rebar_Fy_override")
-        Es_rebar = config.get("rebar_Es_override")
-        if Fy_rebar is not None:
-            Fy_rebar = Fy_rebar * _ssf
-        if Es_rebar is not None:
-            Es_rebar = Es_rebar * _ssf
-        if (Fy_rebar is None or Es_rebar is None) and mat is not None:
-            rm_Fy = getattr(mat, "Fy", 0.0) or 0.0
-            rm_Es = getattr(mat, "E_mod", 0.0) or 0.0
-            if Fy_rebar is None and rm_Fy > 0:
-                Fy_rebar = rm_Fy
-            if Es_rebar is None and rm_Es > 0:
-                Es_rebar = rm_Es
-        if not Fy_rebar:
-            Fy_rebar = DEFAULT_FY_REBAR_PA * _ssf
-        if not Es_rebar:
-            Es_rebar = DEFAULT_E_S_PA * _ssf
-        lines.append(
-            f"uniaxialMaterial Steel02 {tag} {Fy_rebar:g} {Es_rebar:g} 0.01 18.5 0.925 0.15"
-        )
-    elif role == "concrete":
-        Fc = mat.Fc if (mat is not None and mat.Fc and mat.Fc > 0) else DEFAULT_FC_PA * _ssf
-        epsc = DEFAULT_EPS_C
-        lines.append(
-            f"uniaxialMaterial Concrete01 {tag} {-Fc:g} {-epsc:g} {-0.2 * Fc:g} {-0.006:g}"
-        )
-    elif role == "core":
-        Fc = mat.Fc if (mat is not None and mat.Fc and mat.Fc > 0) else DEFAULT_FC_PA * _ssf
-        epsc = DEFAULT_EPS_C
-        fcc = (
-            mat.eFc
-            if (mat is not None and mat.eFc and mat.eFc > 0)
-            else Fc * RC_NO_TIE_CONFINEMENT_FACTOR
-        )
-        epscc = epsc * RC_NO_TIE_EPSC_FACTOR
-        lines.append(
-            f"uniaxialMaterial Concrete01 {tag} {-fcc:g} {-epscc:g} {-0.2 * fcc:g} {-0.02:g}"
-        )
-    else:
-        raise ValueError(f"Unknown fiber material role {role!r} for section {sec.name!r}")
+    lines.append(fiber_role_material_tcl(role, sec, mat, mesh_model.materials, config, _ssf, tag))
 
 
 def _py_val(v: Any) -> str:

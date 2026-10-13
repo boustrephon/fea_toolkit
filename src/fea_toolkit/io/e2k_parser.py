@@ -576,6 +576,28 @@ def _get_area_connectivity(
     return areas
 
 
+# Assignment attributes whose repeated values aggregate into a list rather
+# than replacing one another.  ``MESHAT "BEAMS" MESHAT "WALLS"`` is the
+# canonical example; every other assignment keyword is scalar.
+_MULTI_VALUE_ASSIGN_KEYS = frozenset({"MESHAT"})
+
+
+def _merge_assign_value(existing: Any, value: Any, kw: str) -> Any:
+    """Merge a repeated assignment attribute value.
+
+    Multi-valued keys (see :data:`_MULTI_VALUE_ASSIGN_KEYS`) aggregate repeated
+    values into a list; every other key is scalar, so a later value replaces an
+    earlier one.
+    """
+    if kw in _MULTI_VALUE_ASSIGN_KEYS:
+        if existing is None:
+            return value
+        if isinstance(existing, list):
+            return [*existing, value]
+        return [existing, value]
+    return value
+
+
 def _get_assigns(
     sections: dict[str, list[GroupedLine]],
     section: str,
@@ -585,8 +607,9 @@ def _get_assigns(
 
     The instance identity is the first two values of the leading group
     (``POINTASSIGN "1" "BASE"``, ``LINEASSIGN "C1" "STORY11"``, …); the
-    remaining groups are attributes.  A repeated keyword folds its values into
-    a list (e.g. ``MESHAT "BEAMS" MESHAT "WALLS"``).
+    remaining groups are attributes.  Repeated scalar keywords keep the last
+    value, while explicitly multi-valued keywords (e.g. ``MESHAT``) fold their
+    values into a list.
     """
     assigns: dict[tuple[str, str], dict[str, Any]] = {}
     for groups in sections.get(section, []):
@@ -598,13 +621,7 @@ def _get_assigns(
                 story = str(vals[1])
             else:
                 value = vals[0] if len(vals) == 1 else tuple(vals)
-                if kw in attrs:
-                    existing = attrs[kw]
-                    attrs[kw] = (
-                        [*existing, value] if isinstance(existing, list) else [existing, value]
-                    )
-                else:
-                    attrs[kw] = value
+                attrs[kw] = _merge_assign_value(attrs.get(kw), value, kw)
         if name is not None and story is not None:
             key = (name, story)
             existing = assigns.get(key)
@@ -612,15 +629,7 @@ def _get_assigns(
                 assigns[key] = attrs
             else:
                 for kw, value in attrs.items():
-                    if kw in existing:
-                        old_value = existing[kw]
-                        existing[kw] = (
-                            [*old_value, value]
-                            if isinstance(old_value, list)
-                            else [old_value, value]
-                        )
-                    else:
-                        existing[kw] = value
+                    existing[kw] = _merge_assign_value(existing.get(kw), value, kw)
     return assigns
 
 

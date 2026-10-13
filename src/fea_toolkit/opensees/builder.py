@@ -39,8 +39,6 @@ from ..model.sap_data import SAPModelData
 from ..utils import (
     DEFAULT_E_S_PA,
     DEFAULT_EPS_C,
-    DEFAULT_EPS_CC,
-    DEFAULT_FC_PA,
     DEFAULT_FSAM_CONC_EPCC,
     DEFAULT_FSAM_CONC_ET,
     DEFAULT_FSAM_CONC_FPC_PA,
@@ -54,16 +52,14 @@ from ..utils import (
     DEFAULT_FSAM_STEEL_CR2,
     DEFAULT_FSAM_STEEL_R0,
     DEFAULT_FY_REBAR_PA,
-    DEFAULT_FY_STEEL_PA,
     DEFAULT_G_MOD_FRAC,
     DEFAULT_RHO_MC_SI,
     DEFAULT_RHO_MS_SI,
-    RC_NO_TIE_CONFINEMENT_FACTOR,
-    RC_NO_TIE_EPSC_FACTOR,
     g_from_units,
     mass_density_scale_factor,
     stress_scale_factor,
 )
+from ._fiber_role_materials import fiber_role_material_tcl
 
 if TYPE_CHECKING:
     from ..model.mesh_model import MeshModel
@@ -691,24 +687,6 @@ def export_model_to_tcl(
 # independent of the deprecated class and work directly with SAPModelData.
 
 
-def _resolve_concrete_epsc_tcl(mat) -> float:
-    """Return the concrete peak strain (positive magnitude) for a material.
-
-    ``Material.eFc`` is a *confined compressive strength* (Pa), not a strain,
-    so it is never used as the peak strain.  The stress-strain curve's ``s_fc``
-    (strain at peak ``fc'``) is used when present and within a plausible range;
-    otherwise :data:`DEFAULT_EPS_C` (0.002) applies.
-    """
-    if mat is not None and mat.ss_curve is not None and mat.ss_curve.s_fc is not None:
-        try:
-            s_fc = float(mat.ss_curve.s_fc)
-        except (TypeError, ValueError):
-            s_fc = 0.0
-        if 0.0 < s_fc <= 0.01:
-            return s_fc
-    return DEFAULT_EPS_C
-
-
 def _emit_fiber_role_material_tcl(
     lines: list[str],
     model_data: "SAPModelData",
@@ -720,81 +698,13 @@ def _emit_fiber_role_material_tcl(
 ) -> None:
     """Append the ``uniaxialMaterial`` Tcl line for one fiber role.
 
-    Mirrors :meth:`AnalysisBuilder._create_fiber_role_material`: the role
-    fixes the OpenSees law, while :meth:`Section.fiber_role_material` resolves
-    the backing SAP2000 material.  Strengths/moduli authored in SI (Pa) fall
-    through the shared ``*_PA`` defaults scaled to model units.
+    Delegates to :func:`_fiber_role_materials.resolve_fiber_role_material` —
+    the single source of truth shared with the OpenSeesPy domain and the
+    MeshModel Tcl exporter — and formats its ``(law, args)`` result as Tcl.
     """
     mat_name = sec.fiber_role_material(role)
     mat = model_data.materials.get(mat_name) if mat_name else None
-
-    if role == "steel":
-        if mat is not None and (mat.type or "").lower() == "steel":
-            Fy = mat.Fy if mat.Fy and mat.Fy > 0 else DEFAULT_FY_STEEL_PA * _sf
-            E_mod = mat.E_mod if mat.E_mod and mat.E_mod > 0 else DEFAULT_E_S_PA * _sf
-        else:
-            Fy = DEFAULT_FY_STEEL_PA * _sf
-            E_mod = DEFAULT_E_S_PA * _sf
-        lines.append(f"uniaxialMaterial Steel01 {tag} {Fy:g} {E_mod:g} 0.01")
-    elif role == "rebar":
-        if mat is not None:
-            Fy = mat.Fy if mat.Fy and mat.Fy > 0 else DEFAULT_FY_REBAR_PA * _sf
-            E_mod = mat.E_mod if mat.E_mod and mat.E_mod > 0 else DEFAULT_E_S_PA * _sf
-        else:
-            Fy = DEFAULT_FY_REBAR_PA * _sf
-            E_mod = DEFAULT_E_S_PA * _sf
-        lines.append(f"uniaxialMaterial Steel02 {tag} {Fy:g} {E_mod:g} 0.01 18.5 0.925 0.15")
-    elif role == "concrete":
-        Fc = mat.Fc if (mat is not None and mat.Fc and mat.Fc > 0) else DEFAULT_FC_PA * _sf
-        epsc = _resolve_concrete_epsc_tcl(mat)
-        lines.append(
-            f"uniaxialMaterial Concrete01 {tag} {-Fc:g} {-abs(epsc):g} {-0.2 * Fc:g} {-0.006:g}"
-        )
-    elif role == "core":
-        Fc = mat.Fc if (mat is not None and mat.Fc and mat.Fc > 0) else DEFAULT_FC_PA * _sf
-        epsc = _resolve_concrete_epsc_tcl(mat)
-        fcc = Fc * RC_NO_TIE_CONFINEMENT_FACTOR
-        epscc = abs(epsc) * RC_NO_TIE_EPSC_FACTOR
-        ecu_cc = 0.02
-        fc_method = getattr(sec, "fiber_confinement", None)
-        conf_dict = None
-        if callable(fc_method):
-            tie_fy = getattr(sec, "tie_fy", None) or 0.0
-            if tie_fy <= 0:
-                tie_mat_name = getattr(sec, "tie_rebar_mat", None) or getattr(
-                    sec, "rebar_material", None
-                )
-                tie_mat = model_data.materials.get(tie_mat_name) if tie_mat_name else None
-                if tie_mat is not None:
-                    tie_fy = getattr(tie_mat, "Fy", 0.0) or 0.0
-            try:
-                conf_val = fc_method(Fc, tie_fy)
-                conf_dict = conf_val if isinstance(conf_val, dict) else None
-            except Exception:
-                conf_dict = None
-            if conf_dict is not None:
-                fcc = conf_dict.get("fcc", fcc)
-                epscc = conf_dict.get("ecc", epscc)
-                ecu_cc = conf_dict.get("ecu", ecu_cc)
-        if conf_dict is None:
-            if mat is not None and mat.eFc and mat.eFc > 0:
-                fcc = mat.eFc
-            scc = (
-                float(mat.ss_curve.s_cap)
-                if mat is not None and mat.ss_curve is not None and mat.ss_curve.s_cap is not None
-                else None
-            )
-            if scc is not None and scc <= 0.1:
-                epscc = scc
-        if epscc > 0.1:
-            epscc = DEFAULT_EPS_CC
-        ecu_max = float(config.get("confined_ecu_max", 0.025))
-        ecu_cc = min(ecu_cc, ecu_max)
-        lines.append(
-            f"uniaxialMaterial Concrete01 {tag} {-fcc:g} {-abs(epscc):g} {-0.2 * fcc:g} {-ecu_cc:g}"
-        )
-    else:
-        raise ValueError(f"Unknown fiber material role {role!r} for section {sec.name!r}")
+    lines.append(fiber_role_material_tcl(role, sec, mat, model_data.materials, config, _sf, tag))
 
 
 def tcl_materials_and_sections(

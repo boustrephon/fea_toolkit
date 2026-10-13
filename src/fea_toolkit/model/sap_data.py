@@ -479,11 +479,16 @@ class Section:
         * ``"core"``     — confined concrete core (``Concrete01``, Mander)
         * ``"rebar"``    — reinforcing steel (``Steel02``)
 
-        The base section is a single structural-steel role.  Concrete,
-        composite and non-fiber subclasses override this to declare the extra
-        roles the builders must create materials for.  Sections that do not
-        support fiber conversion return an empty list.
+        The base section returns a single structural-steel role only when the
+        concrete subclass overrides :meth:`to_fiber_patches` (so the builders
+        have fiber patches to attach that role to); a section that keeps the
+        base ``NotImplementedError`` implementation returns an empty list, and
+        the builders fall back to an elastic section.  Concrete and composite
+        subclasses override this to declare the extra roles the builders must
+        create materials for.
         """
+        if type(self).to_fiber_patches is Section.to_fiber_patches:
+            return []
         return ["steel"]
 
     def fiber_role_material(self, role: str) -> Optional[str]:
@@ -1292,6 +1297,15 @@ class EncasedSection(Section):
     encasement_bf: float = 0.0
 
     def fiber_roles(self) -> list[str]:
+        """Fiber roles, empty when the encasement has no dimensions.
+
+        A zero / negative ``encasement_depth`` or ``encasement_bf`` means no
+        concrete encasement geometry was supplied (the parsers do not populate
+        it), so :meth:`to_fiber_patches` would raise :class:`ValueError`.  The
+        builders use the elastic fallback instead of reaching that error.
+        """
+        if self.encasement_depth <= 0 or self.encasement_bf <= 0:
+            return []
         return ["steel", "concrete"]
 
     def fiber_role_material(self, role: str) -> Optional[str]:

@@ -5,37 +5,10 @@ from typing import Optional
 
 import openseespy.opensees as ops
 
-from ..utils import (
-    DEFAULT_E_S_PA,
-    DEFAULT_EPS_C,
-    DEFAULT_FC_PA,
-    DEFAULT_FSAM_CONC_FT_PA,
-    DEFAULT_FY_REBAR_PA,
-    DEFAULT_FY_STEEL_PA,
-    RC_NO_TIE_CONFINEMENT_FACTOR,
-    RC_NO_TIE_EPSC_FACTOR,
-    stress_scale_factor,
-)
+from ..utils import stress_scale_factor
+from ._fiber_role_materials import resolve_fiber_role_material
 
 logger = logging.getLogger(__name__)
-
-
-def _resolve_concrete_epsc(mat) -> float:
-    """Return the concrete peak strain (positive magnitude) for a material.
-
-    ``Material.eFc`` is a *confined compressive strength* (Pa), not a strain,
-    so it is never used as the peak strain.  The stress-strain curve's ``s_fc``
-    (strain at peak ``fc'``) is used when present and within a plausible range;
-    otherwise :data:`DEFAULT_EPS_C` (0.002) applies.
-    """
-    if mat is not None and mat.ss_curve is not None and mat.ss_curve.s_fc is not None:
-        try:
-            s_fc = float(mat.ss_curve.s_fc)
-        except (TypeError, ValueError):
-            s_fc = 0.0
-        if 0.0 < s_fc <= 0.01:
-            return s_fc
-    return DEFAULT_EPS_C
 
 
 class SectionMixin:
@@ -320,155 +293,17 @@ class SectionMixin:
     def _create_fiber_role_material(self, role: str, sec, tag: int) -> None:
         """Create the OpenSees uniaxial material for one fiber role.
 
-        The role fixes the law; the material object (resolved via
-        :meth:`Section.fiber_role_material`) supplies the properties.
-        Strengths/moduli authored in SI (Pa) fall back through the shared
-        ``*_PA`` defaults scaled to model units.
+        Delegates to :func:`_fiber_role_materials.resolve_fiber_role_material`
+        — the single source of truth shared with the two Tcl exporters — and
+        emits the resolved law with ``ops.uniaxialMaterial``.
         """
         mat_name = sec.fiber_role_material(role)
         mat = self.mesh_model.materials.get(mat_name) if mat_name else None
         ssf = stress_scale_factor(self.mesh_model.units)
-
-        if role == "steel":
-            Fy = getattr(mat, "Fy", 0.0) if mat is not None else 0.0
-            Fy = Fy or DEFAULT_FY_STEEL_PA * ssf
-            E = getattr(mat, "E_mod", 0.0) if mat is not None else 0.0
-            E = E or DEFAULT_E_S_PA * ssf
-            ops.uniaxialMaterial("Steel01", tag, Fy, E, 0.01)
-        elif role == "rebar":
-            # Resolve Fy/Es in priority order:
-            #   1) config override (SI Pa, scaled to model units)
-            #   2) section's SAP2000 rebar_material (RebarMatL) lookup
-            #   3) framework rebar defaults (DEFAULT_FY_REBAR_PA / E_S)
-            Fy_rebar = self.config.get("rebar_Fy_override")
-            Es_rebar = self.config.get("rebar_Es_override")
-            if Fy_rebar is not None:
-                Fy_rebar = Fy_rebar * ssf
-            if Es_rebar is not None:
-                Es_rebar = Es_rebar * ssf
-            if (Fy_rebar is None or Es_rebar is None) and mat is not None:
-                rm_Fy = getattr(mat, "Fy", 0.0) or 0.0
-                rm_Es = getattr(mat, "E_mod", 0.0) or 0.0
-                if rm_Fy > 0:
-                    Fy_rebar = Fy_rebar if Fy_rebar is not None else rm_Fy
-                if rm_Es > 0:
-                    Es_rebar = Es_rebar if Es_rebar is not None else rm_Es
-            if not Fy_rebar:
-                Fy_rebar = DEFAULT_FY_REBAR_PA * ssf
-            if not Es_rebar:
-                Es_rebar = DEFAULT_E_S_PA * ssf
-            ops.uniaxialMaterial(
-                "Steel02",
-                tag,
-                Fy_rebar,
-                Es_rebar,
-                float(self.config.get("rebar_b", 0.01)),
-                float(self.config.get("rebar_R0", 18.0)),
-                float(self.config.get("rebar_cR1", 0.925)),
-                float(self.config.get("rebar_cR2", 0.15)),
-            )
-        elif role == "concrete":
-            Fc = getattr(mat, "Fc", 0.0) if mat is not None else 0.0
-            Fc = Fc or DEFAULT_FC_PA * ssf
-            epsc = _resolve_concrete_epsc(mat)
-            self._emit_fiber_concrete(
-                tag,
-                Fc,
-                epsc,
-                float(self.config.get("core_residual_factor", 0.2)) * Fc,
-                0.006,
-            )
-        elif role == "core":
-            # Confined core — Mander when tie data is present, else the shared
-            # no-tie-data heuristic (RC_NO_TIE_CONFINEMENT_FACTOR /
-            # RC_NO_TIE_EPSC_FACTOR, same as builder.py's Tcl export).
-            Fc = getattr(mat, "Fc", 0.0) if mat is not None else 0.0
-            Fc = Fc or DEFAULT_FC_PA * ssf
-            epsc = _resolve_concrete_epsc(mat)
-            Fc_core = Fc * RC_NO_TIE_CONFINEMENT_FACTOR
-            epsc_core = abs(epsc) * RC_NO_TIE_EPSC_FACTOR
-            ecu_core = 0.02
-            tie_fy = getattr(sec, "tie_fy", None) or 0.0
-            if tie_fy <= 0:
-                tie_mat_name = getattr(sec, "tie_rebar_mat", None) or getattr(
-                    sec, "rebar_material", None
-                )
-                tie_mat = self.mesh_model.materials.get(tie_mat_name) if tie_mat_name else None
-                if tie_mat is not None:
-                    tie_fy = getattr(tie_mat, "Fy", 0.0) or 0.0
-            confinement = None
-            fc_method = getattr(sec, "fiber_confinement", None)
-            if callable(fc_method):
-                try:
-                    confinement = fc_method(Fc, tie_fy)
-                except Exception as e:
-                    import warnings
-
-                    warnings.warn(f"fiber_confinement failed for section '{sec.name}': {e}")
-                    confinement = None
-            if confinement is not None:
-                Fc_core = confinement.get("fcc", Fc_core)
-                epsc_core = confinement.get("ecc", epsc_core)
-                ecu_core = confinement.get("ecu", 0.02)
-            _ecu_max = float(self.config.get("confined_ecu_max", 0.025))
-            ecu_core = max(min(ecu_core, _ecu_max), epsc_core)
-            self._emit_fiber_concrete(
-                tag,
-                Fc_core,
-                epsc_core,
-                float(self.config.get("core_residual_factor", 0.2)) * Fc_core,
-                ecu_core,
-            )
-        else:
-            raise ValueError(f"Unknown fiber material role {role!r} for section {sec.name!r}")
-
-    def _emit_fiber_concrete(
-        self, tag: int, Fc: float, epsc0: float, fpcu: float, epsU: float
-    ) -> None:
-        """Emit the fiber concrete law — ``Concrete01`` (default) or ``Concrete02``.
-
-        Both laws share the Kent–Scott–Park compression backbone: peak
-        ``Fc`` at ``epsc0``, descending to ``fpcu`` at ``epsU``.
-        ``Concrete01`` has no tension and stays **flat** at ``fpcu`` past
-        ``epsU``; ``Concrete02`` adds a genuinely descending post-crushing
-        branch plus linear tension softening (``ft`` / ``Ets``), letting a
-        flexure-critical frame shed strength after the peak instead of
-        rising monotonically to the push end.
-
-        Config:
-            * ``concrete_material`` — ``"Concrete01"`` (default) or
-              ``"Concrete02"``.
-            * ``core_residual_factor`` — ``fpcu`` as a fraction of ``Fc``
-              (default 0.2, matching the classic 0.2·f'c residual).
-              Lowering it makes the concrete shed compressive stress as it
-              crushes — the "core-residual reduction" lever that produces
-              the post-peak descent.
-            * ``concrete02_lambda`` — post-peak unloading slope ratio.
-            * ``concrete02_ft_override`` / ``concrete02_Ets_override`` —
-              Concrete02 tension branch, authored in SI (Pa) and scaled to
-              model units.  ``None`` → ``ft`` = :data:`DEFAULT_FSAM_CONC_FT_PA`
-              (3 MPa) and ``Ets`` = ``ft / 0.001``.
-
-        Args:
-            tag: OpenSees material tag.
-            Fc: Compressive peak strength, model units (positive).
-            epsc0: Strain at peak (positive magnitude).
-            fpcu: Crushing (residual) stress, model units (positive).
-            epsU: Ultimate/crushing strain (positive magnitude).
-        """
-        law = self.config.get("concrete_material", "Concrete01")
-        if law == "Concrete02":
-            lam = float(self.config.get("concrete02_lambda", 0.1))
-            ssf = stress_scale_factor(self.mesh_model.units)
-            ft = self.config.get("concrete02_ft_override")
-            ft = DEFAULT_FSAM_CONC_FT_PA * ssf if ft is None else float(ft) * ssf
-            ets = self.config.get("concrete02_Ets_override")
-            ets = ft / 0.001 if ets is None else float(ets) * ssf
-            ops.uniaxialMaterial(
-                "Concrete02", tag, -Fc, -abs(epsc0), -fpcu, -abs(epsU), lam, ft, ets
-            )
-        else:
-            ops.uniaxialMaterial("Concrete01", tag, -Fc, -abs(epsc0), -fpcu, -abs(epsU))
+        law, args = resolve_fiber_role_material(
+            role, sec, mat, self.mesh_model.materials, self.config, ssf
+        )
+        ops.uniaxialMaterial(law, tag, *args)
 
     def _wrap_fiber_section_with_shear(
         self, agg_tag: int, fiber_tag: int, G_mod: float, A: float, sec=None

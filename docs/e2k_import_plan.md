@@ -399,9 +399,6 @@ The generalised multi-material fiber contract is in place:
 Still open (recorded as follow-ups, not implemented):
 
 * A `ConcreteFilledPipeSection` (CHS analogue of the RHS filled tube).
-* The Tcl-export (`builder.py`) / recorder material emission still dispatches
-  RC-vs-steel by `isinstance` and would need role-based emission before it
-  correctly emits composite-section materials.
 * The `Filled Steel Pipe` (CHS) concrete-fill fiber path.
 
 Decision point settled (2026-10-13): the filled-tube warning fix shipped as the
