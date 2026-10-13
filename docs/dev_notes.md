@@ -19,7 +19,7 @@ therefore **cannot** install the pinned docs toolchain — it only worked
 historically because it held the older 1.0.6 / 11.0.1 pair, which is not what CI
 (`python-version: "3.11"` in `.github/workflows/docs.yml`) installs.
 
-Verified 2026-11-10 with a gitignored `venv/`:
+Verified 2026-10-11 with a gitignored `venv/`:
 
     /opt/homebrew/bin/python3.11 -m venv venv
     venv/bin/pip install -r docs/requirements.txt
@@ -1307,7 +1307,7 @@ present after the incident).
 
 ## Pushover profiling — where the per-step time actually goes
 
-Measured 2026-12-10 for the nine-item GUI/workflow follow-up (Item 5a), under
+Measured 2026-10-12 for the nine-item GUI/workflow follow-up (Item 5a), under
 the OpenSeesPy venv, with `cProfile` plus a wall-clock A/B.  The goal was to
 confirm or refute the hypothesis that the per-step *recording* path
 (`_record_step` → `ops.eleResponse` + `ops.nodeDisp` in

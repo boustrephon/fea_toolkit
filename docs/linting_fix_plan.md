@@ -49,7 +49,7 @@ category: [planning]
 > re-run `python -m pyright src/` after the P2 / runner splits before using
 > them.
 >
-> **Status update (2026-11-10):** re-ran `npx pyright src/ --outputjson`
+> **Status update (2026-10-11):** re-ran `npx pyright src/ --outputjson`
 > (Pyright 1.1.4xx) against the current tree.  **Fresh baseline: 308 errors /
 > 890 warnings across 157 files.**  Errors by rule — `reportArgumentType` 151,
 > `reportCallIssue` 57, `reportInvalidTypeForm` 30, `reportMissingImports` 30,

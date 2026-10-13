@@ -10,10 +10,10 @@ category: [planning]
 ## Strategy — the next steps
 
 > The register is the single source of truth; this section is the
-> *sequencing layer* over it (maintained 2026-11-10).  The standalone plan
+> *sequencing layer* over it (maintained 2026-10-11).  The standalone plan
 > documents are historical records — `analysis_builder_migration_plan.md`,
 > `csm_test_model_plan.md`, `deprecation_plan.md` and `linting_fix_plan.md`
-> are ✅ complete (P9's Phase 3 triage resolved 2026-11-10 — baseline renewed,
+> are ✅ complete (P9's Phase 3 triage resolved 2026-10-11 — baseline renewed,
 > the remaining diagnostics accepted as known-benign per `.clinerules` §11).
 > The **active front** is the workflow/GUI layer (P31, P35).
 
@@ -28,7 +28,7 @@ category: [planning]
    stay report-only); and the `Analysis ▸ Modal / Response spectrum / Pushover`
    entries are recipe presets.
 2. ~~**P30 charts** — the remaining `chart` plots (`storey_forces`, pushover,
-   modal, CSM), consuming P32's results~~ ✅ **Landed 2026-11-10.**  All four
+   modal, CSM), consuming P32's results~~ ✅ **Landed 2026-10-11.**  All four
    `chart` kinds now draw from a preceding step's results: `storey_forces`
    (sums a case's frame end forces into global per-level shear/moment via
    `sum_storey_forces`), `pushover`, `modal` (reusing
@@ -36,7 +36,7 @@ category: [planning]
    non-blocking — `sum_storey_forces`' `cut` mode already provided the member
    force transport.
 3. **P36** — shell (area) result display (repository seam → per-case
-   collection → renderer → GUI toggle).  ✅ **Landed 2026-12-10** — see the
+   collection → renderer → GUI toggle).  ✅ **Landed 2026-10-12** — see the
    P36 entry below.
 4. **P35** — named selections first, then the `open`/`close`/`save`/`select`
    document verbs.  **P31** (command palette) is independent input ergonomics
@@ -46,7 +46,7 @@ category: [planning]
 then P19 / P23 / P25.
 
 **Opportunistic — Tier 4.**  ~~P9 (linting Phase 3 triage)~~ ✅ **resolved
-2026-11-10** — fresh `npx pyright src/` baseline recorded, no new real bugs,
+2026-10-11** — fresh `npx pyright src/` baseline recorded, no new real bugs,
 the remainder accepted as known-benign; only the `pd.Series.to_numpy()`
 convention is left tracked (non-blocking).
 
@@ -57,21 +57,21 @@ scoping primitive (P35's `selections` field must round-trip through
 unchanged through P32; heavy imports stay inside the verb functions so
 `import fea_toolkit.workflow` never loads OpenSees.
 
-### GUI/workflow follow-ups — the nine-item batch (2026-12-10)
+### GUI/workflow follow-ups — the nine-item batch (2026-10-12)
 
 A review of the workflow/GUI layer produced a nine-item follow-up list.
-Status as of 2026-12-10:
+Status as of 2026-10-12:
 
 | # | Item | Status |
 |---|---|---|
-| 1 | RS frame + shell forces (record flags, recorder extraction, `rs/shell_*` block) | ✅ Landed 2026-12-10 |
-| 2 | Load/reaction summary table (static sums, RS base shear, summed reactions) | ✅ Landed 2026-12-10 |
-| 3 | Shell deformation — static / RS / modal (pushover shell animation deferred) | ✅ Landed 2026-12-10 |
-| 4 | `results.animate` toggle on the view toolbar | ✅ Landed 2026-12-10 |
-| 5 | Pushover profiling (part a) | ✅ Landed 2026-12-10 (measured — no change warranted) |
-| 6 + 7 | Recipe run-state markers (`Step.enabled` / `Step.status`) | ✅ Landed 2026-12-10 |
-| 8 | Document benign GUI console warnings (VTK / macOS) | ✅ Landed 2026-12-10 |
-| 9 | Named modal analyses + RS/pushover `modal_case` auto-resolution | ✅ Landed 2026-12-10 |
+| 1 | RS frame + shell forces (record flags, recorder extraction, `rs/shell_*` block) | ✅ Landed 2026-10-12 |
+| 2 | Load/reaction summary table (static sums, RS base shear, summed reactions) | ✅ Landed 2026-10-12 |
+| 3 | Shell deformation — static / RS / modal (pushover shell animation deferred) | ✅ Landed 2026-10-12 |
+| 4 | `results.animate` toggle on the view toolbar | ✅ Landed 2026-10-12 |
+| 5 | Pushover profiling (part a) | ✅ Landed 2026-10-12 (measured — no change warranted) |
+| 6 + 7 | Recipe run-state markers (`Step.enabled` / `Step.status`) | ✅ Landed 2026-10-12 |
+| 8 | Document benign GUI console warnings (VTK / macOS) | ✅ Landed 2026-10-12 |
+| 9 | Named modal analyses + RS/pushover `modal_case` auto-resolution | ✅ Landed 2026-10-12 |
 
 **Item 1 detail (RS forces).**  The `response_spectrum` verb gained
 `record_frame_forces` / `record_shell_forces` (default `True`);
@@ -83,7 +83,7 @@ block (self-indexed by `rs/shell_sap_id`, combined with the rule named by
 `write_model_stages` writers via `collect_rs_shell_force_arrays`.  The GUI
 project bundle threads both blocks through `collect_project_results`.
 
-**Upcoming items — detailed plan (2026-12-10).**
+**Upcoming items — detailed plan (2026-10-12).**
 
 **Item 2 detail (load/reaction summary).**  The table is driven from the solve
 itself: `run_static_cases` gained a `summaries_out` side-channel capturing one
@@ -105,7 +105,7 @@ wrapper only when no preceding `run_static` result exists.  The GUI's
 already worked (`npz_to_pyvista_modal_mesh` / `plot_mode_animation`), and the NPZ
 static path already supported `npz_to_pyvista_shell_mesh(deformed_case=…)`; the
 gap was the **interactive `ModelViewer` overlay** the GUI drives, which drew
-displaced frame centrelines only.  Landed 2026-12-10:
+displaced frame centrelines only.  Landed 2026-10-12:
 `ShellGeom` carries the SAP node IDs of its vertices (`node_ids`), populated by
 `ModelViewer._extract_geometry` from `AreaElement.node_ids`; the
 `RenderBackend.render_deformed` contract and its PyVista implementation take an
@@ -122,7 +122,7 @@ no-node-id fallback, replace-not-stack) and
 its shell through the real action, auto-scaled).  Pushover shell animation is
 **deferred**.
 
-**Item 5(a) — pushover profiling.**  Measured 2026-12-10, no runner change.  A
+**Item 5(a) — pushover profiling.**  Measured 2026-10-12, no runner change.  A
 mid-size elastic model (84 frames + 16 shells, 45 nodes, 30 steps) was profiled
 with `cProfile` plus a wall-clock A/B (recording off / node-disp-only /
 everything-on).  The hypothesis — that `_record_step`'s `ops.eleResponse` /
@@ -828,7 +828,7 @@ view** and a **check-table view** landed.  The **capacity checks**
 (`member_shear_capacity`, `wall_shear_check`, `hinge_length`) and the
 **`mesh_checks` verb** landed, completing the check half of Phase C.  The four
 remaining `plotting.report.*` charts — `storey_forces`, `pushover`, `modal`,
-`csm` — landed 2026-11-10, each reading a preceding step's results (never
+`csm` — landed 2026-10-11, each reading a preceding step's results (never
 re-solving): `storey_forces` sums a case's frame end forces into global
 per-level shear/moment via `sum_storey_forces` (`cut` mode), `modal` reuses
 `io.report.modal_participation_df`, and `pushover` / `csm` plot the pushover
@@ -1139,7 +1139,7 @@ helper), and the GUI's tree + selection-authoring surface.
 Source: the 2026-10-02 planning session (post-review); completes milestone 5's
 static-linear slice and pairs with the NPZ shell-force storage already landed.
 
-**Status: ✅ Landed (2026-12-10)** — the four seams below are in place:
+**Status: ✅ Landed (2026-10-12)** — the four seams below are in place:
 per-case ``shell_*`` schema arrays, the repository accessor pair, the in-memory
 collection, and the renderer + GUI overlay.
 
@@ -1217,7 +1217,7 @@ recorder doc current in the meantime.
 #### P9 — Linting Phase 3 triage
 Source: `docs/linting_fix_plan.md` (status updates 2026-08-21 / 2026-09-17).
 
-**Status: ✅ Resolved 2026-11-10.**  Fresh `npx pyright src/` baseline
+**Status: ✅ Resolved 2026-10-11.**  Fresh `npx pyright src/` baseline
 (308 errors / 890 warnings / 157 files) recorded in `docs/linting_fix_plan.md`;
 no new real bugs (the one `reportUndefinedVariable` is a `chart.py` false
 positive, the `reportMissingImports` are the C-extension / optional-GUI deps),
