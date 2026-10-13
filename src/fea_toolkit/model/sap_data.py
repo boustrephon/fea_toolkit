@@ -466,16 +466,50 @@ class Section:
         """Canonical shape identifier (see SHAPE_NAMES)."""
         return SHAPE_NAMES.get(self.shape, "GEN")
 
-    def to_fiber_patches(self, mat_tag: int, nfy: int = 8, nfz: int = 4) -> list[tuple]:
+    # ── Fiber-section material roles ──
+    def fiber_roles(self) -> list[str]:
+        """Material roles required by :meth:`to_fiber_patches`, in creation order.
+
+        Each role is a key of the ``materials`` mapping passed to
+        :meth:`to_fiber_patches`, and also fixes the OpenSees uniaxial law the
+        builders create for it (see ``opensees/_sections.py``):
+
+        * ``"steel"``    — structural steel (``Steel01``)
+        * ``"concrete"`` — unconfined concrete cover / fill (``Concrete01``)
+        * ``"core"``     — confined concrete core (``Concrete01``, Mander)
+        * ``"rebar"``    — reinforcing steel (``Steel02``)
+
+        The base section is a single structural-steel role.  Concrete,
+        composite and non-fiber subclasses override this to declare the extra
+        roles the builders must create materials for.  Sections that do not
+        support fiber conversion return an empty list.
+        """
+        return ["steel"]
+
+    def fiber_role_material(self, role: str) -> Optional[str]:
+        """Return the SAP2000 material name backing a fiber role, or ``None``.
+
+        ``None`` signals the builders to fall back to framework defaults for
+        that role.  Composite sections (encased / filled tube) override this
+        to map each role to its own material reference.
+        """
+        return self.material if role == "steel" else None
+
+    def to_fiber_patches(
+        self, materials: dict[str, int], nfy: int = 8, nfz: int = 4
+    ) -> list[tuple]:
         """Generate OpenSees ``patch`` definitions for fiber sections.
 
         Args:
-            mat_tag: OpenSees material tag.
+            materials: Role → OpenSees material-tag mapping.  The roles are
+                declared by :meth:`fiber_roles`; each emitted patch references
+                the tag of the material role its region is made of.
             nfy: Number of fibres along the local y direction.
             nfz: Number of fibres along the local z direction.
 
         Returns:
-            List of ``('rect', mat_tag, nfy, nfz, y1, z1, y2, z2)`` tuples.
+            List of ``('rect'|'circ'|'straight'|'circ_layer', mat_tag, …)``
+            tuples.
 
         Raises:
             NotImplementedError: If the section type does not support fiber
@@ -547,7 +581,10 @@ class ISection(Section):
     tf: float = 0.0  # Flange thickness
     tw: float = 0.0  # Web thickness
 
-    def to_fiber_patches(self, mat_tag: int, nfy: int = 8, nfz: int = 4) -> list[tuple]:
+    def to_fiber_patches(
+        self, materials: dict[str, int], nfy: int = 8, nfz: int = 4
+    ) -> list[tuple]:
+        mat_tag = materials["steel"]
         y1 = -self.depth / 2.0
         y2 = -self.depth / 2.0 + self.tf
         y3 = self.depth / 2.0 - self.tf
@@ -567,7 +604,12 @@ class GeneralSection(Section):
     (A, I33, I22, J, etc.) are provided by SAP2000 / the catalogue.
     """
 
-    def to_fiber_patches(self, mat_tag: int, nfy: int = 8, nfz: int = 4) -> list[tuple]:
+    def fiber_roles(self) -> list[str]:
+        return []
+
+    def to_fiber_patches(
+        self, materials: dict[str, int], nfy: int = 8, nfz: int = 4
+    ) -> list[tuple]:
         raise NotImplementedError(
             "Fiber conversion requires a known shape type "
             "(I, Pipe, Box, etc.), not a General section"
@@ -581,11 +623,13 @@ class PipeSection(Section):
     od: float = 0.0  # Outer diameter
     t: float = 0.0  # Wall thickness
 
-    def to_fiber_patches(self, mat_tag: int, nfy: int = 8, nfz: int = 4) -> list[tuple]:
+    def to_fiber_patches(
+        self, materials: dict[str, int], nfy: int = 8, nfz: int = 4
+    ) -> list[tuple]:
         """Annular ring via ``patch circ``."""
         R = self.od / 2.0
         return [
-            ("circ", mat_tag, nfy, nfz, 0.0, 0.0, max(0.0, R - self.t), R, 0.0, 360.0),
+            ("circ", materials["steel"], nfy, nfz, 0.0, 0.0, max(0.0, R - self.t), R, 0.0, 360.0),
         ]
 
 
@@ -598,8 +642,11 @@ class BoxSection(Section):
     tf: float = 0.0  # Flange (top/bottom) thickness
     tw: float = 0.0  # Web (left/right) thickness
 
-    def to_fiber_patches(self, mat_tag: int, nfy: int = 8, nfz: int = 4) -> list[tuple]:
+    def to_fiber_patches(
+        self, materials: dict[str, int], nfy: int = 8, nfz: int = 4
+    ) -> list[tuple]:
         """Four rectangular patches for the flanges and webs."""
+        mat_tag = materials["steel"]
         D, B = self.depth, self.bf
         tf, tw = self.tf, self.tw
         half = D / 2.0
@@ -623,13 +670,25 @@ class RectangularSection(Section):
     depth: float = 0.0  # D
     bf: float = 0.0  # B
 
-    def to_fiber_patches(self, mat_tag: int, nfy: int = 12, nfz: int = 6) -> list[tuple]:
-        """Fiber patches: confined concrete core + steel reinforcement bars.
+    def fiber_roles(self) -> list[str]:
+        return ["concrete", "core", "rebar"]
 
-        Material tag convention:
-            mat_tag     → unconfined concrete (Concrete01)
-            mat_tag + 1 → confined concrete (Concrete01)
-            mat_tag + 2 → steel rebar (Steel02)
+    def fiber_role_material(self, role: str) -> Optional[str]:
+        if role in ("concrete", "core"):
+            return self.material
+        if role == "rebar":
+            return getattr(self, "rebar_material", None)
+        return None
+
+    def to_fiber_patches(
+        self, materials: dict[str, int], nfy: int = 12, nfz: int = 6
+    ) -> list[tuple]:
+        """Fiber patches: confined concrete core + cover + steel reinforcement.
+
+        Material roles:
+            ``"concrete"`` → unconfined cover (Concrete01)
+            ``"core"``     → confined core (Concrete01)
+            ``"rebar"``    → steel reinforcement (Steel02)
 
         Steel reinforcement is set to 0.6 % of the gross cross-sectional
         area, distributed equally between top and bottom layers with a
@@ -642,16 +701,16 @@ class RectangularSection(Section):
         core_z1, core_z2 = -half_b + cv, half_b - cv
 
         patches: list[tuple] = [
-            ("rect", mat_tag + 1, nfy, nfz, core_y1, core_z1, core_y2, core_z2),
+            ("rect", materials["core"], nfy, nfz, core_y1, core_z1, core_y2, core_z2),
         ]
         # Unconfined cover patches (top, bottom, left, right)
         if cv > 0:
             patches.extend(
                 [
-                    ("rect", mat_tag, 1, nfz, -half_d, core_z1, core_y1, core_z2),
-                    ("rect", mat_tag, 1, nfz, core_y2, core_z1, half_d, core_z2),
-                    ("rect", mat_tag, nfy, 1, core_y1, -half_b, core_y2, core_z1),
-                    ("rect", mat_tag, nfy, 1, core_y1, core_z2, core_y2, half_b),
+                    ("rect", materials["concrete"], 1, nfz, -half_d, core_z1, core_y1, core_z2),
+                    ("rect", materials["concrete"], 1, nfz, core_y2, core_z1, half_d, core_z2),
+                    ("rect", materials["concrete"], nfy, 1, core_y1, -half_b, core_y2, core_z1),
+                    ("rect", materials["concrete"], nfy, 1, core_y1, core_z2, core_y2, half_b),
                 ]
             )
 
@@ -668,7 +727,7 @@ class RectangularSection(Section):
             patches.append(
                 (
                     "straight",
-                    mat_tag + 2,
+                    materials["rebar"],
                     top_bars,
                     bar_dia,
                     y_top,
@@ -680,7 +739,7 @@ class RectangularSection(Section):
             patches.append(
                 (
                     "straight",
-                    mat_tag + 2,
+                    materials["rebar"],
                     bot_bars,
                     bar_dia,
                     y_bot,
@@ -699,11 +758,13 @@ class CircularSection(Section):
 
     diameter: float = 0.0
 
-    def to_fiber_patches(self, mat_tag: int, nfy: int = 8, nfz: int = 4) -> list[tuple]:
+    def to_fiber_patches(
+        self, materials: dict[str, int], nfy: int = 8, nfz: int = 4
+    ) -> list[tuple]:
         """Solid circle via ``patch circ`` with zero inner radius."""
         R = self.diameter / 2.0
         return [
-            ("circ", mat_tag, nfy, nfz, 0.0, 0.0, 0.0, R, 0.0, 360.0),
+            ("circ", materials["steel"], nfy, nfz, 0.0, 0.0, 0.0, R, 0.0, 360.0),
         ]
 
 
@@ -815,13 +876,25 @@ class ConcreteRectangularSection(Section):
             return None
         return {"fcc": res.fcc, "ecc": res.ecc, "ecu": res.ecu}
 
-    def to_fiber_patches(self, mat_tag: int, nfy: int = 12, nfz: int = 6) -> list[tuple]:
+    def fiber_roles(self) -> list[str]:
+        return ["concrete", "core", "rebar"]
+
+    def fiber_role_material(self, role: str) -> Optional[str]:
+        if role in ("concrete", "core"):
+            return self.material
+        if role == "rebar":
+            return self.rebar_material
+        return None
+
+    def to_fiber_patches(
+        self, materials: dict[str, int], nfy: int = 12, nfz: int = 6
+    ) -> list[tuple]:
         """Fiber patches: confined core + unconfined cover + rebar layers.
 
-        Material tag convention:
-            mat_tag     → unconfined concrete (Concrete01)
-            mat_tag + 1 → confined concrete (Concrete01)
-            mat_tag + 2 → steel rebar (Steel02)
+        Material roles:
+            ``"concrete"`` → unconfined concrete (Concrete01)
+            ``"core"``     → confined concrete (Concrete01)
+            ``"rebar"``    → steel rebar (Steel02)
         """
         d, b = self.depth, self.bf
         cv = self.cover
@@ -837,29 +910,49 @@ class ConcreteRectangularSection(Section):
         core_z1, core_z2 = -half_b + cv, half_b - cv
 
         patches: list[tuple] = [
-            ("rect", mat_tag + 1, nfy, nfz, core_y1, core_z1, core_y2, core_z2),
+            ("rect", materials["core"], nfy, nfz, core_y1, core_z1, core_y2, core_z2),
         ]
         # Unconfined cover patches — only emit when cover > 0 to avoid
         # zero-area degenerate patches.
         if cv > 0:
             patches.append(
-                ("rect", mat_tag, nfy, 1, core_y2, -half_b, half_d, half_b),
+                ("rect", materials["concrete"], nfy, 1, core_y2, -half_b, half_d, half_b),
             )
             patches.append(
-                ("rect", mat_tag, nfy, 1, -half_d, -half_b, core_y1, half_b),
+                ("rect", materials["concrete"], nfy, 1, -half_d, -half_b, core_y1, half_b),
             )
         if cv > 0 and core_y2 > core_y1:
             patches.append(
-                ("rect", mat_tag, 1, max(1, nfz - 2), core_y1, -half_b, core_y2, core_z1)
+                (
+                    "rect",
+                    materials["concrete"],
+                    1,
+                    max(1, nfz - 2),
+                    core_y1,
+                    -half_b,
+                    core_y2,
+                    core_z1,
+                )
             )
-            patches.append(("rect", mat_tag, 1, max(1, nfz - 2), core_y1, core_z2, core_y2, half_b))
+            patches.append(
+                (
+                    "rect",
+                    materials["concrete"],
+                    1,
+                    max(1, nfz - 2),
+                    core_y1,
+                    core_z2,
+                    core_y2,
+                    half_b,
+                )
+            )
         # Rebar layers — convert diameter to cross-sectional area
         if self.top_bars and self.top_bar_dia > 0:
             area_bar = math.pi * (self.top_bar_dia / 2.0) ** 2
             patches.append(
                 (
                     "straight",
-                    mat_tag + 2,
+                    materials["rebar"],
                     self.top_bars,
                     area_bar,
                     half_d - cv,
@@ -873,7 +966,7 @@ class ConcreteRectangularSection(Section):
             patches.append(
                 (
                     "straight",
-                    mat_tag + 2,
+                    materials["rebar"],
                     self.bot_bars,
                     area_bar,
                     -half_d + cv,
@@ -969,7 +1062,19 @@ class ConcreteCircularSection(Section):
             return None
         return {"fcc": res.fcc, "ecc": res.ecc, "ecu": res.ecu}
 
-    def to_fiber_patches(self, mat_tag: int, nfy: int = 12, nfz: int = 6) -> list[tuple]:
+    def fiber_roles(self) -> list[str]:
+        return ["concrete", "core", "rebar"]
+
+    def fiber_role_material(self, role: str) -> Optional[str]:
+        if role in ("concrete", "core"):
+            return self.material
+        if role == "rebar":
+            return self.rebar_material
+        return None
+
+    def to_fiber_patches(
+        self, materials: dict[str, int], nfy: int = 12, nfz: int = 6
+    ) -> list[tuple]:
         """Fiber patches: confined core ring + unconfined cover + rebar ring."""
         R = self.diameter / 2.0
         cv = self.cover
@@ -979,18 +1084,28 @@ class ConcreteCircularSection(Section):
             raise ValueError(f"Cover ({cv}) exceeds radius ({R}) in section {self.name}")
         R_core = max(0.0, R - cv)
         patches: list[tuple] = [
-            ("circ", mat_tag + 1, nfy, nfz, 0.0, 0.0, 0.0, R_core, 0.0, 360.0),
+            ("circ", materials["core"], nfy, nfz, 0.0, 0.0, 0.0, R_core, 0.0, 360.0),
         ]
         # Cover ring — only emit when cover > 0 to avoid degenerate zero-area patch.
         if cv > 0:
             patches.append(
-                ("circ", mat_tag, nfy, nfz, 0.0, 0.0, R_core, R, 0.0, 360.0),
+                ("circ", materials["concrete"], nfy, nfz, 0.0, 0.0, R_core, R, 0.0, 360.0),
             )
         if self.bar_count and self.bar_dia > 0:
             area_bar = math.pi * (self.bar_dia / 2.0) ** 2
             R_rebar = R - self.cover
             patches.append(
-                ("circ_layer", mat_tag + 2, self.bar_count, area_bar, 0.0, 0.0, R_rebar, 0.0, 360.0)
+                (
+                    "circ_layer",
+                    materials["rebar"],
+                    self.bar_count,
+                    area_bar,
+                    0.0,
+                    0.0,
+                    R_rebar,
+                    0.0,
+                    360.0,
+                )
             )
         return patches
 
@@ -1004,7 +1119,9 @@ class ChannelSection(Section):
     tf: float = 0.0  # Flange thickness
     tw: float = 0.0  # Web thickness
 
-    def to_fiber_patches(self, mat_tag: int, nfy: int = 8, nfz: int = 4) -> list[tuple]:
+    def to_fiber_patches(
+        self, materials: dict[str, int], nfy: int = 8, nfz: int = 4
+    ) -> list[tuple]:
         """Three rectangular patches (bottom flange -> web -> top flange), centroid-shifted.
 
         The web sits at one edge (z in [0, tw]) with both flanges extending to
@@ -1015,7 +1132,7 @@ class ChannelSection(Section):
         D, B, tf, tw = self.depth, self.bf, self.tf, self.tw
         half = D / 2.0
         return _rect_patches_from_regions(
-            mat_tag,
+            materials["steel"],
             nfy,
             nfz,
             [
@@ -1038,7 +1155,9 @@ class AngleSection(Section):
     tf: float = 0.0  # Flange thickness
     tw: float = 0.0  # Web thickness
 
-    def to_fiber_patches(self, mat_tag: int, nfy: int = 8, nfz: int = 4) -> list[tuple]:
+    def to_fiber_patches(
+        self, materials: dict[str, int], nfy: int = 8, nfz: int = 4
+    ) -> list[tuple]:
         """Two rectangular patches (vertical + horizontal leg), centroid-shifted.
 
         The vertical leg runs along y (z in [0, tw]) and the horizontal leg
@@ -1049,7 +1168,7 @@ class AngleSection(Section):
         """
         D, B, tf, tw = self.depth, self.bf, self.tf, self.tw
         return _rect_patches_from_regions(
-            mat_tag,
+            materials["steel"],
             nfy,
             nfz,
             [
@@ -1071,7 +1190,9 @@ class DoubleAngleSection(Section):
     tw: float = 0.0  # Web thickness
     dis: float = 0.0  # Gap between angles
 
-    def to_fiber_patches(self, mat_tag: int, nfy: int = 8, nfz: int = 4) -> list[tuple]:
+    def to_fiber_patches(
+        self, materials: dict[str, int], nfy: int = 8, nfz: int = 4
+    ) -> list[tuple]:
         """Four rectangular patches (two back-to-back angles), centroid-shifted.
 
         The two angles face each other with their heel planes separated by
@@ -1083,7 +1204,7 @@ class DoubleAngleSection(Section):
         gap = max(0.0, min(self.dis, B))
         half_gap = gap / 2.0
         return _rect_patches_from_regions(
-            mat_tag,
+            materials["steel"],
             nfy,
             nfz,
             [
@@ -1108,7 +1229,9 @@ class TeeSection(Section):
     tf: float = 0.0  # Flange thickness
     tw: float = 0.0  # Web (stem) thickness
 
-    def to_fiber_patches(self, mat_tag: int, nfy: int = 8, nfz: int = 4) -> list[tuple]:
+    def to_fiber_patches(
+        self, materials: dict[str, int], nfy: int = 8, nfz: int = 4
+    ) -> list[tuple]:
         """Two rectangular patches (flange + stem), centroid-shifted.
 
         The flange sits at the top (y in [D - tf, D], z in [-B/2, B/2]) and the
@@ -1119,7 +1242,7 @@ class TeeSection(Section):
         """
         D, B, tf, tw = self.depth, self.bf, self.tf, self.tw
         return _rect_patches_from_regions(
-            mat_tag,
+            materials["steel"],
             nfy,
             nfz,
             [
@@ -1143,7 +1266,12 @@ class SDSection(Section):
     polygons: list[tuple[str, list[tuple[float, float]]]] = field(default_factory=list)
     # Each tuple: (material_name, [(y1, z1), (y2, z2), ...])
 
-    def to_fiber_patches(self, mat_tag: int, nfy: int = 8, nfz: int = 4) -> list[tuple]:
+    def fiber_roles(self) -> list[str]:
+        return []
+
+    def to_fiber_patches(
+        self, materials: dict[str, int], nfy: int = 8, nfz: int = 4
+    ) -> list[tuple]:
         """Placeholder — SD polygons require triangulation / meshing."""
         raise NotImplementedError(
             "Fiber conversion for SD sections requires polygon meshing — not yet implemented"
@@ -1163,9 +1291,156 @@ class EncasedSection(Section):
     encasement_depth: float = 0.0
     encasement_bf: float = 0.0
 
-    def to_fiber_patches(self, mat_tag: int, nfy: int = 8, nfz: int = 4) -> list[tuple]:
-        """Placeholder — encased sections need steel + concrete patches."""
-        raise NotImplementedError("Fiber conversion for EncasedSection not yet implemented")
+    def fiber_roles(self) -> list[str]:
+        return ["steel", "concrete"]
+
+    def fiber_role_material(self, role: str) -> Optional[str]:
+        if role == "steel":
+            return (
+                self.embedded_section.material
+                if self.embedded_section is not None
+                else self.material
+            )
+        if role == "concrete":
+            return self.encasement_material or None
+        return None
+
+    def to_fiber_patches(
+        self, materials: dict[str, int], nfy: int = 8, nfz: int = 4
+    ) -> list[tuple]:
+        """Steel core + concrete encasement patches.
+
+        The concrete encasement is emitted as a full rectangle and the embedded
+        (steel) section's patches are overlaid on top.  The steel region is
+        therefore counted twice (once as concrete, once as steel) — a documented
+        simplification; a proper composite section would subtract the embedded
+        steel region from the encasement.
+        """
+        D, B = self.encasement_depth, self.encasement_bf
+        if D <= 0 or B <= 0:
+            raise ValueError(f"Encased section {self.name} has invalid encasement dims ({D} x {B})")
+        patches: list[tuple] = [
+            ("rect", materials["concrete"], nfy, nfz, -D / 2.0, -B / 2.0, D / 2.0, B / 2.0),
+        ]
+        if self.embedded_section is not None:
+            # The embedded section is steel; pass the full role map so its own
+            # to_fiber_patches() resolves its ``"steel"`` tag.
+            patches.extend(
+                self.embedded_section.to_fiber_patches(materials=materials, nfy=nfy, nfz=nfz)
+            )
+        return patches
+
+
+@dataclass
+class ConcreteFilledTubeSection(Section):
+    """Concrete-filled steel tube (CFT) — rectangular hollow section (RHS).
+
+    A steel tube (four wall patches) filled with a concrete core and an
+    optional longitudinal rebar layer.  This covers the ``SHAPE
+    "Filled Steel Tube"`` (RHS) case; the ``Filled Steel Pipe`` (CHS) analogue
+    is a straightforward follow-up.
+    """
+
+    depth: float = 0.0  # outer depth D
+    bf: float = 0.0  # outer width B
+    tf: float = 0.0  # flange (top/bottom) wall thickness
+    tw: float = 0.0  # web (left/right) wall thickness
+    fill_material: str = ""  # concrete fill material name
+    # SAP2000 longitudinal rebar material name (``RebarMatL``).  None →
+    # framework rebar defaults (see :class:`ConcreteRectangularSection`).
+    rebar_material: Optional[str] = None
+    # Optional longitudinal rebar (0 / absent → no rebar layers).  ``cover``
+    # is measured from the inner tube face to the rebar centreline.
+    cover: float = 0.0
+    top_bars: int = 0
+    bot_bars: int = 0
+    top_bar_dia: float = 0.0
+    bot_bar_dia: float = 0.0
+
+    def fiber_roles(self) -> list[str]:
+        return ["steel", "concrete", "rebar"]
+
+    def fiber_role_material(self, role: str) -> Optional[str]:
+        if role == "steel":
+            return self.material
+        if role == "concrete":
+            return self.fill_material or None
+        if role == "rebar":
+            return self.rebar_material
+        return None
+
+    def to_fiber_patches(
+        self, materials: dict[str, int], nfy: int = 8, nfz: int = 4
+    ) -> list[tuple]:
+        """Steel tube + unconfined concrete core (+ optional rebar).
+
+        The concrete core is modelled as **unconfined** — the steel tube's
+        confinement of the fill is not Mander-tie confinement, so a
+        conservative unconfined core is used until a CFT confinement model
+        lands (guardrail §12).
+        """
+        D, B, tf, tw = self.depth, self.bf, self.tf, self.tw
+        half_d, half_b = D / 2.0, B / 2.0
+        patches: list[tuple] = [
+            # Steel tube (top/bottom flanges, left/right webs)
+            ("rect", materials["steel"], nfy, nfz, half_d - tf, -half_b, half_d, half_b),
+            ("rect", materials["steel"], nfy, nfz, -half_d, -half_b, -half_d + tf, half_b),
+            (
+                "rect",
+                materials["steel"],
+                nfy,
+                nfz,
+                -half_d + tf,
+                -half_b,
+                half_d - tf,
+                -half_b + tw,
+            ),
+            (
+                "rect",
+                materials["steel"],
+                nfy,
+                nfz,
+                -half_d + tf,
+                half_b - tw,
+                half_d - tf,
+                half_b,
+            ),
+        ]
+        # Concrete core (inner void)
+        cy1, cy2 = -half_d + tf, half_d - tf
+        cz1, cz2 = -half_b + tw, half_b - tw
+        if cy2 > cy1 and cz2 > cz1:
+            patches.append(("rect", materials["concrete"], nfy, nfz, cy1, cz1, cy2, cz2))
+        # Optional longitudinal rebar (top/bottom layers)
+        if self.top_bars and self.top_bar_dia > 0:
+            area_bar = math.pi * (self.top_bar_dia / 2.0) ** 2
+            patches.append(
+                (
+                    "straight",
+                    materials["rebar"],
+                    self.top_bars,
+                    area_bar,
+                    cy2 - self.cover,
+                    cz1 + self.cover,
+                    cy2 - self.cover,
+                    cz2 - self.cover,
+                )
+            )
+        if self.bot_bars and self.bot_bar_dia > 0:
+            area_bar = math.pi * (self.bot_bar_dia / 2.0) ** 2
+            patches.append(
+                (
+                    "straight",
+                    materials["rebar"],
+                    self.bot_bars,
+                    area_bar,
+                    cy1 + self.cover,
+                    cz1 + self.cover,
+                    cy1 + self.cover,
+                    cz2 - self.cover,
+                )
+            )
+        return patches
 
 
 @dataclass
@@ -1178,7 +1453,12 @@ class ShellSection(Section):
     # framework defaults apply for nonlinear wall/slab analysis.
     rebar_material: Optional[str] = None
 
-    def to_fiber_patches(self, mat_tag: int, nfy: int = 8, nfz: int = 4) -> list[tuple]:
+    def fiber_roles(self) -> list[str]:
+        return []
+
+    def to_fiber_patches(
+        self, materials: dict[str, int], nfy: int = 8, nfz: int = 4
+    ) -> list[tuple]:
         raise NotImplementedError("Fiber conversion is not applicable to ShellSection")
 
 

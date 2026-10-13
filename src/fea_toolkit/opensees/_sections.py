@@ -7,8 +7,10 @@ import openseespy.opensees as ops
 
 from ..utils import (
     DEFAULT_E_S_PA,
+    DEFAULT_FC_PA,
     DEFAULT_FSAM_CONC_FT_PA,
     DEFAULT_FY_REBAR_PA,
+    DEFAULT_FY_STEEL_PA,
     RC_NO_TIE_CONFINEMENT_FACTOR,
     RC_NO_TIE_EPSC_FACTOR,
     stress_scale_factor,
@@ -189,124 +191,15 @@ class SectionMixin:
                         max(self._shell_sec_tags.values(), default=0),
                     )
                     self._next_fiber_mat_tag = max(_max_all, 1000000) + 1
-                mat_tag = self._next_fiber_mat_tag
-                self._next_fiber_mat_tag += (
-                    3
-                    if (mat is not None and mat.type is not None and mat.type.lower() == "concrete")
-                    else 1
-                )
-                if mat is not None and mat.type is not None and mat.type.lower() == "concrete":
-                    # Concrete section: to_fiber_patches() uses three tags:
-                    #   mat_tag     → unconfined concrete  (Concrete01)
-                    #   mat_tag + 1 → confined core        (Concrete01)
-                    #   mat_tag + 2 → steel rebar          (Steel02)
-                    Fc = getattr(mat, "Fc", 0.0) or 3.0e7
-                    epsc = getattr(mat, "eFc", 0.0) or 0.002
-                    # Unconfined cover concrete
-                    self._emit_fiber_concrete(
-                        mat_tag,
-                        Fc,
-                        epsc,
-                        float(self.config.get("core_residual_factor", 0.2)) * Fc,
-                        0.006,
-                    )
-                    # Confined core concrete — use Mander confinement when
-                    # tie data is present on the section, else fall back
-                    # to the conventional no-tie-data heuristic defined by
-                    # RC_NO_TIE_CONFINEMENT_FACTOR / RC_NO_TIE_EPSC_FACTOR
-                    # (shared with the Tcl export in builder.py).
-                    Fc_core = Fc * RC_NO_TIE_CONFINEMENT_FACTOR
-                    epsc_core = abs(epsc) * RC_NO_TIE_EPSC_FACTOR
-                    ecu_core = 0.02
-                    tie_fy = getattr(sec, "tie_fy", None) or 0.0
-                    if tie_fy <= 0:
-                        # Attempt to resolve tie_fy from the tie rebar
-                        # material (RebarMatT), then the longitudinal
-                        # rebar material (RebarMatL) as a fallback.
-                        tie_mat_name = getattr(sec, "tie_rebar_mat", None) or getattr(
-                            sec, "rebar_material", None
-                        )
-                        tie_mat = (
-                            self.mesh_model.materials.get(tie_mat_name) if tie_mat_name else None
-                        )
-                        if tie_mat is not None:
-                            tie_fy = getattr(tie_mat, "Fy", 0.0) or 0.0
-                    confinement = None
-                    fc_method = getattr(sec, "fiber_confinement", None)
-                    if callable(fc_method):
-                        try:
-                            confinement = fc_method(Fc, tie_fy)
-                        except Exception as e:
-                            import warnings
-
-                            warnings.warn(f"fiber_confinement failed for section '{sec.name}': {e}")
-                            confinement = None
-                    if confinement is not None:
-                        Fc_core = confinement.get("fcc", Fc_core)
-                        epsc_core = confinement.get("ecc", epsc_core)
-                        ecu_core = confinement.get("ecu", 0.02)
-                    # Cap the confined spalling strain (configurable), but
-                    # never clamp it below the strain at confined peak —
-                    # an ecu below epsc_core would give a degenerate
-                    # Concrete01 curve.  Apply the cap first, then enforce
-                    # epsc_core as the absolute lower bound so a cap set
-                    # below epsc_core still yields a valid curve.
-                    _ecu_max = float(self.config.get("confined_ecu_max", 0.025))
-                    ecu_core = max(min(ecu_core, _ecu_max), epsc_core)
-                    self._emit_fiber_concrete(
-                        mat_tag + 1,
-                        Fc_core,
-                        epsc_core,
-                        float(self.config.get("core_residual_factor", 0.2)) * Fc_core,
-                        ecu_core,
-                    )
-                    # Steel rebar — resolve Fy/Es in priority order:
-                    #   1) config override (SI Pa, scaled to model units)
-                    #   2) section's SAP2000 rebar_material (RebarMatL) lookup
-                    #   3) framework rebar defaults (DEFAULT_FY_REBAR_PA / E_S)
-                    #      scaled to model units
-                    ssf = stress_scale_factor(self.mesh_model.units)
-                    Fy_rebar = self.config.get("rebar_Fy_override")
-                    Es_rebar = self.config.get("rebar_Es_override")
-                    if Fy_rebar is not None:
-                        Fy_rebar = Fy_rebar * ssf
-                    if Es_rebar is not None:
-                        Es_rebar = Es_rebar * ssf
-                    if Fy_rebar is None or Es_rebar is None:
-                        rebar_mat_name = getattr(sec, "rebar_material", None)
-                        rebar_mat = (
-                            self.mesh_model.materials.get(rebar_mat_name)
-                            if rebar_mat_name
-                            else None
-                        )
-                        if rebar_mat is not None:
-                            rm_Fy = getattr(rebar_mat, "Fy", 0.0) or 0.0
-                            rm_Es = getattr(rebar_mat, "E_mod", 0.0) or 0.0
-                            if rm_Fy > 0:
-                                Fy_rebar = Fy_rebar if Fy_rebar is not None else rm_Fy
-                            if rm_Es > 0:
-                                Es_rebar = Es_rebar if Es_rebar is not None else rm_Es
-                    if not Fy_rebar:
-                        Fy_rebar = DEFAULT_FY_REBAR_PA * ssf
-                    if not Es_rebar:
-                        Es_rebar = DEFAULT_E_S_PA * ssf
-                    ops.uniaxialMaterial(
-                        "Steel02",
-                        mat_tag + 2,
-                        Fy_rebar,
-                        Es_rebar,
-                        float(self.config.get("rebar_b", 0.01)),
-                        float(self.config.get("rebar_R0", 18.0)),
-                        float(self.config.get("rebar_cR1", 0.925)),
-                        float(self.config.get("rebar_cR2", 0.15)),
-                    )
-                else:
-                    Fy = getattr(mat, "Fy", 0.0) or 2.5e8
-                    ops.uniaxialMaterial("Steel01", mat_tag, Fy, E_mod, 0.01)
-
+                materials_map: dict[str, int] = {}
+                for role in sec.fiber_roles():
+                    mt = self._next_fiber_mat_tag
+                    self._next_fiber_mat_tag += 1
+                    materials_map[role] = mt
+                    self._create_fiber_role_material(role, sec, mt)
                 # Create fiber section (after to_fiber_patches succeeds)
                 try:
-                    entries = sec.to_fiber_patches(mat_tag=mat_tag, nfy=8, nfz=4)
+                    entries = sec.to_fiber_patches(materials=materials_map, nfy=8, nfz=4)
                 except NotImplementedError:
                     # Fall back to elastic — no Fiber section was created,
                     # so no tag collision with the Elastic replacement.
@@ -404,6 +297,113 @@ class SectionMixin:
             ops.section(
                 "Elastic", tag, E_mod, _A * amod, _I33 * i33mod, _I22 * i22mod, G_mod, _J * jmod
             )
+
+    def _create_fiber_role_material(self, role: str, sec, tag: int) -> None:
+        """Create the OpenSees uniaxial material for one fiber role.
+
+        The role fixes the law; the material object (resolved via
+        :meth:`Section.fiber_role_material`) supplies the properties.
+        Strengths/moduli authored in SI (Pa) fall back through the shared
+        ``*_PA`` defaults scaled to model units.
+        """
+        mat_name = sec.fiber_role_material(role)
+        mat = self.mesh_model.materials.get(mat_name) if mat_name else None
+        ssf = stress_scale_factor(self.mesh_model.units)
+
+        if role == "steel":
+            Fy = getattr(mat, "Fy", 0.0) if mat is not None else 0.0
+            Fy = Fy or DEFAULT_FY_STEEL_PA * ssf
+            E = getattr(mat, "E_mod", 0.0) if mat is not None else 0.0
+            E = E or DEFAULT_E_S_PA * ssf
+            ops.uniaxialMaterial("Steel01", tag, Fy, E, 0.01)
+        elif role == "rebar":
+            # Resolve Fy/Es in priority order:
+            #   1) config override (SI Pa, scaled to model units)
+            #   2) section's SAP2000 rebar_material (RebarMatL) lookup
+            #   3) framework rebar defaults (DEFAULT_FY_REBAR_PA / E_S)
+            Fy_rebar = self.config.get("rebar_Fy_override")
+            Es_rebar = self.config.get("rebar_Es_override")
+            if Fy_rebar is not None:
+                Fy_rebar = Fy_rebar * ssf
+            if Es_rebar is not None:
+                Es_rebar = Es_rebar * ssf
+            if (Fy_rebar is None or Es_rebar is None) and mat is not None:
+                rm_Fy = getattr(mat, "Fy", 0.0) or 0.0
+                rm_Es = getattr(mat, "E_mod", 0.0) or 0.0
+                if rm_Fy > 0:
+                    Fy_rebar = Fy_rebar if Fy_rebar is not None else rm_Fy
+                if rm_Es > 0:
+                    Es_rebar = Es_rebar if Es_rebar is not None else rm_Es
+            if not Fy_rebar:
+                Fy_rebar = DEFAULT_FY_REBAR_PA * ssf
+            if not Es_rebar:
+                Es_rebar = DEFAULT_E_S_PA * ssf
+            ops.uniaxialMaterial(
+                "Steel02",
+                tag,
+                Fy_rebar,
+                Es_rebar,
+                float(self.config.get("rebar_b", 0.01)),
+                float(self.config.get("rebar_R0", 18.0)),
+                float(self.config.get("rebar_cR1", 0.925)),
+                float(self.config.get("rebar_cR2", 0.15)),
+            )
+        elif role == "concrete":
+            Fc = getattr(mat, "Fc", 0.0) if mat is not None else 0.0
+            Fc = Fc or DEFAULT_FC_PA * ssf
+            epsc = getattr(mat, "eFc", 0.0) if mat is not None else 0.0
+            epsc = epsc or 0.002
+            self._emit_fiber_concrete(
+                tag,
+                Fc,
+                epsc,
+                float(self.config.get("core_residual_factor", 0.2)) * Fc,
+                0.006,
+            )
+        elif role == "core":
+            # Confined core — Mander when tie data is present, else the shared
+            # no-tie-data heuristic (RC_NO_TIE_CONFINEMENT_FACTOR /
+            # RC_NO_TIE_EPSC_FACTOR, same as builder.py's Tcl export).
+            Fc = getattr(mat, "Fc", 0.0) if mat is not None else 0.0
+            Fc = Fc or DEFAULT_FC_PA * ssf
+            epsc = getattr(mat, "eFc", 0.0) if mat is not None else 0.0
+            epsc = epsc or 0.002
+            Fc_core = Fc * RC_NO_TIE_CONFINEMENT_FACTOR
+            epsc_core = abs(epsc) * RC_NO_TIE_EPSC_FACTOR
+            ecu_core = 0.02
+            tie_fy = getattr(sec, "tie_fy", None) or 0.0
+            if tie_fy <= 0:
+                tie_mat_name = getattr(sec, "tie_rebar_mat", None) or getattr(
+                    sec, "rebar_material", None
+                )
+                tie_mat = self.mesh_model.materials.get(tie_mat_name) if tie_mat_name else None
+                if tie_mat is not None:
+                    tie_fy = getattr(tie_mat, "Fy", 0.0) or 0.0
+            confinement = None
+            fc_method = getattr(sec, "fiber_confinement", None)
+            if callable(fc_method):
+                try:
+                    confinement = fc_method(Fc, tie_fy)
+                except Exception as e:
+                    import warnings
+
+                    warnings.warn(f"fiber_confinement failed for section '{sec.name}': {e}")
+                    confinement = None
+            if confinement is not None:
+                Fc_core = confinement.get("fcc", Fc_core)
+                epsc_core = confinement.get("ecc", epsc_core)
+                ecu_core = confinement.get("ecu", 0.02)
+            _ecu_max = float(self.config.get("confined_ecu_max", 0.025))
+            ecu_core = max(min(ecu_core, _ecu_max), epsc_core)
+            self._emit_fiber_concrete(
+                tag,
+                Fc_core,
+                epsc_core,
+                float(self.config.get("core_residual_factor", 0.2)) * Fc_core,
+                ecu_core,
+            )
+        else:
+            raise ValueError(f"Unknown fiber material role {role!r} for section {sec.name!r}")
 
     def _emit_fiber_concrete(
         self, tag: int, Fc: float, epsc0: float, fpcu: float, epsU: float

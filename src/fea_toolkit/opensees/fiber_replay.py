@@ -43,7 +43,7 @@ def replay_fiber_section(
 
     Args:
         patches: Fiber patch/layer entries as returned by
-            ``Section.to_fiber_patches(mat_tag, nfy, nfz)``.  Each entry is an
+            ``Section.to_fiber_patches(materials, nfy, nfz)``.  Each entry is an
             ``ops.patch`` / ``ops.layer`` argument tuple: ``("rect", …)``,
             ``("circ", …)``, ``("quad", …)``, ``("straight", …)`` or
             ``("circ_layer", …)``.

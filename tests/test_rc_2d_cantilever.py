@@ -48,7 +48,7 @@ def _build_2d_rc_cantilever(ops) -> list[float]:
         top_bar_dia=0.016,
         bot_bar_dia=0.016,
     )
-    patches = sec.to_fiber_patches(mat_tag=1)
+    patches = sec.to_fiber_patches(materials={"concrete": 1, "core": 2, "rebar": 3})
 
     ops.wipe()
     ops.model("basic", "-ndm", 2, "-ndf", 3)

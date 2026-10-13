@@ -442,7 +442,7 @@ class TestSectionSubclasses:
             tf=0.015,
             tw=0.01,
         )
-        patches = sec.to_fiber_patches(mat_tag=1)
+        patches = sec.to_fiber_patches(materials={"steel": 1})
         assert len(patches) == 3  # bottom flange, web, top flange
         # Check bottom flange
         assert patches[0][0] == "rect"
@@ -466,7 +466,7 @@ class TestSectionSubclasses:
         )
         assert sec.shape_id == "GEN"
         with pytest.raises(NotImplementedError):
-            sec.to_fiber_patches(mat_tag=1)
+            sec.to_fiber_patches(materials={})
 
     def test_pipe_section(self):
         sec = PipeSection(
@@ -511,7 +511,7 @@ class TestSectionSubclasses:
             depth=0.6,
             bf=0.3,
         )
-        patches = sec.to_fiber_patches(mat_tag=2)
+        patches = sec.to_fiber_patches(materials={"concrete": 2, "core": 3, "rebar": 4})
         # Now returns: confined core + 4 cover patches + 2 steel layers
         assert len(patches) == 7
         # Core uses mat_tag+1 (confined concrete)
@@ -690,7 +690,7 @@ class TestSectionSubclasses:
         """Base Section.to_fiber_patches() should raise NotImplementedError."""
         sec = Section(name="", shape="", material="", A=0, I33=0, I22=0, J=0)
         with pytest.raises(NotImplementedError):
-            sec.to_fiber_patches(mat_tag=1)
+            sec.to_fiber_patches(materials={})
 
 
 class TestSAPModelData:
@@ -1138,7 +1138,7 @@ class TestConcreteRectangularSectionFiberPatches:
             top_bar_dia=0.02,
             bot_bar_dia=0.02,
         )
-        patches = sec.to_fiber_patches(mat_tag=1)
+        patches = sec.to_fiber_patches(materials={"concrete": 1, "core": 2, "rebar": 3})
         # Concrete patches: core, top cover, bottom cover, left cover, right cover
         # Rebar layers: top (straight), bottom (straight)
         assert len(patches) == 7
@@ -1170,7 +1170,7 @@ class TestConcreteRectangularSectionFiberPatches:
             bf=0.4,
             cover=0.04,
         )
-        patches = sec.to_fiber_patches(mat_tag=1)
+        patches = sec.to_fiber_patches(materials={"concrete": 1, "core": 2, "rebar": 3})
         for p in patches:
             assert p[0] == "rect"
         assert len(patches) == 5  # 1 confined core + 4 unconfined covers
@@ -1195,7 +1195,7 @@ class TestConcreteCircularSectionFiberPatches:
             bar_count=8,
             bar_dia=0.02,
         )
-        patches = sec.to_fiber_patches(mat_tag=1)
+        patches = sec.to_fiber_patches(materials={"concrete": 1, "core": 2, "rebar": 3})
         # Concrete: confined core (circ), unconfined cover (circ)
         # Rebar: circ_layer with mat_tag + 2 = 3
         assert len(patches) == 3
@@ -1222,8 +1222,131 @@ class TestConcreteCircularSectionFiberPatches:
             diameter=0.4,
             cover=0.04,
         )
-        patches = sec.to_fiber_patches(mat_tag=1)
+        patches = sec.to_fiber_patches(materials={"concrete": 1, "core": 2, "rebar": 3})
         assert len(patches) == 2  # core + cover only, no rebar
+
+
+class TestCompositeSectionFiberPatches:
+    """Fiber patch generation for composite (encased / filled-tube) sections."""
+
+    def _make_inner(self):
+        from fea_toolkit.model.sap_data import ISection
+
+        return ISection(
+            name="UB305",
+            shape="I/Wide Flange",
+            material="Steel",
+            A=0.006,
+            I33=1e-4,
+            I22=3e-5,
+            J=1e-6,
+            depth=0.3,
+            bf=0.15,
+            tf=0.01,
+            tw=0.008,
+        )
+
+    def test_encased_fiber_roles_and_patches(self):
+        from fea_toolkit.model.sap_data import EncasedSection
+
+        sec = EncasedSection(
+            name="SRC_400x400",
+            shape="Concrete Encasement Rectangle",
+            material="Steel",
+            A=0.16,
+            I33=0.00213,
+            I22=0.00213,
+            J=2e-5,
+            embedded_section=self._make_inner(),
+            encasement_material="Concrete_40MPa",
+            encasement_depth=0.4,
+            encasement_bf=0.4,
+        )
+        assert sec.fiber_roles() == ["steel", "concrete"]
+        assert sec.fiber_role_material("steel") == "Steel"
+        assert sec.fiber_role_material("concrete") == "Concrete_40MPa"
+        patches = sec.to_fiber_patches(materials={"steel": 10, "concrete": 11})
+        # 1 concrete encasement rect + 3 embedded ISection rects
+        assert len(patches) == 4
+        assert patches[0][0] == "rect"
+        assert patches[0][1] == 11  # concrete encasement
+        assert all(p[1] == 10 for p in patches[1:])  # embedded steel
+
+    def test_concrete_filled_tube_patches(self):
+        from fea_toolkit.model.sap_data import ConcreteFilledTubeSection
+
+        sec = ConcreteFilledTubeSection(
+            name="CFT400x400x10",
+            shape="Filled Steel Tube",
+            material="Steel",
+            A=0.0,
+            I33=0.0,
+            I22=0.0,
+            J=0.0,
+            depth=0.4,
+            bf=0.4,
+            tf=0.01,
+            tw=0.01,
+            fill_material="C40",
+            rebar_material="Rebar",
+            top_bars=4,
+            bot_bars=4,
+            top_bar_dia=0.02,
+            bot_bar_dia=0.02,
+        )
+        assert sec.fiber_roles() == ["steel", "concrete", "rebar"]
+        assert sec.fiber_role_material("steel") == "Steel"
+        assert sec.fiber_role_material("concrete") == "C40"
+        assert sec.fiber_role_material("rebar") == "Rebar"
+        patches = sec.to_fiber_patches(materials={"steel": 20, "concrete": 21, "rebar": 22})
+        # 4 steel tube walls + 1 concrete core + 2 rebar layers
+        assert len(patches) == 7
+        assert [p[0] for p in patches[:4]] == ["rect"] * 4  # steel walls
+        assert all(p[1] == 20 for p in patches[:4])
+        assert patches[4][0] == "rect" and patches[4][1] == 21  # concrete core
+        assert patches[5][0] == "straight" and patches[5][1] == 22  # top rebar
+        assert patches[6][0] == "straight" and patches[6][1] == 22  # bot rebar
+
+    def test_concrete_filled_tube_no_rebar(self):
+        from fea_toolkit.model.sap_data import ConcreteFilledTubeSection
+
+        sec = ConcreteFilledTubeSection(
+            name="CFT400",
+            shape="Filled Steel Tube",
+            material="Steel",
+            depth=0.4,
+            bf=0.4,
+            tf=0.01,
+            tw=0.01,
+            fill_material="C40",
+        )
+        patches = sec.to_fiber_patches(materials={"steel": 1, "concrete": 2, "rebar": 3})
+        assert len(patches) == 5  # 4 walls + 1 core, no rebar
+
+    def test_fiber_roles_for_base_and_nonfiber(self):
+        from fea_toolkit.model.sap_data import (
+            CircularSection,
+            GeneralSection,
+            ISection,
+            ShellSection,
+        )
+
+        assert ISection(
+            name="", shape="I/Wide Flange", material="", A=0, I33=0, I22=0, J=0
+        ).fiber_roles() == ["steel"]
+        assert CircularSection(
+            name="", shape="Circle", material="", A=0, I33=0, I22=0, J=0
+        ).fiber_roles() == ["steel"]
+        assert (
+            GeneralSection(
+                name="", shape="General", material="", A=0, I33=0, I22=0, J=0
+            ).fiber_roles()
+            == []
+        )
+        assert (
+            ShellSection(name="", shape="Shell", material="", A=0, I33=0, I22=0, J=0).fiber_roles()
+            == []
+        )
 
 
 class TestSAPModelDataMethods:

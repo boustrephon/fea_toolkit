@@ -650,11 +650,8 @@ def export_mesh_model_to_tcl(
     _fiber_mat_names: set[str] = set()
     if config.get("create_fiber_sections", False):
         for sec_name, sec in mesh_model.sections.items():
-            try:
-                sec.to_fiber_patches(mat_tag=1)
+            if sec.fiber_roles():
                 _fiber_mat_names.add(sec.material)
-            except NotImplementedError:
-                pass
 
     lines.append('puts "-> Restraints created, defining materials..."')
     lines.append("flush stdout")
@@ -723,11 +720,8 @@ def export_mesh_model_to_tcl(
             for sec_name, sec in mesh_model.sections.items():
                 if sec_name not in _assigned_to_frames:
                     continue  # skip unused sections
-                try:
-                    sec.to_fiber_patches(mat_tag=1)
+                if sec.fiber_roles():
                     fiber_sec_names.add(sec_name)
-                except NotImplementedError:
-                    pass
 
         for sec_name, sec in mesh_model.sections.items():
             tag = sec_tags.get(sec_name)
@@ -861,7 +855,9 @@ def export_mesh_model_to_tcl(
                     fiber_mat_tag = mat_tags.get(sec.material, 1)
 
                 # Build fiber patches
-                patches = sec.to_fiber_patches(mat_tag=fiber_mat_tag)
+                patches = sec.to_fiber_patches(
+                    materials={role: fiber_mat_tag + i for i, role in enumerate(sec.fiber_roles())}
+                )
                 # GJ torsional rigidity for 3D fiber sections (Xara requirement)
                 _E_mod = mat.E_mod if mat and mat.E_mod is not None and mat.E_mod > 0 else 2.0e11
                 _G = mat.G_mod if mat and mat.G_mod and mat.G_mod > 0 else 0.4 * _E_mod

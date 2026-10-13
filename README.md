@@ -527,11 +527,18 @@ as individual fibres yield.
 | ``ConcreteRectangularSection`` | ``Concrete Rectangular`` | Confined core + unconfined cover + steel rebar layers |
 | ``ConcreteCircularSection`` | ``Concrete Circular`` | Confined core ring + unconfined cover ring + rebar ring |
 
-Material tags are allocated in groups of three::
+Material tags are allocated per **fiber role** (see
+``Section.fiber_roles()``), each role fixing its OpenSees uniaxial law::
 
-    mat_tag     → unconfined concrete (Concrete01)
-    mat_tag + 1 → confined concrete (Concrete01, Mander enhanced)
-    mat_tag + 2 → steel rebar (Steel02)
+    "steel"    → structural steel (Steel01)
+    "concrete" → unconfined concrete cover/fill (Concrete01)
+    "core"     → confined concrete core (Concrete01, Mander enhanced)
+    "rebar"    → steel rebar (Steel02)
+
+``to_fiber_patches(materials, nfy, nfz)`` takes a role → tag mapping rather
+than a single ``mat_tag`` plus ``+1``/``+2`` offsets, so composite sections
+(encased steel, concrete-filled tube) can carry steel + concrete + rebar in
+one section.
 
 #### 10.2 Lumped Plasticity (``hinge_model: 'lumped'``)
 

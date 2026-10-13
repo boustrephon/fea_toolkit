@@ -47,7 +47,7 @@ class TestSectionPromotion:
             if isinstance(sec, ConcreteRectangularSection):
                 concrete_rect_count += 1
                 # Verify RC fiber patches produce 7 entries
-                patches = sec.to_fiber_patches(mat_tag=1)
+                patches = sec.to_fiber_patches(materials={"concrete": 1, "core": 2, "rebar": 3})
                 assert len(patches) == 7, f"Expected 7 RC patches for {name}, got {len(patches)}"
                 # Verify sensible defaults
                 assert sec.cover > 0, f"Cover missing for {name}"
@@ -77,7 +77,7 @@ class TestSectionPromotion:
         assert fsec1 is not None, "FSEC1 section missing"
         assert isinstance(fsec1, ISection), f"FSEC1 expected ISection, got {type(fsec1).__name__}"
         # Steel fiber patches = 3
-        patches = fsec1.to_fiber_patches(mat_tag=1)
+        patches = fsec1.to_fiber_patches(materials={"steel": 1})
         assert len(patches) == 3, f"Expected 3 steel patches for FSEC1, got {len(patches)}"
 
         # Shell sections — single-word names to avoid S2K parser space-splitting

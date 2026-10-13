@@ -45,7 +45,7 @@ def _build_and_push():
         top_bar_dia=0.016,
         bot_bar_dia=0.016,
     )
-    patches = sec.to_fiber_patches(mat_tag=1)
+    patches = sec.to_fiber_patches(materials={"concrete": 1, "core": 2, "rebar": 3})
     fpc, fy, es = 3.0e7, 400e3, 2.0e8
     materials = {
         1: ("Concrete01", (-fpc, -0.002, -0.2 * fpc, -0.006)),

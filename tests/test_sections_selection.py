@@ -228,7 +228,7 @@ class TestMassSource2:
 class TestPipeSectionFiberPatches:
     def test_annular_ring(self):
         p = PipeSection("PIPE", "Pipe", "STEEL", od=1.0, t=0.1)
-        patches = p.to_fiber_patches(mat_tag=1, nfy=8, nfz=4)
+        patches = p.to_fiber_patches(materials={"steel": 1}, nfy=8, nfz=4)
         assert len(patches) == 1
         ptype, mat, ncirc, nrad, _yc, _zc, r_in, r_out, sa, ea = patches[0]
         assert ptype == "circ"
@@ -240,7 +240,7 @@ class TestPipeSectionFiberPatches:
 
     def test_solid_wall(self):
         p = PipeSection("PIPE", "Pipe", "STEEL", od=0.5, t=0.5)
-        patches = p.to_fiber_patches(mat_tag=2)
+        patches = p.to_fiber_patches(materials={"steel": 2})
         _, _, _, _, _, _, r_in, r_out, _, _ = patches[0]
         assert abs(r_in) < 1e-12  # full solid when t == od/2
         assert abs(r_out - 0.25) < 1e-12
@@ -249,7 +249,7 @@ class TestPipeSectionFiberPatches:
 class TestCircularSectionFiberPatches:
     def test_solid_circle(self):
         c = CircularSection("CIRC", "Circle", "STEEL", diameter=0.6)
-        patches = c.to_fiber_patches(mat_tag=3, nfy=12, nfz=6)
+        patches = c.to_fiber_patches(materials={"steel": 3}, nfy=12, nfz=6)
         assert len(patches) == 1
         ptype, mat, ncirc, nrad, _yc, _zc, r_in, r_out, _sa, _ea = patches[0]
         assert ptype == "circ"
@@ -262,7 +262,7 @@ class TestCircularSectionFiberPatches:
 class TestBoxSectionFiberPatches:
     def test_four_rect_patches(self):
         b = BoxSection("BOX", "Box/Tube", "STEEL", depth=0.6, bf=0.4, tf=0.02, tw=0.015)
-        patches = b.to_fiber_patches(mat_tag=4, nfy=3, nfz=2)
+        patches = b.to_fiber_patches(materials={"steel": 4}, nfy=3, nfz=2)
         assert len(patches) == 4
         for p in patches:
             assert p[0] == "rect"
@@ -310,7 +310,7 @@ class TestChannelSectionFiberPatches:
             tf=0.01,
             tw=0.008,
         )
-        patches = sec.to_fiber_patches(mat_tag=5, nfy=3, nfz=2)
+        patches = sec.to_fiber_patches(materials={"steel": 5}, nfy=3, nfz=2)
         assert len(patches) == 3
         _assert_rect_patch_geometry(patches, expected_area=0.00264, mat_tag=5, nfy=3, nfz=2)
         # Bottom flange -> web -> top flange in y (channel is symmetric about y).
@@ -337,7 +337,7 @@ class TestTeeSectionFiberPatches:
             tf=0.012,
             tw=0.01,
         )
-        patches = sec.to_fiber_patches(mat_tag=6, nfy=3, nfz=2)
+        patches = sec.to_fiber_patches(materials={"steel": 6}, nfy=3, nfz=2)
         assert len(patches) == 2
         _assert_rect_patch_geometry(patches, expected_area=0.00308, mat_tag=6, nfy=3, nfz=2)
         # Flange on top (positive y after centroid shift), stem below.
@@ -361,7 +361,7 @@ class TestAngleSectionFiberPatches:
             tf=0.01,
             tw=0.01,
         )
-        patches = sec.to_fiber_patches(mat_tag=7, nfy=3, nfz=2)
+        patches = sec.to_fiber_patches(materials={"steel": 7}, nfy=3, nfz=2)
         assert len(patches) == 2
         _assert_rect_patch_geometry(patches, expected_area=0.0019, mat_tag=7, nfy=3, nfz=2)
         # Vertical leg is tw thick in z; horizontal leg is tf thick in y.
@@ -385,7 +385,7 @@ class TestDoubleAngleSectionFiberPatches:
             tw=0.01,
             dis=0.01,
         )
-        patches = sec.to_fiber_patches(mat_tag=8, nfy=3, nfz=2)
+        patches = sec.to_fiber_patches(materials={"steel": 8}, nfy=3, nfz=2)
         assert len(patches) == 4
         _assert_rect_patch_geometry(patches, expected_area=0.004, mat_tag=8, nfy=3, nfz=2)
         # z-symmetric assembly: left and right legs mirror about z = 0.

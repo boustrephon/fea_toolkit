@@ -139,9 +139,7 @@ class PushoverRunnerMixin:
         for sec in self.mesh_model.sections.values():
             if isinstance(sec, ShellSection):
                 continue
-            try:
-                sec.to_fiber_patches(mat_tag=1)
-            except NotImplementedError:
+            if not sec.fiber_roles():
                 _use_fiber = False
                 import warnings
 

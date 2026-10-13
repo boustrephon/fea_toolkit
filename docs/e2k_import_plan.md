@@ -365,35 +365,45 @@ resolution).
   parser still reads `$ STATIC LOADS`, so a v21 model's loads are not yet
   parsed.
 
-## 7. Composite sections (filled tubes & encased) — staged plan
+## 7. Composite sections (filled tubes & encased) — implemented
 
-`Filled Steel Tube` / `Filled Steel Pipe` are currently approximated as hollow
-**steel** sections (`BoxSection` / `PipeSection`, §6).  A genuinely
-concrete-filled steel tube (CFT) is a two-material composite — steel tube +
-concrete core (+ optional rebar) — the *inverse* of the existing
-`EncasedSection` (steel core + concrete encasement).  Both are one-material
-placeholders today: `EncasedSection.to_fiber_patches()` raises
-`NotImplementedError`, and filled tubes fall back to the hollow-steel section.
+`Filled Steel Tube` / `Filled Steel Pipe` are still *parsed* as hollow **steel**
+sections (`BoxSection` / `PipeSection`, §6) — the parser has no concrete-fill
+token path yet.  The model layer now supports the genuinely composite cases:
 
-The target is a **generalised multi-material fiber contract**, delivered in
-stages (each its own commit; anti-pattern 15 — do not mix a move with a
-behaviour change):
+* `EncasedSection.to_fiber_patches()` is **implemented** — concrete encasement
+  rectangle + overlaid embedded-steel patches (the steel region is counted
+  twice; a documented simplification).
+* `ConcreteFilledTubeSection` (RHS) is **added** — steel tube walls + a
+  concrete core (modelled **unconfined** — the tube's confinement is not
+  Mander-tie confinement, so a conservative unconfined core is used until a
+  CFT confinement model lands, guardrail §12) + optional rebar layers.
 
-1. **Generalise `to_fiber_patches`** from `(mat_tag, nfy, nfz)` to
-   `(materials: Mapping[str, int], nfy, nfz)` — a *role → tag* map
-   (`"steel"`, `"concrete"`, `"rebar"`, …).  This replaces the ad-hoc
-   `mat_tag` / `mat_tag + 1` / `mat_tag + 2` offset convention in the concrete
-   sections and, in one change, unblocks both `EncasedSection` and CFT.
-2. **Add `ConcreteFilledTubeSection`** (and complete `EncasedSection`) on that
-   contract: steel-tube patches + confined concrete core + optional rebar
-   layers.  The steel tube's confinement of the core is **not** Mander-tie
-   confinement — use a conservative unconfined core (or a documented
-   simplification) until a CFT confinement model lands (guardrail §12).
-3. **Lumped-property complement** — a transformed-section helper in
-   `model/section_properties.py` (steel + concrete via modular ratio
+The generalised multi-material fiber contract is in place:
+
+1. **`to_fiber_patches(materials, nfy, nfz)`** takes a *role → tag* map
+   (`"steel"`, `"concrete"`, `"core"`, `"rebar"`) instead of the ad-hoc
+   `mat_tag` / `mat_tag + 1` / `mat_tag + 2` offset convention.  Each role
+   fixes its OpenSees law: `"steel"` → `Steel01`, `"concrete"`/`"core"` →
+   `Concrete01`, `"rebar"` → `Steel02`.
+2. **`Section.fiber_roles()`** declares the roles a section needs, and
+   **`Section.fiber_role_material(role)`** maps each role to its SAP2000
+   material reference — the one hook the builders (`_sections.py`, the Tcl
+   export, the recorder) use to create materials for *any* section, steel,
+   RC, encased or filled tube.
+3. **Lumped-property complement** — still open: a transformed-section helper
+   in `model/section_properties.py` (steel + concrete via modular ratio
    `n = E_s / E_c`) returning composite `A`/`I33`/`I22`/`J`/`Z33`/`Z22` for
    the elastic (`section('Elastic')`) path.
 
-Decision point settled (2026-10-13): the filled-tube warning fix ships now as
-the `SHAPE_NAMES` alias (geometric steel fallback); the composite fiber model
-above is the **target**, not the immediate step.
+Still open (recorded as follow-ups, not implemented):
+
+* A `ConcreteFilledPipeSection` (CHS analogue of the RHS filled tube).
+* The Tcl-export (`builder.py`) / recorder material emission still dispatches
+  RC-vs-steel by `isinstance` and would need role-based emission before it
+  correctly emits composite-section materials.
+* The `Filled Steel Pipe` (CHS) concrete-fill fiber path.
+
+Decision point settled (2026-10-13): the filled-tube warning fix shipped as the
+`SHAPE_NAMES` alias; the composite fiber model above is now implemented as the
+role-based contract.

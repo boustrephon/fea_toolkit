@@ -380,11 +380,8 @@ def export_model_to_tcl(
             # type that supports fiber conversion, not just a
             # hardcoded isinstance list.
             for sec_name, sec in model_data.sections.items():
-                try:
-                    sec.to_fiber_patches(mat_tag=1)
+                if sec.fiber_roles():
                     fiber_sec_names.add(sec_name)
-                except NotImplementedError:
-                    pass
         for sec_name, sec in model_data.sections.items():
             tag = _sec_tag[sec_name]
             # Skip Elastic if this section will be emitted as fiber
@@ -927,7 +924,9 @@ def tcl_materials_and_sections(
         gj = _G * sec.J
         lines.append(f"section Fiber {sec_tag} -GJ {gj:g} {{")
         try:
-            entries = sec.to_fiber_patches(mat_tag=fiber_mat_tag)
+            entries = sec.to_fiber_patches(
+                materials={role: fiber_mat_tag + i for i, role in enumerate(sec.fiber_roles())}
+            )
         except NotImplementedError:
             # No fiber patches — skip this section, remove the header
             lines.pop()
