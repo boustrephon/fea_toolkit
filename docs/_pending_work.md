@@ -371,6 +371,36 @@ implemented, config-gated **off by default** (existing models unchanged):
   element with degrading shear) are recorded here and in
   `docs/vecchio_emara_benchmark.md`.
 
+#### P38 — Member end offsets & cardinal points: `-jntOffset` in the builder
+Source: `docs/member_offsets.md` (the strategy record).
+
+**What.** The parser already folds the SAP2000 cardinal point (insertion point)
+and section centroid offset into lateral `FrameEndOffset.off_y_i/z_i/j/z_j`
+values, but those lateral offsets reach **only** the Rhino export
+(`rhino/geometry.py`) — the analysis builder consumes only the longitudinal
+`end_i`/`end_j` (via stiff elastic links / `rigid_link_mpc`).  A frame drawn on
+a non-centroid cardinal point (e.g. a top-of-slab beam) is therefore extruded at
+the offset but **modelled at the reference line** in OpenSees: the drawn model
+and the analysis model disagree, and the offset stiffness is missing.
+
+**Decision.** Default the rigid offset to the native `-jntOffset` argument of
+`geomTransf` — exact, no extra nodes/MPC/stiff beams, and verified against the
+current OpenSees source as supported by `Linear`, `PDelta` **and**
+`Corotational` in 2D and 3D (the old wiki's omission of 3D Corotational is
+stale).  Keep the stiff-beam path as an opt-in fallback and guard
+`rigid_link_mpc` (which silently breaks with diaphragms).  `-jntOffset` offsets
+are **global**, so the lateral local offsets need a local→global rotation —
+generalised as `local_to_global` / `global_to_local` in `model/geometry_core.py`
+(a single spelling, with `_constraints._global_to_local` delegating to it).
+
+**Outline steps.** 1) add `local_to_global` / `global_to_local` + a shared
+`frame_end_offsets_global()` and unit-test the rotation; 2) emit `-jntOffset`
+in `ElementMixin._add_beam_column` (default), verifying `eleLoad` over the
+shortened flexible length `L`; 3) keep the offset-node exclusion from
+diaphragm/BODY sweeps; 4) guard `rigid_link_mpc` to the `"mpc"` option; 5)
+extend the `typings/openseespy` `geomTransf` stub for PDelta/Corotational; 6)
+thread the same offsets through the GUI frame mesh and Rhino export.
+
 ### Tier 3 — Feature gaps (placeholders / partial)
 
 #### P25 — classic support symbols on top of the per-DOF glyphs

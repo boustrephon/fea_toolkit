@@ -150,6 +150,11 @@ for automated cross-referencing.
   Tags: `mander`, `confinement`, `validation`, `theory`, `reference`
   Related: [Rectangular Concrete Section Workflow](rc_rectangular_section_workflow.md) · [Element Properties Configuration](element_properties_config.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md)
 
+- [Member End Offsets & Cardinal Points (Insertion Point)](member_offsets.md) — 🚧 Draft
+  > How SAP2000 frame end offsets and cardinal-point (insertion-point) offsets are carried onto the OpenSees frame element, the -jntOffset mechanism decision, and the shared local↔global coordinate transformation.
+  Tags: `offsets`, `cardinal-point`, `insertion-point`, `rigid-zones`, `jntOffset`, `geomTransf`, `frames`, `sap2000`
+  Related: [SAP2000 Parser — Table & Keyword Coverage](parser_coverage.md) · [Report Generation — Design Proposal](report_generation.md) · [Builder Reference — Two-stage Pipeline](builder_reference.md) · [Storey Identification & Diaphragm Constraints](diaphragm_constraints.md) · [Member End Releases & Partial Fixity](member_releases.md)
+
 - [Member End Releases & Partial Fixity](member_releases.md) — ✅ Complete
   > How SAP2000 frame end releases and partial-fixity springs are converted to OpenSees zero-length release elements (and Tcl), including the DOF mapping, formulation-aware stiffness selection, and validation.
   Tags: `releases`, `partial-fixity`, `connections`, `zeroLength`, `frames`, `tcl`, `sap2000`
@@ -379,6 +384,7 @@ Tags across all documentation files:
 - **`build`** — [openseespy_local_build.md](openseespy_local_build.md)
 - **`capacity`** — [capacity.md](capacity.md), [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`capacity-spectrum`** — [csm_bilinearization.md](csm_bilinearization.md), [csm_test_model_plan.md](csm_test_model_plan.md)
+- **`cardinal-point`** — [member_offsets.md](member_offsets.md)
 - **`checklist`** — [ETABS_checklist.md](ETABS_checklist.md), [ETABS_checklist_gb.md](ETABS_checklist_gb.md), [ETABS_checklist_hk.md](ETABS_checklist_hk.md), [ETABS_checklist_is.md](ETABS_checklist_is.md), [SAP2000_checklist_gb.md](SAP2000_checklist_gb.md), [SAP2000_checklist_hk.md](SAP2000_checklist_hk.md)
 - **`checks`** — [model_review.md](model_review.md)
 - **`classification`** — [element_classification.md](element_classification.md)
@@ -428,9 +434,10 @@ Tags across all documentation files:
 - **`fiber`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`fiber-section`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`force-controlled`** — [shear_failure_modelling.md](shear_failure_modelling.md)
-- **`frames`** — [member_releases.md](member_releases.md)
+- **`frames`** — [member_offsets.md](member_offsets.md), [member_releases.md](member_releases.md)
 - **`fsam`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
 - **`gb50010`** — [capacity.md](capacity.md)
+- **`geomTransf`** — [member_offsets.md](member_offsets.md)
 - **`geometry`** — [rhino_export.md](rhino_export.md)
 - **`gpl`** — [licence.md](licence.md)
 - **`gravity`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
@@ -441,11 +448,13 @@ Tags across all documentation files:
 - **`hinges`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md)
 - **`html-export`** — [viewer.md](viewer.md)
 - **`identifiers`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
+- **`insertion-point`** — [member_offsets.md](member_offsets.md)
 - **`integrity`** — [model_review.md](model_review.md)
 - **`interaction`** — [gui.md](gui.md)
 - **`interactive`** — [viewer.md](viewer.md)
 - **`internal`** — [parser_coverage.md](parser_coverage.md)
 - **`io`** — [json_serialization.md](json_serialization.md), [model_stage_file.md](model_stage_file.md), [pipeline_logging.md](pipeline_logging.md), [results_schema.md](results_schema.md)
+- **`jntOffset`** — [member_offsets.md](member_offsets.md)
 - **`joint`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`json`** — [json_serialization.md](json_serialization.md)
 - **`kip-in`** — [units_conversion.md](units_conversion.md)
@@ -475,6 +484,7 @@ Tags across all documentation files:
 - **`nonlinear`** — [element_properties_config.md](element_properties_config.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [pushover_analysis.md](pushover_analysis.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`notes`** — [dev_notes.md](dev_notes.md)
 - **`npz`** — [model_stage_file.md](model_stage_file.md), [project_bundle.md](project_bundle.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
+- **`offsets`** — [member_offsets.md](member_offsets.md)
 - **`opensees`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [tcl_export.md](tcl_export.md)
 - **`openseespy`** — [licence.md](licence.md), [openseespy_local_build.md](openseespy_local_build.md)
 - **`openseesrt`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
@@ -511,12 +521,13 @@ Tags across all documentation files:
 - **`review`** — [ETABS_checklist.md](ETABS_checklist.md), [ETABS_checklist_gb.md](ETABS_checklist_gb.md), [ETABS_checklist_hk.md](ETABS_checklist_hk.md), [ETABS_checklist_is.md](ETABS_checklist_is.md), [SAP2000_checklist_gb.md](SAP2000_checklist_gb.md), [SAP2000_checklist_hk.md](SAP2000_checklist_hk.md), [model_review.md](model_review.md)
 - **`rhino`** — [model_stage_file.md](model_stage_file.md), [rhino_attributes.md](rhino_attributes.md), [rhino_export.md](rhino_export.md)
 - **`rigid-end-offset`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`rigid-zones`** — [member_offsets.md](member_offsets.md)
 - **`rigidDiaphragm`** — [diaphragm_constraints.md](diaphragm_constraints.md)
 - **`roadmap`** — [gui_roadmap.md](gui_roadmap.md)
 - **`round-trip`** — [model_stage_file.md](model_stage_file.md)
 - **`runtime`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`s2k`** — [model_review.md](model_review.md)
-- **`sap2000`** — [ETABS_checklist.md](ETABS_checklist.md), [member_releases.md](member_releases.md), [model_review.md](model_review.md), [parser_coverage.md](parser_coverage.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
+- **`sap2000`** — [ETABS_checklist.md](ETABS_checklist.md), [member_offsets.md](member_offsets.md), [member_releases.md](member_releases.md), [model_review.md](model_review.md), [parser_coverage.md](parser_coverage.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`schema`** — [results_schema.md](results_schema.md)
 - **`scripting`** — [tcl_export.md](tcl_export.md)
 - **`sections`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
