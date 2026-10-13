@@ -298,7 +298,7 @@ def _deformed_shell_points(window):
     """
     for actor in window._backend.actors("deformed"):
         dataset = actor.mapper.dataset
-        if getattr(dataset, "n_faces", 0) > 0:
+        if dataset.GetNumberOfPolys() > 0:
             return np.asarray(dataset.points, dtype=float)
     return None
 
