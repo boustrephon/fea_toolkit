@@ -399,12 +399,14 @@ SHAPE_NAMES = {
     "PIPE": "CHS",
     "Steel Pipe": "CHS",
     "Concrete Pipe": "CHS",
+    "Filled Steel Pipe": "CHS",
     # Box / RHS
     "Box/Tube": "RHS",
     "Tube": "RHS",
     "TUBE": "RHS",
     "Steel Tube": "RHS",
     "Concrete Tube": "RHS",
+    "Filled Steel Tube": "RHS",
     # General / catalogue
     "General": "GEN",
     "GENERAL": "GEN",

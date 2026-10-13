@@ -159,8 +159,8 @@ parametric build dispatched on the canonical shape type.
 |---|---|---|---|---|
 | `I` | `I/Wide Flange`, `WIDE FLANGE`, `Steel I/Wide Flange` | `D B TF TW` | `ISection` | depth / bf / tf / tw |
 | `CH` | `Channel`, `Steel/Concrete Channel` | `D B TF TW` | `ChannelSection` | depth / bf / tf / tw |
-| `CHS` | `Pipe`, `Steel/Concrete Pipe` | `D`(OD) `T`(wall) | `PipeSection` | od / t |
-| `RHS` | `Box/Tube`, `Tube`, `Steel/Concrete Tube` | `D B TF TW` | `BoxSection` | depth / bf / tf / tw |
+| `CHS` | `Pipe`, `Steel/Concrete Pipe`, `Filled Steel Pipe` | `D`(OD) `T`(wall) | `PipeSection` | od / t |
+| `RHS` | `Box/Tube`, `Tube`, `Steel/Concrete Tube`, `Filled Steel Tube` | `D B TF TW` | `BoxSection` | depth / bf / tf / tw |
 | `A` | `Angle`, `Steel/Concrete Angle` | `D B TF TW` | `AngleSection` | depth / bf / tf / tw |
 | `AA` | `Double Angle`, `Steel/Concrete Double Angle` | `D B TF TW DIS` | `DoubleAngleSection` | depth / bf / tf / tw / dis |
 | `T` | `Tee` | `D B TF TW` | `TeeSection` | depth / bf / tf / tw |
@@ -347,6 +347,12 @@ resolution).
   resolve within their `FILE`-named catalogue.  Only `cg_offset_2`/`cg_offset_3`
   remain unpopulated for parametric sections (pending a real-export reference
   check).
+* **Filled steel tubes are approximated as hollow steel sections.**
+  `Filled Steel Tube` / `Filled Steel Pipe` map to `BoxSection` /
+  `PipeSection` (the `FILLMATERIAL` token is parsed into `dims` and ignored),
+  matching the S2K parser's dispatch.  Correct for an unfilled tube, but a
+  *steel-tube / concrete-core composite* for a genuinely filled section — see
+  the staged composite-section plan (§7).
 * **Object auto-meshing is deferred (M6)** — `AUTOMESH` / `MESHATINTERSECTIONS`
   / `FLOORMESH` / `MINNUMSTA` / `MAXSTASPC` (line) and `OBJMESHTYPE` / `MESHAT`
   / `MAXMESHSIZE` / `LINECONSTRAINT` (area) are parsed into each assignment's
@@ -358,3 +364,36 @@ resolution).
   with `$ LOAD PATTERNS` + `$ LOAD CASES` (and added `$ MASS SOURCE`).  The
   parser still reads `$ STATIC LOADS`, so a v21 model's loads are not yet
   parsed.
+
+## 7. Composite sections (filled tubes & encased) — staged plan
+
+`Filled Steel Tube` / `Filled Steel Pipe` are currently approximated as hollow
+**steel** sections (`BoxSection` / `PipeSection`, §6).  A genuinely
+concrete-filled steel tube (CFT) is a two-material composite — steel tube +
+concrete core (+ optional rebar) — the *inverse* of the existing
+`EncasedSection` (steel core + concrete encasement).  Both are one-material
+placeholders today: `EncasedSection.to_fiber_patches()` raises
+`NotImplementedError`, and filled tubes fall back to the hollow-steel section.
+
+The target is a **generalised multi-material fiber contract**, delivered in
+stages (each its own commit; anti-pattern 15 — do not mix a move with a
+behaviour change):
+
+1. **Generalise `to_fiber_patches`** from `(mat_tag, nfy, nfz)` to
+   `(materials: Mapping[str, int], nfy, nfz)` — a *role → tag* map
+   (`"steel"`, `"concrete"`, `"rebar"`, …).  This replaces the ad-hoc
+   `mat_tag` / `mat_tag + 1` / `mat_tag + 2` offset convention in the concrete
+   sections and, in one change, unblocks both `EncasedSection` and CFT.
+2. **Add `ConcreteFilledTubeSection`** (and complete `EncasedSection`) on that
+   contract: steel-tube patches + confined concrete core + optional rebar
+   layers.  The steel tube's confinement of the core is **not** Mander-tie
+   confinement — use a conservative unconfined core (or a documented
+   simplification) until a CFT confinement model lands (guardrail §12).
+3. **Lumped-property complement** — a transformed-section helper in
+   `model/section_properties.py` (steel + concrete via modular ratio
+   `n = E_s / E_c`) returning composite `A`/`I33`/`I22`/`J`/`Z33`/`Z22` for
+   the elastic (`section('Elastic')`) path.
+
+Decision point settled (2026-10-13): the filled-tube warning fix ships now as
+the `SHAPE_NAMES` alias (geometric steel fallback); the composite fiber model
+above is the **target**, not the immediate step.

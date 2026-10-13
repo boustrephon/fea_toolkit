@@ -327,6 +327,34 @@ def test_parametric_concrete_circle(parametric_sections):
     assert sec.diameter == pytest.approx(0.4)
 
 
+_FILLED_SECTIONS_SNIPPET = """$ MATERIAL PROPERTIES
+  MATERIAL  "STEEL"  M 7.85  W 77.0  TYPE "ISOTROPIC"  E 2.0E+08  U 0.3  A 1.17E-05
+  MATERIAL  "STEEL"  DESIGNTYPE "STEEL"  FY 345000  FU 448000
+  MATERIAL  "CONC"  M 2.4  W 23.5  TYPE "ISOTROPIC"  E 2.5E+07  U 0.2  A 9.9E-06
+  MATERIAL  "CONC"  DESIGNTYPE "CONCRETE"  FC 28000
+
+$ FRAME SECTIONS
+  FRAMESECTION  "CFTBox"   MATERIAL "STEEL"  SHAPE "Filled Steel Tube"  D 0.4  B 0.4  TF 0.01  TW 0.01
+  FRAMESECTION  "CFTPipe"  MATERIAL "STEEL"  SHAPE "Filled Steel Pipe"  D 0.4  T 0.01
+"""
+
+
+def test_filled_steel_shapes_dispatch_to_hollow_steel_sections():
+    sections = _parse_sections(_FILLED_SECTIONS_SNIPPET)
+    materials = _get_materials(sections)
+    built = _get_frame_sections(sections, materials, "m", {})
+
+    box = built["CFTBox"]
+    assert isinstance(box, BoxSection)
+    assert box.depth == pytest.approx(0.4)
+    assert box.tf == pytest.approx(0.01)
+
+    pipe = built["CFTPipe"]
+    assert isinstance(pipe, PipeSection)
+    assert pipe.od == pytest.approx(0.4)
+    assert pipe.t == pytest.approx(0.01)
+
+
 def test_general_section_reads_explicit_properties():
     snippet = (
         "$ MATERIAL PROPERTIES\n"

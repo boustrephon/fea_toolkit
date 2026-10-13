@@ -673,6 +673,18 @@ class TestSectionSubclasses:
             BoxSection(name="", shape="Box/Tube", material="", A=0, I33=0, I22=0, J=0).shape_id
             == "RHS"
         )
+        assert (
+            PipeSection(
+                name="", shape="Filled Steel Pipe", material="", A=0, I33=0, I22=0, J=0
+            ).shape_id
+            == "CHS"
+        )
+        assert (
+            BoxSection(
+                name="", shape="Filled Steel Tube", material="", A=0, I33=0, I22=0, J=0
+            ).shape_id
+            == "RHS"
+        )
 
     def test_base_section_raises(self):
         """Base Section.to_fiber_patches() should raise NotImplementedError."""
