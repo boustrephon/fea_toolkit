@@ -258,6 +258,19 @@ class Preprocessor:
 
     # ── Public API ────────────────────────────────────────────────
 
+    def _rigid_offset_method(self) -> str:
+        """Resolve how frame end offsets are carried onto the OpenSees model.
+
+        The primary key is ``rigid_offset_method`` ∈ ``{"jntOffset" | "beam" |
+        "mpc"}`` (default ``"jntOffset"``).  The legacy ``rigid_link_mpc``
+        boolean maps onto it for back-compatibility (``True`` → ``"mpc"``,
+        ``False`` → ``"jntOffset"``).
+        """
+        method = self.config.get("rigid_offset_method")
+        if method is not None:
+            return method
+        return "mpc" if self.config.get("rigid_link_mpc", False) else "jntOffset"
+
     def run(
         self,
         model_data: SAPModelData,
@@ -337,6 +350,7 @@ class Preprocessor:
 
         # ── 3. Frame end offsets ─────────────────────────────────
         offset_rigid_links: list[tuple] = []
+        carried_offsets: dict[str, FrameEndOffset] = {}
         effective_offsets: dict[str, FrameEndOffset] = dict(
             getattr(md, "frame_end_offsets", {}) or {}
         )
@@ -356,16 +370,23 @@ class Preprocessor:
             effective_offsets = auto
 
         if effective_offsets:
-            max_node_tag = max((n.node_tag for n in md.nodes.values()), default=0)
-            new_elems, new_assigns, md.nodes, _next_tag, offset_rigid_links = (
-                apply_frame_end_offsets(
-                    new_elems,
-                    new_assigns,
-                    md.nodes,
-                    effective_offsets,
-                    next_tag=max_node_tag + 1,
+            method = self._rigid_offset_method()
+            if method == "jntOffset":
+                # Native ``-jntOffset``: carry the offsets through to the
+                # builder untouched — no offset nodes / rigid links here, and
+                # the members keep their reference-line connectivity.
+                carried_offsets = effective_offsets
+            else:
+                max_node_tag = max((n.node_tag for n in md.nodes.values()), default=0)
+                new_elems, new_assigns, md.nodes, _next_tag, offset_rigid_links = (
+                    apply_frame_end_offsets(
+                        new_elems,
+                        new_assigns,
+                        md.nodes,
+                        effective_offsets,
+                        next_tag=max_node_tag + 1,
+                    )
                 )
-            )
 
         # ── 3b. Split areas at frame edges ────────────────────────
         # Ensures slab mesh nodes coincide with frame split points.
@@ -639,6 +660,7 @@ class Preprocessor:
             diaphragm_components=diaphragm_components,
             rigid_body_components=rigid_body_components,
             offset_rigid_links=offset_rigid_links,
+            frame_end_offsets=carried_offsets,
             frame_element_types=frame_element_types,
             area_element_types=area_element_types,
             diaphragm_z_tolerance=float(self.config.get("diaphragm_z_tolerance", 0.01)),

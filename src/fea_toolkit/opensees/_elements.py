@@ -9,7 +9,7 @@ from typing import Optional
 import numpy as np
 import openseespy.opensees as ops
 
-from ..model.geometry import get_SAP_vecxz
+from ..model.geometry import frame_end_offsets_global, get_SAP_vecxz
 from ..model.sap_data import FrameElement, Node
 from ..utils import (
     DEFAULT_RHO_MC_SI,
@@ -432,6 +432,19 @@ class ElementMixin:
         n = len([e for e in elements.values() if not getattr(e, "inactive", False)])
         self._log.info("elements", f"Created {n} frame elements")
 
+    def _rigid_offset_method(self) -> str:
+        """Resolve how frame end offsets are carried onto the OpenSees model.
+
+        Mirrors :meth:`Preprocessor._rigid_offset_method`.  The primary key is
+        ``rigid_offset_method`` ∈ ``{"jntOffset" | "beam" | "mpc"}`` (default
+        ``"jntOffset"``); the legacy ``rigid_link_mpc`` boolean maps onto it
+        (``True`` → ``"mpc"``, ``False`` → ``"jntOffset"``).
+        """
+        method = self.config.get("rigid_offset_method")
+        if method is not None:
+            return method
+        return "mpc" if self.config.get("rigid_link_mpc", False) else "jntOffset"
+
     def _add_beam_column(self, elem, tag, elements, assignments):
         """Add a single beam-column element to the OpenSees domain."""
         ni = self.mesh_model.nodes.get(elem.node_i)
@@ -535,10 +548,42 @@ class ElementMixin:
 
         # Geometric transformation
         angle = getattr(elem, "angle", 0.0)
-        vecxz = get_SAP_vecxz(np.array([nj.x - ni.x, nj.y - ni.y, nj.z - ni.z]), angle)
+        axis = np.array([nj.x - ni.x, nj.y - ni.y, nj.z - ni.z])
+        vecxz = get_SAP_vecxz(axis, angle)
         transf_type = self.config.get("geom_transf_type", "Linear")
         transf_tag = tag
-        ops.geomTransf(transf_type, transf_tag, *vecxz)
+        offset = (getattr(self.mesh_model, "frame_end_offsets", None) or {}).get(elem.elem_id)
+        if (
+            offset is not None
+            and self._rigid_offset_method() == "jntOffset"
+            and any(
+                abs(v) > 1e-12
+                for v in (
+                    offset.end_i,
+                    offset.end_j,
+                    offset.off_y_i,
+                    offset.off_z_i,
+                    offset.off_y_j,
+                    offset.off_z_j,
+                )
+            )
+        ):
+            # Native rigid offset: the flexible span runs centroid-to-centroid
+            # while the joints stay on the reference line.  Offsets are GLOBAL,
+            # so the local (1, 2, 3) values are rotated via the shared helper.
+            off_i, off_j = frame_end_offsets_global(
+                axis,
+                angle,
+                offset.end_i,
+                offset.end_j,
+                offset.off_y_i,
+                offset.off_z_i,
+                offset.off_y_j,
+                offset.off_z_j,
+            )
+            ops.geomTransf(transf_type, transf_tag, *vecxz, "-jntOffset", *off_i, *off_j)
+        else:
+            ops.geomTransf(transf_type, transf_tag, *vecxz)
         self._transf_tags[tag] = transf_tag
 
         # Element

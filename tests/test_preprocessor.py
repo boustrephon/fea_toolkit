@@ -142,7 +142,7 @@ class TestSourceModelIsUntouched:
         model = _crossing_frames_model()
         snapshot = copy.deepcopy(model)
 
-        mesh = Preprocessor({"split_elements": True}).run(model)
+        mesh = Preprocessor({"split_elements": True, "rigid_offset_method": "beam"}).run(model)
 
         # The pipeline really did mutate something…
         assert mesh.frame_elements["A"].inactive

@@ -166,8 +166,10 @@ class TestPreprocessorRigidEndZones:
         assert mesh.offset_rigid_links == []
 
     def test_enabled_creates_links(self):
-        """``rigid_end_zones=True`` -> one rigid link per member end at the joint."""
-        mesh = preprocess_model(_l_frame(), {"rigid_end_zones": True})
+        """``rigid_end_zones=True`` (beam fallback) -> one rigid link per member end."""
+        mesh = preprocess_model(
+            _l_frame(), {"rigid_end_zones": True, "rigid_offset_method": "beam"}
+        )
         assert len(mesh.offset_rigid_links) == 2
         link_ids = {link[0] for link in mesh.offset_rigid_links}
         assert "1_rigid_j" in link_ids
@@ -177,7 +179,7 @@ class TestPreprocessorRigidEndZones:
         """Explicit ``frame_end_offsets`` replace auto-derived values."""
         md = _l_frame()
         md.frame_end_offsets = {"1": FrameEndOffset(end_j=0.3)}
-        mesh = preprocess_model(md, {"rigid_end_zones": True})
+        mesh = preprocess_model(md, {"rigid_end_zones": True, "rigid_offset_method": "beam"})
         link_ids = {link[0] for link in mesh.offset_rigid_links}
         assert "1_rigid_j" in link_ids
         assert "2_rigid_i" in link_ids
@@ -194,14 +196,21 @@ class TestPreprocessorRigidEndZones:
         unconnected -> singular stiffness matrix (previously observed as
         ``BandGenLinLapackSolver ... matrix singular U(i,i)=0``).
         """
-        mesh = preprocess_model(_l_frame(), {"rigid_end_zones": True})
+        mesh = preprocess_model(
+            _l_frame(), {"rigid_end_zones": True, "rigid_offset_method": "beam"}
+        )
         assert "2" in mesh.nodes
         assert len(mesh.offset_rigid_links) == 2
 
     def test_absolute_config(self):
         """``rigid_offset_absolute`` overrides the derived ``factor x D``."""
         mesh = preprocess_model(
-            _l_frame(), {"rigid_end_zones": True, "rigid_offset_absolute": 0.25}
+            _l_frame(),
+            {
+                "rigid_end_zones": True,
+                "rigid_offset_absolute": 0.25,
+                "rigid_offset_method": "beam",
+            },
         )
         # Column top offset node at z = 2.0 - 0.25 = 1.75.
         assert mesh.nodes["1_off_j"].z == pytest.approx(1.75)
@@ -210,7 +219,14 @@ class TestPreprocessorRigidEndZones:
 
     def test_joint_extents_config(self):
         """``joint_extents`` consumes the derived offset -> no rigid links."""
-        mesh = preprocess_model(_l_frame(), {"rigid_end_zones": True, "joint_extents": {"2": 0.3}})
+        mesh = preprocess_model(
+            _l_frame(),
+            {
+                "rigid_end_zones": True,
+                "joint_extents": {"2": 0.3},
+                "rigid_offset_method": "beam",
+            },
+        )
         assert mesh.offset_rigid_links == []
 
 
@@ -255,12 +271,12 @@ class TestBuilderRigidEndZones:
         finally:
             wipe()
 
-    def test_elastic_links_created_by_default(self):
-        """Without ``rigid_link_mpc`` stiff elastic rigid links are used."""
+    def test_beam_fallback_creates_elastic_links(self):
+        """``rigid_offset_method="beam"`` emits stiff elastic rigid links."""
         import openseespy.opensees as ops
         from openseespy.opensees import wipe
 
-        cfg = {"rigid_end_zones": True}
+        cfg = {"rigid_end_zones": True, "rigid_offset_method": "beam"}
         mesh = preprocess_model(_l_frame(), cfg)
         builder = AnalysisBuilder(mesh, cfg)
         try:

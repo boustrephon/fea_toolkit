@@ -428,7 +428,7 @@ class TestBuilderFrameEndOffsets:
         from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
         from fea_toolkit.opensees.preprocessor import preprocess_model
 
-        cfg = {"verbose": False, "use_elastic_sections": True}
+        cfg = {"verbose": False, "use_elastic_sections": True, "rigid_offset_method": "beam"}
         mm = preprocess_model(offset_model, cfg)
         b = AnalysisBuilder(mm, cfg)
         try:
@@ -450,13 +450,13 @@ class TestBuilderFrameEndOffsets:
             ops.wipe()
 
     def test_rigid_links_recorded(self, offset_model):
-        """_offset_rigid_links contains entries after build()."""
+        """_offset_rigid_links contains entries after build() (beam fallback)."""
         import openseespy.opensees as ops
 
         from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
         from fea_toolkit.opensees.preprocessor import preprocess_model
 
-        cfg = {"verbose": False, "use_elastic_sections": True}
+        cfg = {"verbose": False, "use_elastic_sections": True, "rigid_offset_method": "beam"}
         mm = preprocess_model(offset_model, cfg)
         b = AnalysisBuilder(mm, cfg)
         try:
@@ -501,6 +501,103 @@ class TestBuilderFrameEndOffsets:
         finally:
             import openseespy.opensees as ops
 
+            ops.wipe()
+
+    def test_jnt_offset_default_carries_offsets_without_nodes(self, offset_model):
+        """Default ``-jntOffset``: offsets carried, no offset nodes / rigid links."""
+        import openseespy.opensees as ops
+
+        cfg = {"verbose": False, "use_elastic_sections": True}
+        mm = preprocess_model(offset_model, cfg)
+        b = AnalysisBuilder(mm, cfg)
+        try:
+            b.build_domain()
+            # The members keep their reference-line connectivity; the builder
+            # emits -jntOffset instead of creating offset nodes / stiff links.
+            assert "1_off_i" not in mm.nodes
+            assert "1_off_j" not in mm.nodes
+            assert len(b._offset_rigid_links) == 0
+            assert mm.frame_end_offsets["1"].end_i == pytest.approx(0.3)
+            assert mm.frame_end_offsets["1"].end_j == pytest.approx(0.4)
+        finally:
+            ops.wipe()
+
+    def test_jnt_offset_emitted_in_geom_transf(self, offset_model):
+        """``-jntOffset`` is appended to the geomTransf call (global coords)."""
+        import openseespy.opensees as ops
+
+        from fea_toolkit.opensees import _elements
+        from fea_toolkit.opensees.recorder import RecordingOpenSees
+
+        cfg = {"verbose": False, "use_elastic_sections": True}
+        mm = preprocess_model(offset_model, cfg)
+        b = AnalysisBuilder(mm, cfg)
+        rec = RecordingOpenSees(ops)
+        _elements.ops = rec
+        try:
+            b.build_domain()
+        finally:
+            _elements.ops = ops
+            ops.wipe()
+
+        geom = [a for name, a, _kw in rec.commands if name == "geomTransf"]
+        jnt = [a for a in geom if "-jntOffset" in a]
+        assert jnt, "no -jntOffset geomTransf recorded"
+        call = jnt[0]
+        idx = call.index("-jntOffset")
+        vals = [float(v) for v in call[idx + 1 : idx + 7]]
+        # Member along +X (0 → 6): vx=+X, vy=+Z, vz=-Y.
+        # off_i = [+0.3, 0, 0]; off_j = [-0.4, 0, 0].
+        assert vals == pytest.approx([0.3, 0.0, 0.0, -0.4, 0.0, 0.0])
+
+    def test_jnt_offset_eleload_over_flexible_length(self):
+        """eleLoad spans the shortened flexible length, not the reference line."""
+        import openseespy.opensees as ops
+
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 10.0, 0.0, 0.0),
+        }
+        mats = {"Steel": Material("Steel", "Steel", E_mod=2e11)}
+        secs = {
+            "UB300": Section("UB300", "I/Wide Flange", "Steel", A=0.01, I33=1e-4, I22=1e-5, J=1e-6),
+        }
+        md = SAPModelData(
+            nodes=nodes,
+            restraints={"1": Restraint([1, 1, 1, 1, 1, 1])},
+            materials=mats,
+            sections=secs,
+            frame_elements={"1": FrameElement("1", 10, "1", "2")},
+            area_elements={},
+            frame_assignments={"1": "UB300"},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+            # end_i=1 shortens the flexible cantilever to 9 m.
+            frame_end_offsets={"1": FrameEndOffset(end_i=1.0, end_j=0.0)},
+        )
+        cfg = {"verbose": False, "use_elastic_sections": True}
+        mm = preprocess_model(md, cfg)
+        b = AnalysisBuilder(mm, cfg)
+        try:
+            b.build_domain()
+            ops.timeSeries("Linear", 1)
+            ops.pattern("Plain", 1, 1)
+            # w = 10 (force/length) in global -Z → local y = -10.
+            ops.eleLoad("-ele", 10, "-type", "-beamUniform", -10.0, 0.0, 0.0)
+            ops.constraints("Transformation")
+            ops.numberer("RCM")
+            ops.system("BandGeneral")
+            ops.test("NormDispIncr", 1e-8, 30)
+            ops.algorithm("Newton")
+            ops.integrator("LoadControl", 1.0)
+            ops.analysis("Static")
+            assert ops.analyze(1) == 0
+            ops.reactions()
+            # Total vertical load = w * flexible length = 10 * 9 = 90.
+            # Over the reference line (10 m) it would be 100.
+            assert abs(abs(ops.nodeReaction(1, 3)) - 90.0) < 1e-3
+        finally:
             ops.wipe()
 
 

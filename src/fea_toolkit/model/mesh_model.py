@@ -17,6 +17,7 @@ from .sap_data import (
     FrameDistributedLoad,
     FrameElement,
     FrameElementProperties,
+    FrameEndOffset,
     FrameRelease,
     GravityLoad,
     Group,
@@ -199,6 +200,11 @@ class MeshModel:
 
     # ── Rigid links from frame end offsets ────────────────────────
     offset_rigid_links: list[tuple] = field(default_factory=list)
+    # Frame end offsets carried through to the builder for native
+    # ``-jntOffset`` emission (populated only when ``rigid_offset_method`` is
+    # ``"jntOffset"`` — the default).  Empty when the Preprocessor applies
+    # the offsets itself as stiff links / MPCs (``"beam"`` / ``"mpc"``).
+    frame_end_offsets: dict[str, FrameEndOffset] = field(default_factory=dict)
     # Frame end releases / partial fixity keyed by (active) frame id.  When a
     # released frame is split by the Preprocessor the release is re-mapped
     # onto the first/last leaf element so the key remains an active element.
