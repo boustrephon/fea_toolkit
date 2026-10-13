@@ -39,7 +39,7 @@ $ LINE CONNECTIVITIES
   LINE  "B1"  BEAM  "1"  "2"  0
 
 $ AREA CONNECTIVITIES
-  AREA "S1"  FLOOR  4  "1"  "2"  "3"  "4"  0  0  0  0
+  AREA "S1"  FLOOR  4  "1"  "2"  "4"  "3"  0  0  0  0
 
 $ POINT ASSIGNS
   POINTASSIGN  "1"  "BASE"  RESTRAINT "UX UY UZ"

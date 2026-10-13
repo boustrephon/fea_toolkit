@@ -111,7 +111,21 @@ def model():
 
 
 def test_units(model):
-    assert model.units == {"F": "KN", "L": "M", "T": "C"}
+    assert model.units == {"F": "kN", "L": "m", "T": "C"}
+
+
+def test_get_model_units_canonical(tmp_path):
+    """ETABS ``UNITS`` tokens are canonicalised to downstream unit labels."""
+    for force, length, expect_f, expect_l in [
+        ("KN", "M", "kN", "m"),
+        ("N", "MM", "N", "mm"),
+        ("KGF", "CM", "kgf", "cm"),
+    ]:
+        content = f'$ CONTROLS\n  UNITS  "{force}"  "{length}"\n$ END OF MODEL FILE\n'
+        p = tmp_path / "units.e2k"
+        p.write_text(content, encoding="utf-8")
+        units = ETABSParser(p).parse().get_model_units()
+        assert units == {"F": expect_f, "L": expect_l, "T": "C"}
 
 
 def test_storey_elevations(model):
@@ -156,7 +170,7 @@ def test_frame_section_assignments(model):
 def test_area_element_materialised(model):
     assert len(model.area_elements) == 1
     area = model.area_elements["S1@ROOF"]
-    assert area.node_ids == ["1@ROOF", "2@ROOF", "3@ROOF", "4@ROOF"]
+    assert area.node_ids == ["1@ROOF", "2@ROOF", "4@ROOF", "3@ROOF"]
     assert model.area_assignments["S1@ROOF"] == "Slab"
 
 

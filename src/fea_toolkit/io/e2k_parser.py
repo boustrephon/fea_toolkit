@@ -49,6 +49,7 @@ from itertools import accumulate
 from pathlib import Path
 from typing import Any, Optional, Union
 
+from .._unit_scaling import force_unit_label, length_unit_label
 from ..model.sap_data import (
     SHAPE_NAMES,
     AngleSection,
@@ -373,10 +374,18 @@ class ETABSParser:
         # ── Diaphragm constraints (M4) ──────────────────────────────
         diaphragm_names = _get_diaphragm_names(sections)
         constraints, constraint_assignments = _build_diaphragm_constraints(
-            nodes, point_assigns, area_assigns, diaphragm_names
+            area_elements, point_assigns, area_assigns, diaphragm_names
         )
 
         # ── Loads (M3) ────────────────────────────────────────────
+        if "STATIC LOADS" not in sections and (
+            "LOAD PATTERNS" in sections or "LOAD CASES" in sections
+        ):
+            logger.warning(
+                "%s uses the v21 load format ($ LOAD PATTERNS / $ LOAD CASES), "
+                "which is not parsed; the model will have no loads.",
+                self.file_path,
+            )
         load_cases, load_patterns = _get_load_cases_and_patterns(sections)
         load_combinations = _get_load_combinations(sections)
         joint_loads = _get_joint_loads(sections)
@@ -416,15 +425,23 @@ class ETABSParser:
         """Extract the model unit system from the ``$ CONTROLS`` section.
 
         ETABS declares two units (``UNITS "KN" "M"``); temperature defaults to
-        Celsius.  Returns ``{"F", "L", "T"}``.
+        Celsius.  Force and length are canonicalised to the display labels the
+        downstream unit consumers accept (``"KN"`` becomes ``"kN"``, ``"M"``
+        becomes ``"m"``).  Returns ``{"F", "L", "T"}``.
         """
+        force = "N"
+        length = "m"
         for groups in self.sections.get("CONTROLS", []):
             for kw, vals in groups:
                 if kw == "UNITS":
                     force = str(vals[0]) if vals else "N"
                     length = str(vals[1]) if len(vals) > 1 else "m"
-                    return {"F": force, "L": length, "T": "C"}
-        return {"F": "N", "L": "m", "T": "C"}
+                    break
+        return {
+            "F": force_unit_label({"F": force}),
+            "L": length_unit_label({"L": length}),
+            "T": "C",
+        }
 
     def _section_db(self) -> dict[str, dict]:
         """Return the profile catalogue, loading it lazily (empty if absent).
@@ -589,7 +606,21 @@ def _get_assigns(
                 else:
                     attrs[kw] = value
         if name is not None and story is not None:
-            assigns[(name, story)] = attrs
+            key = (name, story)
+            existing = assigns.get(key)
+            if existing is None:
+                assigns[key] = attrs
+            else:
+                for kw, value in attrs.items():
+                    if kw in existing:
+                        old_value = existing[kw]
+                        existing[kw] = (
+                            [*old_value, value]
+                            if isinstance(old_value, list)
+                            else [old_value, value]
+                        )
+                    else:
+                        existing[kw] = value
     return assigns
 
 
@@ -834,7 +865,7 @@ def _get_diaphragm_names(sections: dict[str, list[GroupedLine]]) -> dict[str, st
 
 
 def _build_diaphragm_constraints(
-    nodes: dict[str, Node],
+    area_elements: dict[str, AreaElement],
     point_assigns: dict[tuple[str, str], dict[str, Any]],
     area_assigns: dict[tuple[str, str], dict[str, Any]],
     diaphragm_names: dict[str, str],
@@ -846,7 +877,8 @@ def _build_diaphragm_constraints(
     S2K constraint model assumes "one name → one joint group", so each
     ``(name, storey)`` pair becomes its own :class:`Constraint` instance keyed
     ``name@storey`` (the composite-id convention).  The participating nodes are
-    every node at that storey, minus points explicitly marked
+    the corner nodes of ``DIAPH``-assigned area elements plus the node of each
+    ``DIAPH``-assigned point, minus points explicitly marked
     ``DIAPH "DISCONNECTED"``.
 
     ``RIGID`` diaphragms populate ``constraint_assignments`` so the existing
@@ -858,61 +890,55 @@ def _build_diaphragm_constraints(
         ``(constraints, constraint_assignments)``, both keyed by the per-storey
         instance id.
     """
-    # Nodes grouped by storey (recovered from ``point@storey`` ids).
-    nodes_by_storey: dict[str, list[str]] = {}
-    for node_id in nodes:
-        _, storey = _split_id(node_id)
-        nodes_by_storey.setdefault(storey, []).append(node_id)
-
-    # Diaphragm names per storey (from area + point assigns) and disconnected
-    # points per storey (from point assigns only).
-    names_by_storey: dict[str, set[str]] = {}
+    # Per-(name, storey) membership, accumulated from the assigned objects
+    # (point nodes and area corner nodes), plus points opted out per storey.
+    members: dict[tuple[str, str], set[str]] = {}
     disconnected: dict[str, set[str]] = {}
     for (obj, storey), attrs in point_assigns.items():
         value = attrs.get("DIAPH")
         if value is None:
             continue
-        if str(value).upper() == "DISCONNECTED":
+        upper = str(value).upper()
+        if upper == "DISCONNECTED":
             disconnected.setdefault(storey, set()).add(obj)
-        elif str(value).upper() not in ("", "NONE"):
-            names_by_storey.setdefault(storey, set()).add(str(value))
-    for (_, storey), attrs in area_assigns.items():
+        elif upper not in ("", "NONE"):
+            members.setdefault((str(value), storey), set()).add(_compose_id(obj, storey))
+    for (area, storey), attrs in area_assigns.items():
         value = attrs.get("DIAPH")
-        if value is None:
+        if value is None or str(value).upper() in ("", "NONE", "DISCONNECTED"):
             continue
-        if str(value).upper() not in ("", "NONE", "DISCONNECTED"):
-            names_by_storey.setdefault(storey, set()).add(str(value))
+        elem = area_elements.get(_compose_id(area, storey))
+        if elem is None:
+            continue
+        members.setdefault((str(value), storey), set()).update(elem.node_ids)
 
     constraints: dict[str, Constraint] = {}
     assignments: dict[str, str] = {}
-    for storey, names in names_by_storey.items():
-        for name in sorted(names):
-            rigidity = diaphragm_names.get(name)
-            if rigidity is None:
-                logger.warning(
-                    "DIAPH %r assigned at storey %r but not defined; skipping.",
-                    name,
-                    storey,
-                )
-                continue
-            excluded = disconnected.get(storey, set())
-            node_ids = [
-                nid for nid in nodes_by_storey.get(storey, []) if _split_id(nid)[0] not in excluded
-            ]
-            cname = _compose_id(name, storey)
-            constraints[cname] = Constraint(
-                name=cname,
-                constraint_type="DIAPHRAGM",
-                coord_sys="GLOBAL",
-                constraint_data={
-                    "Axis": "Z",
-                    "Rigidity": rigidity,
-                    "Diaphragm": name,
-                },
+    for (name, storey), node_ids in members.items():
+        rigidity = diaphragm_names.get(name)
+        if rigidity is None:
+            logger.warning(
+                "DIAPH %r assigned at storey %r but not defined; skipping.",
+                name,
+                storey,
             )
-            if rigidity == "RIGID":
-                for nid in node_ids:
-                    assignments[nid] = cname
+            continue
+        excluded = disconnected.get(storey, set())
+        member_nodes = [nid for nid in node_ids if _split_id(nid)[0] not in excluded]
+        cname = _compose_id(name, storey)
+        constraints[cname] = Constraint(
+            name=cname,
+            constraint_type="DIAPHRAGM",
+            coord_sys="GLOBAL",
+            constraint_data={
+                "Axis": "Z",
+                "Rigidity": rigidity,
+                "Diaphragm": name,
+            },
+        )
+        if rigidity == "RIGID":
+            for nid in member_nodes:
+                assignments[nid] = cname
     return constraints, assignments
 
 

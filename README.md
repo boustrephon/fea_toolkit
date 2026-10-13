@@ -733,12 +733,14 @@ that section.
 1. **Frame‑Frame Intersection Splitting** ✅  
    - `AtFrames=True` splitting at frame-frame intersections is implemented (`model/geometry_frames.py` `split_elements()`), parser-wired (`FRAME AUTO MESH ASSIGNMENTS` → `SAPModelData.frame_auto_mesh`), and unit-tested (`TestSplitElementsAtFrames` + parser round-trip tests).  
 
-2. **ETABS `.E2K` / `.$ET` input** ✅  
-   - `ETABSParser` (`io/e2k_parser.py`) reads a full `.e2k` / `.$et` export
-     end-to-end (geometry, sections, materials, restraints, loads and
-     combinations) into the same `SAPModelData`, and is wired through
-     `load_model_data()`, the review CLI, the GUI file dialog and the examples.
-     See `docs/e2k_import_plan.md`.
+2. **ETABS `.E2K` / `.$ET` input** ⚠️ Partial  
+   - `ETABSParser` (`io/e2k_parser.py`) reads geometry, sections, materials,
+     restraints, loads and combinations from an ETABS text export into the same
+     `SAPModelData`, and is wired through `load_model_data()`, the review CLI,
+     the GUI file dialog and the examples.
+   - Open gaps: v21 `$ LOAD PATTERNS` / `$ LOAD CASES` loads (M7), object
+     auto-meshing (M6), `AUTOSECTION` auto-select lists, and multi-tower
+     elevations.  See `docs/e2k_import_plan.md`.
 
 3. **Load Combinations and Analysis Types**  
    - ~~`MassSource`~~ ✅ Parsed by `_get_mass_sources()` and stored in `SAPModelData.mass_sources`.  

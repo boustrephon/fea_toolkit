@@ -91,8 +91,8 @@ a sequential integer tag.
 | **M1** | Geometry resolution: storey elevations, node/element materialisation with drops, composite ids + tags | ✅ done |
 | **M2** | Sections & materials & restraints | ✅ done |
 | **M3** | Loads & combinations | ✅ done |
-| **M4** | Wiring (`model_loader`, CLI, GUI dialogs, examples) + fixtures + docs | ✅ done |
-| **M5** | Diaphragm constraints (`$ DIAPHRAGM NAMES` + `DIAPH` assigns) | ✅ done |
+| **M4** | Diaphragm constraints (`$ DIAPHRAGM NAMES` + `DIAPH` assigns) | ✅ done |
+| **M5** | Wiring (`model_loader`, CLI, GUI dialogs, examples) + fixtures + docs | ✅ done |
 | **M6** | Object auto-meshing via `gmsh` (`FLOORMESH`, cookie-cut, `MAXMESHSIZE`) | ⬜ deferred |
 | **M7** | v21 load-case format split (`$ LOAD PATTERNS` + `$ LOAD CASES`) | ⬜ pending |
 | **M2 hardening** | Parametric shape-type dispatch + `FILE`-scoped catalogue resolution | ✅ done |
@@ -131,7 +131,7 @@ automatically).  Without it, profile sections degrade to placeholders.
 
 ### M2 hardening — parametric shape-type dispatch & FILE-scoped catalogue resolution (implemented)
 
-`_build_frame_section` has two defects (summarised in §6): it routes every
+`_build_frame_section` had two defects (now fixed; summarised in §6): it routes every
 shape *type* name into a rectangle-only builder, and it resolves catalogue
 profiles by name across all catalogues without using `FILE`.  This sub-milestone
 makes section resolution mirror `E2K_utilities.enhance_frame_properties` (the
@@ -169,8 +169,8 @@ parametric build dispatched on the canonical shape type.
 
 `Pipe`/`Circle` reuse the `D` token (outer diameter), *not* the `OD`/`TDES`
 tokens the catalogue uses — the parametric builder maps `D`→`od`/`diameter` and
-`T`→`t`.  The per-subclass field mapping already exists in `_resolve_profile`
-(lines 1180–1208); the parametric path reuses that same construction.
+`T`→`t`.  The per-subclass field mapping already exists in `_resolve_profile`;
+the parametric path reuses that same construction.
 
 **Property computation.**  New `model/section_properties.py` (pure geometry,
 alongside `model/section_profiles.py`), porting the reference's
@@ -223,7 +223,7 @@ resolution).
 
 **Tests:**
 * Unit tests per `*_props` against the reference's doctest values (e.g.
-  `I_props(15,12,3,2) → A 90, I33 2767.5, I22 858.0`) plus hand-checked
+  `I_props(15,12,3,2) → A 90, I33 2767.5, I22 870.0`) plus hand-checked
   `J`/`Z33`/`Z22`.
 * Parser tests on new fixture lines (one parametric section of each type)
   asserting the returned `Section` **subclass** (the regression this removes is
@@ -258,7 +258,7 @@ resolution).
   frame point loads) and `UNIFLOADSET` have no target dataclass yet; they are
   logged at debug level rather than dropped silently.
 
-### M4 — wiring (implemented)
+### M5 — wiring (implemented)
 
 * **`load_model_data()`** routes `.e2k` / `.$et` to `ETABSParser` (alongside
   `.s2k` / `.$2k` → `SAP2000Parser`), so every existing consumer picks up
@@ -268,7 +268,7 @@ resolution).
 * **`review_s2k_file`** dispatches on suffix; for ETABS it passes no
   `raw_tables` (the grouped-line sections do not map to SAP table names, so
   the table-coverage report is simply omitted).
-* **GUI** — the open dialog filter and tooltip offer `*.s2k *.e2k *.json`, and
+* **GUI** — the open dialog filter offers `*.s2k *.$2k *.e2k *.$et *.json`, and
   `open_path` / `app._load_model` go through `load_model_data`.
 * **Examples** — `basic_usage.py` accepts `.e2k`/`.$et` (routed to
   `ETABSParser` with the probed section catalogue); the other three examples
@@ -277,7 +277,7 @@ resolution).
   and `docs/gui_roadmap.md` flipped from "ETABS planned / not yet supported"
   to supported.
 
-### M5 — diaphragm constraints (implemented)
+### M4 — diaphragm constraints (implemented)
 
 * **`$ DIAPHRAGM NAMES`** — each `DIAPHRAGM "D1" TYPE RIGID|SEMIRIGID` is a
   diaphragm *definition*.  `RIGID` is a rigid in-plane constraint (no flexural
@@ -292,8 +292,8 @@ resolution).
 * **Per-storey instancing** — ETABS assigns one named diaphragm at many storeys,
   yet each storey's floor is a separate rigid plane.  Each `(name, storey)`
   pair becomes its own `Constraint` keyed `name@storey` (the composite-id
-  convention).  The node set is every node at that storey, minus
-  `DISCONNECTED` points.
+  convention).  The node set is the corner nodes of `DIAPH`-assigned areas
+  plus the assigned points, minus `DISCONNECTED` points.
 * **RIGID** → `constraints` + `constraint_assignments`, so the existing
   `_detect_diaphragm_levels` → `ops.rigidDiaphragm` path applies one rigid MPC
   per storey.  **SEMIRIGID** → `constraints` (with
@@ -301,7 +301,7 @@ resolution).
   rigid MPC (the zero-assignment constraint is skipped by
   `_detect_diaphragm_levels`).
 
-### M5b — cardinal point & frame angle (implemented)
+### M4b — cardinal point & frame angle (implemented)
 
 * **`ANG`** and **`CARDINALPT`** on `$ LINE ASSIGNS` are read and stored on each
   `FrameElement` (`angle`, `cardinal_point`), matching the S2K path.
@@ -318,9 +318,9 @@ resolution).
 * **Sibling `ETABSParser`** in `src/fea_toolkit/io/e2k_parser.py`, same API as
   `SAP2000Parser` (`.parse().get_model_data() → SAPModelData`), no OpenSees
   import.
-* **Composite ids** use `@` as the delimiter with `@`/`\` escaping; the
-  `(name, storey)` tuple (via the parser's private registry) is the authority
-  for tags, so correctness never depends on the id string encoding.
+* **Composite ids** use `@` as the delimiter with `@`/`\` escaping; tags come
+  from sequential counters in `_resolve_geometry` (one each for nodes, frames
+  and areas), so correctness never depends on the id string encoding.
 * **`to_json` / `from_json` deferred** — the model-codec path
   (`model_codec.model_to_json`) already persists a built `SAPModelData`, so an
   E2K model can be saved/reloaded without a raw-table cache.  The raw-table
