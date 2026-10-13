@@ -17,6 +17,7 @@ from ..utils import (
     length_scale_factor,
     mass_density_scale_factor,
 )
+from .preprocessor import _resolve_rigid_offset_method
 from .releases import plan_releases
 
 logger = logging.getLogger(__name__)
@@ -433,15 +434,11 @@ class ElementMixin:
     def _rigid_offset_method(self) -> str:
         """Resolve how frame end offsets are carried onto the OpenSees model.
 
-        Mirrors :meth:`Preprocessor._rigid_offset_method`.  The primary key is
-        ``rigid_offset_method`` ∈ ``{"jntOffset" | "beam" | "mpc"}`` (default
-        ``"jntOffset"``); the legacy ``rigid_link_mpc`` boolean maps onto it
-        (``True`` → ``"mpc"``, ``False`` → ``"jntOffset"``).
+        Delegates to the shared :func:`_resolve_rigid_offset_method` in
+        ``preprocessor.py`` so the Preprocessor and the builder use one
+        spelling.
         """
-        method = self.config.get("rigid_offset_method")
-        if method is not None:
-            return method
-        return "mpc" if self.config.get("rigid_link_mpc", False) else "jntOffset"
+        return _resolve_rigid_offset_method(self.config)
 
     def _rigid_section_properties(self) -> tuple[float, float, float, float, float]:
         """``(E, A, I, G, J)`` for the stiff-beam rigid-link fallback section.

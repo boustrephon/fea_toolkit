@@ -36,17 +36,23 @@ domain, and why the native `-jntOffset` mechanism is the default.
   `_cardinal_point_offset()`, writing the result into
   `FrameEndOffset.off_y_* / off_z_*`.
 
-## 2. Current state — the gap
+## 2. Current state — carried to every consumer
+
+Both the longitudinal and the lateral end offsets now reach the analysis model,
+the GUI viewer and the Rhino export through the one shared helper
+:func:`fea_toolkit.model.geometry_core.frame_end_offsets_global` (see §5):
 
 | Offset | Consumer | Mechanism |
 |---|---|---|
-| `end_i`, `end_j` (longitudinal) | `opensees/preprocessor.py` | stiff elastic links, or `rigidLink` MPCs (`rigid_link_mpc`) |
-| `off_y_i/z_i`, `off_y_j/z_j` (lateral) | `rhino/geometry.py` **only** | extrusion offset only — **never reaches the analysis model** |
+| `end_i`, `end_j` (longitudinal) | `opensees/_elements.py` (default `"jntOffset"`), `plotting/viewer.py`, `rhino/geometry.py` | native `-jntOffset` in `geomTransf`; stiff-beam / `rigidLink` MPC fallbacks (`"beam"` / `"mpc"`) |
+| `off_y_i/z_i`, `off_y_j/z_j` (lateral) | `opensees/_elements.py`, `plotting/viewer.py`, `rhino/geometry.py` | the same `-jntOffset` rotation |
 
-Consequence: a frame placed on a non-centroid cardinal point (e.g. a beam drawn
-top-of-slab) is extruded at the offset but **modelled at the reference line** in
-OpenSees.  The drawn model and the analysis model disagree, and the offset
-stiffness is missing entirely.  This is the correctness gap P38 addresses.
+*Historical gap (now closed — P38).*  The lateral offsets were originally
+consumed by `rhino/geometry.py` **only**, so a frame placed on a non-centroid
+cardinal point (e.g. a beam drawn top-of-slab) was extruded at the offset but
+**modelled at the reference line** in OpenSees: the drawn model and the analysis
+model disagreed, and the offset stiffness was missing entirely.  That is the gap
+the completed P38 work closed.
 
 ## 3. Mechanism decision
 
@@ -86,9 +92,9 @@ and for any situation where the fixed-vector assumption below is unacceptable;
    with the existing load-splitting must be verified (see §7 step 2).
 5. **OpenSeesPy passes it straight through** —
    `ops.geomTransf("Linear", tag, *vecxz, "-jntOffset", *offI, *offJ)`.  The
-   type stub `typings/openseespy/opensees/__init__.pyi` already documents the
-   `Linear` form; it needs extending for `PDelta`/`Corotational` plus a
-   global-coordinates note.
+   type stub `typings/openseespy/opensees/__init__.pyi` documents the `Linear`,
+   `PDelta` and `Corotational` `-jntOffset` forms plus the global-coordinates
+   note (§7 step 5).
 
 ## 5. The coordinate transformation (shared, generalised)
 
@@ -112,9 +118,10 @@ def global_to_local(axes, vec):
 
 - `axes = get_local_axes(axis, angle)` supplies the orthonormal `(vx, vy, vz)`
   following the CSI default frame-local convention.
-- The existing `_global_to_local` in `opensees/_constraints.py`
-  (`T = vstack([vx, vy, vz]); return T @ vec`) becomes a thin delegator to
-  `global_to_local` — one spelling, not two.
+- The pair is the single spelling for the offset pipeline: the builder, the
+  GUI viewer and the Rhino export all derive their vectors through
+  :func:`frame_end_offsets_global` (which calls :func:`local_to_global`),
+  rather than each site repeating its own local-to-global rotation.
 
 ## 6. Sign convention
 

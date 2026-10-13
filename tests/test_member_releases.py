@@ -344,6 +344,35 @@ class TestSplitRemap:
         remapped = _remap_frame_releases({"S1": rel}, {"S1": elem})
         assert remapped["S1"] is rel
 
+    def test_offset_remapped_to_leaf(self):
+        from fea_toolkit.model.sap_data import FrameEndOffset
+        from fea_toolkit.opensees.preprocessor import _remap_frame_end_offsets
+
+        parent = FrameElement("S1", 1, "1", "3", inactive=True, child_ids=["S1-0", "S1-1"])
+        leaf_i = FrameElement("S1-0", 2, "1", "2", parent_id="S1")
+        leaf_j = FrameElement("S1-1", 3, "2", "3", parent_id="S1")
+        elements = {"S1": parent, "S1-0": leaf_i, "S1-1": leaf_j}
+
+        off = FrameEndOffset(end_i=0.3, off_y_i=1.0, end_j=0.4, off_y_j=2.0)
+        remapped = _remap_frame_end_offsets({"S1": off}, elements)
+
+        assert set(remapped) == {"S1-0", "S1-1"}
+        assert remapped["S1-0"].end_i == 0.3
+        assert remapped["S1-0"].off_y_i == 1.0
+        assert remapped["S1-0"].end_j == 0.0
+        assert remapped["S1-1"].end_j == 0.4
+        assert remapped["S1-1"].off_y_j == 2.0
+        assert remapped["S1-1"].end_i == 0.0
+
+    def test_unsplit_offset_passes_through(self):
+        from fea_toolkit.model.sap_data import FrameEndOffset
+        from fea_toolkit.opensees.preprocessor import _remap_frame_end_offsets
+
+        elem = FrameElement("S1", 1, "1", "2")
+        off = FrameEndOffset(end_i=0.3, end_j=0.4)
+        remapped = _remap_frame_end_offsets({"S1": off}, {"S1": elem})
+        assert remapped["S1"] is off
+
     def test_release_remapped_when_frame_split_by_shell_subdiv(self):
         """Full ``Preprocessor.run`` keeps releases on active leaves.
 

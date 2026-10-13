@@ -118,6 +118,84 @@ def _remap_frame_releases(
     return remapped
 
 
+def _remap_frame_end_offsets(
+    offsets: dict[str, FrameEndOffset],
+    elements: dict[str, FrameElement],
+) -> dict[str, FrameEndOffset]:
+    """Re-key frame end offsets onto the active leaf element at each end.
+
+    An end offset is an **end** property of the original member, so after the
+    Preprocessor splits frames at interior joints and shell nodes it belongs to
+    the first leaf (I-end) and/or the last leaf (J-end) of the split chain.
+    Offsets on unsplit (active) frames are passed through unchanged.
+
+    Args:
+        offsets: Offsets keyed by the original (pre-split) frame id.
+        elements: Post-split frame elements (may contain inactive parents).
+
+    Returns:
+        Offsets re-keyed by active leaf frame ids -- the I-end
+        (``end_i``/``off_y_i``/``off_z_i``) on the first leaf and the J-end
+        (``end_j``/``off_y_j``/``off_z_j``) on the last leaf -- so
+        :meth:`ElementMixin._add_beam_column` finds them by child ``elem_id``.
+    """
+    if not offsets:
+        return {}
+    from ..model.tree_utils import collect_descendants
+
+    remapped: dict[str, FrameEndOffset] = {}
+    for frame_id, offset in offsets.items():
+        parent = elements.get(frame_id)
+        if parent is not None and not getattr(parent, "inactive", False):
+            remapped[frame_id] = offset
+            continue
+
+        leaves = collect_descendants(frame_id, elements)
+        if not leaves:
+            continue
+
+        i_leaf: Optional[str] = None
+        j_leaf: Optional[str] = None
+        if parent is not None:
+            for leaf_id in leaves:
+                leaf = elements[leaf_id]
+                if i_leaf is None and leaf.node_i == parent.node_i:
+                    i_leaf = leaf_id
+                if j_leaf is None and leaf.node_j == parent.node_j:
+                    j_leaf = leaf_id
+        # ``collect_descendants()`` walks ``child_ids`` depth-first in order,
+        # so the leaf list runs I-end to J-end along the split chain:
+        # ``leaves[0]`` is the first leaf and ``leaves[-1]`` the last.  The
+        # coordinate match above is the primary path; these are the fallback
+        # (mirrors :func:`_remap_frame_releases`).
+        if i_leaf is None:
+            i_leaf = leaves[0]
+        if j_leaf is None:
+            j_leaf = leaves[-1]
+
+        i_entry = remapped.get(i_leaf)
+        if i_entry is None:
+            i_entry = FrameEndOffset()
+            remapped[i_leaf] = i_entry
+        i_entry.end_i = offset.end_i
+        i_entry.off_y_i = offset.off_y_i
+        i_entry.off_z_i = offset.off_z_i
+
+        j_entry = remapped.get(j_leaf)
+        if j_entry is None:
+            j_entry = FrameEndOffset()
+            remapped[j_leaf] = j_entry
+        j_entry.end_j = offset.end_j
+        j_entry.off_y_j = offset.off_y_j
+        j_entry.off_z_j = offset.off_z_j
+
+        # The per-member rigidity factor travels with both end entries.
+        for entry in (i_entry, j_entry):
+            entry.rigid_factor = offset.rigid_factor
+
+    return remapped
+
+
 #: BODY-constraint DOF flags, in OpenSees DOF order (1..6).
 _BODY_DOF_KEYS = ("UX", "UY", "UZ", "RX", "RY", "RZ")
 
@@ -210,6 +288,40 @@ def _copy_for_preprocessing(md: SAPModelData) -> SAPModelData:
     return clone
 
 
+#: Accepted ``rigid_offset_method`` values -- the single resolver raises
+#: ``ValueError`` for anything else before an implementation path is chosen.
+_RIGID_OFFSET_METHODS = ("jntOffset", "beam", "mpc")
+
+
+def _resolve_rigid_offset_method(config: dict[str, Any]) -> str:
+    """Resolve how frame end offsets are carried onto the OpenSees model.
+
+    The primary key is ``rigid_offset_method`` (one of ``"jntOffset"``,
+    ``"beam"``, ``"mpc"``; default ``"jntOffset"``).  The legacy
+    ``rigid_link_mpc`` boolean maps onto it for back-compatibility
+    (``True`` -> ``"mpc"``, ``False`` -> ``"jntOffset"``).  An unrecognised
+    value raises ``ValueError`` **before** an implementation path is selected,
+    so a typo fails loudly instead of silently degrading to the default.
+
+    Args:
+        config: Flat builder/preprocessor-scoped configuration dict.
+
+    Returns:
+        One of ``{"jntOffset", "beam", "mpc"}``.
+
+    Raises:
+        ValueError: If ``rigid_offset_method`` is not an accepted value.
+    """
+    method = config.get("rigid_offset_method")
+    if method is None:
+        method = "mpc" if config.get("rigid_link_mpc", False) else "jntOffset"
+    if method not in _RIGID_OFFSET_METHODS:
+        raise ValueError(
+            f"Unknown rigid_offset_method {method!r}; expected one of {_RIGID_OFFSET_METHODS}."
+        )
+    return method
+
+
 class Preprocessor:
     """Prepare model topology for OpenSees analysis.
 
@@ -261,15 +373,10 @@ class Preprocessor:
     def _rigid_offset_method(self) -> str:
         """Resolve how frame end offsets are carried onto the OpenSees model.
 
-        The primary key is ``rigid_offset_method`` ∈ ``{"jntOffset" | "beam" |
-        "mpc"}`` (default ``"jntOffset"``).  The legacy ``rigid_link_mpc``
-        boolean maps onto it for back-compatibility (``True`` → ``"mpc"``,
-        ``False`` → ``"jntOffset"``).
+        Delegates to the shared :func:`_resolve_rigid_offset_method` so the
+        Preprocessor and the builder use one spelling.
         """
-        method = self.config.get("rigid_offset_method")
-        if method is not None:
-            return method
-        return "mpc" if self.config.get("rigid_link_mpc", False) else "jntOffset"
+        return _resolve_rigid_offset_method(self.config)
 
     def run(
         self,
@@ -555,6 +662,15 @@ class Preprocessor:
         # to the correct ultimate leaves before ``plan_releases`` consumes
         # them.
         frame_releases = _remap_frame_releases(getattr(md, "frame_releases", {}) or {}, new_elems)
+
+        # ── 7c. Re-map frame end offsets onto final active leaves ──
+        # ``carried_offsets`` (the ``"jntOffset"`` path) is keyed by the
+        # original (pre-split) frame id, but ``_add_beam_column`` looks the
+        # offsets up by the *child* ``elem_id``.  Re-key them after every
+        # splitting pass (interior joints and shell-node subdivision) so the
+        # I-end lands on the first active leaf and the J-end on the last,
+        # mirroring ``_remap_frame_releases``.
+        carried_offsets = _remap_frame_end_offsets(carried_offsets, new_elems)
 
         # ── 8. Build MeshModel ───────────────────────────────────
         base_z = min((nd.z for nd in md.nodes.values()), default=None)

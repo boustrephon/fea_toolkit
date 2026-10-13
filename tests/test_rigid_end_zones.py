@@ -414,3 +414,11 @@ def test_rigid_section_placeholder_without_material_stiffness():
     )
     E, A, sec_I, G, J = ElementMixin._rigid_section_properties(SimpleNamespace(mesh_model=mesh))
     assert (E, A, sec_I, G, J) == (1.0, 1.0, 1.0, 1.0 / 2.6, 1.0)
+
+
+def test_unknown_offset_method_raises():
+    """An unrecognised ``rigid_offset_method`` fails loudly before any path."""
+    from fea_toolkit.opensees.preprocessor import _resolve_rigid_offset_method
+
+    with pytest.raises(ValueError):
+        _resolve_rigid_offset_method({"rigid_offset_method": "warp"})
