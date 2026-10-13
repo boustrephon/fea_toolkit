@@ -668,6 +668,7 @@ SAP2000/ETABS models use a variety of cross‑section shapes. The `Section` data
 | **`SDSection`** | `SD Section` | `polygons` (multi‑material) | 🚧 Placeholder (needs meshing) |
 | **`EncasedSection`** | `Concrete Encasement Rectangle/Circle` | `embedded_section`, `encasement_depth/bf` | ⚠️ Partial (encasement + embedded steel, steel counted twice) |
 | **`ConcreteFilledTubeSection`** | *(programmatic only — parsers map `Filled Steel Tube` to `BoxSection`)* | `depth`, `bf`, `tf`, `tw`, `fill_material` | ⚠️ Partial (steel tube + unconfined concrete core) |
+| **`ConcreteFilledPipeSection`** | *(programmatic only — parsers map `Filled Steel Pipe` to `PipeSection`)* | `od`, `t`, `fill_material` | ⚠️ Partial (steel pipe + unconfined concrete core) |
 | **`ShellSection`** | `Shell` | `thickness` | ❌ Not applicable |
 
 All section classes inherit the common derived properties (`A`, `I33`, `I22`, `J`) directly from the SAP2000 text file, which includes pre‑computed values. The `to_fiber_patches()` method on each class generates OpenSees `patch('rect', …)` definitions for nonlinear fiber‑section analysis.
@@ -1031,8 +1032,10 @@ plan.  In summary:
   Tier-2 record in `docs/_pending_work.md`.
 - **Section fiber patches** — ✅ **P6a done 2026-08-25** for
   `Channel`/`Angle`/`DoubleAngle`/`Tee`; 🚧 **P6b pending** for `SDSection`
-  (polygon meshing) and `EncasedSection` (embedded steel + concrete
-  encasement).
+  (polygon meshing).  `EncasedSection` and the CFT sections
+  (`ConcreteFilledTubeSection` / `ConcreteFilledPipeSection`) are implemented
+  via the role-based fiber contract; the CFT concrete-fill confinement model
+  is deferred (see `docs/cft_confinement_plan.md`).
 - **Python-native nonlinear dynamic integration** 🚧 **P7 pending** — the
   Tcl/Xara ground-motion path is complete; a native OpenSeesPy transient
   runner remains planned.  See the Tier-3 items in

@@ -480,8 +480,9 @@ Source: repo-root `README.md` §5 "Section Types and Properties" table.
 **What.** `to_fiber_patches()` is implemented for `ChannelSection`,
 `AngleSection`, `DoubleAngleSection`, and `TeeSection` (P6a, 2026-08-25 -
 centroid-shifted `patch('rect')` decompositions + per-shape tests); still
-`🚧 Placeholder` for `SDSection` (needs polygon meshing) and
-`EncasedSection` (embedded section + concrete encasement) - see P6b below.
+`🚧 Placeholder` for `SDSection` (needs polygon meshing); `EncasedSection`
+(embedded section + concrete encasement) is implemented via the role-based
+fiber contract - see P6b below.
 "Frame Member Types (RC)" is `⚠️ Partial` in the README - materials, RC
 section shapes, rebar auto-placement and Mander confinement are wired; the
 remaining gaps are the P6b shape patches plus benchmark validation (see P5).
@@ -504,10 +505,16 @@ remaining gaps are the P6b shape patches plus benchmark validation (see P5).
    (arbitrary-polygon meshing) - blocked: the parser constructs
    `SDSection(**common)` with empty `polygons` (no `SECTION DESIGNER`
    table parsing), so only caller-provided polygons would be actionable.
-2. `EncasedSection`: emit the embedded steel-section patches + concrete
-   encasement patches - blocked: no parser path populates the section,
-   and the single-`mat_tag` `to_fiber_patches()` signature cannot carry
-   two materials (steel + encasement concrete) without an API change.
+2. `EncasedSection`: `to_fiber_patches()` is **implemented** via the
+   role-based fiber contract (encasement rectangle + overlaid embedded-steel
+   patches, steel counted twice — a documented simplification).  Remaining:
+   no parser path populates the encasement dimensions (`encasement_depth` /
+   `encasement_bf`), so it is inert on real files; see
+   `docs/e2k_import_plan.md` §7.
+3. `ConcreteFilledTubeSection` / `ConcreteFilledPipeSection` (CFT) fibre cores
+   are modelled **unconfined**; the CFT confinement model is deferred — the
+   decision and researched recommendation are recorded in
+   `docs/cft_confinement_plan.md`.
 
 **Constraints.** Section geometric properties stay as-authored (from the
 S2K text); patches must integrate with both `AnalysisBuilder` fiber sections

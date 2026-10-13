@@ -1348,6 +1348,68 @@ class TestCompositeSectionFiberPatches:
             == []
         )
 
+    def test_concrete_filled_pipe_patches(self):
+        from fea_toolkit.model.sap_data import ConcreteFilledPipeSection
+
+        sec = ConcreteFilledPipeSection(
+            name="CFP400x10",
+            shape="Filled Steel Pipe",
+            material="Steel",
+            od=0.4,
+            t=0.01,
+            fill_material="C40",
+            rebar_material="Rebar",
+            cover=0.04,
+            bar_count=8,
+            bar_dia=0.02,
+        )
+        assert sec.fiber_roles() == ["steel", "concrete", "rebar"]
+        assert sec.fiber_role_material("steel") == "Steel"
+        assert sec.fiber_role_material("concrete") == "C40"
+        assert sec.fiber_role_material("rebar") == "Rebar"
+        patches = sec.to_fiber_patches(materials={"steel": 30, "concrete": 31, "rebar": 32})
+        # 1 steel pipe ring + 1 concrete core + 1 rebar ring
+        assert len(patches) == 3
+        assert patches[0][0] == "circ" and patches[0][1] == 30  # steel pipe
+        assert patches[1][0] == "circ" and patches[1][1] == 31  # concrete core
+        assert patches[2][0] == "circ_layer" and patches[2][1] == 32  # rebar ring
+
+    def test_concrete_filled_pipe_no_rebar(self):
+        from fea_toolkit.model.sap_data import ConcreteFilledPipeSection
+
+        sec = ConcreteFilledPipeSection(
+            name="CFP400",
+            shape="Filled Steel Pipe",
+            material="Steel",
+            od=0.4,
+            t=0.01,
+            fill_material="C40",
+        )
+        patches = sec.to_fiber_patches(materials={"steel": 1, "concrete": 2, "rebar": 3})
+        assert len(patches) == 2  # pipe + core, no rebar
+
+    def test_confinement_steel_fy_resolves_tie_material(self):
+        from fea_toolkit.model.sap_data import ConcreteRectangularSection
+
+        sec = ConcreteRectangularSection(
+            name="C",
+            shape="Concrete Rectangular",
+            material="C40",
+            A=0.16,
+            I33=0.002,
+            I22=0.002,
+            J=0,
+            depth=0.4,
+            bf=0.4,
+            cover=0.04,
+            tie_rebar_mat="TieSteel",
+        )
+        tie = Material("TieSteel", "Rebar", Fy=420e6)
+        assert sec.confinement_steel_fy({"TieSteel": tie}) == pytest.approx(420e6)
+        # A directly-set tie_fy wins over the material lookup.
+        sec.tie_fy = 500e6
+        assert sec.confinement_steel_fy({"TieSteel": tie}) == pytest.approx(500e6)
+
 
 class TestSAPModelDataMethods:
     """Tests for the utility methods added to SAPModelData."""

@@ -147,14 +147,7 @@ def resolve_fiber_role_material(
         epsc_core = abs(epsc) * RC_NO_TIE_EPSC_FACTOR
         ecu_core = 0.02
 
-        tie_fy = getattr(sec, "tie_fy", None) or 0.0
-        if tie_fy <= 0:
-            tie_mat_name = getattr(sec, "tie_rebar_mat", None) or getattr(
-                sec, "rebar_material", None
-            )
-            tie_mat = materials.get(tie_mat_name) if tie_mat_name else None
-            if tie_mat is not None:
-                tie_fy = getattr(tie_mat, "Fy", 0.0) or 0.0
+        tie_fy = sec.confinement_steel_fy(materials)
 
         confinement = None
         fc_method = getattr(sec, "fiber_confinement", None)

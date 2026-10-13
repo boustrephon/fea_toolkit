@@ -500,6 +500,23 @@ class Section:
         """
         return self.material if role == "steel" else None
 
+    def confinement_steel_fy(self, materials: dict) -> float:
+        """Yield strength of the steel that confines the core (model units).
+
+        Resolves the transverse (tie/spiral/hoop) steel yield for RC sections
+        from ``tie_fy`` → ``tie_rebar_mat`` → ``rebar_material``, falling back
+        to ``0.0`` when no confinement steel is defined.  Composite filled-tube
+        sections override this to return the steel *tube's* yield strength,
+        because their confinement comes from the tube, not from ties.
+        """
+        fy = getattr(self, "tie_fy", None) or 0.0
+        if fy <= 0:
+            name = getattr(self, "tie_rebar_mat", None) or getattr(self, "rebar_material", None)
+            mat = materials.get(name) if name else None
+            if mat is not None:
+                fy = getattr(mat, "Fy", 0.0) or 0.0
+        return fy
+
     def to_fiber_patches(
         self, materials: dict[str, int], nfy: int = 8, nfz: int = 4
     ) -> list[tuple]:
@@ -1352,7 +1369,7 @@ class ConcreteFilledTubeSection(Section):
     A steel tube (four wall patches) filled with a concrete core and an
     optional longitudinal rebar layer.  This covers the ``SHAPE
     "Filled Steel Tube"`` (RHS) case; the ``Filled Steel Pipe`` (CHS) analogue
-    is a straightforward follow-up.
+    is :class:`ConcreteFilledPipeSection`.
     """
 
     depth: float = 0.0  # outer depth D
@@ -1454,6 +1471,82 @@ class ConcreteFilledTubeSection(Section):
                     cz2 - self.cover,
                 )
             )
+        return patches
+
+
+@dataclass
+class ConcreteFilledPipeSection(Section):
+    """Concrete-filled steel pipe (CFT) — circular hollow section (CHS).
+
+    A steel pipe (annular wall) filled with a concrete core and an optional
+    longitudinal rebar ring.  The concrete core is modelled as **unconfined**
+    (see :class:`ConcreteFilledTubeSection`); a CFT confinement model is
+    planned (see ``docs/cft_confinement_plan.md``).
+    """
+
+    od: float = 0.0  # outer diameter
+    t: float = 0.0  # wall thickness
+    fill_material: str = ""  # concrete fill material name
+    # SAP2000 longitudinal rebar material name (``RebarMatL``).  None →
+    # framework rebar defaults (see :class:`ConcreteRectangularSection`).
+    rebar_material: Optional[str] = None
+    # Optional longitudinal rebar ring (0 / absent → no rebar).  ``cover`` is
+    # measured from the inner pipe face to the rebar centreline.
+    cover: float = 0.0
+    bar_count: int = 0
+    bar_dia: float = 0.0
+
+    def fiber_roles(self) -> list[str]:
+        return ["steel", "concrete", "rebar"]
+
+    def fiber_role_material(self, role: str) -> Optional[str]:
+        if role == "steel":
+            return self.material
+        if role == "concrete":
+            return self.fill_material or None
+        if role == "rebar":
+            return self.rebar_material
+        return None
+
+    def to_fiber_patches(
+        self, materials: dict[str, int], nfy: int = 8, nfz: int = 4
+    ) -> list[tuple]:
+        """Steel pipe + unconfined concrete core (+ optional rebar ring).
+
+        The concrete core is modelled as **unconfined** — the pipe's
+        confinement of the fill is not Mander-tie confinement, so a
+        conservative unconfined core is used until a CFT confinement model
+        lands (guardrail §12).
+        """
+        R = self.od / 2.0
+        R_core = max(0.0, R - self.t)
+        patches: list[tuple] = [
+            # Steel pipe (annular wall)
+            ("circ", materials["steel"], nfy, nfz, 0.0, 0.0, R_core, R, 0.0, 360.0),
+        ]
+        # Concrete core (inner void)
+        if R_core > 0:
+            patches.append(
+                ("circ", materials["concrete"], nfy, nfz, 0.0, 0.0, 0.0, R_core, 0.0, 360.0)
+            )
+        # Optional longitudinal rebar ring
+        if self.bar_count and self.bar_dia > 0:
+            area_bar = math.pi * (self.bar_dia / 2.0) ** 2
+            R_rebar = R_core - self.cover
+            if R_rebar > 0:
+                patches.append(
+                    (
+                        "circ_layer",
+                        materials["rebar"],
+                        self.bar_count,
+                        area_bar,
+                        0.0,
+                        0.0,
+                        R_rebar,
+                        0.0,
+                        360.0,
+                    )
+                )
         return patches
 
 

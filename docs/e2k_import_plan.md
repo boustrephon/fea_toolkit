@@ -374,10 +374,12 @@ token path yet.  The model layer now supports the genuinely composite cases:
 * `EncasedSection.to_fiber_patches()` is **implemented** — concrete encasement
   rectangle + overlaid embedded-steel patches (the steel region is counted
   twice; a documented simplification).
-* `ConcreteFilledTubeSection` (RHS) is **added** — steel tube walls + a
-  concrete core (modelled **unconfined** — the tube's confinement is not
-  Mander-tie confinement, so a conservative unconfined core is used until a
-  CFT confinement model lands, guardrail §12) + optional rebar layers.
+* `ConcreteFilledTubeSection` (RHS) and `ConcreteFilledPipeSection` (CHS) are
+  **added** — steel tube walls / pipe ring + a concrete core (modelled
+  **unconfined** — the tube's confinement is not Mander-tie confinement, so a
+  conservative unconfined core is used until a CFT confinement model lands,
+  see `docs/cft_confinement_plan.md`, guardrail §12) + optional rebar
+  layers / ring.
 
 The generalised multi-material fiber contract is in place:
 
@@ -398,8 +400,10 @@ The generalised multi-material fiber contract is in place:
 
 Still open (recorded as follow-ups, not implemented):
 
-* A `ConcreteFilledPipeSection` (CHS analogue of the RHS filled tube).
-* The `Filled Steel Pipe` (CHS) concrete-fill fiber path.
+* The `Filled Steel Pipe` (CHS) concrete-fill *parser* path (§6 still parses
+  filled pipes as hollow `PipeSection`).
+* The CFT confinement formula — decision + researched recommendation recorded
+  in `docs/cft_confinement_plan.md`; not yet implemented.
 
 Decision point settled (2026-10-13): the filled-tube warning fix shipped as the
 `SHAPE_NAMES` alias; the composite fiber model above is now implemented as the
