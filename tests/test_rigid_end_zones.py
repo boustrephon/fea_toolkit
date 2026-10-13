@@ -311,6 +311,45 @@ class TestBuilderRigidEndZones:
         finally:
             wipe()
 
+    def test_mpc_method_key_emits_mpc(self):
+        """``rigid_offset_method="mpc"`` emits MPCs, not elastic rigid links.
+
+        Pins the single-spelling fix: before it, the builder read the legacy
+        ``rigid_link_mpc`` boolean directly, so the new ``"mpc"`` key silently
+        degraded to stiff elastic links (2 frame + 2 link elements = 4).
+        MPCs add no elements, so the domain holds only the 2 frame elements.
+        """
+        import openseespy.opensees as ops
+        from openseespy.opensees import wipe
+
+        cfg = {"rigid_end_zones": True, "rigid_offset_method": "mpc"}
+        mesh = preprocess_model(_l_frame(), cfg)
+        assert len(mesh.offset_rigid_links) == 2
+        builder = AnalysisBuilder(mesh, cfg)
+        try:
+            builder.build_domain()
+            assert len(ops.getEleTags()) == 2
+        finally:
+            wipe()
+
+    def test_mpc_with_diaphragms_warns(self):
+        """MPC end offsets coexisting with diaphragms emit a conflict warning."""
+        import warnings
+
+        with pytest.warns(UserWarning, match="coexists with diaphragm/BODY"):
+            preprocess_model(
+                _l_frame(),
+                {
+                    "rigid_end_zones": True,
+                    "rigid_link_mpc": True,
+                    "rigid_diaphragms": True,
+                },
+            )
+        # Without diaphragms the same MPC offsets are legitimate — no warning.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            preprocess_model(_l_frame(), {"rigid_end_zones": True, "rigid_link_mpc": True})
+
     def test_rigid_zones_stiffen_lateral_response(self):
         """Rigid end zones shorten the members -> smaller lateral drift."""
         import openseespy.opensees as ops

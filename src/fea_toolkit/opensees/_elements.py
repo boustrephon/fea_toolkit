@@ -387,7 +387,12 @@ class ElementMixin:
         # The Preprocessor returns (link_id, node_i, node_j, link_tag) tuples.
         # node_i and node_j are string node IDs — resolve to numeric tags.
         if self._offset_rigid_links:
-            _mpc = self.config.get("rigid_link_mpc", False)
+            # Resolve the MPC flag through the single spelling so the new
+            # ``rigid_offset_method="mpc"`` key actually emits MPCs (the
+            # legacy ``rigid_link_mpc`` boolean maps onto it in
+            # ``_rigid_offset_method``) — reading the boolean directly here
+            # silently degrades ``"mpc"`` to stiff elastic links.
+            _mpc = self._rigid_offset_method() == "mpc"
             for _link_id, _node_i_id, _node_j_id, link_tag in self._offset_rigid_links:
                 nd_i = self.mesh_model.nodes.get(_node_i_id)
                 nd_j = self.mesh_model.nodes.get(_node_j_id)

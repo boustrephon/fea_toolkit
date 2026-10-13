@@ -521,6 +521,32 @@ class Preprocessor:
         # AnalysisBuilder as `rigidLink('beam')` MPCs — recorded here.
         rigid_body_components = self._detect_rigid_body_constraints(md)
 
+        # ── 7a. MPC guard: rigidLink MPC end offsets vs diaphragm/BODY MPCs ──
+        # ``rigid_offset_method="mpc"`` ties each joint node (as the rigidLink
+        # master) to its offset node; diaphragm / BODY constraints then make
+        # those same joints slaves of another MPC.  The Transformation handler
+        # cannot chain a node that is a master in one constraint and a slave
+        # in another, so the domain silently degrades (wrong results or a
+        # singular system).  Warn rather than raise: the conflict is only
+        # real when a joint actually belongs to both, but the cost of a false
+        # negative is silent corruption.
+        if self._rigid_offset_method() == "mpc" and offset_rigid_links:
+            config_diaphragms = self.config.get("rigid_diaphragms", None)
+            diaphragms_active = config_diaphragms is not False and (
+                bool(diaphragm_components) or config_diaphragms is not None
+            )
+            bodies_active = bool(rigid_body_components)
+            if diaphragms_active or bodies_active:
+                warnings.warn(
+                    "rigid_offset_method='mpc' (rigidLink MPC end offsets) "
+                    "coexists with diaphragm/BODY multipoint constraints; the "
+                    "same joint nodes become rigidLink masters and "
+                    "diaphragm/BODY slaves, which the Transformation handler "
+                    "cannot chain — results are silently corrupted. Use "
+                    "rigid_offset_method='jntOffset' (default) or 'beam'.",
+                    stacklevel=2,
+                )
+
         # ── 7b. Re-map frame end releases onto final active leaves ──
         # A release is an end property of the original member; after all
         # splitting it belongs to the first/last leaf of the chain.  This

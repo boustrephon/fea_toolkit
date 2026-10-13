@@ -399,8 +399,10 @@ generalised as `local_to_global` / `global_to_local` in `model/geometry_core.py`
 over the shortened flexible length `L` (pinned by
 `test_jnt_offset_eleload_over_flexible_length`); 3) ✅ keep the offset-node
 exclusion from diaphragm/BODY sweeps (storey-detection components and the
-per-elevation fallback both skip `_off_i`/`_off_j` nodes); 4) guard
-`rigid_link_mpc` to the `"mpc"` option; 5) extend the
+per-elevation fallback both skip `_off_i`/`_off_j` nodes); 4) ✅ guard
+`rigid_link_mpc` to the `"mpc"` option (single spelling through
+`_rigid_offset_method()`) and warn when it coexists with diaphragms/BODY; 5)
+extend the
 `typings/openseespy` `geomTransf` stub for PDelta/Corotational; 6) thread the
 same offsets through the GUI frame mesh and Rhino export.
 

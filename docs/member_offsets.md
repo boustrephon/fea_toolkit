@@ -147,8 +147,10 @@ each joint back to the reference line.
 3. **Offset-node exclusion.**  Keep the offset-node exclusion from
    diaphragm/BODY sweeps — it is needed by the `"beam"` fallback and by the
    pre-existing longitudinal rigid-link path regardless of the default.
-4. **MPC guard.**  Confine `rigid_link_mpc` to the `"mpc"` option and warn (or
-   raise) when it coexists with diaphragms.
+4. **MPC guard.** ✅  Confine `rigid_link_mpc` to the `"mpc"` option (the
+   builder's offset-link emission now resolves the flag through
+   `_rigid_offset_method()` rather than reading the legacy boolean directly)
+   and warn when it coexists with diaphragms/BODY constraints.
 5. **Stub.**  Extend `typings/openseespy/opensees/__init__.pyi` `geomTransf`
    docstring with the `PDelta`/`Corotational` `-jntOffset` forms and a
    global-coordinates clarification.
