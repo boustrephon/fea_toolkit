@@ -156,6 +156,91 @@ def rotate_about_axis(v: np.ndarray, axis: np.ndarray, theta_rad: float) -> np.n
     return v_rot / np.linalg.norm(v_rot)
 
 
+def local_to_global(
+    axes: tuple[np.ndarray, np.ndarray, np.ndarray],
+    vec: Union[Sequence[float], np.ndarray],
+) -> np.ndarray:
+    """Rotate a local (1, 2, 3) vector into global coordinates.
+
+    The inverse of :func:`global_to_local`.  ``axes`` is the orthonormal
+    ``(vx, vy, vz)`` triplet from :func:`get_local_axes`; the returned global
+    vector is ``vx*vec[0] + vy*vec[1] + vz*vec[2]``.
+
+    Args:
+        axes: Orthonormal ``(vx, vy, vz)`` local axes (unit vectors).
+        vec: 3-element vector expressed in the local frame.
+
+    Returns:
+        3-element ``np.ndarray`` in global coordinates.
+    """
+    vx, vy, vz = axes
+    v = np.asarray(vec, dtype=float)
+    return vx * v[0] + vy * v[1] + vz * v[2]
+
+
+def global_to_local(
+    axes: tuple[np.ndarray, np.ndarray, np.ndarray],
+    vec: Union[Sequence[float], np.ndarray],
+) -> np.ndarray:
+    """Rotate a global vector into local (1, 2, 3) coordinates.
+
+    The inverse of :func:`local_to_global`: because ``(vx, vy, vz)`` are
+    orthonormal, the local components are the dot products with each axis.
+
+    Args:
+        axes: Orthonormal ``(vx, vy, vz)`` local axes (unit vectors).
+        vec: 3-element vector expressed in global coordinates.
+
+    Returns:
+        3-element ``np.ndarray`` in local coordinates.
+    """
+    vx, vy, vz = axes
+    v = np.asarray(vec, dtype=float)
+    return np.array([np.dot(vx, v), np.dot(vy, v), np.dot(vz, v)])
+
+
+def frame_end_offsets_global(
+    axis: Union[Sequence[float], np.ndarray],
+    angle: float = 0.0,
+    end_i: float = 0.0,
+    end_j: float = 0.0,
+    off_y_i: float = 0.0,
+    off_z_i: float = 0.0,
+    off_y_j: float = 0.0,
+    off_z_j: float = 0.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute the global ``-jntOffset`` vectors for a frame's end offsets.
+
+    Combines the longitudinal (``end_i``/``end_j``, along local 1) and lateral
+    (``off_y_*``/``off_z_*``, along local 2/3) offsets of a
+    :class:`~fea_toolkit.model.sap_data.FrameEndOffset` into the two global
+    offset vectors consumed by OpenSees' ``geomTransf ... -jntOffset`` (which
+    is specified in **global** coordinates).  The sign convention matches the
+    centroid-line convention used by the Rhino exporter: the flexible member
+    runs centroid-to-centroid, so the I-end offset is ``[end_i, off_y_i,
+    off_z_i]`` in local coordinates and the J-end offset is ``[-end_j,
+    off_y_j, off_z_j]``.
+
+    Args:
+        axis: Element axis vector (I→J, the reference line).
+        angle: Rotation (degrees) about the local 1-axis (the SAP2000
+            *coordinate angle*).
+        end_i: Longitudinal offset at the I end (local 1).
+        end_j: Longitudinal offset at the J end (local 1).
+        off_y_i: Lateral offset at the I end (local 2).
+        off_z_i: Lateral offset at the I end (local 3).
+        off_y_j: Lateral offset at the J end (local 2).
+        off_z_j: Lateral offset at the J end (local 3).
+
+    Returns:
+        ``(off_i, off_j)`` — the two 3-element global offset vectors.
+    """
+    axes = get_local_axes(np.asarray(axis, dtype=float), angle)
+    off_i = local_to_global(axes, np.array([end_i, off_y_i, off_z_i]))
+    off_j = local_to_global(axes, np.array([-end_j, off_y_j, off_z_j]))
+    return off_i, off_j
+
+
 def point_on_segment(
     p: Union[Sequence[float], np.ndarray],
     a: Union[Sequence[float], np.ndarray],

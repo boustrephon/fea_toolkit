@@ -12,7 +12,11 @@ import numpy as np
 import pytest
 
 from fea_toolkit.model.geometry import (
+    frame_end_offsets_global,
+    get_local_axes,
     get_SAP_vecxz,
+    global_to_local,
+    local_to_global,
     trapezoidal_force_split,
 )
 from fea_toolkit.model.sap_data import (
@@ -568,6 +572,51 @@ class TestEdgeCases:
         """Should accept plain Python lists as input."""
         vecxz = get_SAP_vecxz([5.0, 0.0, 0.0])
         assert np.allclose(vecxz, [0.0, -1.0, 0.0], atol=1e-6)
+
+
+class TestLocalGlobalTransforms:
+    """local↔global rotation helpers and the ``-jntOffset`` vector builder."""
+
+    def test_axes_map_basis_vectors(self):
+        # Member along +X: vx=+X, vy=+Z, vz=-Y (CSI default frame axes).
+        axes = get_local_axes(np.array([5.0, 0.0, 0.0]), 0.0)
+        vx, vy, vz = axes
+        assert np.allclose(local_to_global(axes, [1.0, 0.0, 0.0]), vx)
+        assert np.allclose(local_to_global(axes, [0.0, 1.0, 0.0]), vy)
+        assert np.allclose(local_to_global(axes, [0.0, 0.0, 1.0]), vz)
+
+    def test_round_trip_non_axis_aligned(self):
+        axis = np.array([3.0, 4.0, 2.0])
+        axes = get_local_axes(axis, 0.0)
+        for v in ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.5, -0.25, 1.5]):
+            back = global_to_local(axes, local_to_global(axes, v))
+            assert np.allclose(back, v, atol=1e-12)
+
+    def test_global_to_local_inverts_local_to_global(self):
+        axes = get_local_axes(np.array([1.0, 2.0, 3.0]), 30.0)
+        g = np.array([1.5, -2.0, 0.5])
+        assert np.allclose(local_to_global(axes, global_to_local(axes, g)), g, atol=1e-12)
+
+    def test_frame_end_offsets_axis_aligned(self):
+        # Member along +X with longitudinal + lateral offsets at both ends.
+        # vx=+X, vy=+Z, vz=-Y.
+        off_i, off_j = frame_end_offsets_global(
+            [5.0, 0.0, 0.0],
+            angle=0.0,
+            end_i=0.5,
+            end_j=0.3,
+            off_y_i=0.2,  # local 2 = +Z
+            off_z_i=0.1,  # local 3 = -Y
+            off_y_j=0.4,
+            off_z_j=-0.2,
+        )
+        assert np.allclose(off_i, [0.5, -0.1, 0.2])
+        assert np.allclose(off_j, [-0.3, 0.2, 0.4])
+
+    def test_frame_end_offsets_zero(self):
+        off_i, off_j = frame_end_offsets_global([1.0, 0.0, 0.0])
+        assert np.allclose(off_i, [0.0, 0.0, 0.0])
+        assert np.allclose(off_j, [0.0, 0.0, 0.0])
 
 
 # ============================================================================
