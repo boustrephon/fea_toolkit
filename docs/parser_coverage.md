@@ -227,7 +227,7 @@ registry below.  Three things about how they are matched:
 |---|---|---|---|
 | Insertion-point mirror flags | `FRAME INSERTION POINT ASSIGNMENTS` — `Mirror2`, `Mirror3` | `FrameElement.mirror_2`, `FrameElement.mirror_3` | Section mirroring is not modelled; the extrusion is never mirrored, so an asymmetric section mirrored in SAP2000 is drawn the wrong way round. |
 | Stiffness transformation flag | `FRAME INSERTION POINT ASSIGNMENTS` — `Transform` | `FrameElement.transform_stiffness` | SAP2000's *"do not transform frame stiffness for offsets from centroid"*, inverted. The builder always constructs the member at the reference line; the 6×6 transform for the centroid offset is not applied. |
-| Rigid-zone factor | `FRAME END OFFSET ASSIGNMENTS` — `RigidFactor` (also `FRAME END LENGTH OFFSETS` / `FRAME OFFSET ALONG LENGTH ASSIGNMENTS`) | `FrameEndOffset.rigid_factor` | The builder treats every end offset as **fully rigid** (stiff links / `rigid_link_mpc`). Partial rigidity (`0 < RigidFactor < 1`) is not applied. |
+| Rigid-zone factor | `FRAME END OFFSET ASSIGNMENTS` — `RigidFactor` (also `FRAME END LENGTH OFFSETS` / `FRAME OFFSET ALONG LENGTH ASSIGNMENTS`) | `FrameEndOffset.rigid_factor` | The builder treats every end offset as **fully rigid** (native `-jntOffset` by default; stiff elastic links / `rigid_link_mpc` as opt-in fallbacks). Partial rigidity (`0 < RigidFactor < 1`) is not applied. |
 | Area edge constraints | `AREA EDGE CONSTRAINT ASSIGNMENTS` | `SAPModelData.area_edge_constraints` | Parsed and stored, but nothing reads it: the preprocessor derives its own edge pairs via `find_constraint_edges()` instead. |
 | Area auto-mesh flags | `AREA AUTO MESH ASSIGNMENTS` — `NoAutoMeshAtEdges`, `NoSubMesh`, `MinSize` | `AreaMesh.no_auto_mesh_at_edges`, `AreaMesh.no_sub_mesh`, `AreaMesh.min_size` | `AreaMesh.auto_mesh` and `AreaMesh.max_size` **are** consumed (`mesh/remesh.py`); the other three are not. |
 | Encased-section data | `FRAME SECTION PROPERTIES 01 - GENERAL` | `EncasedSection.embedded_section`, `.encasement_material`, `.encasement_depth`, `.encasement_bf` | Encased composite sections are not modelled. |
@@ -246,21 +246,22 @@ scan.  They are listed so the register is not misread.
 
 | Item | Source table / column | Where it is consumed |
 |---|---|---|
-| Section centroid offset | `FRAME SECTION PROPERTIES 01 - GENERAL` — `CGOffset2`, `CGOffset3` | `SAP2000Parser._merge_cardinal_into_offsets()` → lateral `FrameEndOffset.off_y_i/z_i/j/z_j` for cardinal point 10 (centroid).  The resulting lateral offsets are then consumed by the Rhino export (`rhino/geometry.py`). |
+| Section centroid offset | `FRAME SECTION PROPERTIES 01 - GENERAL` — `CGOffset2`, `CGOffset3` | `SAP2000Parser._merge_cardinal_into_offsets()` → lateral `FrameEndOffset.off_y_i/z_i/j/z_j` for cardinal point 10 (centroid).  The resulting lateral offsets are consumed by the analysis builder (native `-jntOffset`), the GUI viewer and the Rhino export — all through the shared `frame_end_offsets_global()`. |
 | Shear-centre eccentricity | `FRAME SECTION PROPERTIES 01 - GENERAL` — `EccV2`, `EccV3` | Same path, for cardinal point 11 (shear centre).  **Effectively dormant in practice** because CP 11 is rare — every model inspected so far uses CP 2, 8 or 10. |
 
-## Consumed fields reached indirectly
+## Frame end offsets — consumers
 
-Some frame-offset data is consumed by the Rhino export only, never by the
-analysis builder.  This is expected (the offsets are a *visual* concern —
-the analytical line is built at the node-to-node reference line) but worth
-stating explicitly, because a reader may assume the analysis uses them:
+Frame end offsets (longitudinal `end_i`/`end_j` and lateral
+`off_y_*`/`off_z_*` from the cardinal point) reach the analysis builder, the
+GUI viewer and the Rhino export alike — all through the shared
+`frame_end_offsets_global()` helper, so the drawn member, the analysed member
+and the exported geometry agree (see `docs/member_offsets.md`):
 
 | Field | Consumer |
 |---|---|
 | `FrameElement.cardinal_point` | `io/_serial.py`, `model/review.py`, `model/source_resolver.py` (reporting / round-trip / mesh conversion) |
-| `FrameEndOffset.off_y_i`, `off_z_i`, `off_y_j`, `off_z_j` | `rhino/geometry.py` only |
-| `FrameEndOffset.end_i`, `end_j` | `opensees/preprocessor.py` (rigid links) |
+| `FrameEndOffset.off_y_i`, `off_z_i`, `off_y_j`, `off_z_j` | builder (`-jntOffset` in `opensees/_elements.py`), `plotting/viewer.py`, `rhino/geometry.py` |
+| `FrameEndOffset.end_i`, `end_j` | builder (`-jntOffset`, or `opensees/preprocessor.py` stiff-link / MPC fallback), `plotting/viewer.py`, `rhino/geometry.py` |
 
 ## Keeping this current
 

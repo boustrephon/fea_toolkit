@@ -150,7 +150,7 @@ for automated cross-referencing.
   Tags: `mander`, `confinement`, `validation`, `theory`, `reference`
   Related: [Rectangular Concrete Section Workflow](rc_rectangular_section_workflow.md) · [Element Properties Configuration](element_properties_config.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md)
 
-- [Member End Offsets & Cardinal Points (Insertion Point)](member_offsets.md) — 🚧 Draft
+- [Member End Offsets & Cardinal Points (Insertion Point)](member_offsets.md) — ✅ Complete
   > How SAP2000 frame end offsets and cardinal-point (insertion-point) offsets are carried onto the OpenSees frame element, the -jntOffset mechanism decision, and the shared local↔global coordinate transformation.
   Tags: `offsets`, `cardinal-point`, `insertion-point`, `rigid-zones`, `jntOffset`, `geomTransf`, `frames`, `sap2000`
   Related: [SAP2000 Parser — Table & Keyword Coverage](parser_coverage.md) · [Report Generation — Design Proposal](report_generation.md) · [Builder Reference — Two-stage Pipeline](builder_reference.md) · [Storey Identification & Diaphragm Constraints](diaphragm_constraints.md) · [Member End Releases & Partial Fixity](member_releases.md)

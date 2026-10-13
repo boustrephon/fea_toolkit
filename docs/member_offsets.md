@@ -1,7 +1,7 @@
 ---
 title: "Member End Offsets & Cardinal Points (Insertion Point)"
 description: "How SAP2000 frame end offsets and cardinal-point (insertion-point) offsets are carried onto the OpenSees frame element, the -jntOffset mechanism decision, and the shared local↔global coordinate transformation."
-status: "draft"
+status: "complete"
 tags: [offsets, cardinal-point, insertion-point, rigid-zones, jntOffset, geomTransf, frames, sap2000]
 category: [model-features]
 related: [parser_coverage.md, report_generation.md, builder_reference.md, diaphragm_constraints.md, member_releases.md]
@@ -162,12 +162,16 @@ each joint back to the reference line.
    I/J centroid endpoints from the shared helper (``rhino/geometry.py``
    ``_get_frame_points``) and sweeps the extrusion along that centroid line
    instead of the full reference length.
-7. **Stiff-beam fallback stiffness.**  For `"beam"`, scale the elastic link
-   stiffness (≈1000× member stiffness) rather than a hardcoded absolute.
-8. **Tests + docs.**  Test the rotation, the `-jntOffset` emission (incl. the
-   Corotational form), the eleLoad length, and the fallback; close out P38 here
-   and in `docs/parser_coverage.md` (the `off_y/off_z` consumer moves from
-   *"rhino only"* to the builder).
+7. **Stiff-beam fallback stiffness.** ✅  For `"beam"`, scale the elastic link
+   stiffness ≈1000× the stiffest member's axial (`E·A`) and flexural (`E·I`)
+   stiffness in model units (`ElementMixin._rigid_section_properties()` in
+   `opensees/_elements.py`) instead of the hardcoded `2.0e14` (wrong in kN-m
+   and mm unit systems).  Falls back to a dimensionless `1.0` placeholder when
+   the model has no usable section/material stiffness.
+8. **Tests + docs.** ✅  Rotation, `-jntOffset` emission (incl. the Corotational
+   form), the eleLoad length and the fallback stiffness are all tested; P38 is
+   closed here and in `docs/parser_coverage.md` (the `off_y/off_z` consumer
+   moved from *"rhino only"* to the builder / viewer).
 
 ## 8. Config naming
 

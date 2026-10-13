@@ -337,14 +337,7 @@ class ElementMixin:
             all_sec_tags.update(self._shell_sec_tags.values())
             all_sec_tags.update(self._shell_sec_variants.values())
             rigid_section_tag = max(all_sec_tags, default=0) + 1
-            rigid_E = 2.0e14
-            rigid_A = 1.0
-            rigid_I = 1.0
-            # Arbitrary large shear modulus — the exact ratio is irrelevant
-            # for a numerical rigid link (an artificial stiffener, not a
-            # physical material).  Keep G large so shear/torsion never become
-            # the soft DOFs of the link.
-            rigid_G = rigid_E / 2.6
+            rigid_E, rigid_A, rigid_I, rigid_G, rigid_J = self._rigid_section_properties()
             ops.section(
                 "Elastic",
                 rigid_section_tag,
@@ -353,7 +346,7 @@ class ElementMixin:
                 rigid_I,
                 rigid_I,
                 rigid_G,
-                rigid_I,
+                rigid_J,
             )
             self._rigid_section_tag = rigid_section_tag
 
@@ -449,6 +442,53 @@ class ElementMixin:
         if method is not None:
             return method
         return "mpc" if self.config.get("rigid_link_mpc", False) else "jntOffset"
+
+    def _rigid_section_properties(self) -> tuple[float, float, float, float, float]:
+        """``(E, A, I, G, J)`` for the stiff-beam rigid-link fallback section.
+
+        The rigid link is an artificial stiffener, so its exact modulus does not
+        matter — only that it is much stiffer than the members it bridges.  The
+        section is therefore scaled to ≈1000× the stiffest member's axial
+        (``E·A``) and flexural (``E·I``) stiffness, derived from the model's own
+        materials/sections in model units (§4.6 — no hardcoded physical
+        constant).  Falls back to a dimensionless ``1.0`` placeholder when the
+        model carries no usable section/material stiffness.
+
+        Returns:
+            ``(E, A, I, G, J)`` for ``ops.section("Elastic", ...)``.
+        """
+        factor = 1000.0
+        max_EA = 0.0
+        max_EI = 0.0
+        max_E = 0.0
+        sections = getattr(self.mesh_model, "sections", {}) or {}
+        materials = getattr(self.mesh_model, "materials", {}) or {}
+        for sec in sections.values():
+            A = float(getattr(sec, "A", 0.0) or 0.0)
+            sec_I = max(
+                float(getattr(sec, "I33", 0.0) or 0.0),
+                float(getattr(sec, "I22", 0.0) or 0.0),
+            )
+            mat = materials.get(getattr(sec, "material", ""))
+            E = float(getattr(mat, "E_mod", 0.0) or 0.0) if mat is not None else 0.0
+            if E > 0.0:
+                max_EA = max(max_EA, E * A)
+                max_EI = max(max_EI, E * sec_I)
+                max_E = max(max_E, E)
+
+        if max_E <= 0.0:
+            # No usable section/material stiffness in the model — a
+            # dimensionless placeholder (never a hardcoded physical constant).
+            return 1.0, 1.0, 1.0, 1.0 / 2.6, 1.0
+
+        rigid_E = max_E
+        rigid_A = factor * max_EA / rigid_E if max_EA > 0.0 else 1.0
+        rigid_I = factor * max_EI / rigid_E if max_EI > 0.0 else rigid_A
+        # Keep G large (≈E/2.6) so shear/torsion never become the soft DOFs of
+        # the link; the exact ratio is irrelevant for an artificial stiffener.
+        rigid_G = rigid_E / 2.6
+        rigid_J = rigid_I
+        return rigid_E, rigid_A, rigid_I, rigid_G, rigid_J
 
     def _add_beam_column(self, elem, tag, elements, assignments):
         """Add a single beam-column element to the OpenSees domain."""

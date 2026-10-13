@@ -404,7 +404,13 @@ per-elevation fallback both skip `_off_i`/`_off_j` nodes); 4) ✅ guard
 `_rigid_offset_method()`) and warn when it coexists with diaphragms/BODY; 5) ✅
 extend the
 `typings/openseespy` `geomTransf` stub for PDelta/Corotational; 6) ✅ thread the
-same offsets through the GUI frame mesh and Rhino export.
+same offsets through the GUI frame mesh and Rhino export; 7) ✅ scale the
+`"beam"` fallback stiffness ≈1000× member stiffness (no hardcoded `2.0e14`);
+8) ✅ close out the consumer register in `docs/parser_coverage.md`.
+
+**Status.** ✅ complete — `-jntOffset` is the default (exact, no extra
+nodes/MPC/stiff beams), with `"beam"` / `"mpc"` as guarded opt-in fallbacks, and
+the drawn / analysed / exported geometry now agree.
 
 ### Tier 3 — Feature gaps (placeholders / partial)
 

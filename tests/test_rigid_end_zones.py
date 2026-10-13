@@ -378,3 +378,39 @@ class TestBuilderRigidEndZones:
                 wipe()
 
         assert drift(True) < drift(False)
+
+
+def test_rigid_section_scales_to_member_stiffness():
+    """The ``"beam"`` fallback stiffens ≈1000× the member, in model units."""
+    from types import SimpleNamespace
+
+    from fea_toolkit.opensees._elements import ElementMixin
+
+    md = _l_frame()
+    E, A, sec_I, G, J = ElementMixin._rigid_section_properties(SimpleNamespace(mesh_model=md))
+    # Both sections carry A = 0.12, I33 = 1.6e-3 on the E = 200e6 Pa material.
+    assert pytest.approx(200e6) == E
+    assert pytest.approx(1000.0 * 200e6 * 0.12) == E * A
+    assert pytest.approx(1000.0 * 200e6 * 1.6e-3) == E * sec_I
+    assert pytest.approx(E / 2.6) == G
+    assert pytest.approx(sec_I) == J
+
+
+def test_rigid_section_placeholder_without_material_stiffness():
+    """No usable E in the model → a dimensionless 1.0 placeholder, not 2e14."""
+    from types import SimpleNamespace
+
+    from fea_toolkit.model.sap_data import RectangularSection
+    from fea_toolkit.opensees._elements import ElementMixin
+
+    # A section whose material reference is missing, so E is unknown.
+    mesh = SimpleNamespace(
+        sections={
+            "S": RectangularSection(
+                name="S", shape="Rectangular", material="NOPE", A=0.1, I33=1e-3, I22=1e-3
+            )
+        },
+        materials={},
+    )
+    E, A, sec_I, G, J = ElementMixin._rigid_section_properties(SimpleNamespace(mesh_model=mesh))
+    assert (E, A, sec_I, G, J) == (1.0, 1.0, 1.0, 1.0 / 2.6, 1.0)
