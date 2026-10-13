@@ -1609,6 +1609,11 @@ class Preprocessor:
         components: list[tuple[float, list[str]]] = []
         for story in story_levels:
             node_ids = [nid for nid in (story.node_ids or []) if nid in md.nodes]
+            # Exclude internal frame-end-offset nodes — rigid-link slaves of
+            # the real joint that must not be swept into a diaphragm (they
+            # would be constrained twice: once by the rigid link, once by the
+            # ``rigidDiaphragm`` MPC).
+            node_ids = [nid for nid in node_ids if not nid.endswith(("_off_i", "_off_j"))]
             if not node_ids:
                 continue
             z_mean = round(story.elevation, 4)

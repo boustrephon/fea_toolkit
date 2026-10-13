@@ -229,6 +229,30 @@ class TestPreprocessorRigidEndZones:
         )
         assert mesh.offset_rigid_links == []
 
+    def test_offset_nodes_excluded_from_storey_diaphragms(self):
+        """Offset nodes are not swept into storey-detected diaphragm groups.
+
+        ``rigid_diaphragms: True`` forces storey-based detection (Path B),
+        which clusters nodes by Z.  The column's offset node (z = 2 − 0.2 =
+        1.8) and the beam's offset node (z = 2.0) sit inside the top storey's
+        clustering band and would otherwise be swept into the diaphragm —
+        double-constraining rigid-link slaves.  They must be excluded.
+        """
+        mesh = preprocess_model(
+            _l_frame(),
+            {
+                "rigid_end_zones": True,
+                "rigid_offset_method": "beam",
+                "rigid_diaphragms": True,
+            },
+        )
+        all_ids = [nid for _z, ids in mesh.diaphragm_components for nid in ids]
+        # The real joints remain in the diaphragm groups…
+        assert "2" in all_ids
+        assert "3" in all_ids
+        # …but no internal offset node is swept in.
+        assert not any(nid.endswith(("_off_i", "_off_j")) for nid in all_ids)
+
 
 class TestBuilderRigidEndZones:
     """Analysis-level behaviour of the frame member rigid end zones."""

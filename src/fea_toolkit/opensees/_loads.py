@@ -1002,6 +1002,10 @@ class LoadMixin:
             for z in levels:
                 tags_at_z = []
                 for nid, nd in self.mesh_model.nodes.items():
+                    # Internal frame-end-offset nodes are rigid-link slaves of
+                    # the real joint — never sweep them into a diaphragm.
+                    if nid.endswith(("_off_i", "_off_j")):
+                        continue
                     if abs(nd.z - float(z)) > z_tol:
                         continue
                     try:

@@ -397,11 +397,12 @@ generalised as `local_to_global` / `global_to_local` in `model/geometry_core.py`
 `frame_end_offsets_global()` and unit-test the rotation; 2) ✅ emit
 `-jntOffset` in `ElementMixin._add_beam_column` (default), verifying `eleLoad`
 over the shortened flexible length `L` (pinned by
-`test_jnt_offset_eleload_over_flexible_length`); 3) keep the offset-node
-exclusion from diaphragm/BODY sweeps; 4) guard `rigid_link_mpc` to the
-`"mpc"` option; 5) extend the `typings/openseespy` `geomTransf` stub for
-PDelta/Corotational; 6) thread the same offsets through the GUI frame mesh and
-Rhino export.
+`test_jnt_offset_eleload_over_flexible_length`); 3) ✅ keep the offset-node
+exclusion from diaphragm/BODY sweeps (storey-detection components and the
+per-elevation fallback both skip `_off_i`/`_off_j` nodes); 4) guard
+`rigid_link_mpc` to the `"mpc"` option; 5) extend the
+`typings/openseespy` `geomTransf` stub for PDelta/Corotational; 6) thread the
+same offsets through the GUI frame mesh and Rhino export.
 
 ### Tier 3 — Feature gaps (placeholders / partial)
 
