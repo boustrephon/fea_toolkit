@@ -1572,6 +1572,7 @@ class SAP2000Parser:
         # bar sizes, area-section rebar material, and rebar-size diameters).
         column_reinf, beam_reinf, area_rebar_mat, rebar_diameters = self._get_reinf_tables()
         from ..model.sap_data import (
+            SHAPE_NAMES,
             AngleSection,
             BoxSection,
             ChannelSection,
@@ -1643,15 +1644,21 @@ class SAP2000Parser:
 
             sec_data: Section
 
+            # Unified dispatch via SHAPE_NAMES (single source of truth for
+            # the SAP2000/ETABS shape-name -> canonical-id mapping, §4.4).
+            # The concrete-vs-steel discriminator stays shape-string based
+            # ("Concrete Rectangular" / "Concrete Circular" / "Concrete Circle").
+            canonical = SHAPE_NAMES.get(shape)
+
             if shape == "Shell":
                 sec_data = ShellSection(**common, thickness=float(sec.get("thickness", 0)))
-            elif shape in ("I/Wide Flange", "WIDE FLANGE", "Steel I/Wide Flange"):
+            elif canonical == "I":
                 sec_data = ISection(**common, depth=t3, bf=t2, tf=tf_val, tw=tw_val)
-            elif shape in ("Channel", "CHANNEL", "Steel Channel", "Concrete Channel"):
+            elif canonical == "CH":
                 sec_data = ChannelSection(**common, depth=t3, bf=t2, tf=tf_val, tw=tw_val)
-            elif shape in ("Angle", "Steel Angle", "Concrete Angle"):
+            elif canonical == "A":
                 sec_data = AngleSection(**common, depth=t3, bf=t2, tf=tf_val, tw=tw_val)
-            elif shape in ("Double Angle", "Steel Double Angle", "Concrete Double Angle"):
+            elif canonical == "AA":
                 sec_data = DoubleAngleSection(
                     **common,
                     depth=t3,
@@ -1660,22 +1667,15 @@ class SAP2000Parser:
                     tw=tw_val,
                     dis=float(sec.get("DIS", 0)),
                 )
-            elif shape == "Tee":
+            elif canonical == "T":
                 sec_data = TeeSection(**common, depth=t3, bf=t2, tf=tf_val, tw=tw_val)
-            elif shape in ("Pipe", "PIPE", "Steel Pipe", "Concrete Pipe", "Filled Steel Pipe"):
+            elif canonical == "CHS":
                 sec_data = PipeSection(**common, od=t3, t=tw_val)
-            elif shape in (
-                "Box/Tube",
-                "Steel Tube",
-                "Concrete Tube",
-                "Tube",
-                "TUBE",
-                "Filled Steel Tube",
-            ):
+            elif canonical == "RHS":
                 sec_data = BoxSection(**common, depth=t3, bf=t2, tf=tf_val, tw=tw_val)
-            elif shape in ("Rectangular", "Rectangle", "RECTANGLE", "Steel Plate"):
+            elif canonical == "R" and shape != "Concrete Rectangular":
                 sec_data = RectangularSection(**common, depth=t3, bf=t2)
-            elif shape == "Concrete Rectangular":
+            elif canonical == "R":
                 _reinf = column_reinf.get(name) or beam_reinf.get(name) or {}
                 _bar_id = (
                     _reinf.get("bar_size_along3")
@@ -1705,14 +1705,7 @@ class SAP2000Parser:
                     tie_spacing=_reinf.get("tie_spacing"),
                     tie_rebar_mat=_reinf.get("tie_rebar_mat"),
                 )
-            elif shape in (
-                "Circle",
-                "CIRCLE",
-                "Steel Rod",
-                "Steel Circle",
-                "Concrete Circular",
-                "Concrete Circle",
-            ):
+            elif canonical == "C":
                 if shape in ("Concrete Circular", "Concrete Circle"):
                     _reinf = column_reinf.get(name) or beam_reinf.get(name) or {}
                     _bar_id = (
@@ -1737,7 +1730,7 @@ class SAP2000Parser:
                     )
                 else:
                     sec_data = CircularSection(**common, diameter=t3)
-            elif shape == "SD Section":
+            elif canonical == "SD":
                 sec_data = SDSection(**common)
             else:
                 sec_data = GeneralSection(**common)
