@@ -925,6 +925,14 @@ def _build_diaphragm_constraints(
             continue
         excluded = disconnected.get(storey, set())
         member_nodes = [nid for nid in node_ids if _split_id(nid)[0] not in excluded]
+        if rigidity == "RIGID" and len(member_nodes) < 2:
+            logger.warning(
+                "DIAPH %r at storey %r has fewer than two connected member nodes "
+                "after filtering disconnected points; skipping RIGID constraint.",
+                name,
+                storey,
+            )
+            continue
         cname = _compose_id(name, storey)
         constraints[cname] = Constraint(
             name=cname,

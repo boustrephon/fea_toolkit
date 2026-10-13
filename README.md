@@ -666,7 +666,8 @@ SAP2000/ETABS models use a variety of cross‑section shapes. The `Section` data
 | **`CircularSection`** | `Circle`, `Steel Rod`, `Concrete Circle` | `diameter` | ✅ 1 solid `circ` patch |
 | **`GeneralSection`** | `General`, `NA` | — | ❌ Requires a known shape |
 | **`SDSection`** | `SD Section` | `polygons` (multi‑material) | 🚧 Placeholder (needs meshing) |
-| **`EncasedSection`** | `Concrete Encasement Rectangle/Circle` | `embedded_section`, `encasement_depth/bf` | 🚧 Placeholder |
+| **`EncasedSection`** | `Concrete Encasement Rectangle/Circle` | `embedded_section`, `encasement_depth/bf` | ⚠️ Partial (encasement + embedded steel, steel counted twice) |
+| **`ConcreteFilledTubeSection`** | `Filled Steel Tube` | `depth`, `bf`, `tf`, `tw`, `fill_material` | ⚠️ Partial (steel tube + unconfined concrete core) |
 | **`ShellSection`** | `Shell` | `thickness` | ❌ Not applicable |
 
 All section classes inherit the common derived properties (`A`, `I33`, `I22`, `J`) directly from the SAP2000 text file, which includes pre‑computed values. The `to_fiber_patches()` method on each class generates OpenSees `patch('rect', …)` definitions for nonlinear fiber‑section analysis.

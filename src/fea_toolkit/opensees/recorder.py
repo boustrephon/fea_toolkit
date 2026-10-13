@@ -61,6 +61,76 @@ from ..utils import (
 )
 
 
+def _emit_fiber_role_material_tcl(
+    lines: list[str],
+    mesh_model: MeshModel,
+    sec,
+    role: str,
+    tag: int,
+    config: dict,
+    _ssf: float,
+) -> None:
+    """Append the ``uniaxialMaterial`` Tcl line for one fiber role.
+
+    Mirrors :meth:`AnalysisBuilder._create_fiber_role_material`: the role
+    fixes the OpenSees law, while :meth:`Section.fiber_role_material` resolves
+    the backing SAP2000 material.  Strengths/moduli authored in SI (Pa) fall
+    through the shared ``*_PA`` defaults scaled to model units.
+    """
+    mat_name = sec.fiber_role_material(role)
+    mat = mesh_model.materials.get(mat_name) if mat_name else None
+
+    if role == "steel":
+        if mat is not None and (mat.type or "").lower() == "steel":
+            Fy = mat.Fy if mat.Fy and mat.Fy > 0 else DEFAULT_FY_STEEL_PA * _ssf
+            E_mod = mat.E_mod if mat.E_mod and mat.E_mod > 0 else DEFAULT_E_S_PA * _ssf
+        else:
+            Fy = DEFAULT_FY_STEEL_PA * _ssf
+            E_mod = DEFAULT_E_S_PA * _ssf
+        lines.append(f"uniaxialMaterial Steel01 {tag} {Fy:g} {E_mod:g} 0.01")
+    elif role == "rebar":
+        Fy_rebar = config.get("rebar_Fy_override")
+        Es_rebar = config.get("rebar_Es_override")
+        if Fy_rebar is not None:
+            Fy_rebar = Fy_rebar * _ssf
+        if Es_rebar is not None:
+            Es_rebar = Es_rebar * _ssf
+        if (Fy_rebar is None or Es_rebar is None) and mat is not None:
+            rm_Fy = getattr(mat, "Fy", 0.0) or 0.0
+            rm_Es = getattr(mat, "E_mod", 0.0) or 0.0
+            if Fy_rebar is None and rm_Fy > 0:
+                Fy_rebar = rm_Fy
+            if Es_rebar is None and rm_Es > 0:
+                Es_rebar = rm_Es
+        if not Fy_rebar:
+            Fy_rebar = DEFAULT_FY_REBAR_PA * _ssf
+        if not Es_rebar:
+            Es_rebar = DEFAULT_E_S_PA * _ssf
+        lines.append(
+            f"uniaxialMaterial Steel02 {tag} {Fy_rebar:g} {Es_rebar:g} 0.01 18.5 0.925 0.15"
+        )
+    elif role == "concrete":
+        Fc = mat.Fc if (mat is not None and mat.Fc and mat.Fc > 0) else DEFAULT_FC_PA * _ssf
+        epsc = DEFAULT_EPS_C
+        lines.append(
+            f"uniaxialMaterial Concrete01 {tag} {-Fc:g} {-epsc:g} {-0.2 * Fc:g} {-0.006:g}"
+        )
+    elif role == "core":
+        Fc = mat.Fc if (mat is not None and mat.Fc and mat.Fc > 0) else DEFAULT_FC_PA * _ssf
+        epsc = DEFAULT_EPS_C
+        fcc = (
+            mat.eFc
+            if (mat is not None and mat.eFc and mat.eFc > 0)
+            else Fc * RC_NO_TIE_CONFINEMENT_FACTOR
+        )
+        epscc = epsc * RC_NO_TIE_EPSC_FACTOR
+        lines.append(
+            f"uniaxialMaterial Concrete01 {tag} {-fcc:g} {-epscc:g} {-0.2 * fcc:g} {-0.02:g}"
+        )
+    else:
+        raise ValueError(f"Unknown fiber material role {role!r} for section {sec.name!r}")
+
+
 def _py_val(v: Any) -> str:
     """Convert a Python value to a clean literal string for code generation.
 
@@ -646,12 +716,17 @@ def export_mesh_model_to_tcl(
             lines.append(f"fix {nd.node_tag} {tags}")
 
     # ── Determine which materials are used by fiber sections ────
-    # These will get nonlinear materials later — skip Elastic here.
+    # These will get nonlinear materials later — skip Elastic here.  Every
+    # role material (not just ``sec.material``) must be skipped so a composite
+    # section's steel + concrete + rebar materials don't get a dead Elastic
+    # duplicate emitted above the fiber block.
     _fiber_mat_names: set[str] = set()
     if config.get("create_fiber_sections", False):
         for sec_name, sec in mesh_model.sections.items():
-            if sec.fiber_roles():
-                _fiber_mat_names.add(sec.material)
+            for role in sec.fiber_roles():
+                mat_name = sec.fiber_role_material(role)
+                if mat_name:
+                    _fiber_mat_names.add(mat_name)
 
     lines.append('puts "-> Restraints created, defining materials..."')
     lines.append("flush stdout")
@@ -693,17 +768,12 @@ def export_mesh_model_to_tcl(
             _assigned_to_frames.add(sn)
 
     # ── Material-tag allocation counter (shared by sections + releases) ──
-    # _rc_mat_tags[(mat_name, rebar_mat_name)] =
-    #     (concrete_unconf, concrete_conf, rebar_tag)
-    # The cache is keyed by the concrete/rebar material pair so RC sections
-    # that share concrete but use different rebar grades receive distinct
-    # rebar tags, while identical pairs reuse the same three tags.
     # _next_mat_tag starts one past the highest pre-computed material tag and
-    # is advanced as nonlinear fiber materials are emitted, so it always points
-    # one past the highest material tag actually allocated.  The member-end
-    # release springs reuse it (see ``start_mat_tag`` below) so their Elastic
-    # tags cannot collide with any earlier ``uniaxialMaterial`` definition.
-    _rc_mat_tags: dict[tuple[str, Optional[str]], tuple[int, int, int]] = {}
+    # is advanced as nonlinear fiber materials are emitted (one fresh tag per
+    # role), so it always points one past the highest material tag actually
+    # allocated.  The member-end release springs reuse it (see
+    # ``start_mat_tag`` below) so their Elastic tags cannot collide with any
+    # earlier ``uniaxialMaterial`` definition.
     _next_mat_tag = max(mat_tags.values(), default=0) + 1
 
     lines.append('puts "-> Materials defined, creating frame sections..."')
@@ -732,132 +802,20 @@ def export_mesh_model_to_tcl(
                 # ── Fiber section ──
                 mat = mesh_model.materials.get(sec.material)
 
-                from ..model.sap_data import (
-                    ConcreteCircularSection,
-                    ConcreteRectangularSection,
-                    RectangularSection,
-                )
-
-                is_rc = isinstance(
-                    sec,
-                    (
-                        ConcreteRectangularSection,
-                        ConcreteCircularSection,
-                        RectangularSection,
-                    ),
-                )
-
-                if is_rc:
-                    # Emit RC fiber materials ONCE per (material, rebar) pair,
-                    # not per section - so sections sharing concrete but using
-                    # different rebar grades get distinct rebar tags, while
-                    # identical pairs reuse the same three tags.
-                    _rc_key = (sec.material, getattr(sec, "rebar_material", None))
-                    if _rc_key not in _rc_mat_tags:
-                        concrete_unconf = _next_mat_tag
-                        concrete_conf = _next_mat_tag + 1
-                        rebar_tag = _next_mat_tag + 2
-                        _next_mat_tag += 3
-                        _rc_mat_tags[_rc_key] = (concrete_unconf, concrete_conf, rebar_tag)
-
-                        # Concrete fallback strengths are authored in SI
-                        # (Pa) and scaled to model units via _ssf — never
-                        # hand-converted literals (see the material-
-                        # property convention in .clinerules §4.6).
-                        _ssf = stress_scale_factor(mesh_model.units)
-                        _fc_pa = DEFAULT_FC_PA * _ssf
-                        # No-tie-data confined-core heuristic — use the
-                        # shared RC_NO_TIE_* factors (same as builder.py
-                        # and AnalysisBuilder) so all Tcl/OpenSees paths
-                        # emit identical Concrete01 parameters.
-                        if mat is not None:
-                            Fc = mat.Fc if mat.Fc and mat.Fc > 0 else _fc_pa
-                            epsc = DEFAULT_EPS_C
-                            fcc = (
-                                mat.eFc
-                                if mat.eFc and mat.eFc > 0
-                                else Fc * RC_NO_TIE_CONFINEMENT_FACTOR
-                            )
-                            epscc = epsc * RC_NO_TIE_EPSC_FACTOR
-                        else:
-                            Fc = _fc_pa
-                            epsc = DEFAULT_EPS_C
-                            fcc = RC_NO_TIE_CONFINEMENT_FACTOR * _fc_pa
-                            epscc = epsc * RC_NO_TIE_EPSC_FACTOR
-
-                        # ── Rebar material (Steel02) ──────────────────
-                        # Priority: config override (Pa, scaled to model
-                        # units) → section.rebar_material lookup (model
-                        # units, used as-is) → framework defaults (Pa,
-                        # scaled to model units).
-                        Fy_rebar = config.get("rebar_Fy_override")
-                        Es_rebar = config.get("rebar_Es_override")
-                        if Fy_rebar is not None:
-                            Fy_rebar = Fy_rebar * _ssf
-                        if Es_rebar is not None:
-                            Es_rebar = Es_rebar * _ssf
-                        if Fy_rebar is None or Es_rebar is None:
-                            rebar_mat = None
-                            rm_name = getattr(sec, "rebar_material", None)
-                            if rm_name:
-                                rebar_mat = mesh_model.materials.get(rm_name)
-                            if rebar_mat is not None:
-                                rm_Fy = getattr(rebar_mat, "Fy", 0.0) or 0.0
-                                rm_Es = getattr(rebar_mat, "E_mod", 0.0) or 0.0
-                                if Fy_rebar is None and rm_Fy > 0:
-                                    Fy_rebar = rm_Fy
-                                if Es_rebar is None and rm_Es > 0:
-                                    Es_rebar = rm_Es
-                        if not Fy_rebar:
-                            Fy_rebar = DEFAULT_FY_REBAR_PA * _ssf
-                        if not Es_rebar:
-                            Es_rebar = DEFAULT_E_S_PA * _ssf
-
-                        lines.append(
-                            f"uniaxialMaterial Concrete01 {concrete_unconf} "
-                            f"{-Fc:g} {-epsc:g} {-0.2 * Fc:g} {-0.006:g}"
-                        )
-                        lines.append(
-                            f"uniaxialMaterial Concrete01 {concrete_conf} "
-                            f"{-fcc:g} {-epscc:g} {-0.2 * fcc:g} {-0.02:g}"
-                        )
-                        lines.append(
-                            f"uniaxialMaterial Steel02 {rebar_tag} "
-                            f"{Fy_rebar:g} {Es_rebar:g} 0.01 18.5 0.925 0.15"
-                        )
-                    else:
-                        concrete_unconf, concrete_conf, rebar_tag = _rc_mat_tags[_rc_key]
-                    fiber_mat_tag = concrete_unconf
-                else:
-                    # Steel fiber section — emit Steel01 if not already done
-                    _steel_key = (sec.material, getattr(sec, "rebar_material", None))
-                    if _steel_key not in _rc_mat_tags:
-                        tag_for_steel = mat_tags.get(sec.material, 1)
-                        _rc_mat_tags[_steel_key] = (tag_for_steel, 0, 0)
-                        if (
-                            mat is not None
-                            and hasattr(mat, "type")
-                            and mat.type
-                            and mat.type.lower() == "steel"
-                        ):
-                            Fy = (
-                                mat.Fy
-                                if mat.Fy and mat.Fy > 0
-                                else DEFAULT_FY_STEEL_PA * _stress_factor
-                            )
-                            E_mod = mat.E_mod if mat.E_mod > 0 else DEFAULT_E_S_PA * _stress_factor
-                        else:
-                            Fy = DEFAULT_FY_STEEL_PA * _stress_factor
-                            E_mod = DEFAULT_E_S_PA * _stress_factor
-                        lines.append(
-                            f"uniaxialMaterial Steel01 {tag_for_steel} {Fy:g} {E_mod:g} 0.01"
-                        )
-                    fiber_mat_tag = mat_tags.get(sec.material, 1)
-
+                # Allocate a fresh material tag per role and emit each role's
+                # law, resolving the backing material via
+                # Section.fiber_role_material().
+                roles = sec.fiber_roles()
+                _ssf = stress_scale_factor(mesh_model.units)
+                role_tags: dict[str, int] = {}
+                for role in roles:
+                    role_tags[role] = _next_mat_tag
+                    _next_mat_tag += 1
+                    _emit_fiber_role_material_tcl(
+                        lines, mesh_model, sec, role, role_tags[role], config, _ssf
+                    )
                 # Build fiber patches
-                patches = sec.to_fiber_patches(
-                    materials={role: fiber_mat_tag + i for i, role in enumerate(sec.fiber_roles())}
-                )
+                patches = sec.to_fiber_patches(materials=role_tags)
                 # GJ torsional rigidity for 3D fiber sections (Xara requirement)
                 _E_mod = mat.E_mod if mat and mat.E_mod is not None and mat.E_mod > 0 else 2.0e11
                 _G = mat.G_mod if mat and mat.G_mod and mat.G_mod > 0 else 0.4 * _E_mod

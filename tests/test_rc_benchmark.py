@@ -83,6 +83,7 @@ from fea_toolkit.model.sap_data import (
     Node,
     Restraint,
     SAPModelData,
+    StressStrainCurve,
 )
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 from fea_toolkit.opensees.preprocessor import preprocess_model
@@ -130,7 +131,9 @@ def make_vecchio_emara_frame() -> SAPModelData:
             nu=0.2,
             unit_weight=24.0,
             Fc=30.0e3,  # kPa (30 MPa)
-            eFc=1.85e-3,  # strain at peak stress
+            # Peak strain lives on the stress-strain curve (``s_fc``), not on
+            # ``eFc`` (which is the confined *strength* in Pa, not a strain).
+            ss_curve=StressStrainCurve(s_fc=1.85e-3),  # strain at peak stress
         ),
         "RebarL": Material(
             name="RebarL",

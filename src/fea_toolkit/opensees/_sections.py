@@ -7,6 +7,7 @@ import openseespy.opensees as ops
 
 from ..utils import (
     DEFAULT_E_S_PA,
+    DEFAULT_EPS_C,
     DEFAULT_FC_PA,
     DEFAULT_FSAM_CONC_FT_PA,
     DEFAULT_FY_REBAR_PA,
@@ -17,6 +18,24 @@ from ..utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_concrete_epsc(mat) -> float:
+    """Return the concrete peak strain (positive magnitude) for a material.
+
+    ``Material.eFc`` is a *confined compressive strength* (Pa), not a strain,
+    so it is never used as the peak strain.  The stress-strain curve's ``s_fc``
+    (strain at peak ``fc'``) is used when present and within a plausible range;
+    otherwise :data:`DEFAULT_EPS_C` (0.002) applies.
+    """
+    if mat is not None and mat.ss_curve is not None and mat.ss_curve.s_fc is not None:
+        try:
+            s_fc = float(mat.ss_curve.s_fc)
+        except (TypeError, ValueError):
+            s_fc = 0.0
+        if 0.0 < s_fc <= 0.01:
+            return s_fc
+    return DEFAULT_EPS_C
 
 
 class SectionMixin:
@@ -351,8 +370,7 @@ class SectionMixin:
         elif role == "concrete":
             Fc = getattr(mat, "Fc", 0.0) if mat is not None else 0.0
             Fc = Fc or DEFAULT_FC_PA * ssf
-            epsc = getattr(mat, "eFc", 0.0) if mat is not None else 0.0
-            epsc = epsc or 0.002
+            epsc = _resolve_concrete_epsc(mat)
             self._emit_fiber_concrete(
                 tag,
                 Fc,
@@ -366,8 +384,7 @@ class SectionMixin:
             # RC_NO_TIE_EPSC_FACTOR, same as builder.py's Tcl export).
             Fc = getattr(mat, "Fc", 0.0) if mat is not None else 0.0
             Fc = Fc or DEFAULT_FC_PA * ssf
-            epsc = getattr(mat, "eFc", 0.0) if mat is not None else 0.0
-            epsc = epsc or 0.002
+            epsc = _resolve_concrete_epsc(mat)
             Fc_core = Fc * RC_NO_TIE_CONFINEMENT_FACTOR
             epsc_core = abs(epsc) * RC_NO_TIE_EPSC_FACTOR
             ecu_core = 0.02
