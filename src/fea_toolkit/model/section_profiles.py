@@ -23,6 +23,8 @@ from .sap_data import (
     BoxSection,
     ChannelSection,
     CircularSection,
+    ConcreteCircularSection,
+    ConcreteRectangularSection,
     ISection,
     PipeSection,
     RectangularSection,
@@ -178,10 +180,10 @@ def section_profile_outline(section: Union[Section, Any]) -> Optional[ProfileOut
     is_circle = False
     radius = 0.0
 
-    if isinstance(section, RectangularSection):
+    if isinstance(section, (RectangularSection, ConcreteRectangularSection)):
         if section.depth > 0 and section.bf > 0:
             pts_2d = profile_rect(section.depth, section.bf)
-    elif isinstance(section, CircularSection):
+    elif isinstance(section, (CircularSection, ConcreteCircularSection)):
         is_circle = True
         radius = section.diameter / 2.0
     elif isinstance(section, ISection):
@@ -265,13 +267,13 @@ def section_plates(
     Returns:
         A list of open polylines, each a list of ``(x, y)`` points.
     """
-    if isinstance(section, RectangularSection):
+    if isinstance(section, (RectangularSection, ConcreteRectangularSection)):
         if section.depth <= 0 or section.bf <= 0:
             return _zero_dimension_plates(section)
         return _rect_sides(section.depth / 2.0, section.bf / 2.0)
 
-    if isinstance(section, (CircularSection, PipeSection)):
-        if isinstance(section, CircularSection):
+    if isinstance(section, (CircularSection, ConcreteCircularSection, PipeSection)):
+        if isinstance(section, (CircularSection, ConcreteCircularSection)):
             radius = section.diameter / 2.0
         else:
             radius = section.od / 2.0

@@ -91,11 +91,35 @@ class TestSectionProfileOutline:
         assert kind == "polygon"
         assert len(pts) == 4
 
+    def test_concrete_rectangular_section_is_a_rectangle(self):
+        from fea_toolkit.model.sap_data import ConcreteRectangularSection
+        from fea_toolkit.model.section_profiles import section_profile_outline
+
+        sec = ConcreteRectangularSection("CB", "Rectangular", "CONC", depth=0.4, bf=0.2)
+        kind, pts = section_profile_outline(sec)
+        assert kind == "polygon"
+        assert len(pts) == 4
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        # Depth 0.4 on the y axis, breadth 0.2 on the x axis — a rectangle, not
+        # the sqrt(A) square the zero-dimension fallback would produce.
+        assert max(xs) == 0.1 and min(xs) == -0.1
+        assert max(ys) == 0.2 and min(ys) == -0.2
+
     def test_circular_section_is_a_circle(self):
         from fea_toolkit.model.sap_data import CircularSection
         from fea_toolkit.model.section_profiles import section_profile_outline
 
         sec = CircularSection("C", "Circle", "C30", diameter=0.3)
+        kind, radius = section_profile_outline(sec)
+        assert kind == "circle"
+        assert radius == 0.15
+
+    def test_concrete_circular_section_is_a_circle(self):
+        from fea_toolkit.model.sap_data import ConcreteCircularSection
+        from fea_toolkit.model.section_profiles import section_profile_outline
+
+        sec = ConcreteCircularSection("CC", "Concrete Circular", "CONC", diameter=0.3)
         kind, radius = section_profile_outline(sec)
         assert kind == "circle"
         assert radius == 0.15
@@ -153,6 +177,19 @@ class TestSectionPlates:
         plates = section_plates(sec)
         assert len(plates) == 4
         assert all(len(poly) == 2 for poly in plates)
+
+    def test_concrete_rect_is_four_open_sides(self):
+        from fea_toolkit.model.sap_data import ConcreteRectangularSection
+        from fea_toolkit.model.section_profiles import section_plates
+
+        sec = ConcreteRectangularSection("CB", "Rectangular", "CONC", depth=0.4, bf=0.2)
+        plates = section_plates(sec)
+        assert len(plates) == 4
+        assert all(len(poly) == 2 for poly in plates)
+        xs = [p[0] for poly in plates for p in poly]
+        ys = [p[1] for poly in plates for p in poly]
+        assert max(xs) == 0.1 and min(xs) == -0.1  # breadth 0.2
+        assert max(ys) == 0.2 and min(ys) == -0.2  # depth 0.4
 
     def test_circular_sections_are_one_open_tube(self):
         from fea_toolkit.model.sap_data import CircularSection, PipeSection
