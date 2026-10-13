@@ -6,6 +6,7 @@ and :mod:`fea_toolkit.io.results_schema`).
 Modules
 -------
 s2k_parser — Parse SAP2000 .S2K / .$2K text files into SAPModelData.
+e2k_parser — Parse ETABS .E2K / .$ET text files into SAPModelData.
 table_registry — SAP2000 table-coverage registry + unhandled-table detection.
 npz_writer — Serialise analysis results to NPZ archives.
 npz_reader — Deserialise NPZ archives and convert to PyVista meshes.
@@ -20,6 +21,7 @@ helper — File-chooser dialogs (tkinter / macOS native).
 
 from ._serial import collect_geometry_arrays
 from .combination_set import read_combination_set, write_combination_set
+from .e2k_parser import ETABSParser
 from .ground_motion import (
     baseline_correct,
     read_peer_record,
@@ -124,6 +126,7 @@ __all__ = [
     "GEOMETRY_ARRAY_KEYS",
     "SCHEMA_VERSION",
     "SCHEMA_VERSION_LEGACY",
+    "ETABSParser",
     "InMemoryModelStore",
     "ModelHeader",
     "ModelStore",

@@ -885,11 +885,11 @@ def review_s2k_file(
     brace_k: float = 1.0,
     export_npz: Optional[Any] = None,
 ) -> dict[str, Any]:
-    """Parse a ``.s2k`` file and run the full review on it.
+    """Parse a ``.s2k`` / ``.e2k`` file and run the full review on it.
 
     Args:
-        path: Path to the ``.s2k`` / ``.$2k`` file (ETABS ``.e2k`` / ``.$et``
-            is planned, not yet supported).
+        path: Path to the ``.s2k`` / ``.$2k`` or ETABS ``.e2k`` / ``.$et``
+            text export.
         tol: Forwarded to :func:`review_model`.
         include_analysis: Forwarded to :func:`review_model`.
         analysis_config: Forwarded to :func:`review_model`.
@@ -901,16 +901,24 @@ def review_s2k_file(
     Returns:
         The review result dict (see :func:`review_model`).
     """
-    from ..io.s2k_parser import SAP2000Parser
-
     source = Path(path)
-    parser = SAP2000Parser(source)
-    parser.parse()
+    if source.suffix.lower() in (".e2k", ".$et"):
+        from ..io.e2k_parser import ETABSParser
+
+        parser = ETABSParser(source)
+        parser.parse()
+        raw_tables: Optional[dict[str, Any]] = None
+    else:
+        from ..io.s2k_parser import SAP2000Parser
+
+        parser = SAP2000Parser(source)
+        parser.parse()
+        raw_tables = parser.raw_tables
     md = parser.get_model_data()
     return review_model(
         md,
         file=source,
-        raw_tables=parser.raw_tables,
+        raw_tables=raw_tables,
         tol=tol,
         include_analysis=include_analysis,
         analysis_config=analysis_config,
@@ -2226,11 +2234,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     """
     parser = argparse.ArgumentParser(
         prog="fea_toolkit.model.review",
-        description="Review and check a SAP2000 .s2k model file.",
+        description="Review and check a SAP2000 / ETABS model file.",
     )
     parser.add_argument(
         "path",
-        help="Path to the .s2k / .$2k file to review (ETABS .e2k / .$et planned, not yet supported).",
+        help="Path to the .s2k / .$2k / .e2k / .$et file to review.",
     )
     parser.add_argument(
         "--analysis",

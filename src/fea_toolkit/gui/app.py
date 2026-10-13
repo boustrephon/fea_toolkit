@@ -3,7 +3,7 @@
 Usage::
 
     fea-gui                    # opens a small built-in demo frame
-    fea-gui path/to/model.s2k  # opens a SAP2000 model file
+    fea-gui path/to/model.s2k  # opens a SAP2000 / ETABS model file
 
 Milestone 1 scope was launch-and-render: the window embeds a PyVista viewport
 and shows geometry.  The window itself (chrome, lazy Model Tree, inspector,
@@ -161,10 +161,10 @@ def _demo_model():
 
 
 def _load_model(path: str):
-    """Parse a SAP2000 model file into ``SAPModelData``."""
-    from ..io.s2k_parser import SAP2000Parser
+    """Parse a SAP2000 / ETABS model file into ``SAPModelData``."""
+    from ..io.model_loader import load_model_data
 
-    return SAP2000Parser(path).parse().get_model_data()
+    return load_model_data(path)
 
 
 def main(argv: Optional[list] = None) -> int:

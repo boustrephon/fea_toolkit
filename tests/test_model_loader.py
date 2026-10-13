@@ -1,8 +1,8 @@
 """Tests for ``fea_toolkit.io.model_loader`` — model-file dispatch.
 
-Covers the three recognised inputs (SAP2000 text, raw-table JSON, model-codec
-JSON), the validation that makes an unrecognised payload a loud error rather
-than a silently empty model, and the package-level export.
+Covers the four recognised inputs (SAP2000 text, ETABS text, raw-table JSON,
+model-codec JSON), the validation that makes an unrecognised payload a loud
+error rather than a silently empty model, and the package-level export.
 """
 
 import json
@@ -68,12 +68,17 @@ def _mesh_snapshot():
 
 
 class TestTextAndTableInputs:
-    """The SAP2000 text export and the parser's raw-table JSON cache."""
+    """The SAP2000 / ETABS text exports and the parser's raw-table JSON cache."""
 
     def test_s2k_text_export(self):
         md = load_model_data(FIXTURES / "clean_model.s2k")
         assert isinstance(md, SAPModelData)
         assert md.nodes and md.frame_elements
+
+    def test_e2k_text_export(self):
+        md = load_model_data(FIXTURES / "clean_model.e2k")
+        assert isinstance(md, SAPModelData)
+        assert md.nodes and md.frame_elements and md.area_elements
 
     def test_raw_table_json_cache(self):
         """A ``SAP2000Parser.to_json()`` cache rebuilds the same model."""

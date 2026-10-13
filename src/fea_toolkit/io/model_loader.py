@@ -1,10 +1,12 @@
 """Load a model from any supported on-disk representation.
 
-Three inputs are recognised, all producing the object a ``.s2k`` parse would
+Four inputs are recognised, all producing the object a ``.s2k`` parse would
 (so every downstream consumer — viewer, review, preprocessing — behaves
 identically):
 
 * **``.s2k`` / ``.$2k``** — the SAP2000 text export, parsed directly.
+* **``.e2k`` / ``.$et``** — the ETABS text export, parsed by the sibling
+  :class:`~fea_toolkit.io.e2k_parser.ETABSParser`.
 * **Raw-table JSON** — as written by
   :meth:`~fea_toolkit.io.s2k_parser.SAP2000Parser.to_json`: the parsed
   tables are restored and the model rebuilt exactly as from text.
@@ -29,21 +31,26 @@ from typing import Union
 
 from ..model.mesh_model import MeshModel
 from ..model.sap_data import SAPModelData
+from .e2k_parser import ETABSParser
 from .s2k_parser import SAP2000Parser
 
 #: Suffixes routed to the SAP2000 text parser.
 TEXT_SUFFIXES: tuple[str, ...] = (".s2k", ".$2k")
+
+#: Suffixes routed to the ETABS text parser.
+ETABS_SUFFIXES: tuple[str, ...] = (".e2k", ".$et")
 
 #: Top-level marker keys identifying a model-codec payload.
 CODEC_MARKER_KEYS: tuple[str, ...] = ("__schema_version__", "__type__")
 
 
 def load_model_data(path: Union[str, Path]) -> Union[SAPModelData, MeshModel]:
-    """Load a model from a ``.s2k``, raw-table JSON or model-codec JSON file.
+    """Load a model from a ``.s2k``, ``.e2k``, raw-table JSON or model-codec JSON file.
 
     Args:
         path: Path to the model file.  Recognised forms are the SAP2000 text
-            export (``.s2k`` / ``.$2k``), a raw-table cache written by
+            export (``.s2k`` / ``.$2k``), the ETABS text export (``.e2k`` /
+            ``.$et``), a raw-table cache written by
             :meth:`~fea_toolkit.io.s2k_parser.SAP2000Parser.to_json`, and a
             model-codec snapshot written by
             :func:`~fea_toolkit.io.model_codec.model_to_json`.
@@ -72,10 +79,16 @@ def load_model_data(path: Union[str, Path]) -> Union[SAPModelData, MeshModel]:
         parser.parse()
         return parser.get_model_data()
 
+    if suffix in ETABS_SUFFIXES:
+        parser = ETABSParser(path)
+        parser.parse()
+        return parser.get_model_data()
+
     if suffix != ".json":
         raise ValueError(
             f"unsupported model file {path.name!r}: expected a SAP2000 text export "
-            f"({' / '.join(TEXT_SUFFIXES)}) or a parsed-model .json"
+            f"({' / '.join(TEXT_SUFFIXES)}), an ETABS text export "
+            f"({' / '.join(ETABS_SUFFIXES)}) or a parsed-model .json"
         )
 
     try:

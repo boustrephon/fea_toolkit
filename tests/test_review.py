@@ -466,6 +466,12 @@ class TestReviewS2kFileAndCli:
         assert result["inventory"]["nodes"] == 28
         assert str(result["file"]).endswith("sample.s2k")
 
+    def test_review_e2k_file(self):
+        result = review_s2k_file(FIXTURES_DIR / "clean_model.e2k")
+        assert result["ok"] is True
+        assert result["inventory"]["nodes"] == 6
+        assert str(result["file"]).endswith("clean_model.e2k")
+
     def test_cli_clean_exit_code(self, capsys):
         code = main([str(FIXTURES_DIR / "sample.s2k")])
         out = capsys.readouterr().out

@@ -703,7 +703,7 @@ class MainWindow(QMainWindow):
 
         # ── Live in M2 ──
         a["file.open"] = self._real_action(
-            "Open", self._on_open, shortcut="Ctrl+O", tip="Open a SAP2000 .s2k or JSON model"
+            "Open", self._on_open, shortcut="Ctrl+O", tip="Open a SAP2000 / ETABS model"
         )
         a["file.open_results"] = self._real_action(
             "Open results\u2026",
@@ -3267,7 +3267,7 @@ class MainWindow(QMainWindow):
             self,
             "Open model",
             "",
-            "SAP2000 model (*.s2k *.json);;All files (*)",
+            "Structural model (*.s2k *.e2k *.json);;All files (*)",
         )
         if path and not self.open_path(path):
             QMessageBox.critical(
@@ -3780,11 +3780,11 @@ class MainWindow(QMainWindow):
 
         Dialog-free so tests can drive it directly.
         """
-        from ..io.s2k_parser import SAP2000Parser
+        from ..io.model_loader import load_model_data
 
         self.log(f"Opening {path} \u2026")
         try:
-            model = SAP2000Parser(path).parse().get_model_data()
+            model = load_model_data(path)
         except Exception as exc:
             self.log(f"Failed to open {path}: {exc}", "error")
             return False
