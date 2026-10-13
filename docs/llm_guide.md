@@ -54,9 +54,8 @@ builder = AnalysisBuilder(mesh, {}).build_domain()
 
 ```
 "Parse a SAP2000 model"              → SAP2000Parser(path).parse().get_model_data()
-"Parse an ETABS model"               → NOT YET SUPPORTED: parser reads SAP2000
-                                       text exports only (.s2k / .$2k); ETABS
-                                       (.e2k / .$et) parsing is still to come
+"Parse an ETABS model"               → ETABSParser(path).parse().get_model_data()
+"Parse any text model"               → load_model_data(path)  # .s2k / .$2k / .e2k / .$et / .json
 "Cache parsed data to JSON"          → parser.to_json(path)   # raw tables, not the model
 "Load JSON cache"                    → parser.from_json(path)
 "Serialize the model object itself"  → model_to_json(md) / json_to_model(payload, cls=SAPModelData)

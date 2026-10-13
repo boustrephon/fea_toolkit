@@ -12,8 +12,8 @@ visualisation and Grasshopper workflows.
 
 The goal is to create a Python package `fea_toolkit` that:
 
-- Parses SAP2000 `.s2k` text files into a common
-  intermediate data model (`SAPModelData`); ETABS (`.e2k` / `.$et`) parsing is not yet supported.
+- Parses SAP2000 `.s2k` and ETABS `.e2k` / `.$et` text files into a common
+  intermediate data model (`SAPModelData`).
 - Enriches section properties using a manufacturer database.
 - Splits frame elements at joints (and optionally at frame intersections)
   with parent‑child tracking.
@@ -298,6 +298,7 @@ parsing through analysis to visualisation and reporting.
 | Workflow | Entry point | What it does |
 |---|---|---|
 | **Parse SAP2000 `.s2k`** | `SAP2000Parser.parse()` → `get_model_data()` | Read SAP2000 text export into structured model data |
+| **Parse ETABS `.e2k`** | `ETABSParser.parse()` → `get_model_data()` | Read ETABS text export into structured model data |
 | **Save/load JSON cache** | `.to_json()` / `.from_json()` | Serialise raw parsed tables for reuse without re-parsing |
 | **Enrich from catalogue** | `SectionLibrary.enrich_section()` | Populate section dimensions from a manufacturer database |
 
@@ -732,12 +733,12 @@ that section.
 1. **Frame‑Frame Intersection Splitting** ✅  
    - `AtFrames=True` splitting at frame-frame intersections is implemented (`model/geometry_frames.py` `split_elements()`), parser-wired (`FRAME AUTO MESH ASSIGNMENTS` → `SAPModelData.frame_auto_mesh`), and unit-tested (`TestSplitElementsAtFrames` + parser round-trip tests).  
 
-2. **ETABS `.E2K` / `.$ET` input**  
-   - 🚧 Placeholder — the text-parser path reads SAP2000 text exports
-     (`.s2k` / `.$2k`) only; `SAP2000Parser.from_json()` reads JSON caches.
-     No ETABS-specific handling exists — see `io/s2k_parser.py`.  
-   - Planned: read a full `.e2k` / `.$et` export end-to-end and add ETABS-specific
-     load-nomenclature mapping if needed.
+2. **ETABS `.E2K` / `.$ET` input** ✅  
+   - `ETABSParser` (`io/e2k_parser.py`) reads a full `.e2k` / `.$et` export
+     end-to-end (geometry, sections, materials, restraints, loads and
+     combinations) into the same `SAPModelData`, and is wired through
+     `load_model_data()`, the review CLI, the GUI file dialog and the examples.
+     See `docs/e2k_import_plan.md`.
 
 3. **Load Combinations and Analysis Types**  
    - ~~`MassSource`~~ ✅ Parsed by `_get_mass_sources()` and stored in `SAPModelData.mass_sources`.  

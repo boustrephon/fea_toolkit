@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Example: Parse a SAP2000 .S2K file, enrich sections, and print summary.
+"""Example: Parse a SAP2000 .S2K / ETABS .E2K file, enrich sections, and print summary.
 
 Run this script from the project root (where the 'fea_toolkit/' folder lives):
 
@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))  # project root
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from fea_toolkit import __version__, ops_version
+from fea_toolkit.io.e2k_parser import ETABSParser
 from fea_toolkit.io.helper import mac_file_chooser, tkinter_file_chooser
 from fea_toolkit.io.s2k_parser import SAP2000Parser
 from fea_toolkit.model.sections import SectionLibrary
@@ -44,16 +45,14 @@ print(f"FEA Toolkit Version: {__version__}")
 print(f"OpenSees Version: {ops_version()}")
 
 
-#: Extensions the example can read: SAP2000 text exports, plus the
-#: raw-table JSON caches written by ``SAP2000Parser.to_json()``.  ETABS
-#: (``.e2k`` / ``.$et``) is deliberately omitted — the parser cannot read
-#: it yet, and offering it would yield a silently empty model.
-MODEL_FILE_TYPES = ("s2k", "S2K", "$2k", "json", "JSON")
+#: Extensions the example can read: SAP2000 / ETABS text exports, plus the
+#: raw-table JSON caches written by ``SAP2000Parser.to_json()``.
+MODEL_FILE_TYPES = ("s2k", "S2K", "$2k", "e2k", "E2K", "$et", "json", "JSON")
 
 
 def pick_file() -> Path:
     """Open a native file chooser dialog appropriate for the platform."""
-    prompt = "Select a SAP2000 model file"
+    prompt = "Select a SAP2000 / ETABS model file"
     if os_name == "Darwin" and architecture == "arm64":
         path = mac_file_chooser(file_types=MODEL_FILE_TYPES, prompt=prompt)
     else:
@@ -65,13 +64,13 @@ def pick_file() -> Path:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Parse a SAP2000 .s2k / .$2k / .json file and optionally run an OpenSees analysis. ETABS .e2k / .$et input is planned, not yet supported.",
+        description="Parse a SAP2000 .s2k / .$2k / .json or ETABS .e2k / .$et file and optionally run an OpenSees analysis.",
     )
     parser.add_argument(
         "s2k_file",
         nargs="?",
         default=None,
-        help="Path to the SAP2000 file (.s2k, .$2k, .json); ETABS (.e2k, .$et) planned, not yet supported.",
+        help="Path to the model file (.s2k, .$2k, .json, .e2k, .$et).",
     )
     parser.add_argument(
         "--sample",
@@ -113,14 +112,15 @@ def main():
         return
 
     # Load the model.  A .json input is a raw-table cache and must be read
-    # with from_json(); anything else is parsed as a SAP2000 text export.
+    # with from_json(); .e2k / .$et are parsed by the ETABS parser; anything
+    # else is parsed as a SAP2000 text export.
     if s2k_file.suffix.lower() == ".json":
         print(f"\nLoading JSON cache: {s2k_file}")
         parser = SAP2000Parser.from_json(s2k_file)
     elif s2k_file.suffix.lower() in (".e2k", ".$et"):
-        # ETABS text exports are not implemented by the parser yet — reject
-        # them up front rather than silently parsing an empty model.
-        sys.exit(f"Error: ETABS (.e2k / .$et) input is not yet supported — {s2k_file}")
+        print(f"\nParsing ETABS file: {s2k_file}")
+        parser = ETABSParser(s2k_file, section_db_path=section_db_path)
+        parser.parse()
     else:
         if s2k_file.suffix.lower() not in (".s2k", ".$2k"):
             print(

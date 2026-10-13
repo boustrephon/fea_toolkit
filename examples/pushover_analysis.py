@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))  # project root
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from fea_toolkit import __version__, ops_version
-from fea_toolkit.io.s2k_parser import SAP2000Parser
+from fea_toolkit.io import load_model_data
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 from fea_toolkit.opensees.preprocessor import preprocess_model
 from fea_toolkit.plotting import (
@@ -43,7 +43,7 @@ def main():
     parser.add_argument(
         "s2k_file",
         nargs="?",
-        help="Path to the SAP2000 text file (.s2k, .$2k); ETABS (.e2k, .$et) planned, not yet supported. Omit when using --sample.",
+        help="Path to the model text file (.s2k, .$2k, .e2k, .$et). Omit when using --sample.",
     )
     parser.add_argument(
         "--sample",
@@ -68,9 +68,7 @@ def main():
         print(f"FEA Toolkit Version: {__version__}")
         print(f"OpenSees Version: {ops_version()}")
         print(f"Loading: {s2k_path}\n")
-        parser_s2k = SAP2000Parser(s2k_path)
-        parser_s2k.parse()
-        md = parser_s2k.get_model_data()
+        md = load_model_data(s2k_path)
     else:
         sys.exit("Provide a .s2k file path or use --sample.")
 

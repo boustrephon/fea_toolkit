@@ -16,10 +16,10 @@ confuse.
 ## Scope
 
 The parser reads **SAP2000 text exports** — `.s2k`, and the `.$2k` variant
-of the same text format. **ETABS `.e2k` / `.$et` parsing is not implemented
-yet**; the CLI help documents those extensions as planned but not yet
-supported, and the file dialogs do not offer them, since no ETABS-specific
-handling exists in the parser.
+of the same text format — plus **ETABS text exports** — `.e2k` and `.$et` —
+via the sibling `ETABSParser` (`io/e2k_parser.py`).  `load_model_data()`
+routes each suffix to its parser, and the CLI help and file dialogs offer
+both.
 
 ## 1. Parser raw-table cache — `SAP2000Parser.to_json()` / `from_json()`
 
@@ -96,6 +96,7 @@ clone = json_to_model(payload, cls=SAPModelData)     # field-for-field equal
 from fea_toolkit.io import load_model_data
 
 md = load_model_data("model.s2k")      # SAP2000 text export
+md = load_model_data("model.e2k")      # ETABS text export
 md = load_model_data("tables.json")    # either JSON form, auto-detected
 ```
 

@@ -93,7 +93,7 @@ inside the viewport itself.
 
 The workflow it must support is the one the toolkit already encodes:
 
-1. Import models from `*.s2k` (later `*.e2k`, PyRite, OpenSees).
+1. Import models from `*.s2k` / `*.e2k` (later PyRite, OpenSees).
 2. Display geometry **and loading**.
 3. Query objects for their properties / materials.
 4. Initiate analyses.
