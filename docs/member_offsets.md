@@ -171,8 +171,11 @@ back-compatibility (`True` → `"mpc"`, `False` → `"jntOffset"`).
 
 ## 9. Open items / risks
 
-- **`eleLoad` over the flexible length** (step 2) is the one un-verified
-  interaction; pin it with a test before declaring the default stable.
+- **`eleLoad` over the flexible length** — verified (step 2).  OpenSees applies
+  ``eleLoad`` over the shortened flexible length between the ``-jntOffset``
+  ends, not the reference line — pinned by
+  ``test_jnt_offset_eleload_over_flexible_length`` in
+  ``tests/test_analysis_csm.py``.
 - **Fixed-vector approximation** for `Corotational` large-displacement models —
   document, and keep `"beam"` as the escape hatch.
 - **Partial rigidity** (`rigid_factor`) remains out of scope (tracked as P16).

@@ -393,13 +393,15 @@ are **global**, so the lateral local offsets need a local→global rotation —
 generalised as `local_to_global` / `global_to_local` in `model/geometry_core.py`
 (a single spelling, with `_constraints._global_to_local` delegating to it).
 
-**Outline steps.** 1) add `local_to_global` / `global_to_local` + a shared
-`frame_end_offsets_global()` and unit-test the rotation; 2) emit `-jntOffset`
-in `ElementMixin._add_beam_column` (default), verifying `eleLoad` over the
-shortened flexible length `L`; 3) keep the offset-node exclusion from
-diaphragm/BODY sweeps; 4) guard `rigid_link_mpc` to the `"mpc"` option; 5)
-extend the `typings/openseespy` `geomTransf` stub for PDelta/Corotational; 6)
-thread the same offsets through the GUI frame mesh and Rhino export.
+**Outline steps.** 1) ✅ add `local_to_global` / `global_to_local` + a shared
+`frame_end_offsets_global()` and unit-test the rotation; 2) ✅ emit
+`-jntOffset` in `ElementMixin._add_beam_column` (default), verifying `eleLoad`
+over the shortened flexible length `L` (pinned by
+`test_jnt_offset_eleload_over_flexible_length`); 3) keep the offset-node
+exclusion from diaphragm/BODY sweeps; 4) guard `rigid_link_mpc` to the
+`"mpc"` option; 5) extend the `typings/openseespy` `geomTransf` stub for
+PDelta/Corotational; 6) thread the same offsets through the GUI frame mesh and
+Rhino export.
 
 ### Tier 3 — Feature gaps (placeholders / partial)
 
