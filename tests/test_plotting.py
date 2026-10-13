@@ -250,3 +250,38 @@ class TestPlottingImports:
         os.remove(tmp)
 
         viewer.clear()
+
+
+def test_offset_frame_endpoints_applies_rigid_offsets():
+    """``_offset_frame_endpoints`` shifts the drawn member onto the centroid line."""
+    from fea_toolkit.model.sap_data import FrameElement, FrameEndOffset
+    from fea_toolkit.plotting.viewer import _offset_frame_endpoints
+
+    class _MD:
+        def __init__(self):
+            self.frame_end_offsets = {}
+
+    class _N:
+        def __init__(self, x, y, z):
+            self.x, self.y, self.z = x, y, z
+
+    elem = FrameElement("F1", 1, "1", "2")
+    ni, nj = _N(0.0, 0.0, 0.0), _N(5.0, 0.0, 0.0)
+
+    # Member along +X: vx=+X, vy=+Z, vz=-Y →
+    #   off_i = [end_i, -off_z_i, off_y_i] = [0.5, -0.1, 0.2]
+    #   off_j = [-end_j, -off_z_j, off_y_j] = [-0.3, 0.2, 0.4]
+    md = _MD()
+    md.frame_end_offsets = {
+        "F1": FrameEndOffset(
+            end_i=0.5, end_j=0.3, off_y_i=0.2, off_z_i=0.1, off_y_j=0.4, off_z_j=-0.2
+        )
+    }
+    start, end = _offset_frame_endpoints(md, elem, ni, nj)
+    np.testing.assert_allclose(start, [0.5, -0.1, 0.2], atol=1e-9)
+    np.testing.assert_allclose(end, [4.7, 0.2, 0.4], atol=1e-9)
+
+    # No offset record → the member stays on the reference line.
+    start, end = _offset_frame_endpoints(_MD(), elem, ni, nj)
+    np.testing.assert_allclose(start, [0.0, 0.0, 0.0])
+    np.testing.assert_allclose(end, [5.0, 0.0, 0.0])

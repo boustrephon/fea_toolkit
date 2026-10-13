@@ -154,10 +154,14 @@ each joint back to the reference line.
 5. **Stub.** ✅  Extend `typings/openseespy/opensees/__init__.pyi` `geomTransf`
    docstring with the `PDelta`/`Corotational` `-jntOffset` forms and a
    global-coordinates clarification.
-6. **GUI / Rhino parity.**  Thread the same `frame_end_offsets_global()` through
-   the extruded-frame mesh and the Rhino export so the drawn member, the
-   analysis model and the exported geometry agree (full I/J offsets, sweep along
-   the centroid line, line-skeleton shift).
+6. **GUI / Rhino parity.** ✅  Thread the same `frame_end_offsets_global()`
+   through the GUI frame mesh and the Rhino export so the drawn member, the
+   analysis model and the exported geometry agree: `ModelViewer` now shifts each
+   ``FrameGeom`` to the centroid line (``plotting/viewer.py``
+   ``_offset_frame_endpoints``), and the Rhino exporter derives the same full
+   I/J centroid endpoints from the shared helper (``rhino/geometry.py``
+   ``_get_frame_points``) and sweeps the extrusion along that centroid line
+   instead of the full reference length.
 7. **Stiff-beam fallback stiffness.**  For `"beam"`, scale the elastic link
    stiffness (≈1000× member stiffness) rather than a hardcoded absolute.
 8. **Tests + docs.**  Test the rotation, the `-jntOffset` emission (incl. the

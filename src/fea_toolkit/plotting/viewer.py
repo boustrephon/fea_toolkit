@@ -30,6 +30,7 @@ from typing import Any, Optional, Union
 
 import numpy as np
 
+from ..model.geometry import frame_end_offsets_global
 from .renderers import AnnotationDef, FrameGeom, HighlightDef, NodeGeom, RenderBackend, ShellGeom
 from .renderers.base import RestraintGeom
 
@@ -146,6 +147,35 @@ _RESTRAINT_SIZE_MIN = 0.08
 _NODE_COLOR = (0.3, 0.3, 0.3)
 _CONSTRAINED_NODE_COLOR = (0.15, 0.65, 0.25)
 _CONSTRAINED_NODE_SIZE_FACTOR = 1.2
+
+
+def _offset_frame_endpoints(
+    md: Any, elem: Any, ni: Any, nj: Any
+) -> "tuple[np.ndarray, np.ndarray]":
+    """Drawn ``(start, end)`` for a frame with rigid end offsets applied.
+
+    Mirrors the AnalysisBuilder's ``-jntOffset`` lookup — ``get(frame_end_offsets,
+    elem.elem_id)`` — so the flexible member is drawn centroid-to-centroid
+    (``p_i + off_i`` → ``p_j + off_j``) and the drawn, analysed and exported
+    geometry agree.  A frame without an offset record stays on the reference
+    line unchanged.
+    """
+    start = np.array([ni.x, ni.y, ni.z], dtype=float)
+    end = np.array([nj.x, nj.y, nj.z], dtype=float)
+    offset = getattr(md, "frame_end_offsets", {}).get(elem.elem_id)
+    if offset is None:
+        return start, end
+    off_i, off_j = frame_end_offsets_global(
+        end - start,
+        float(getattr(elem, "angle", 0.0)),
+        offset.end_i,
+        offset.end_j,
+        offset.off_y_i,
+        offset.off_z_i,
+        offset.off_y_j,
+        offset.off_z_j,
+    )
+    return start + off_i, end + off_j
 
 
 class ModelViewer:
@@ -289,14 +319,15 @@ class ModelViewer:
             nj = md.nodes.get(elem.node_j)
             if ni is None or nj is None:
                 continue
+            start, end = _offset_frame_endpoints(md, elem, ni, nj)
             self._frames.append(
                 FrameGeom(
                     elem_id=eid,
                     section=sec,
                     node_i=elem.node_i,
                     node_j=elem.node_j,
-                    start=np.array([ni.x, ni.y, ni.z], dtype=float),
-                    end=np.array([nj.x, nj.y, nj.z], dtype=float),
+                    start=start,
+                    end=end,
                     angle=float(getattr(elem, "angle", 0.0)),
                 )
             )

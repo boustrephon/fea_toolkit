@@ -410,3 +410,70 @@ class TestLocalAxesVsModel:
     def test_zero_length_member_returns_none(self, rhino_local_axes):
         """A zero-length member yields ``None`` (the model raises instead)."""
         assert rhino_local_axes((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)) is None
+
+
+class TestFramePointsMatchModel:
+    """``rhino.geometry._get_frame_points`` must reproduce ``frame_end_offsets_global``."""
+
+    @pytest.mark.parametrize(
+        "axis,angle,offs",
+        [
+            # axis-aligned with lateral (I/J) offsets; a rotated in-plane member;
+            # a vertical member with a section rotation (exercises the vertical
+            # local-axis fallback inside the shared helper).
+            ((5.0, 0.0, 0.0), 0.0, (0.5, 0.3, 0.2, 0.1, 0.4, -0.2)),
+            ((3.0, 4.0, 0.0), 0.0, (0.4, 0.1, 0.0, -0.15, 0.05, 0.25)),
+            ((0.0, 0.0, 5.0), 30.0, (0.5, 0.2, 0.1, 0.0, -0.2, 0.3)),
+        ],
+    )
+    def test_elastic_endpoints_match_frame_end_offsets_global(self, monkeypatch, axis, angle, offs):
+        """``elastic_i``/``elastic_j`` equal ``p_i + off_i`` / ``p_j + off_j``."""
+        from fea_toolkit.model.geometry import frame_end_offsets_global
+        from fea_toolkit.model.sap_data import (
+            FrameElement,
+            FrameEndOffset,
+            Node,
+            SAPModelData,
+        )
+        from fea_toolkit.rhino import geometry
+
+        monkeypatch.setattr(geometry, "rg", _FakeRhinoGeometry())
+
+        md = SAPModelData(
+            nodes={"1": Node("1", 1, 0.0, 0.0, 0.0), "2": Node("2", 2, *axis)},
+            restraints={},
+            materials={},
+            sections={},
+            frame_elements={"F1": FrameElement("F1", 1, "1", "2", angle=angle)},
+            area_elements={},
+            frame_assignments={"F1": "S"},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+            frame_end_offsets={
+                "F1": FrameEndOffset(
+                    end_i=offs[0],
+                    end_j=offs[1],
+                    off_y_i=offs[2],
+                    off_z_i=offs[3],
+                    off_y_j=offs[4],
+                    off_z_j=offs[5],
+                )
+            },
+        )
+
+        pts = geometry._get_frame_points(md, "F1", md.frame_elements["F1"])
+        assert pts is not None
+        p_i, p_j, _x, _y, _z, _length, ei, ej, *_ = pts
+
+        off_i, off_j = frame_end_offsets_global(list(axis), angle, *offs)
+        np.testing.assert_allclose(
+            [ei.X, ei.Y, ei.Z],
+            [p_i.X + off_i[0], p_i.Y + off_i[1], p_i.Z + off_i[2]],
+            atol=1e-9,
+        )
+        np.testing.assert_allclose(
+            [ej.X, ej.Y, ej.Z],
+            [p_j.X + off_j[0], p_j.Y + off_j[1], p_j.Z + off_j[2]],
+            atol=1e-9,
+        )

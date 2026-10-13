@@ -19,6 +19,7 @@ try:
 except ImportError:
     Rhino = sc = rd = rg = None  # type: ignore
 
+from ..model.geometry import frame_end_offsets_global
 from ..model.sap_data import SAPModelData
 
 # ========================================================================
@@ -209,7 +210,9 @@ def _get_frame_points(md: SAPModelData, eid: str, elem):
     Returns ``(p_i, p_j, x_axis, y_axis, z_axis, length,
                elastic_i, elastic_j,
                off_y_i, off_z_i, off_y_j, off_z_j)``
-    or ``None`` if the element has invalid nodes.
+    where ``elastic_i`` / ``elastic_j`` are the full centroid endpoints
+    (``p_i + off_i`` / ``p_j + off_j`` — longitudinal + lateral), or
+    ``None`` if the element has invalid nodes.
     """
     ni = md.nodes.get(elem.node_i)
     nj = md.nodes.get(elem.node_j)
@@ -245,10 +248,20 @@ def _get_frame_points(md: SAPModelData, eid: str, elem):
         end_i *= scale
         end_j *= scale
 
-    xi = rg.Vector3d(x_axis.X * end_i, x_axis.Y * end_i, x_axis.Z * end_i)
-    xj = rg.Vector3d(x_axis.X * end_j, x_axis.Y * end_j, x_axis.Z * end_j)
-    elastic_i = rg.Point3d(p_i.X + xi.X, p_i.Y + xi.Y, p_i.Z + xi.Z)
-    elastic_j = rg.Point3d(p_j.X - xj.X, p_j.Y - xj.Y, p_j.Z - xj.Z)
+    # Full I/J offset vectors in global coordinates — the same helper the
+    # OpenSees builder feeds ``-jntOffset``, so drawn == analysed == exported.
+    off_i, off_j = frame_end_offsets_global(
+        [dx, dy, dz],
+        elem.angle,
+        end_i,
+        end_j,
+        off_y_i,
+        off_z_i,
+        off_y_j,
+        off_z_j,
+    )
+    elastic_i = rg.Point3d(p_i.X + off_i[0], p_i.Y + off_i[1], p_i.Z + off_i[2])
+    elastic_j = rg.Point3d(p_j.X + off_j[0], p_j.Y + off_j[1], p_j.Z + off_j[2])
 
     return (
         p_i,
@@ -363,7 +376,7 @@ def create_frame_extrusions(
                 x_axis,
                 y_axis,
                 z_axis,
-                length,
+                _length,
                 ei,
                 ej,
                 off_y_i,
@@ -371,6 +384,12 @@ def create_frame_extrusions(
                 off_y_j,
                 off_z_j,
             ) = pts
+
+            # Centroid line the section sweeps along (elastic_i → elastic_j):
+            # the flexible length the ``-jntOffset`` analysis uses, not the
+            # full reference line.
+            flex_vec = rg.Vector3d(ej.X - ei.X, ej.Y - ei.Y, ej.Z - ei.Z)
+            flex_length = flex_vec.Length
 
             sec_name = md.frame_assignments.get(eid, "")
             layer_index = frame_extrusion_layers.get(sec_name, default_layer)
@@ -395,7 +414,7 @@ def create_frame_extrusions(
                 plane = rg.Plane(rg.Point3d(0, 0, 0), rg.Vector3d(0, 0, 1))
                 circle = rg.Circle(plane, r)
                 profile_curve = circle.ToNurbsCurve()
-                extrusion = rg.Extrusion.Create(profile_curve, length, True)
+                extrusion = rg.Extrusion.Create(profile_curve, flex_length, True)
             else:
                 signed_area = 0.0
                 n = profile.PointCount  # pyright: ignore[reportAttributeAccessIssue]
@@ -405,9 +424,9 @@ def create_frame_extrusions(
                     signed_area += p0.X * p1.Y - p1.X * p0.Y
                 signed_area *= 0.5
                 if signed_area < 0:
-                    extrusion = rg.Extrusion.Create(profile, -length, True)
+                    extrusion = rg.Extrusion.Create(profile, -flex_length, True)
                 else:
-                    extrusion = rg.Extrusion.Create(profile, length, True)
+                    extrusion = rg.Extrusion.Create(profile, flex_length, True)
 
             if extrusion is None:
                 continue
@@ -421,16 +440,10 @@ def create_frame_extrusions(
             if off_diff:
                 # Different lateral offsets at ends — can't use lightweight
                 # Extrusion. Fall back to swept Brep between shifted endpoints.
-                origin_i = rg.Point3d(
-                    ei.X + y_axis.X * oy_i + z_axis.X * oz_i,
-                    ei.Y + y_axis.Y * oy_i + z_axis.Y * oz_i,
-                    ei.Z + y_axis.Z * oy_i + z_axis.Z * oz_i,
-                )
-                origin_j = rg.Point3d(
-                    ej.X + y_axis.X * off_y_j + z_axis.X * off_z_j,
-                    ej.Y + y_axis.Y * off_y_j + z_axis.Y * off_z_j,
-                    ej.Z + y_axis.Z * off_y_j + z_axis.Z * off_z_j,
-                )
+                # ``ei`` / ``ej`` already carry the full I/J offsets, so the
+                # sweep runs centroid-to-centroid between the shifted endpoints.
+                origin_i = rg.Point3d(ei.X, ei.Y, ei.Z)
+                origin_j = rg.Point3d(ej.X, ej.Y, ej.Z)
 
                 # Create a extrusion at I-end then morph to J-end
                 xform_i = rg.Transform.Identity
@@ -495,10 +508,10 @@ def create_frame_extrusions(
                                         obj.CommitChanges()
                             continue
 
-            # Use I-end offsets (or common offsets if no difference)
-            origin_x = ei.X + y_axis.X * oy_i + z_axis.X * oz_i
-            origin_y = ei.Y + y_axis.Y * oy_i + z_axis.Y * oz_i
-            origin_z = ei.Z + y_axis.Z * oy_i + z_axis.Z * oz_i
+            # Sweep along the centroid line from the (full-offset) I endpoint.
+            origin_x = ei.X
+            origin_y = ei.Y
+            origin_z = ei.Z
 
             xform = rg.Transform.Identity
             xform.M00, xform.M01, xform.M02 = z_axis.X, y_axis.X, x_axis.X
