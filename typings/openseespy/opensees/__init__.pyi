@@ -603,9 +603,9 @@ def geomTransf(transf_type: str, tag: int, *args: Any) -> None:
     Args:
         transf_type: ``'Linear'``, ``'PDelta'``, or ``'Corotational'``.
         tag: Transformation tag.
-        *args: Vector components (the local x-axis ``vecxz`` in global
-            coordinates), optionally followed by ``'-jntOffset'`` and the two
-            3-component global offset vectors (I-end then J-end).
+        *args: Vector components (a vector ``vecxz`` in the local x-z plane, in
+            global coordinates), optionally followed by ``'-jntOffset'`` and the
+            two 3-component global offset vectors (I-end then J-end).
     """
     ...
 
