@@ -818,17 +818,17 @@ def test_cardinal_points_extracted(tmp_path):
     off1 = md.frame_end_offsets.get("1")
     assert off1 is not None
     # B400 section: t3=400 (depth), t2=200 (width), model units = "N, mm, C"
-    # Cardinal point 8 (top centre) → off_y = 0, off_z = -0.5 × 400 = -200
-    assert off1.off_y_i == pytest.approx(0.0)
-    assert off1.off_z_i == pytest.approx(-200.0)
-    assert off1.off_y_j == pytest.approx(0.0)
-    assert off1.off_z_j == pytest.approx(-200.0)
+    # Cardinal point 8 (top centre) → off_y = -0.5 × 400 = -200, off_z = 0
+    assert off1.off_y_i == pytest.approx(-200.0)
+    assert off1.off_z_i == pytest.approx(0.0)
+    assert off1.off_y_j == pytest.approx(-200.0)
+    assert off1.off_z_j == pytest.approx(0.0)
 
     off2 = md.frame_end_offsets.get("2")
     assert off2 is not None
-    # Cardinal point 2 (bottom centre) → off_y = 0, off_z = +0.5 × 400 = +200
-    assert off2.off_y_i == pytest.approx(0.0)
-    assert off2.off_z_i == pytest.approx(200.0)
+    # Cardinal point 2 (bottom centre) → off_y = +0.5 × 400 = +200, off_z = 0
+    assert off2.off_y_i == pytest.approx(200.0)
+    assert off2.off_z_i == pytest.approx(0.0)
 
 
 def test_cardinal_points_alternative_column_names(tmp_path):
@@ -933,11 +933,11 @@ def test_insertion_point_table_parsed(tmp_path):
     assert fe.mirror_3 is False
     assert fe.transform_stiffness is True
 
-    # Cardinal point 8 (top centre) on a 400 mm deep section → off_z = -200.
+    # Cardinal point 8 (top centre) on a 400 mm deep section → off_y = -200.
     off = md.frame_end_offsets["1"]
-    assert off.off_y_i == pytest.approx(0.0)
-    assert off.off_z_i == pytest.approx(-200.0)
-    assert off.off_z_j == pytest.approx(-200.0)
+    assert off.off_y_i == pytest.approx(-200.0)
+    assert off.off_z_i == pytest.approx(0.0)
+    assert off.off_y_j == pytest.approx(-200.0)
 
 
 def test_insertion_point_transform_flag_captured(tmp_path):
@@ -1843,54 +1843,54 @@ class TestCardinalPointOffsets:
     def test_bottom_left(self):
         """Cardinal point 1 (bottom left)."""
         off_y, off_z = self._offset(1, D=0.4, B=0.3)
-        assert off_y == pytest.approx(0.15)  # 0.5 * 0.3
-        assert off_z == pytest.approx(0.2)  # 0.5 * 0.4
+        assert off_y == pytest.approx(0.2)  # 0.5 * 0.4 (depth on local y)
+        assert off_z == pytest.approx(0.15)  # 0.5 * 0.3 (width on local z)
 
     def test_bottom_center(self):
-        """Cardinal point 2 (bottom centre) → y=0, z=+half-depth."""
+        """Cardinal point 2 (bottom centre) → y=+half-depth, z=0."""
         off_y, off_z = self._offset(2, D=0.4, B=0.3)
-        assert off_y == pytest.approx(0.0)
-        assert off_z == pytest.approx(0.2)
+        assert off_y == pytest.approx(0.2)
+        assert off_z == pytest.approx(0.0)
 
     def test_bottom_right(self):
-        """Cardinal point 3 (bottom right) → y=-half-width, z=+half-depth."""
+        """Cardinal point 3 (bottom right) → y=+half-depth, z=-half-width."""
         off_y, off_z = self._offset(3, D=0.4, B=0.3)
-        assert off_y == pytest.approx(-0.15)
-        assert off_z == pytest.approx(0.2)
+        assert off_y == pytest.approx(0.2)
+        assert off_z == pytest.approx(-0.15)
 
     def test_middle_left(self):
-        """Cardinal point 4 (middle left) → y=+half-width, z=0."""
+        """Cardinal point 4 (middle left) → y=0, z=+half-width."""
         off_y, off_z = self._offset(4, D=0.4, B=0.3)
-        assert off_y == pytest.approx(0.15)
-        assert off_z == pytest.approx(0.0)
+        assert off_y == pytest.approx(0.0)
+        assert off_z == pytest.approx(0.15)
 
     def test_middle_center(self):
         """Cardinal point 5 (middle centre) → (0, 0)."""
         assert self._offset(5) == (0.0, 0.0)
 
     def test_middle_right(self):
-        """Cardinal point 6 (middle right) → y=-half-width, z=0."""
+        """Cardinal point 6 (middle right) → y=0, z=-half-width."""
         off_y, off_z = self._offset(6, D=0.4, B=0.3)
-        assert off_y == pytest.approx(-0.15)
-        assert off_z == pytest.approx(0.0)
+        assert off_y == pytest.approx(0.0)
+        assert off_z == pytest.approx(-0.15)
 
     def test_top_left(self):
-        """Cardinal point 7 (top left) → y=+half-width, z=-half-depth."""
+        """Cardinal point 7 (top left) → y=-half-depth, z=+half-width."""
         off_y, off_z = self._offset(7, D=0.4, B=0.3)
-        assert off_y == pytest.approx(0.15)
-        assert off_z == pytest.approx(-0.2)
+        assert off_y == pytest.approx(-0.2)
+        assert off_z == pytest.approx(0.15)
 
     def test_top_center(self):
-        """Cardinal point 8 (top centre) → y=0, z=-half-depth."""
+        """Cardinal point 8 (top centre) → y=-half-depth, z=0."""
         off_y, off_z = self._offset(8, D=0.4, B=0.3)
-        assert off_y == pytest.approx(0.0)
-        assert off_z == pytest.approx(-0.2)
+        assert off_y == pytest.approx(-0.2)
+        assert off_z == pytest.approx(0.0)
 
     def test_top_right(self):
-        """Cardinal point 9 (top right) → y=-half-width, z=-half-depth."""
+        """Cardinal point 9 (top right) → y=-half-depth, z=-half-width."""
         off_y, off_z = self._offset(9, D=0.4, B=0.3)
-        assert off_y == pytest.approx(-0.15)
-        assert off_z == pytest.approx(-0.2)
+        assert off_y == pytest.approx(-0.2)
+        assert off_z == pytest.approx(-0.15)
 
     def test_circular_section_uses_depth_for_both(self):
         """For circular sections, B is 0 so D is used for both axes."""
@@ -2115,10 +2115,10 @@ class TestMergeCardinalIntoOffsets:
         assignments = {"B1": "Sec1"}
         offsets = {}
         result = parser._merge_cardinal_into_offsets(elements, sections, assignments, offsets)
-        assert result["B1"].off_z_i == pytest.approx(-0.2)
-        assert result["B1"].off_z_j == pytest.approx(-0.2)
-        assert result["B1"].off_y_i == 0.0
-        assert result["B1"].off_y_j == 0.0
+        assert result["B1"].off_y_i == pytest.approx(-0.2)
+        assert result["B1"].off_y_j == pytest.approx(-0.2)
+        assert result["B1"].off_z_i == 0.0
+        assert result["B1"].off_z_j == 0.0
 
     def test_bottom_center_adds_offset(self):
         """Cardinal point 2 (bottom centre) on a 300 mm deep section."""
@@ -2144,8 +2144,8 @@ class TestMergeCardinalIntoOffsets:
         assert result["C1"].end_i == pytest.approx(0.05)
         assert result["C1"].end_j == pytest.approx(0.05)
         # Cardinal offset added
-        assert result["C1"].off_z_i == pytest.approx(0.15)  # 0.5 * 0.3
-        assert result["C1"].off_z_j == pytest.approx(0.15)
+        assert result["C1"].off_y_i == pytest.approx(0.15)  # 0.5 * 0.3
+        assert result["C1"].off_y_j == pytest.approx(0.15)
 
     def test_unknown_section_skipped(self):
         """Frame with no matching section → no offset added."""

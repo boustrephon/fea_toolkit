@@ -73,6 +73,35 @@ def test_local_axes_batch_matches_get_local_axes():
         np.testing.assert_allclose(vz[i], rz, atol=1e-10)
 
 
+def test_section_orientation_depth_on_local_y_width_on_local_z():
+    """A beam along +X sweeps depth along local-y (+Z) and width along local-z (−Y).
+
+    Regresses the width/depth swap that rendered every non-square section 90°
+    about the member axis: a beam along +X must have its depth (web) in the
+    vertical X–Z plane and its width (flanges) in the horizontal X–Y plane.
+    """
+    # Beam along +X -> local axes vy = (0,0,1) (up), vz = (0,−1,0) (horizontal).
+    frame = _frame("1", "R", (0, 0, 0), (4, 0, 0))
+    mesh = build_extruded_frame_mesh([frame], _SECTIONS, _COLORS, detail="solid")
+
+    pts = mesh.points
+    # "R" is RectangularSection(depth=0.4, bf=0.2) — see _SECTIONS above.
+    assert pts[:, 2].max() - pts[:, 2].min() == pytest.approx(0.4)  # depth → +Z
+    assert pts[:, 1].max() - pts[:, 1].min() == pytest.approx(0.2)  # width → −Y
+
+
+def test_isection_web_is_vertical_for_beam_along_x():
+    """An I-beam along +X has a vertical web (depth) and horizontal flanges (width)."""
+    frame = _frame("1", "I", (0, 0, 0), (4, 0, 0))
+    mesh = build_extruded_frame_mesh([frame], _SECTIONS, _COLORS, detail="plates")
+
+    pts = mesh.points
+    # "I" is ISection(depth=0.3, bf=0.15, tf=0.01, tw=0.006): the web (depth) must
+    # span the vertical Z axis, the flanges (width) the horizontal Y axis.
+    assert pts[:, 2].max() - pts[:, 2].min() == pytest.approx(0.3 - 0.01)  # web
+    assert pts[:, 1].max() - pts[:, 1].min() == pytest.approx(0.15)  # flanges
+
+
 def test_empty_frames_returns_an_empty_mesh():
     mesh = build_extruded_frame_mesh([], _SECTIONS, _COLORS)
     assert mesh.points.size == 0

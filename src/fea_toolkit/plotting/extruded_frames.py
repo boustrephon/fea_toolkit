@@ -50,8 +50,9 @@ def local_axes_batch(
     """Vectorised ``(vx, vy, vz)`` for ``M`` member axes.
 
     Matches :func:`~fea_toolkit.model.geometry.get_local_axes` for every row —
-    including the vertical-member ``±global Y`` fallback and the rotation about
-    the local x-axis — but in one numpy pass over the whole model.
+    including the vertical-member ``local_x × global_X`` fallback (≡ ±global Y)
+    and the rotation about the local x-axis — but in one numpy pass over the
+    whole model.
 
     Args:
         axes: ``(M, 3)`` member axis vectors (I→J, need not be unit).
@@ -76,7 +77,8 @@ def local_axes_batch(
     cos_sim = vx @ global_z
     vertical = np.abs(cos_sim) > 0.9999
 
-    # Default vecxz = cross(local_x, global_Z); a vertical member uses ±global_Y.
+    # Default vecxz = cross(local_x, global_Z); a vertical member uses
+    # cross(local_x, global_X) (≡ ±global_Y).
     vecxz = np.cross(vx, global_z)
     sign = np.where(cos_sim > 0.0, 1.0, -1.0)
     vecxz[vertical] = global_y * sign[vertical, None]
@@ -129,6 +131,19 @@ def _circle_ring(radius: float, segments: int) -> np.ndarray:
     return np.column_stack([radius * np.cos(theta), radius * np.sin(theta)])
 
 
+def _swap_profile_columns(pts: np.ndarray) -> np.ndarray:
+    """Swap a profile's ``(width, depth)`` columns to ``(depth, width)``.
+
+    The shared section-profile functions emit ``(x, y) = (width, depth)``.
+    :func:`_sweep_mesh` maps column 0 onto the member's local *y* axis (``vy``)
+    and column 1 onto its local *z* axis (``vz``), so swapping here places the
+    section's *depth* on the major (local-y) axis and its *width* on the minor
+    (local-z) axis — matching CSI, the OpenSees fibre-section patches and Rhino.
+    Without it a non-square section renders rotated 90° about the member axis.
+    """
+    return np.ascontiguousarray(pts[:, ::-1])
+
+
 def _sweeps(
     section: Any, detail: str, circle_segments: int
 ) -> list[tuple[np.ndarray, bool, bool, Optional[np.ndarray]]]:
@@ -136,9 +151,10 @@ def _sweeps(
 
     ``"plates"`` produces the open plate decomposition (no caps); ``"solid"``
     produces the closed perimeter (with caps).  Each sweep's *points* are the
-    cross-section coordinates in the local YZ plane, ``(P, 2)``; a hollow
-    section (a box) carries its inner boundary in *inner* so the sweep can seal
-    the material between the two loops with annular caps.
+    cross-section coordinates in the local YZ plane, ``(P, 2)`` with column 0
+    along the member's local *y* axis (depth) and column 1 along its local *z*
+    axis (width); a hollow section (a box) carries its inner boundary in *inner*
+    so the sweep can seal the material between the two loops with annular caps.
 
     Args:
         section: The section to sweep.
@@ -153,7 +169,7 @@ def _sweeps(
         polylines = section_plates(section, circle_segments=circle_segments)
         sweeps: list[tuple[np.ndarray, bool, bool, Optional[np.ndarray]]] = []
         for poly in polylines:
-            pts = np.asarray(poly, dtype=float)
+            pts = _swap_profile_columns(np.asarray(poly, dtype=float))
             if pts.shape[0] > 2:
                 # An open tube (a circular section's perimeter) — closed loop, no caps.
                 sweeps.append((pts, True, False, None))
@@ -174,8 +190,15 @@ def _sweeps(
         # so the inner boundary stays a hole in the solid.  The inner loop is
         # reversed inside ``_sweep_mesh`` so its faces point into the void.
         outer, inner = value
-        return [(np.asarray(outer, dtype=float), True, True, np.asarray(inner, dtype=float))]
-    return [(np.asarray(value, dtype=float), True, True, None)]
+        return [
+            (
+                _swap_profile_columns(np.asarray(outer, dtype=float)),
+                True,
+                True,
+                _swap_profile_columns(np.asarray(inner, dtype=float)),
+            )
+        ]
+    return [(_swap_profile_columns(np.asarray(value, dtype=float)), True, True, None)]
 
 
 def _sweep_mesh(

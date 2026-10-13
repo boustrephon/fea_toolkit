@@ -15,20 +15,30 @@ import numpy as np
 
 
 def get_SAP_vecxz(vec_x: Union[Sequence[float], np.ndarray], angle: float = 0.0) -> np.ndarray:
-    """Generate default vecxz vector for OpenSees geometric transformation.
+    """Generate the default ``vecxz`` (SAP2000 local 3‑axis) for OpenSees.
 
-    For a member parallel to global Z the default reference is ±global Y
-    (``+Y`` for an upward member); otherwise it is
-    ``normalize(local_x × global_Z)``.  The optional ``angle`` rotates that
-    default about the local x‑axis in **both** cases, so a vertical member
-    still honours the requested rotation.
+    Follows the CSI (SAP2000/ETABS) default frame local‑axis convention:
+
+    * **non‑vertical** member — ``vecxz = normalize(local_x × global_Z)``: the
+      local 1‑2 plane is vertical, so the local 3‑axis is horizontal;
+    * **vertical** member — ``vecxz = normalize(local_x × global_X)``, which
+      equals ``+global_Y`` for an upward member and ``-global_Y`` for a
+      downward one: the local 2‑axis is horizontal along global +X and the
+      local 3‑axis follows the right‑hand rule.
+
+    The optional ``angle`` is the SAP2000 *coordinate angle*: it rotates the
+    local 2 and 3 axes counter‑clockwise about the positive local 1‑axis (with
+    ``+1`` pointing toward you), applied here by rotating ``vecxz`` about
+    ``local_x``.  It applies in **both** the vertical and non‑vertical cases,
+    so a vertical member still honours the requested rotation.
 
     Args:
-        vec_x: Vector from node I to node J (local x‑axis).
-        angle: Rotation (degrees) about the local x‑axis from default.
+        vec_x: Vector from node I to node J (the local 1‑axis).
+        angle: Rotation (degrees) about the local 1‑axis from default.
 
     Returns:
-        Unit vector in the local x‑z plane (vecxz), orthogonal to ``vec_x``.
+        Unit vector in the local 1‑3 plane (``vecxz`` = the local 3‑axis),
+        orthogonal to ``vec_x``.
     """
     if isinstance(vec_x, Sequence):
         vec_x = np.array(vec_x, dtype=float)
@@ -69,19 +79,20 @@ def get_local_axes(
     """Compute the full local coordinate system for a frame element.
 
     Given the element axis (I→J vector), returns the orthonormal
-    ``(vx, vy, vz)`` triplet following SAP2000 conventions.
+    ``(vx, vy, vz)`` triplet following the CSI (SAP2000/ETABS) default frame
+    local‑axis convention:
 
-    * ``vx`` = unit vector along the element axis.
-    * ``vz`` = vecxz (SAP2000 local z) normalised, perpendicular to *vx*.
-    * ``vy`` = ``vz × vx``, completing the right-handed system.
-
-    When *vx* is vertical (parallel to global Z), the default fallback
-    uses global Y as the reference for vecxz.
+    * ``vx`` = unit vector along the element axis (the local 1‑axis).
+    * ``vz`` = ``vecxz`` (the local 3‑axis): ``normalize(vx × global_Z)`` for a
+      non‑vertical member, or ``normalize(vx × global_X)`` (≡ ±global_Y) for a
+      vertical member.
+    * ``vy`` = ``vz × vx`` (the local 2‑axis), completing the right‑handed
+      system.
 
     Args:
         axis: Element axis vector (I→J).  Does not need to be unit length.
-        angle: Rotation (degrees) about the local x‑axis (SAP2000 convention).
-            Defaults to 0.0.
+        angle: Rotation (degrees) about the local 1‑axis — the SAP2000
+            *coordinate angle* (counter‑clockwise about +1).  Defaults to 0.0.
 
     Returns:
         ``(vx, vy, vz)`` — each a **unit** ``np.ndarray`` of length 3 (all

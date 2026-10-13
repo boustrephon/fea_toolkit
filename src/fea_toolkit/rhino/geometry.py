@@ -29,7 +29,7 @@ from ..model.sap_data import SAPModelData
 # solid in Rhino *and* a PyVista viewport from one source of truth.  This module
 # only turns those outlines into ``rg`` curves for ``Extrusion.Create``, which
 # extrudes along Z — so a profile is built in the XY plane, with the convention
-# x = width (→ element y_axis), y = depth (→ element z_axis).
+# x = width (→ element z_axis), y = depth (→ element y_axis).
 
 
 def _polyline_curve(pts) -> t.Any:
@@ -80,10 +80,12 @@ def _build_profile_curve(sec) -> tuple[t.Any, t.Optional[t.Any]]:
 def _local_axes(
     p_i: rg.Point3d, p_j: rg.Point3d, angle_deg: float = 0.0
 ) -> t.Optional[tuple[rg.Vector3d, rg.Vector3d, rg.Vector3d]]:
-    """Compute local (x, y, z) unit vectors — matches OpenSees convention.
+    """Compute local (x, y, z) unit vectors — matches the CSI/OpenSees convention.
 
-    Mirrors :func:`fea_toolkit.model.geometry.get_local_axes`; the returned
-    triplet is always orthonormal.  Returns ``None`` for a zero-length member.
+    Mirrors :func:`fea_toolkit.model.geometry.get_local_axes` (the SAP2000/ETABS
+    default frame local axes: non‑vertical ``vecxz = x × global_Z``, vertical
+    ``vecxz = x × global_X`` ≡ ±global_Y); the returned triplet is always
+    orthonormal.  Returns ``None`` for a zero-length member.
     """
     x_axis = rg.Vector3d(p_j.X - p_i.X, p_j.Y - p_i.Y, p_j.Z - p_i.Z)
     length = x_axis.Length

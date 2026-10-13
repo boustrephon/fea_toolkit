@@ -542,19 +542,19 @@ plus centroid and shear centre:
 
 | Value | Position | Description | Offset (y, z) |
 |---|---|---|---|
-| 1 | Bottom left | Lower-left corner | (½B, ½D) |
-| 2 | Bottom centre | Bottom edge midpoint | (0, ½D) |
-| 3 | Bottom right | Lower-right corner | (−½B, ½D) |
-| 4 | Middle left | Left edge midpoint | (½B, 0) |
+| 1 | Bottom left | Lower-left corner | (½D, ½B) |
+| 2 | Bottom centre | Bottom edge midpoint | (½D, 0) |
+| 3 | Bottom right | Lower-right corner | (½D, −½B) |
+| 4 | Middle left | Left edge midpoint | (0, ½B) |
 | 5 | Middle centre | Bounding-box centroid | (0, 0) |
-| 6 | Middle right | Right edge midpoint | (−½B, 0) |
-| 7 | Top left | Upper-left corner | (½B, −½D) |
-| 8 | Top centre | Top edge midpoint | (0, −½D) |
-| 9 | Top right | Upper-right corner | (−½B, −½D) |
+| 6 | Middle right | Right edge midpoint | (0, −½B) |
+| 7 | Top left | Upper-left corner | (−½D, ½B) |
+| 8 | Top centre | Top edge midpoint | (−½D, 0) |
+| 9 | Top right | Upper-right corner | (−½D, −½B) |
 | 10 | Centroid | Section centroid (default) | (0, 0) |
 | 11 | Shear centre | Section shear centre | (0, 0) |
 
-*D* = section depth (local-3), *B* = section width (local-2).
+*D* = section depth (local-2), *B* = section width (local-3).
 
 Common settings:
 

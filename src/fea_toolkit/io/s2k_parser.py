@@ -1204,31 +1204,31 @@ class SAP2000Parser:
     ) -> tuple[float, float]:
         """Compute (off_y, off_z) from a cardinal point and section dimensions.
 
-        Per SAP2000/ETABS convention (matching E2K_utilities):
+        Per the SAP2000/ETABS convention (depth on local 2, width on local 3):
 
         =====  ===============  ==================================
         Value  Position         Offset (y, z) relative to centroid
         =====  ===============  ==================================
-        1      Bottom left      (½B,  ½D)
-        2      Bottom centre    (0,      ½D)
-        3      Bottom right     (-½B, ½D)
-        4      Middle left      (½B,  0)
+        1      Bottom left      (½D,  ½B)
+        2      Bottom centre    (½D,     0)
+        3      Bottom right     (½D, -½B)
+        4      Middle left      (0,    ½B)
         5      Middle centre    (0,      0)
-        6      Middle right     (-½B, 0)
-        7      Top left         (½B, -½D)
-        8      Top centre       (0,     -½D)
-        9      Top right        (-½B,-½D)
+        6      Middle right     (0,   -½B)
+        7      Top left         (-½D,  ½B)
+        8      Top centre       (-½D,    0)
+        9      Top right        (-½D, -½B)
         10     Centroid         (-CGOffset2, -CGOffset3)
         11     Shear centre     (-(CGOffset2+EccV2), -(CGOffset3+EccV3))
         =====  ===============  ==================================
 
         Offsets are relative to the section centroid in the local y-z plane.
-        D = depth (local-3 direction), B = width (local-2 direction).
+        D = depth (local-2 direction), B = width (local-3 direction).
         For circular sections (B = 0), D is used in place of B.
 
         Points 1–9 sit on the section *bounding box*, which is centred on
-        the profile origin, so they are simple half-dimension offsets
-        (unchanged from the E2K convention).  Points 10 (centroid) and 11
+        the profile origin, so they are simple half-dimension offsets.
+        Points 10 (centroid) and 11
         (shear centre) instead sit at the section's true centroid / shear
         centre, which for asymmetric shapes (channel, angle, tee) is *not*
         the bounding-box centre.  SAP2000 reports those locations as
@@ -1243,8 +1243,8 @@ class SAP2000Parser:
 
         Args:
             num: Cardinal-point number (1–11).
-            D: Section depth (local 3).
-            B: Section width (local 2; ``0`` for circular → ``D`` used).
+            D: Section depth (local 2).
+            B: Section width (local 3; ``0`` for circular → ``D`` used).
             cg_offset_2: ``CGOffset2`` — centroid offset along local 2.
             cg_offset_3: ``CGOffset3`` — centroid offset along local 3.
             ecc_v2: ``EccV2`` — shear-centre eccentricity along local 2.
@@ -1256,20 +1256,20 @@ class SAP2000Parser:
             return (-(cg_offset_2 + ecc_v2), -(cg_offset_3 + ecc_v3))
         b = D if B == 0 else B  # circular sections: use D for both
         return {
-            1: (0.5 * b, 0.5 * D),  # Bottom left
-            2: (0.0, 0.5 * D),  # Bottom centre
-            3: (-0.5 * b, 0.5 * D),  # Bottom right
-            4: (0.5 * b, 0.0),  # Middle left
+            1: (0.5 * D, 0.5 * b),  # Bottom left
+            2: (0.5 * D, 0.0),  # Bottom centre
+            3: (0.5 * D, -0.5 * b),  # Bottom right
+            4: (0.0, 0.5 * b),  # Middle left
             5: (0.0, 0.0),  # Middle centre (centroid of bbox)
-            6: (-0.5 * b, 0.0),  # Middle right
-            7: (0.5 * b, -0.5 * D),  # Top left
-            8: (0.0, -0.5 * D),  # Top centre
-            9: (-0.5 * b, -0.5 * D),  # Top right
+            6: (0.0, -0.5 * b),  # Middle right
+            7: (-0.5 * D, 0.5 * b),  # Top left
+            8: (-0.5 * D, 0.0),  # Top centre
+            9: (-0.5 * D, -0.5 * b),  # Top right
         }.get(num, (0.0, 0.0))
 
     @staticmethod
     def _get_section_depth_width(sec: "Section") -> tuple[float, float]:
-        """Extract section depth D (local-3) and width B (local-2).
+        """Extract section depth D (local-2) and width B (local-3).
 
         Returns (0, 0) for sections with no explicit dimensions.
         """

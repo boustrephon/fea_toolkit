@@ -7,9 +7,11 @@ curves for ``Extrusion.Create``, and a PyVista renderer can sweep them into
 extruded solid actors.
 
 The convention: the profile lives in the section's local **YZ** plane, with
-``x = width`` (along the element's local *y* axis) and ``y = depth`` (along the
-element's local *z* axis) — the same convention :mod:`fea_toolkit.rhino.geometry`
-uses.
+``x = width`` (along the element's local *z* axis) and ``y = depth`` (along the
+element's local *y* axis) — the same convention :mod:`fea_toolkit.rhino.geometry`
+uses.  The section's *depth* is its major (strong-axis) dimension, sitting on
+the local 2-axis, and its *width* the minor dimension on the local 3-axis,
+matching CSI and the OpenSees fibre-section patches.
 """
 
 from __future__ import annotations
@@ -43,9 +45,9 @@ def profile_rect(depth: float, bf: float) -> list[tuple[float, float]]:
 
     Args:
         depth: Section depth — the profile's extent along the element's local
-            *z* axis (the profile's ``y`` coordinate).
+            *y* axis (the profile's ``y`` coordinate).
         bf: Section breadth / flange width — the profile's extent along the
-            element's local *y* axis (the profile's ``x`` coordinate).
+            element's local *z* axis (the profile's ``x`` coordinate).
 
     Returns:
         A ``list`` of four ``(x, y)`` points, one per corner, tracing the
@@ -59,8 +61,8 @@ def profile_i(depth: float, bf: float, tf: float, tw: float) -> list[tuple[float
     """I / wide-flange profile in the YZ plane.
 
     Args:
-        depth: Section depth (overall height along the local *z* axis).
-        bf: Flange width (overall breadth along the local *y* axis).
+        depth: Section depth (overall height along the local *y* axis).
+        bf: Flange width (overall breadth along the local *z* axis).
         tf: Flange thickness.
         tw: Web thickness.
 
@@ -95,8 +97,8 @@ def profile_box(
     """Box / RHS (hollow rectangle) profile in the YZ plane.
 
     Args:
-        depth: Section depth (overall height along the local *z* axis).
-        bf: Section breadth (overall width along the local *y* axis).
+        depth: Section depth (overall height along the local *y* axis).
+        bf: Section breadth (overall width along the local *z* axis).
         tf: Wall (flange) thickness.
         tw: Wall (web) thickness.
 
@@ -120,8 +122,8 @@ def profile_channel(depth: float, bf: float, tf: float, tw: float) -> list[tuple
     """Channel / C-section profile in the YZ plane (CW winding).
 
     Args:
-        depth: Section depth (overall height along the local *z* axis).
-        bf: Flange width (overall breadth along the local *y* axis).
+        depth: Section depth (overall height along the local *y* axis).
+        bf: Flange width (overall breadth along the local *z* axis).
         tf: Flange thickness.
         tw: Web thickness.
 
