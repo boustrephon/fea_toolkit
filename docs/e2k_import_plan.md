@@ -79,7 +79,8 @@ ETABS builds a model in five stages; 3-D coordinates only exist after stage 5:
 4. **Element templates** — `$ LINE CONNECTIVITIES`
    (`LINE "C1" COLUMN "1" "1" 1`) and `$ AREA CONNECTIVITIES`
    (`AREA "W1" PANEL 4 "11" "17" "17" "11" 1 1 0 0`).  The type keyword
-   (`COLUMN`/`BEAM`/`BRACE`; `PANEL`/…) is followed by its point references
+   (`COLUMN`/`BEAM`/`BRACE`, the null `LINE` type, `CABLE`/`TENDON`;
+   `FLOOR`/`PANEL`/`WALL`/…) is followed by its point references
    **plus a "drop" count** = storeys that end sits below the assigned storey.
 5. **Instances** — `$ POINT/LINE/AREA ASSIGNS` pair a template with a storey:
    * a point instance → a node at `Z = ABS_ELEV[storey] − DeltaZ`;
@@ -130,6 +131,22 @@ a sequential integer tag.
 * **Shell sections** (`$ WALL/SLAB/DECK PROPERTIES`): multi-line `SHELLPROP`
   blocks merge by name into `ShellSection` (thickness from `TM`→`TB`→
   `SLABDEPTH`); assigned area thickness is populated from them.
+* **Section Designer sections** (`$ SECTION DESIGNER SECTIONS`): `SHAPE "SD
+  Section"` frame sections resolve to `SDSection` (no longer a zero-property
+  placeholder).  The polygon corner loops (`SHAPETYPE "POLYGON"` +
+  `POLYCORNER … X … Y …`) are read and their **gross elastic** properties — `A`,
+  `I33`, `I22`, `J` — computed with the shoelace / Green's-theorem formulas
+  (`polygon_props`), mapping `X` → local 3 and `Y` → local 2 (the ETABS
+  frame-section default).  `REF LINE` shapes are skipped; `J` is the polar
+  second moment (a solid-section upper bound).  This restores correct *elastic*
+  stiffness for SD-defined wall piers.  **Fiber conversion remains deferred**:
+  `SDSection.to_fiber_patches` raises `NotImplementedError` — the outstanding
+  path is multi-material polygon meshing (concrete / steel / rebar
+  triangulation).  The `ANGLE` rotation token and the wall-pier local-axis
+  convention are not yet applied and must be pinned against a controlled ETABS
+  export.  Null `LINE`/`AREA` objects assigned the built-in `"NONE"` section are
+  materialised with a synthesised zero-stiffness `GeneralSection` (`"NONE"`), so
+  their loads (none in this model, but generally present) can resolve.
 * **Restraints** (`$ POINT ASSIGNS` `RESTRAINT "UX UY UZ"`): mapped to the six
   DOFs and keyed by the `point@storey` node id.
 
@@ -257,9 +274,17 @@ resolution).
   `combo`), so no name-resolution pass is needed (unlike SAP2000).
 * **Point loads** (`$ POINT OBJECT LOADS` `TYPE "FORCE"`) → `JointLoad`, keyed
   by `point@storey`.
-* **Frame loads** (`$ LINE OBJECT LOADS`) → `FrameDistributedLoad`:
-  `UNIFF` → `Uniform`; `TRAPF` (`FSTART`/`FEND`/`RDSTART`/`RDEND`) →
-  `Linear`/`Trapezoidal` (linear when the span is 0–1).
+* **Frame loads** (`$ LINE OBJECT LOADS` / `$ FRAME OBJECT LOADS`) →
+  `FrameDistributedLoad`: `UNIFF` → `Uniform`; `TRAPF`
+  (`FSTART`/`FEND`/`RDSTART`/`RDEND`) → `Linear`/`Trapezoidal` (linear when the
+  span is 0–1); `UNIFM` (`MVAL`, a uniform distributed *moment* in [F·L/L] =
+  force units) → a `Moment`-type `Uniform` load.  Numeric `DIR` `1`/`2`/`3` map
+  to `LocalX`/`LocalY`/`LocalZ` (local 1/2/3 axes), so a torsion `UNIFM` with
+  `DIR "1"` lands on the local 1-axis.  ``Moment`` loads reach OpenSees as
+  statically-equivalent **nodal end moments** ``m·L/2`` about the load axis
+  (``beam_moment_to_nodal_moments``) — OpenSees ``eleLoad`` has no
+  distributed-moment form — with the sign following the right-hand rule of the
+  resolved axis.
 * **Area loads** (`$ AREA OBJECT LOADS` / `$ SHELL OBJECT LOADS`): `TYPE "UNIFF"`
   → `AreaUniformLoad`; `DIR "GRAV"` maps to `direction="Gravity"`.
   `TYPE "UNIFLOADSET" "name"` references a named shell uniform load set
@@ -408,6 +433,22 @@ resolution).
   than ``$ WALL/SLAB/DECK PROPERTIES``.  Until these are matched (and
   multi-tower elevation stacks are computed), geometry is empty on real
   exports — the loads parse, but nodes/elements do not materialise.
+* **Section Designer sections are elastic-only.**  `SHAPE "SD Section"` frames
+  resolve to `SDSection` with gross `A`/`I33`/`I22` computed from the polygon
+  loop (`polygon_props`); the three open fidelity items below are tracked in
+  `docs/sd_sections.md`:
+  1. `J` is the **polar second moment** (`I33 + I22` — a solid-section upper
+     bound), not the St. Venant torsional constant.
+  2. `to_fiber_patches()` is **not implemented** for `SDSection`, so nonlinear
+     analysis of SD piers falls back to elastic sections.
+  3. The `ANGLE` rotation token and the wall-pier (vs frame) local-axis
+     convention are **not applied** — `I33`/`I22` follow the ETABS
+     frame-section default (`X` → local 3, `Y` → local 2).
+* **Uniform distributed moments (`UNIFM`)** are converted to statically
+  equivalent nodal end moments `m·L/2` (`beam_moment_to_nodal_moments`); the
+  sign follows the right-hand rule of the resolved local axis and should be
+  validated once against a controlled ETABS export (only *uniform* moments are
+  decomposed).
 
 ## 7. Composite sections (filled tubes & encased) — implemented
 
