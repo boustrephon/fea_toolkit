@@ -291,10 +291,20 @@ scope and a different risk from "draw a result", so it is its own item.
 
 ### Resolving the `generate_report` duality — its own item (P32)
 
+> **Resolved 2026-10-02 — this section and its alternatives are historical.**
+> P32 landed the **verb route (blended)**: the `modal`, `response_spectrum` and
+> `pushover` verbs were added to the vocabulary, and `generate_report` now
+> composes those same verbs instead of calling the analysis functions directly,
+> keeping its own storage (NPZ/HDF5) and HTML-rendering stages — which are
+> *not* verbs.  The report's public signature was left untouched throughout,
+> and the `Analysis ▸ Modal / Response spectrum / Pushover` menu entries became
+> recipe presets over those verbs.  See `docs/_pending_work.md` → P32
+> (landed 2026-10-02).
+
 `generate_report(config)` is a fixed, complete pipeline with a stable public
-signature; a recipe is the same idea, editable.  The two currently coexist
-(`docs/report_generation.md` records the position from its side), and that
-coexistence is **deliberate and temporary**.
+signature; a recipe is the same idea, editable.  The two previously coexisted
+(`docs/report_generation.md` records the position from its side); that
+coexistence was **deliberate and temporary**.
 
 Reconciling them means one of:
 
@@ -315,10 +325,13 @@ practical reconciliation is:
    analysis functions directly, keeping its own storage and rendering stages;
 3. leave the report's public signature untouched throughout.
 
-Deciding formally between the adapter and the verb route is the first task of
-**P32**, though the survey above already points at a blend of the two.  What must
-**not** happen is a piecemeal merge: `generate_report` is a public entry point, so
-a half-migrated pipeline is worse than two clearly-separated ones.
+The formal decision between the adapter and the verb route was the first task
+of **P32**; the survey above already pointed at a blend, and P32 landed that
+blend — the verb route for the three analysis stages, the report keeping its
+storage and rendering stages.  What must **not** happen is a piecemeal merge:
+`generate_report` is a public entry point, so a half-migrated pipeline is worse
+than two clearly-separated ones — the migration landed as one composed change,
+not a gradual splice.
 
 
 

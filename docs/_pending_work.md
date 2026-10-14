@@ -1517,11 +1517,11 @@ strict-failing):
 Both are suppressed in CI and documented for local builds; the exact pins keep
 the build reproducible, so no action is needed today.
 
-**Open decision (not urgent).** Revisit when a docs-package bump is needed or
-MkDocs 1.x becomes unmaintained: (a) stay pinned on 1.x; (b) migrate to
-*ProperDocs* (`properdocs build` — a drop-in 1.x continuation that
-`mkdocs-gen-files` already depends on); (c) follow `mkdocs-material`'s 2.0
-guidance
+**Decision (2026-10-14) — stay pinned on MkDocs 1.x.**  Revisit only when a
+docs-package bump is forced or MkDocs 1.x becomes unmaintained.  At that point
+the fallback options are: (a) stay pinned on 1.x; (b) migrate to *ProperDocs*
+(`properdocs build` — a drop-in 1.x continuation that `mkdocs-gen-files`
+already depends on); (c) follow `mkdocs-material`'s 2.0 guidance
 (https://squidfunk.github.io/mkdocs-material/blog/2026/02/18/mkdocs-2.0/).
 
 

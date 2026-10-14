@@ -82,7 +82,11 @@ category: [planning]
 
 ---
 
-## Current Baseline (as of 2026-01-08)
+## Historical Baseline (as of 2026-01-08)
+
+> Superseded by the 2026-10-11 rerun (`308 errors / 890 warnings / 157 files`)
+> — see the status updates at the top of this document.  The phase counts below
+> are historical.
 
 | Phase | Category | Count | Strategy |
 |---|---|---|---|
