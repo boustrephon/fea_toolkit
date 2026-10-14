@@ -365,8 +365,9 @@ def run_mesh_checks(context: StepContext, step: Step) -> list[StepResult]:
 def run_hinge_length(context: StepContext, step: Step) -> list[StepResult]:
     """Plastic hinge length ``L_p`` (ASCE 41-17 §10.8) for the selected members.
 
-    Wraps :func:`fea_toolkit.capacity.asce41.hinge_length`, which reads the
-    member's section and material and returns ``L_p`` in model length units.
+    Wraps :func:`fea_toolkit.model.checks.compute_asce41_hinge_length`, which
+    reads the member's section and material and returns ``L_p`` in model
+    length units.
 
     Args:
         context: The run's working state.  ``model_data`` supplies the members,
@@ -381,7 +382,7 @@ def run_hinge_length(context: StepContext, step: Step) -> list[StepResult]:
     """
     import math
 
-    from ...capacity.asce41 import hinge_length
+    from ...model.checks import compute_asce41_hinge_length
 
     validate_params("hinge_length", HINGE_LENGTH_PARAMS, step.params)
     md = context.model_data
@@ -403,7 +404,9 @@ def run_hinge_length(context: StepContext, step: Step) -> list[StepResult]:
         length = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
         if length < 1e-12:
             continue
-        rows.append((eid, sec_name, _num(length), _num(hinge_length(md, sec_name, length))))
+        rows.append(
+            (eid, sec_name, _num(length), _num(compute_asce41_hinge_length(md, sec_name, length)))
+        )
 
     table = Table(
         title="Plastic hinge length",

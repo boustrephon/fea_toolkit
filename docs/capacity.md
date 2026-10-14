@@ -70,16 +70,15 @@ grade.
 
 | Function | Clause | Returns |
 |---|---|---|
-| `hinge_length(md, sec_name, elem_length)` | §10.8 (Eqs. 10-1 / 10-2, ACI 440-style RC) | `float` (model length units) |
+| `hinge_length(section, concrete, steel, units, *, elem_length)` | §10.8 (Eqs. 10-1 / 10-2, ACI 440-style RC) | `float` (model length units) |
 
-Migrated verbatim from `model.checks.compute_asce41_hinge_length`; the legacy
-name is retained in `model/checks.py` as a delegating wrapper.  The formula
-converts the model's material strengths (model stress → Pa → MPa) and section
-dimensions (model length → m/mm) internally via `stress_to_si_factor` /
-`length_to_si_factor`, and returns `L_p` in model length units, capped at
-`0.33·L`.  It keeps the model-data-coupled `(md, sec_name, elem_length)`
-signature for behaviour-preserving migration; aligning it to the unit-aware
-`(section, concrete, steel, units, ...)` form is a documented follow-up.
+Migrated from `model.checks.compute_asce41_hinge_length`; the legacy
+`(md, sec_name, elem_length)` name is retained in `model/checks.py` as a
+delegating adapter that resolves the section/material from the model and
+converts model strengths → Pa.  The formula converts section dimensions
+(model length → m/mm) internally via `length_to_si_factor` and returns `L_p`
+in model length units, capped at `0.33·L`; material strengths are authored
+in SI (Pa) per the capacity convention.
 
 ## Adding a new code
 

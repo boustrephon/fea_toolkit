@@ -547,11 +547,37 @@ def compute_asce41_hinge_length(
 ) -> float:
     """Plastic hinge length ``L_p`` per ASCE 41-17 §10.8 (model length units).
 
-    Legacy alias — the canonical implementation now lives in
-    :func:`fea_toolkit.capacity.asce41.hinge_length` (moved verbatim from
-    this module).  This wrapper delegates to it unchanged, so behaviour is
-    preserved for existing callers.
+    Legacy adapter — the canonical unit-aware implementation now lives in
+    :func:`fea_toolkit.capacity.asce41.hinge_length`.  This resolves the
+    section and its material from the model, converts the material's
+    strengths from model units to SI (Pa), and delegates, preserving the
+    original ``(md, sec_name, elem_length)`` behaviour for existing callers.
     """
-    from ..capacity.asce41 import hinge_length
+    from types import SimpleNamespace
 
-    return hinge_length(md, sec_name, elem_length)
+    from ..capacity.asce41 import hinge_length
+    from ..utils import stress_to_si_factor
+    from .sap_data import ConcreteRectangularSection
+
+    sec = md.sections.get(sec_name)
+    if sec is None:
+        return max(0.05, elem_length * 0.1)
+
+    mat = md.materials.get(sec.material)
+    if mat is None:
+        return max(0.05, elem_length * 0.1)
+
+    units = getattr(md, "units", {}) or {}
+    sf = stress_to_si_factor(units)
+
+    def _to_pa(value: float) -> float:
+        return (value or 0.0) * sf
+
+    if isinstance(sec, ConcreteRectangularSection):
+        concrete = SimpleNamespace(Fc=_to_pa(getattr(mat, "Fc", 0.0)))
+        steel = None
+    else:
+        concrete = None
+        steel = SimpleNamespace(Fy=_to_pa(getattr(mat, "Fy", 0.0)))
+
+    return hinge_length(sec, concrete, steel, units, elem_length=elem_length)
