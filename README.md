@@ -752,12 +752,13 @@ that section.
 
 2. **ETABS `.E2K` / `.$ET` input** ⚠️ Partial  
    - `ETABSParser` (`io/e2k_parser.py`) reads geometry, sections, materials,
-     restraints, loads and combinations from an ETABS text export into the same
-     `SAPModelData`, and is wired through `load_model_data()`, the review CLI,
-     the GUI file dialog and the examples.
-   - Open gaps: v21 `$ LOAD PATTERNS` / `$ LOAD CASES` loads (M7), object
-     auto-meshing (M6), `AUTOSECTION` auto-select lists, and multi-tower
-     elevations.  See `docs/e2k_import_plan.md`.
+     restraints, loads, load cases/patterns, mass sources and combinations from
+     an ETABS text export into the same `SAPModelData`, and is wired through
+     `load_model_data()`, the review CLI, the GUI file dialog and the examples.
+   - Open gaps: object auto-meshing (M6), `AUTOSECTION` auto-select lists,
+     multi-tower elevations, and real-export section-name gaps (storeys
+     `- FOR EACH TOWER`, split `SLAB`/`DECK`/`WALL` properties) that leave
+     geometry empty on real exports.  See `docs/e2k_import_plan.md`.
 
 3. **Load Combinations and Analysis Types**  
    - ~~`MassSource`~~ ✅ Parsed by `_get_mass_sources()` and stored in `SAPModelData.mass_sources`.  

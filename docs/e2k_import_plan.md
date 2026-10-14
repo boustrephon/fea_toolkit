@@ -1,6 +1,6 @@
 ---
 title: "ETABS (.E2K / .$ET) import"
-description: "Implemented ETABS text-export parser (geometry, sections, materials, restraints, loads, combinations) plus the deferred-geometry model it is built on; M6 auto-meshing and M7 v21 loads remain open."
+description: "Implemented ETABS text-export parser (geometry, sections, materials, restraints, loads, combinations, mass source) plus the deferred-geometry model it is built on; M6 auto-meshing remains open."
 status: "partial"
 tags: [etabs, e2k, io, parser]
 category: [import]
@@ -11,9 +11,10 @@ related: [json_serialization.md, parser_coverage.md, llm_guide.md, gui_roadmap.m
 > **Status: ⚠️ Partial.** The core parser (milestones M0–M5 plus the M2
 > parametric-shape hardening) is **implemented and wired** through
 > `load_model_data()`, the review CLI, the GUI file dialog and the examples
-> (2026-10-13).  Remaining: **M6** (object auto-meshing via `gmsh`) and
-> **M7** (ETABS v21 `$ LOAD PATTERNS` / `$ LOAD CASES`), plus `AUTOSECTION`
-> auto-select lists and multi-tower elevations — see §6.
+> (2026-10-13).  **M7** (v19+ `$ LOAD PATTERNS` / `$ LOAD CASES` / `$ MASS
+> SOURCE`) landed 2026-10-14 against a real v19 `.$et` export.  Remaining:
+> **M6** (object auto-meshing via `gmsh`), `AUTOSECTION` auto-select lists,
+> multi-tower elevations, and the real-export section-name gaps in §6.
 
 `fea_toolkit` historically parses SAP2000 text exports (`.s2k` / `.$2k`) only.
 This document records the design for adding an ETABS text-export parser and the
@@ -101,7 +102,7 @@ a sequential integer tag.
 | **M4** | Diaphragm constraints (`$ DIAPHRAGM NAMES` + `DIAPH` assigns) | ✅ done |
 | **M5** | Wiring (`model_loader`, CLI, GUI dialogs, examples) + fixtures + docs | ✅ done |
 | **M6** | Object auto-meshing via `gmsh` (`FLOORMESH`, cookie-cut, `MAXMESHSIZE`) | ⬜ deferred |
-| **M7** | v21 load-case format split (`$ LOAD PATTERNS` + `$ LOAD CASES`) | ⬜ pending |
+| **M7** | v19+ load-case format split (`$ LOAD PATTERNS` + `$ LOAD CASES` + `$ MASS SOURCE`) | ✅ done |
 | **M2 hardening** | Parametric shape-type dispatch + `FILE`-scoped catalogue resolution | ✅ done |
 
 ### M2 — sections, materials, restraints (implemented)
@@ -259,11 +260,25 @@ resolution).
 * **Frame loads** (`$ LINE OBJECT LOADS`) → `FrameDistributedLoad`:
   `UNIFF` → `Uniform`; `TRAPF` (`FSTART`/`FEND`/`RDSTART`/`RDEND`) →
   `Linear`/`Trapezoidal` (linear when the span is 0–1).
-* **Area loads** (`$ AREA OBJECT LOADS` `TYPE "UNIFF"`) → `AreaUniformLoad`;
-  `DIR "GRAV"` maps to `direction="Gravity"`.
+* **Area loads** (`$ AREA OBJECT LOADS` / `$ SHELL OBJECT LOADS`): `TYPE "UNIFF"`
+  → `AreaUniformLoad`; `DIR "GRAV"` maps to `direction="Gravity"`.
+  `TYPE "UNIFLOADSET" "name"` references a named shell uniform load set
+  (`$ SHELL UNIFORM LOAD SETS`: `SHELLUNIFORMLOADSET "name" LOADPAT "pattern"
+  VALUE value`) and expands to one gravity-direction `AreaUniformLoad` per
+  `(pattern, value)` pair in the set.  The original definitions and per-area
+  assignments are *also* retained as `SAPModelData.shell_uniform_load_sets`
+  (``{name: ShellUniformLoadSet}``) and
+  `SAPModelData.shell_uniform_load_set_assignments` (``{area_id: set_name}``)
+  for introspection and editability.  Each expanded load carries its set name
+  in `AreaUniformLoad.source_set` (`None` for a direct `UNIFF` pressure), so
+  `SAPModelData.reexpand_uniform_load_sets()` can drop and regenerate exactly
+  the set-derived loads after the definitions are edited.  Both fields are
+  carried onto `MeshModel`, and the GUI Model Tree surfaces them under a
+  **Shell Uniform Load Sets** group (one row per set, expanding to its assigned
+  shell objects).
 * **Deferred load types** — `TEMP`, `GROUNDDISP`, `POINTF`/`POINTM` (mid-span
-  frame point loads) and `UNIFLOADSET` have no target dataclass yet; they are
-  logged at debug level rather than dropped silently.
+  frame point loads) have no target dataclass yet; they are logged at debug
+  level rather than dropped silently.
 
 ### M5 — wiring (implemented)
 
@@ -343,8 +358,11 @@ resolution).
 * **Auto-select (`AUTOSECTION`) frame-section lists** are deferred, so the
   corresponding `Auto Select List` sections are skipped (they reference the
   list, not a concrete section).
-* **Deferred load types** — `TEMP`, `GROUNDDISP`, `POINTF`/`POINTM` and
-  `UNIFLOADSET` object loads are logged but not mapped (no target dataclass).
+* **Deferred load types** — `TEMP`, `GROUNDDISP`, `POINTF`/`POINTM` object loads
+  are logged but not mapped (no target dataclass).
+* **`$ TABLE SETS` / `$ DATABASE TABLE NAMED SETS`** are database-table
+  export/display named sets (which tables and which loads to export), not
+  structural loads — they are deliberately ignored by the parser.
 * The profile catalogue (`data/section_dict.pkl`) is optional: without it,
   profile sections become `GeneralSection` placeholders (zero A/I/J) rather
   than failing the parse.
@@ -367,10 +385,29 @@ resolution).
   beams/walls/grids and multi-node floor slabs (`FLOORMESH`) need a
   `gmsh`-based remeshing path (`mesh/remesh.py`), which is not yet wired to the
   parser.  `frame_auto_mesh` / `area_mesh` therefore stay empty for E2K input.
-* **v21 load-case format split (M7)** — ETABS v21 replaced `$ STATIC LOADS`
-  with `$ LOAD PATTERNS` + `$ LOAD CASES` (and added `$ MASS SOURCE`).  The
-  parser still reads `$ STATIC LOADS`, so a v21 model's loads are not yet
-  parsed.
+* **v19+ load-case format (M7, implemented)** — ETABS v19 replaced
+  `$ STATIC LOADS` with `$ LOAD PATTERNS` + `$ LOAD CASES` and added
+  `$ MASS SOURCE` (the plan's original "v21" label; the split is a v19 change,
+  verified against a v19 `.$et` export).  `_get_load_patterns` /
+  `_get_load_cases` / `_get_mass_sources` read these, mapping ``TYPE
+  "Linear Static"`` → ``case_type="LinStatic"`` (so
+  ``auto_detect_static_cases`` works) and the ``LOADPAT … SF`` lines to the
+  S2K ``CASE - STATIC 1 - LOAD ASSIGNMENTS`` key.  Two real-export fixes ride
+  along: load-combination ``LOADCOMBO`` entries (→ ``kind="combo"``) and the
+  real object-load section names ``$ FRAME OBJECT LOADS`` / ``$ SHELL OBJECT
+  LOADS`` (the synthetic fixtures' ``$ LINE`` / ``$ AREA OBJECT LOADS`` are
+  still accepted).
+
+* **Real-export section-name gaps (not yet fixed)** — a v19 `.$et` export
+  revealed section-name mismatches the synthetic fixtures do not cover, in the
+  geometry/property (not load) path: the storey section is exported as
+  ``$ STORIES - IN SEQUENCE FROM TOP - FOR EACH TOWER`` (with ``$ TOWERS`` and
+  per-``STORY`` ``TOWER`` / ``SIMILARTO`` tokens) rather than the fixture's
+  ``$ STORIES - IN SEQUENCE FROM TOP``, and shell properties are split into
+  ``$ SLAB PROPERTIES`` / ``$ DECK PROPERTIES`` / ``$ WALL PROPERTIES`` rather
+  than ``$ WALL/SLAB/DECK PROPERTIES``.  Until these are matched (and
+  multi-tower elevation stacks are computed), geometry is empty on real
+  exports — the loads parse, but nodes/elements do not materialise.
 
 ## 7. Composite sections (filled tubes & encased) — implemented
 

@@ -83,35 +83,29 @@ Requirements
 ------------
 - Must run **inside Rhino 8** under CPython 3.9+
 - ``fea_toolkit`` must be on ``sys.path`` (adjust the line below)
-- A parsed SAP2000 model file (``.s2k``, ``.$2k`` or ``.json``); ETABS
-  ``.e2k`` / ``.$et`` is planned, not yet supported
+- A parsed model file (``.s2k``, ``.$2k``, ``.e2k``, ``.$et`` or ``.json``);
+  ETABS text exports are read through ``load_model_data()``
 """
 
 import sys
 sys.path.append(r'/path/to/fea_toolkit/src')   # <-- adjust to your setup
 
 import Rhino
-from fea_toolkit.io.s2k_parser import SAP2000Parser
+from fea_toolkit.io.model_loader import load_model_data
 from fea_toolkit.rhino import RhinoImporter
 
 # --- File picker (native Rhino dialog) -----------------------------------
 dialog = Rhino.UI.OpenFileDialog()
-dialog.Filter = "SAP2000 files (*.s2k;*.S2K;*.$2k;*.json)|*.s2k;*.S2K;*.$2k;*.json|All files (*.*)|*.*"
-dialog.Title = "Select SAP2000 model file"
+dialog.Filter = "Structural model files (*.s2k;*.S2K;*.$2k;*.e2k;*.E2K;*.$et;*.json)|*.s2k;*.S2K;*.$2k;*.e2k;*.E2K;*.$et;*.json|All files (*.*)|*.*"
+dialog.Title = "Select model file"
 
 if not dialog.ShowDialog():
     print("Import cancelled.")
 else:
     file_path = dialog.FileName
 
-    # Load .s2k or JSON -- the parser auto-detects the format
-    if file_path.lower().endswith('.json'):
-        parser = SAP2000Parser.from_json(file_path)
-    else:
-        parser = SAP2000Parser(file_path)
-        parser.parse()
-
-    md = parser.get_model_data()
+    # Load any supported format -- load_model_data() dispatches on the suffix
+    md = load_model_data(file_path)
 
     importer = RhinoImporter(md)
     report = importer.run(
@@ -125,8 +119,8 @@ else:
     Rhino.RhinoApp.RunScript("_Zoom _Extents", False)
 ```
 
-The dialog filters for `.s2k`, `.$2k` and `.json` files.  Pick a file and the
-model is imported with full layer structure, metadata, and groups.
+The dialog filters for `.s2k`, `.$2k`, `.e2k`, `.$et` and `.json` files.  Pick a
+file and the model is imported with full layer structure, metadata, and groups.
 
 ### Direct path (alternative)
 
@@ -138,17 +132,11 @@ If you already know the file path, replace the file-picker section with:
 import sys
 sys.path.append(r'/path/to/fea_toolkit/src')
 
-from fea_toolkit.io.s2k_parser import SAP2000Parser
+from fea_toolkit.io.model_loader import load_model_data
 from fea_toolkit.rhino import RhinoImporter
 
-# .s2k file (default):
-parser = SAP2000Parser('/path/to/model.s2k')
-parser.parse()
-md = parser.get_model_data()
-
-# Or JSON export:
-# parser = SAP2000Parser.from_json('/path/to/model.json')
-# md = parser.get_model_data()
+# Any supported model file (.s2k / .e2k / .$et / .json):
+md = load_model_data('/path/to/model.s2k')
 
 importer = RhinoImporter(md)
 report = importer.run()
