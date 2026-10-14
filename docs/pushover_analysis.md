@@ -34,6 +34,14 @@ constant.  The result is a **capacity curve** — base shear vs. control node
 displacement — that shows how the structure stiffens, yields, and degrades
 under increasing lateral demand.
 
+> **Requirement — fiber-capable model.**  Pushover is nonlinear and requires a
+> fiber-capable model (``make_nonlinear_sample_model()``, or sections implementing
+> ``to_fiber_patches()``).  A model with only elastic ``Section`` properties
+> cannot yield, so the runner raises ``ValueError`` rather than silently
+> degrading to a linear "pushover".  (Lumped plastic hinges —
+> ``hinge_model='lumped'`` — are exempt, since the hinges supply the
+> nonlinearity.)
+
 The fea_toolkit implementation follows the standard OpenSees two‑stage
 approach used in well‑known examples (e.g. the
 [PEER RC Frame pushover](https://github.com/OpenSees/OpenSees/blob/master/EXAMPLES/Example3/Example3.1%20-%20Pushover.tcl)

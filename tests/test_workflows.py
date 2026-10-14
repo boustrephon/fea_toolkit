@@ -25,12 +25,6 @@ from fea_toolkit.model.sap_data import (
     TeeSection,
 )
 
-# The pushover tests use the base "UB300" Section (no fiber patches), so the
-# AnalysisBuilder legitimately warns and falls back to elastic elements.  This
-# is expected behavior — suppress the specific message so the test suite output
-# stays clean, but leave any other warnings visible.
-pytestmark = pytest.mark.filterwarnings("ignore:Section 'UB300' does not support fiber patches")
-
 # ============================================================================
 # Constants
 # ============================================================================
@@ -544,11 +538,11 @@ class TestModalAnalysisWorkflow:
 class TestPushoverWorkflow:
     """End-to-end non-linear pushover analysis (truss-brace approach)."""
 
-    def test_pushover_uniform_returns_keys(self, sample_ab):
+    def test_pushover_uniform_returns_keys(self, sample_nl_ab):
         """Uniform-mass-proportional pushover produces a capacity curve."""
-        sample_ab.build_domain()
-        sample_ab.compute_seismic_masses()
-        results = sample_ab.run_pushover_analysis(
+        sample_nl_ab.build_domain()
+        sample_nl_ab.compute_seismic_masses()
+        results = sample_nl_ab.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},
             lateral_load_type="uniform",
             lateral_direction="X",
@@ -566,11 +560,11 @@ class TestPushoverWorkflow:
         assert len(results["step"]) > 1, "uniform: step empty"
         assert abs(results["base_shear"][-1]) > 1e-6, "uniform: final base_shear zero"
 
-    def test_pushover_triangular_returns_keys(self, sample_ab):
+    def test_pushover_triangular_returns_keys(self, sample_nl_ab):
         """Triangular (ELF) pushover produces a valid capacity curve."""
-        sample_ab.build_domain()
-        sample_ab.compute_seismic_masses()
-        results = sample_ab.run_pushover_analysis(
+        sample_nl_ab.build_domain()
+        sample_nl_ab.compute_seismic_masses()
+        results = sample_nl_ab.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},
             lateral_load_type="triangular",
             lateral_direction="X",
@@ -587,10 +581,10 @@ class TestPushoverWorkflow:
         assert len(results["base_shear"]) > 1, "triangular: base_shear empty"
         assert abs(results["base_shear"][-1]) > 1e-6, "triangular: final base_shear zero"
 
-    def test_pushover_pattern_returns_keys(self, sample_ab):
+    def test_pushover_pattern_returns_keys(self, sample_nl_ab):
         """SAP2000-pattern-based pushover uses existing distributed loads."""
-        sample_ab.build_domain()
-        results = sample_ab.run_pushover_analysis(
+        sample_nl_ab.build_domain()
+        results = sample_nl_ab.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},
             lateral_load_type="pattern",
             lateral_pattern_name="WIND",
@@ -608,9 +602,9 @@ class TestPushoverWorkflow:
         assert len(results["base_shear"]) > 1, "pattern: base_shear empty"
         assert abs(results["base_shear"][-1]) > 1e-6, "pattern: final base_shear near zero"
 
-    def test_recording_honours_per_block_flags_and_stride(self, sample_ab):
+    def test_recording_honours_per_block_flags_and_stride(self, sample_nl_ab):
         """Per-block flags record only the requested blocks, and stride subsamples."""
-        sample_ab.config.update(
+        sample_nl_ab.config.update(
             {
                 "record_pushover_steps": True,
                 "pushover_record_node_disp": True,
@@ -619,9 +613,9 @@ class TestPushoverWorkflow:
                 "pushover_step_stride": 2,
             }
         )
-        sample_ab.build_domain()
-        sample_ab.compute_seismic_masses()
-        results = sample_ab.run_pushover_analysis(
+        sample_nl_ab.build_domain()
+        sample_nl_ab.compute_seismic_masses()
+        results = sample_nl_ab.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},
             lateral_load_type="uniform",
             lateral_direction="X",
@@ -677,6 +671,20 @@ class TestPushoverWorkflow:
             == len(sdef["kz"])
             == len(sdef["torsion"])
         )
+
+    def test_pushover_raises_on_non_fiber_section(self, sample_ab):
+        """Pushover on an elastic-only (base Section) model raises, not falls back."""
+        sample_ab.build_domain()
+        with pytest.raises(ValueError, match="fiber-capable frame sections"):
+            sample_ab.run_pushover_analysis(
+                gravity_patterns={"DEAD": 1.0},
+                lateral_load_type="uniform",
+                lateral_direction="X",
+                control_node_tag=2,
+                max_disp=0.1,
+                num_steps=5,
+                print_progress=False,
+            )
 
 
 # ============================================================================
@@ -1770,13 +1778,13 @@ class TestCSMWorkflow:
         accels = [0.5, 1.5, 1.5, 1.5, 0.75, 0.375, 0.25, 0.125]
         return periods, accels
 
-    def test_pushover_to_adrs(self, sample_ab):
+    def test_pushover_to_adrs(self, sample_nl_ab):
         """Pushover curve can be converted to ADRS format."""
-        sample_ab.build_domain()
-        sample_ab.compute_seismic_masses()
-        modal = sample_ab.run_modal_analysis(num_modes=3)
-        shapes = sample_ab.extract_mode_shapes(3)
-        results = sample_ab.run_pushover_analysis(
+        sample_nl_ab.build_domain()
+        sample_nl_ab.compute_seismic_masses()
+        modal = sample_nl_ab.run_modal_analysis(num_modes=3)
+        shapes = sample_nl_ab.extract_mode_shapes(3)
+        results = sample_nl_ab.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},
             lateral_load_type="uniform",
             lateral_direction="X",
@@ -1785,7 +1793,7 @@ class TestCSMWorkflow:
             num_steps=5,
             print_progress=False,
         )
-        adrs = sample_ab.pushover_to_adrs(
+        adrs = sample_nl_ab.pushover_to_adrs(
             results,
             modal,
             shapes,

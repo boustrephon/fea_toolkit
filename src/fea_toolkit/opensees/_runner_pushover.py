@@ -129,40 +129,48 @@ class PushoverRunnerMixin:
 
         dof = {"X": 1, "Y": 2, "Z": 3}[lateral_direction]
 
-        # ── Rebuild with fiber sections ──────────────────────────
-        # Pushover always attempts fiber sections (nonlinear).  Check
-        # whether any section overrides the base to_fiber_patches —
-        # if none do, fall back to elastic sections.
+        # ── Rebuild with the nonlinear mechanism ─────────────────
+        # Pushover is a nonlinear static analysis: it must model yielding.
+        # Two mechanisms are possible:
+        #   * hinge_model='fiber' (default) — distributed plasticity via
+        #     fiber sections; every frame section must implement
+        #     to_fiber_patches().  Refuse rather than silently degrade to a
+        #     linear "pushover".
+        #   * hinge_model='lumped' — zero-length hinge springs at member
+        #     ends (elastic interior); the hinges provide the nonlinearity,
+        #     so elastic sections are correct and no fiber is required.
         # Note: brace_truss is orthogonal — braces use Hysteretic truss
-        # elements while beams/columns can still use fiber sections.
-        _use_fiber = True
-        for sec in self.mesh_model.sections.values():
-            if isinstance(sec, ShellSection):
-                continue
-            if not sec.fiber_roles():
-                _use_fiber = False
-                import warnings
+        # elements while beams/columns still use fiber sections.
+        _hinge_lumped = self.config.get("hinge_model") == "lumped"
 
-                warnings.warn(
-                    f"Section '{sec.name}' does not support fiber patches — "
-                    f"falling back to elastic sections for all frame elements. "
-                    f"Consider implementing to_fiber_patches() for mixed "
-                    f"steel/RC models.",
-                    UserWarning,
-                    stacklevel=3,
-                )
-                break
+        if not _hinge_lumped:
+            for sec in self.mesh_model.sections.values():
+                if isinstance(sec, ShellSection):
+                    continue
+                if not sec.fiber_roles():
+                    raise ValueError(
+                        f"Pushover analysis is nonlinear and requires "
+                        f"fiber-capable frame sections, but section "
+                        f"'{sec.name}' has no fiber patches "
+                        f"(fiber_roles() is empty).  Use a typed section "
+                        f"(ISection, PipeSection, ConcreteRectangularSection, "
+                        f"…) or hinge_model='lumped'; for a linear check use "
+                        f"the static / modal / response-spectrum runners."
+                    )
 
-        if not _use_fiber:
-            overrides: dict[str, Any] = {
-                "element_type": "elasticBeamColumn",
-                "create_fiber_sections": False,
-                "use_elastic_sections": True,
-            }
-            self.build_domain(config_overrides=overrides)
-        else:
+        if not _hinge_lumped:
             self.rebuild_with_fiber_sections(
                 brace_selection=self._brace_selection,
+            )
+        else:
+            # Lumped plasticity keeps elastic sections; the zero-length
+            # hinge springs supply the nonlinear mechanism.
+            self.build_domain(
+                config_overrides={
+                    "element_type": "elasticBeamColumn",
+                    "create_fiber_sections": False,
+                    "use_elastic_sections": True,
+                }
             )
 
         # ── Re-apply edge constraints ────────────────────────────

@@ -29,6 +29,12 @@ from fea_toolkit.model.sap_data import (
 def make_sample_model() -> SAPModelData:
     """Build a simple 10 m steel cantilever column with gravity + lateral loads.
 
+    The frame section is a base :class:`~fea_toolkit.model.sap_data.Section`
+    (sectional properties only — no shape), so the model is **elastic**: use it
+    for static / modal / response-spectrum analyses.  Pushover is nonlinear and
+    requires fiber sections — use :func:`make_nonlinear_sample_model` instead.
+
+
     Returns:
         SAPModelData ready to be passed to the Preprocessor + AnalysisBuilder
         two-stage pipeline.
@@ -128,6 +134,10 @@ def make_nonlinear_sample_model() -> SAPModelData:
     ``patch rect``) and use ``dispBeamColumn`` elements.  This produces
     a genuinely nonlinear pushover curve (elastic → yielding), which is
     required for the CSM performance-point workflow.
+
+    Use this model for pushover (and nonlinear-dynamic) analyses; use
+    :func:`make_sample_model` for elastic (static / modal /
+    response-spectrum) checks.
 
     The UB300 section is a **UB 305×165×40** universal beam
     (nominal flange/web approximation): d = 303.4 mm, bf = 165.1 mm,

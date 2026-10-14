@@ -57,7 +57,7 @@ class TestPushoverBuild:
             "Steel": Material(name="Steel", type="Steel", E_mod=2e11, unit_weight=77000),
         }
         sections = {
-            "UB100": Section(
+            "UB100": ISection(
                 name="UB100",
                 shape="I/Wide Flange",
                 material="Steel",
@@ -65,6 +65,10 @@ class TestPushoverBuild:
                 I33=1e-4,
                 I22=1e-5,
                 J=1e-6,
+                depth=0.1,
+                bf=0.06,
+                tf=0.008,
+                tw=0.005,
             ),
         }
         frames = {
@@ -145,8 +149,8 @@ class TestPushoverBuild:
         # Note: initial base_shear includes gravity reaction
         assert abs(results["base_shear"][0]) < 3000.0
 
-    def test_cantilever_linear_pushover_pattern(self, cantilever_model):
-        """Cantilever with elastic sections: linear, monotonic (pattern)."""
+    def test_cantilever_pushover_pattern_monotonic(self, cantilever_model):
+        """Cantilever with fiber sections: monotonic base shear (pattern)."""
         b = _make_pushover_ab(cantilever_model)
         results = b.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},

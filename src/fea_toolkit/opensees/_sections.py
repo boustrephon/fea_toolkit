@@ -167,8 +167,6 @@ class SectionMixin:
                     G_mod = mat.shear_modulus(E_mod)
 
                 _A = getattr(sec, "A", 0.0) or 0.0
-                _I33 = getattr(sec, "I33", 0.0) or 0.0
-                _I22 = getattr(sec, "I22", 0.0) or 0.0
                 _J = getattr(sec, "J", 0.0) or 0.0
 
                 # Create material(s) appropriate for the section type
@@ -192,21 +190,16 @@ class SectionMixin:
                 # Create fiber section (after to_fiber_patches succeeds)
                 try:
                     entries = sec.to_fiber_patches(materials=materials_map, nfy=8, nfz=4)
-                except NotImplementedError:
-                    # Fall back to elastic — no Fiber section was created,
-                    # so no tag collision with the Elastic replacement.
-                    import warnings
-
-                    warnings.warn(
-                        f"Section '{sec.name}' (tag {tag}) does not support fiber "
-                        f"patches — using elastic section instead. "
-                        f"This may indicate a mixed steel/RC model where some "
-                        f"sections lack fiber conversion.",
-                        UserWarning,
-                        stacklevel=2,
-                    )
-                    ops.section("Elastic", tag, E_mod, _A, _I33, _I22, G_mod, _J)
-                    return
+                except NotImplementedError as exc:
+                    # Refuse to degrade to an elastic section: a nonlinear
+                    # analysis on an elastic member is meaningless.
+                    raise ValueError(
+                        f"Fiber sections were requested (create_fiber_sections=True) "
+                        f"but section '{sec.name}' (tag {tag}) does not implement "
+                        f"to_fiber_patches().  Use a typed section (ISection, "
+                        f"PipeSection, ConcreteRectangularSection, …) or disable "
+                        f"fiber sections."
+                    ) from exc
 
                 # When shear aggregation is enabled the fiber section must
                 # live at an internal tag so the SectionAggregator can take

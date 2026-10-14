@@ -517,6 +517,14 @@ is discretised into fibres (concrete patches + steel rebar layers for RC,
 flange/web rectangles for steel).  P-M-M interaction is captured implicitly
 as individual fibres yield.
 
+> **Fiber is required for pushover.**  Because pushover is nonlinear, the
+> distributed-plasticity path requires every frame section to implement
+> ``to_fiber_patches()``.  A model with only elastic ``Section`` properties
+> cannot yield, so the runner raises ``ValueError`` instead of silently
+> degrading to a linear "pushover".  Use ``make_nonlinear_sample_model()`` (or
+> typed sections), or opt into lumped plasticity (§10.2) for the hinge-based
+> alternative.
+
 **Steel sections** — the existing ``to_fiber_patches()`` on ``ISection``,
 ``PipeSection``, ``BoxSection``, etc. generates rectangular ``patch`` definitions.
 
