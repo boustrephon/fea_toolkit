@@ -250,6 +250,45 @@ remaining gaps are the P6b shape patches plus benchmark validation (see P5).
 S2K text); patches must integrate with both `AnalysisBuilder` fiber sections
 and Tcl export (`export_model_to_tcl`).
 
+#### P39 — Section tools: St. Venant J for arbitrary polygons (SD-section fidelity)
+
+Source: `docs/sd_sections.md` (import and roadmap); placeholder in
+`src/fea_toolkit/model/section_tools.py`.
+
+**What.**  SD sections now import with gross elastic `A`/`I33`/`I22` from
+`polygon_props()`, but `J` is the **polar second moment** `I33 + I22` — exact
+for a circle, only an upper bound for an arbitrary solid section (it over-counts
+the warping restraint of a non-circular cross-section).  The true St. Venant
+torsional constant needs a section-tools computation.  A `st_venant_j()`
+placeholder module (`section_tools.py`) marks the home for this work and raises
+`NotImplementedError` so no caller can silently get the polar-moment value from
+it.
+
+**Planned toolkit** (each is an independent follow-up):
+1. **`st_venant_j(vertices, thickness=…)`** — thin-wall `Σ b·t³/3` / Bredt
+   `4·Am² / ∮ ds/t` for thin-walled shapes; a Prandtl / finite-difference /
+   boundary-element solve for solid sections, generalising `rect_props()`'s
+   rectangular-bar series.  Then wire `polygon_props()` to call it (replacing
+   the `J = I33 + I22` line).
+2. **Section moduli `Z33`/`Z22`** from extreme fibres, once the SD local-axis
+   orientation is pinned down.
+3. **`SDSection.to_fiber_patches()`** — triangulate the polygon into concrete
+   patches plus rebar from the `REF LINE`/reinforcement records (unblocks P6b
+   item 1; the SD polygon parsing that P6b flagged as missing is now
+   implemented).
+4. **Centroid/shear-centre offsets** (`cg_offset_2/3`, `ecc_v2/v3`) once the
+   reference-point convention is confirmed.
+
+**Also unresolved (same doc).**  The SD `ANGLE` rotation token and the
+wall-pier (vs frame) local-axis convention are not applied — `I33`/`I22`
+follow the ETABS frame-section default and may be swapped for asymmetric piers
+until a controlled ETABS export pins the convention down.  Each follow-up above
+should be validated against such an export (a small model with hand-computable
+SD sections, at `ANGLE 0` and a known rotation).
+
+**Where.**  `src/fea_toolkit/model/section_tools.py` (pure geometry, no
+OpenSees); wire `st_venant_j` into `polygon_props()` once item 1 lands.
+
 #### P7 — Python-native nonlinear dynamic (time-history) integration
 Source: `docs/nonlinear_dynamic_analysis.md` (frontmatter + Notes);
 repo-root `README.md` "TODO / Future Work" section.
