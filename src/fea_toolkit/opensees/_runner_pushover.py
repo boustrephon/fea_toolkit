@@ -133,9 +133,9 @@ class PushoverRunnerMixin:
         # Pushover is a nonlinear static analysis: it must model yielding.
         # Two mechanisms are possible:
         #   * hinge_model='fiber' (default) — distributed plasticity via
-        #     fiber sections; every frame section must implement
-        #     to_fiber_patches().  Refuse rather than silently degrade to a
-        #     linear "pushover".
+        #     fiber sections; every frame section assigned to an active
+        #     element must implement to_fiber_patches().  Refuse rather than
+        #     silently degrade to a linear "pushover".
         #   * hinge_model='lumped' — zero-length hinge springs at member
         #     ends (elastic interior); the hinges provide the nonlinearity,
         #     so elastic sections are correct and no fiber is required.
@@ -144,8 +144,14 @@ class PushoverRunnerMixin:
         _hinge_lumped = self.config.get("hinge_model") == "lumped"
 
         if not _hinge_lumped:
-            for sec in self.mesh_model.sections.values():
-                if isinstance(sec, ShellSection):
+            # Only validate sections actually assigned to active frame
+            # elements — an unused section definition (or one left only on an
+            # inactive split/meshed parent) must not block the rebuild.
+            active_frame_secs = self._active_frame_section_names()
+            has_fiber_frames = False
+            for sec_name in active_frame_secs:
+                sec = self.mesh_model.sections.get(sec_name)
+                if sec is None or isinstance(sec, ShellSection):
                     continue
                 if not sec.fiber_roles():
                     raise ValueError(
@@ -157,6 +163,25 @@ class PushoverRunnerMixin:
                         f"…) or hinge_model='lumped'; for a linear check use "
                         f"the static / modal / response-spectrum runners."
                     )
+                has_fiber_frames = True
+
+            # A distributed-plasticity pushover must have at least one active
+            # nonlinear yielding mechanism.  Fiber frame sections qualify; a
+            # nonlinear LayeredShell (ShellNLDKGQ) qualifies; a wall
+            # macro-element (SFI_MVLEM_3D / MVLEM_3D) qualifies; an ordinary
+            # elastic ShellSection (ShellMITC4) does not.
+            has_layered_shell = bool(self._active_layered_shell_section_names())
+            has_wall = bool(getattr(self.mesh_model, "wall_elements", None))
+            if not has_fiber_frames and not has_layered_shell and not has_wall:
+                raise ValueError(
+                    "Pushover analysis is nonlinear and requires an active "
+                    "nonlinear yielding mechanism, but the model has no "
+                    "fiber-capable frame sections, no nonlinear layered-shell "
+                    "section, and no wall macro-element.  Use a typed section "
+                    "(ISection, PipeSection, ConcreteRectangularSection, …), "
+                    "hinge_model='lumped', or a nonlinear wall; for a linear "
+                    "check use the static / modal / response-spectrum runners."
+                )
 
         if not _hinge_lumped:
             self.rebuild_with_fiber_sections(

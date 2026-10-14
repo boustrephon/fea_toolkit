@@ -686,6 +686,50 @@ class TestPushoverWorkflow:
                 print_progress=False,
             )
 
+    def test_pushover_ignores_unused_section_definition(self, sample_nl_ab):
+        """An unused non-fiber section definition must not block a fiber pushover."""
+        from fea_toolkit.model.sap_data import GeneralSection
+
+        sample_nl_ab.mesh_model.sections["UNUSED_GEN"] = GeneralSection(
+            name="UNUSED_GEN", shape="General", material="Steel"
+        )
+        sample_nl_ab.build_domain()
+        sample_nl_ab.compute_seismic_masses()
+        results = sample_nl_ab.run_pushover_analysis(
+            gravity_patterns={"DEAD": 1.0},
+            lateral_load_type="uniform",
+            lateral_direction="X",
+            control_node_tag=2,
+            max_disp=0.05,
+            num_steps=3,
+            print_progress=False,
+        )
+        assert "control_disp" in results
+
+    def test_pushover_raises_without_yielding_mechanism(self):
+        """A model with no active nonlinear mechanism raises, not silently degrades."""
+        from fea_toolkit.model.mesh_model import MeshModel
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+        mm = MeshModel(
+            nodes={},
+            frame_elements={},
+            frame_assignments={},
+            area_elements={},
+            area_assignments={},
+            frame_dist_loads=[],
+        )
+        ab = AnalysisBuilder(mm, {"verbose": False})
+        with pytest.raises(ValueError, match="active nonlinear yielding mechanism"):
+            ab.run_pushover_analysis(
+                gravity_patterns={"DEAD": 1.0},
+                lateral_load_type="uniform",
+                lateral_direction="X",
+                max_disp=0.05,
+                num_steps=3,
+                print_progress=False,
+            )
+
 
 # ============================================================================
 # Workflow: P6a steel-shape fiber sections end-to-end (parser → builder)

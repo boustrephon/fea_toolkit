@@ -1489,9 +1489,12 @@ criterion A/B scan and mask negatives before the area integrals, which makes
 the former docs claim ("negative values skipped") true and lets the test feed
 `S_a` unfiltered.
 
-**Next step.** Decide (a) vs (b).  If (b): add the skip/mask in
-`src/fea_toolkit/model/csm.py`, flip `test_noisy_curve_with_negative_sa` to
-pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
+**Next step.** None — resolved as option (a): the non-negative input stays a
+documented caller obligation (no code change).  Option (b) — add the
+skip/mask in `src/fea_toolkit/model/csm.py`, flip
+`test_noisy_curve_with_negative_sa` to pass raw `S_a` and drop its
+out-of-contract guard, then re-run the CSM suite — remains the fallback if
+the caller-side contract is ever abandoned.
 
 
 #### P15 — Docs toolchain: MkDocs 2.0 / ProperDocs decision

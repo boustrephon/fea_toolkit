@@ -5,6 +5,7 @@ from typing import Optional
 
 import openseespy.opensees as ops
 
+from ..model.sap_data import ShellSection
 from ..utils import stress_scale_factor
 from ._fiber_role_materials import resolve_fiber_role_material
 
@@ -125,6 +126,43 @@ class SectionMixin:
 
         self._log.info("sections", f"Created {created} layered shell section(s)")
 
+    def _active_frame_section_names(self) -> set[str]:
+        """Return section names assigned to active (non-inactive) frame elements.
+
+        Split / meshed parents are marked ``inactive`` and are never created
+        in the OpenSees domain, so their section assignments must not drive
+        fiber validation or section creation.
+        """
+        assignments = self.mesh_model.frame_assignments or {}
+        return {
+            assignments[eid]
+            for eid, elem in self.mesh_model.frame_elements.items()
+            if not getattr(elem, "inactive", False) and eid in assignments
+        }
+
+    def _active_layered_shell_section_names(self) -> set[str]:
+        """Return nonlinear layered-shell section names on active area elements.
+
+        A :class:`~fea_toolkit.model.sap_data.LayeredShellSection` assigned to
+        an active (non-inactive, non-loads-only) area element produces a
+        ``ShellNLDKGQ`` shell — a nonlinear yielding mechanism.  Ordinary
+        elastic ``ShellSection`` areas (``ShellMITC4``) are excluded because
+        they carry no such section.
+        """
+        layered = self.mesh_model.layered_shell_sections or {}
+        if not layered:
+            return set()
+        assignments = self.mesh_model.area_assignments or {}
+        loads_only = self.mesh_model.loads_only_area_ids or set()
+        return {
+            assignments[aid]
+            for aid, area in self.mesh_model.area_elements.items()
+            if not getattr(area, "inactive", False)
+            and aid in assignments
+            and assignments[aid] in layered
+            and aid not in loads_only
+        }
+
     def _create_sections(self) -> None:
         """Create OpenSees sections from MeshModel sections.
 
@@ -139,7 +177,23 @@ class SectionMixin:
         next_tag = (
             max(_max_sec, _max_shell) + 1 if (self.section_tags or self._shell_sec_tags) else 1
         )
+
+        # In fiber mode, only create the sections an active frame element
+        # actually uses.  An unused definition (e.g. a GeneralSection never
+        # assigned to a frame, or a section left only on an inactive
+        # split/meshed parent) must not be turned into a fiber section — and
+        # must not raise the "no fiber patches" error.  Shell sections are
+        # created by ``_create_shell_elements``, so the skip is frame-only.
+        create_fiber = self.config.get("create_fiber_sections", False)
+        active_frame_secs = self._active_frame_section_names() if create_fiber else None
+
         for sec_name, sec in self.mesh_model.sections.items():
+            if (
+                create_fiber
+                and not isinstance(sec, ShellSection)
+                and sec_name not in active_frame_secs
+            ):
+                continue
             if sec_name not in self.section_tags:
                 self.section_tags[sec_name] = next_tag
                 next_tag += 1
