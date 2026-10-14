@@ -25,6 +25,8 @@ from fea_toolkit.io.e2k_parser import (
     _get_diaphragm_names,
     _get_frame_sections,
     _get_materials,
+    _get_shell_uniform_load_set_assignments,
+    _get_shell_uniform_load_sets,
     _line_split,
     _load_catalogues,
     _merge_assign_value,
@@ -49,11 +51,14 @@ from fea_toolkit.model.sap_data import (
     LoadCombination,
     PipeSection,
     ShellSection,
+    ShellUniformLoadSet,
     TeeSection,
+    patterns_from_case,
 )
 
 FIXTURE = Path(__file__).parent / "fixtures" / "clean_model.e2k"
 DIAPHRAGM_FIXTURE = Path(__file__).parent / "fixtures" / "diaphragm_model.e2k"
+V19_FIXTURE = Path(__file__).parent / "fixtures" / "v19_loads.e2k"
 
 
 # ── Tokeniser ───────────────────────────────────────────────────────
@@ -486,7 +491,7 @@ def test_load_cases_and_patterns(model):
     assert live.self_weight_factor == pytest.approx(0.0)
 
     assert model.load_cases["DEAD"].design_type == "DEAD"
-    assert model.load_cases["DEAD"].case_type == "Linear Static"
+    assert model.load_cases["DEAD"].case_type == "LinStatic"
 
     wind = model.load_patterns["WX"]
     assert wind.pattern_type == "WIND"
@@ -539,6 +544,202 @@ def test_frame_distributed_loads(model):
     assert linear.val_a == pytest.approx(1.0)
     assert linear.val_b == pytest.approx(2.0)
     assert linear.direction == "Gravity"
+
+
+# ── M7: v19+ load format ($ LOAD PATTERNS / $ LOAD CASES / $ MASS SOURCE) ──
+
+
+@pytest.fixture(scope="module")
+def v19_model():
+    return ETABSParser(V19_FIXTURE).parse().get_model_data()
+
+
+def test_v19_load_patterns(v19_model):
+    dl = v19_model.load_patterns["DL"]
+    assert dl.pattern_type == "Dead"
+    assert dl.self_weight_factor == pytest.approx(1.0)
+
+    ll = v19_model.load_patterns["LL"]
+    assert ll.pattern_type == "Live"
+    assert ll.self_weight_factor == pytest.approx(0.0)
+
+    eq = v19_model.load_patterns["EQ"]
+    assert eq.pattern_type == "Seismic"
+    assert eq.auto_data["SEISMIC"]["source"] == "User Loads"
+    assert len(eq.auto_data["SEISMIC"]["user_loads"]) == 1
+
+
+def test_v19_load_cases(v19_model):
+    dead = v19_model.load_cases["Dead"]
+    assert dead.case_type == "LinStatic"
+    assert patterns_from_case(dead) == {"DL": 1.0}
+
+    ll = v19_model.load_cases["LL_0.5"]
+    assert ll.case_type == "LinStatic"
+    assert patterns_from_case(ll) == {"LL": 0.5}
+
+    modal = v19_model.load_cases["Modal"]
+    assert modal.case_type == "LinModal"
+
+    spec = v19_model.load_cases["SpecX"]
+    assert spec.case_type == "LinRespSpec"
+    assert spec.modal_case == "Modal"
+
+
+def test_v19_mass_source(v19_model):
+    ms = v19_model.mass_sources["MsSrc1"]
+    assert ms.elements is False
+    assert ms.masses is False
+    assert ms.loads is True
+    assert ms.is_default is True
+    assert ms.load_pattern == {"DL": 1.0, "LL": 0.25}
+
+
+def test_v19_object_load_section_names(v19_model):
+    # Real ETABS spells frame/area loads as $ FRAME OBJECT LOADS and
+    # $ SHELL OBJECT LOADS (the synthetic fixtures use $ LINE / $ AREA).
+    assert len(v19_model.frame_dist_loads) == 1
+    frame_load = v19_model.frame_dist_loads[0]
+    assert frame_load.frame_id == "B1@ROOF"
+    assert frame_load.pattern == "DL"
+    assert frame_load.val_a == pytest.approx(0.7)
+
+    unif = [load for load in v19_model.area_uniform_loads if load.area_id == "S1@ROOF"]
+    assert len(unif) == 1
+    assert unif[0].pattern == "LL"
+    assert unif[0].value == pytest.approx(2.5)
+    assert unif[0].direction == "Gravity"
+    assert unif[0].source_set is None  # a direct UNIFF pressure, not a set
+
+
+def test_v19_shell_uniform_load_sets(v19_model):
+    # A UNIFLOADSET reference expands to one gravity-direction AreaUniformLoad
+    # per (pattern, value) pair in the named set ("GravitySet" bundles DL+LL).
+    loads = [load for load in v19_model.area_uniform_loads if load.area_id == "S2@ROOF"]
+    assert len(loads) == 2
+    by_pattern = {load.pattern: load for load in loads}
+    assert set(by_pattern) == {"DL", "LL"}
+    assert all(load.direction == "Gravity" for load in loads)
+    assert all(load.source_set == "GravitySet" for load in loads)
+    assert by_pattern["DL"].value == pytest.approx(1.5)
+    assert by_pattern["LL"].value == pytest.approx(2.0)
+
+    # The original set definition and per-area assignment are retained as
+    # supplementary metadata for introspection / editability.
+    gravity_set = v19_model.shell_uniform_load_sets["GravitySet"]
+    assert isinstance(gravity_set, ShellUniformLoadSet)
+    assert gravity_set.name == "GravitySet"
+    assert set(gravity_set.load_pattern) == {"DL", "LL"}
+    assert gravity_set.load_pattern["DL"] == pytest.approx(1.5)
+    assert gravity_set.load_pattern["LL"] == pytest.approx(2.0)
+    assert v19_model.shell_uniform_load_set_assignments == {"S2@ROOF": "GravitySet"}
+
+
+def test_get_shell_uniform_load_sets():
+    sections = _parse_sections(
+        "$ SHELL UNIFORM LOAD SETS\n"
+        '  SHELLUNIFORMLOADSET "Roof"  LOADPAT "SDL"  VALUE 0.0034\n'
+        '  SHELLUNIFORMLOADSET "Roof"  LOADPAT "Live"  VALUE 0.00098\n'
+        '  SHELLUNIFORMLOADSET "Office"  LOADPAT "SDL"  VALUE 1.2\n'
+    )
+    sets = _get_shell_uniform_load_sets(sections)
+    assert set(sets) == {"Roof", "Office"}
+    assert sets["Roof"].name == "Roof"
+    assert set(sets["Roof"].load_pattern) == {"SDL", "Live"}
+    assert sets["Roof"].load_pattern["SDL"] == pytest.approx(0.0034)
+    assert sets["Roof"].load_pattern["Live"] == pytest.approx(0.00098)
+    assert sets["Office"].load_pattern == {"SDL": 1.2}
+
+
+def test_get_shell_uniform_load_set_assignments():
+    sections = _parse_sections(
+        "$ SHELL OBJECT LOADS\n"
+        '  AREALOAD  "S1"  "ROOF"  TYPE "UNIFF"  DIR "GRAV"  LC "LL"  FVAL 2.5\n'
+        '  AREALOAD  "S2"  "ROOF"  TYPE "UNIFLOADSET"  "GravitySet"\n'
+        '  AREALOAD  "S3"  "BASE"  TYPE "UNIFLOADSET"  "RoofSet"\n'
+    )
+    assert _get_shell_uniform_load_set_assignments(sections) == {
+        "S2@ROOF": "GravitySet",
+        "S3@BASE": "RoofSet",
+    }
+
+
+def test_reexpand_uniform_load_sets():
+    """Editing a set's pattern values re-emits the set-derived loads only."""
+    from examples.sample_model import make_sample_model
+
+    md = make_sample_model()
+    md.shell_uniform_load_sets = {
+        "RoofSet": ShellUniformLoadSet(name="RoofSet", load_pattern={"SDL": 1.2}),
+    }
+    md.shell_uniform_load_set_assignments = {"A1": "RoofSet", "A2": "RoofSet"}
+    # One direct UNIFF pressure plus two set-derived loads.
+    md.area_uniform_loads = [
+        AreaUniformLoad(pattern="Wind", area_id="A1", direction="X", value=0.8),
+        AreaUniformLoad(
+            pattern="SDL", area_id="A1", direction="Gravity", value=1.2, source_set="RoofSet"
+        ),
+        AreaUniformLoad(
+            pattern="SDL", area_id="A2", direction="Gravity", value=1.2, source_set="RoofSet"
+        ),
+    ]
+
+    # Edit the set: change SDL, add Snow.
+    md.shell_uniform_load_sets["RoofSet"].load_pattern["SDL"] = 1.6
+    md.shell_uniform_load_sets["RoofSet"].load_pattern["Snow"] = 0.3
+
+    expanded = md.reexpand_uniform_load_sets()
+
+    by_key = {(ld.area_id, ld.pattern): ld for ld in md.area_uniform_loads}
+    # The UNIFF pressure survives untouched.
+    assert by_key[("A1", "Wind")].source_set is None
+    assert by_key[("A1", "Wind")].value == pytest.approx(0.8)
+    # Set-derived loads reflect the edited definition.
+    assert by_key[("A1", "SDL")].value == pytest.approx(1.6)
+    assert by_key[("A1", "Snow")].value == pytest.approx(0.3)
+    assert by_key[("A2", "SDL")].value == pytest.approx(1.6)
+    assert by_key[("A2", "Snow")].value == pytest.approx(0.3)
+    # 1 UNIFF + 2 areas × 2 patterns.
+    assert len(md.area_uniform_loads) == 5
+    assert len(expanded) == 4
+    assert all(ld.source_set == "RoofSet" for ld in expanded)
+
+
+def test_reexpand_uniform_load_sets_drops_deleted_assignments():
+    """An area no longer assigned to a set loses its set-derived loads."""
+    from examples.sample_model import make_sample_model
+
+    md = make_sample_model()
+    md.shell_uniform_load_sets = {
+        "RoofSet": ShellUniformLoadSet(name="RoofSet", load_pattern={"SDL": 1.2}),
+    }
+    md.shell_uniform_load_set_assignments = {"A1": "RoofSet"}
+    md.area_uniform_loads = [
+        AreaUniformLoad(
+            pattern="SDL", area_id="A1", direction="Gravity", value=1.2, source_set="RoofSet"
+        ),
+    ]
+
+    # Drop the assignment entirely.
+    md.shell_uniform_load_set_assignments = {}
+    expanded = md.reexpand_uniform_load_sets()
+
+    assert expanded == []
+    assert md.area_uniform_loads == []
+
+
+def test_v19_load_combinations(v19_model):
+    comb1 = v19_model.load_combinations["Comb1"]
+    assert comb1.combo_type == "Linear Add"
+    assert comb1.design["ComboType"] == "Strength"
+    assert [(e.name, e.kind) for e in comb1.entries] == [
+        ("Dead", "case"),
+        ("LL_0.5", "case"),
+    ]
+
+    enve = v19_model.load_combinations["ENVE"]
+    assert enve.combo_type == "Envelope"
+    assert [(e.name, e.kind) for e in enve.entries] == [("Comb1", "combo")]
 
 
 # ── M4: diaphragm constraints ───────────────────────────────────────

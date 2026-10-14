@@ -133,6 +133,7 @@ from .sap_data import (
     Section,
     ShellFiberLayer,
     ShellSection,
+    ShellUniformLoadSet,
     TeeSection,
 )
 from .sections import SectionLibrary
@@ -276,6 +277,7 @@ __all__ = [
     "SelectionWeight",
     "ShellFiberLayer",
     "ShellSection",
+    "ShellUniformLoadSet",
     "SpatialGrid",
     "StoreyRigidBody",
     "StoryLevel",

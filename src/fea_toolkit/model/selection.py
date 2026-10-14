@@ -1197,6 +1197,14 @@ class Selection:
             load_cases=model.load_cases,
             load_patterns=model.load_patterns,
             mass_sources=model.mass_sources,
+            shell_uniform_load_sets=getattr(model, "shell_uniform_load_sets", {}) or {},
+            shell_uniform_load_set_assignments={
+                aid: sname
+                for aid, sname in (
+                    getattr(model, "shell_uniform_load_set_assignments", {}) or {}
+                ).items()
+                if aid in area_ids
+            },
             # Loads on selected elements / nodes
             joint_loads=[jl for jl in model.joint_loads if jl.node_id in node_ids],
             frame_dist_loads=[ld for ld in model.frame_dist_loads if ld.frame_id in frame_ids],

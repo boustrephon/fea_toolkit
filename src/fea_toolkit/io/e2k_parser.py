@@ -72,6 +72,7 @@ from ..model.sap_data import (
     LoadCombination,
     LoadCombinationEntry,
     LoadPattern,
+    MassSource,
     Material,
     Node,
     PipeSection,
@@ -80,6 +81,7 @@ from ..model.sap_data import (
     SAPModelData,
     Section,
     ShellSection,
+    ShellUniformLoadSet,
     TeeSection,
 )
 from ..model.section_properties import (
@@ -377,20 +379,20 @@ class ETABSParser:
             area_elements, point_assigns, area_assigns, diaphragm_names
         )
 
-        # ── Loads (M3) ────────────────────────────────────────────
-        if "STATIC LOADS" not in sections and (
-            "LOAD PATTERNS" in sections or "LOAD CASES" in sections
-        ):
-            logger.warning(
-                "%s uses the v21 load format ($ LOAD PATTERNS / $ LOAD CASES), "
-                "which is not parsed; the model will have no loads.",
-                self.file_path,
-            )
+        # ── Loads (M3 + M7) ───────────────────────────────────────
+        # Legacy ``$ STATIC LOADS`` merges the load-case and load-pattern
+        # concepts; v19+ splits them into ``$ LOAD PATTERNS`` + ``$ LOAD CASES``
+        # and adds ``$ MASS SOURCE``.
         load_cases, load_patterns = _get_load_cases_and_patterns(sections)
+        load_patterns.update(_get_load_patterns(sections))
+        load_cases.update(_get_load_cases(sections))
+        mass_sources = _get_mass_sources(sections)
         load_combinations = _get_load_combinations(sections)
         joint_loads = _get_joint_loads(sections)
         frame_dist_loads = _get_frame_distributed_loads(sections)
-        area_uniform_loads = _get_area_uniform_loads(sections)
+        shell_uniform_load_sets = _get_shell_uniform_load_sets(sections)
+        shell_uniform_load_set_assignments = _get_shell_uniform_load_set_assignments(sections)
+        area_uniform_loads = _get_area_uniform_loads(sections, shell_uniform_load_sets)
 
         md = SAPModelData(
             nodes=nodes,
@@ -408,10 +410,13 @@ class ETABSParser:
             frame_end_offsets=frame_end_offsets,
             load_cases=load_cases,
             load_patterns=load_patterns,
+            mass_sources=mass_sources,
             load_combinations=load_combinations,
             joint_loads=joint_loads,
             frame_dist_loads=frame_dist_loads,
             area_uniform_loads=area_uniform_loads,
+            shell_uniform_load_sets=shell_uniform_load_sets,
+            shell_uniform_load_set_assignments=shell_uniform_load_set_assignments,
             units=units,
             source=str(self.file_path),
         )
@@ -591,6 +596,16 @@ def _merge_assign_value(existing: Any, value: Any, kw: str) -> Any:
     accumulated values rather than appended as a nested element; a scalar value
     is appended.  Every other key is scalar, so a later value replaces an
     earlier one.
+
+    Args:
+        existing: The previously accumulated value for *kw*, or ``None`` if
+            this is the first occurrence.
+        value: The incoming value for the current occurrence of *kw*.
+        kw: The assignment keyword being merged.
+
+    Returns:
+        The merged value: a flat list of accumulated values for multi-valued
+        keys, or *value* itself (replacing any earlier value) for scalar keys.
     """
     if kw in _MULTI_VALUE_ASSIGN_KEYS:
         items = list(value) if isinstance(value, (list, tuple)) else [value]
@@ -1603,25 +1618,46 @@ _COMBO_ENTRY_KIND = {
     "LOADPATTERN": "case",
     "SPEC": "case",
     "COMBO": "combo",
+    "LOADCOMBO": "combo",
 }
 
+# ETABS v19+ load-case ``TYPE`` strings → the toolkit's ``case_type``
+# vocabulary.  SAP2000's ``.s2k`` spells a linear-static case ``LinStatic``;
+# :func:`~fea_toolkit.analysis.case_listing.list_static_cases` auto-detects a
+# static case by matching ``linstatic`` / ``static`` case-insensitively, so the
+# ETABS spellings below must land on those tokens.
+_CASE_TYPE_MAP = {
+    "LINEAR STATIC": "LinStatic",
+    "MODAL - EIGEN": "LinModal",
+    "RESPONSE SPECTRUM": "LinRespSpec",
+}
+
+
+def _yes(value: Any) -> bool:
+    """Interpret an ETABS ``"Yes"`` / ``"No"`` token as a bool."""
+    return str(value).strip().lower() in ("yes", "true", "1")
+
+
 # Load types recognised but not mapped to a load dataclass (deferred):
-# temperature, ground displacement, point force/moment at a frame midspan, and
-# uniform-load sets.  Logged at debug level rather than dropped silently or
-# spamming warnings.
-_DEFERRED_LOAD_TYPES = {"TEMP", "GROUNDDISP", "POINTF", "POINTM", "UNIFLOADSET"}
+# temperature, ground displacement, and point force/moment at a frame midspan.
+# Logged at debug level rather than dropped silently or spamming warnings.
+_DEFERRED_LOAD_TYPES = {"TEMP", "GROUNDDISP", "POINTF", "POINTM"}
 
 
 def _get_load_cases_and_patterns(
     sections: dict[str, list[GroupedLine]],
 ) -> tuple[dict[str, LoadCase], dict[str, LoadPattern]]:
-    """Extract load cases and patterns from ``$ STATIC LOADS``.
+    """Extract load cases and patterns from the legacy ``$ STATIC LOADS``.
 
-    Each ``LOADCASE`` line yields both a :class:`LoadCase` and a
-    :class:`LoadPattern` (ETABS merges the two SAP2000 concepts); the
-    ``SELFWEIGHT`` factor maps to the pattern's self-weight multiplier.  A
-    ``WIND`` line (``WIND "WX" "EUROCODE1 2005" …``) attaches the
+    Pre-v19 ETABS exports merge the load-case and load-pattern concepts into a
+    single ``LOADCASE`` line: each line yields both a :class:`LoadCase` and a
+    :class:`LoadPattern` of the same name, and the ``SELFWEIGHT`` factor maps to
+    the pattern's self-weight multiplier.  A ``WIND`` line attaches the
     auto-generation parameters to the matching case and pattern.
+
+    v19+ splits this into ``$ LOAD PATTERNS`` + ``$ LOAD CASES`` (see
+    :func:`_get_load_patterns` and :func:`_get_load_cases`); this function only
+    reads the legacy form.
     """
     load_cases: dict[str, LoadCase] = {}
     load_patterns: dict[str, LoadPattern] = {}
@@ -1636,7 +1672,7 @@ def _get_load_cases_and_patterns(
             self_weight = _as_float(attrs.get("SELFWEIGHT", 0.0))
             load_cases[name] = LoadCase(
                 case_name=name,
-                case_type="Linear Static",
+                case_type="LinStatic",
                 design_type_option="Prog Det",
                 design_type=design_type,
                 design_action_option="Prog Det",
@@ -1662,6 +1698,144 @@ def _get_load_cases_and_patterns(
     return load_cases, load_patterns
 
 
+def _get_load_patterns(
+    sections: dict[str, list[GroupedLine]],
+) -> dict[str, LoadPattern]:
+    """Extract load patterns from ``$ LOAD PATTERNS`` (v19+).
+
+    ``LOADPATTERN "name" TYPE "type" SELFWEIGHT factor`` yields a
+    :class:`LoadPattern`; ``SEISMIC`` / ``WIND`` auto-generation records attach
+    to ``auto_data`` (captured, not expanded — matching the SAP2000 parser's
+    treatment of ``AUTO*`` tables).
+    """
+    patterns: dict[str, LoadPattern] = {}
+    for groups in sections.get("LOAD PATTERNS", []):
+        if not groups:
+            continue
+        leading, vals = groups[0]
+        attrs = {kw: v[0] if len(v) == 1 else tuple(v) for kw, v in groups[1:]}
+        name = str(vals[0]) if vals else ""
+        if not name:
+            continue
+        if leading == "LOADPATTERN":
+            patterns[name] = LoadPattern(
+                name=name,
+                pattern_type=str(attrs.get("TYPE", "Other")),
+                self_weight_factor=_as_float(attrs.get("SELFWEIGHT", 0.0)),
+            )
+        elif leading == "SEISMIC":
+            if name not in patterns:
+                logger.debug("SEISMIC record %r has no matching LOADPATTERN.", name)
+                continue
+            data = patterns[name].auto_data.setdefault("SEISMIC", {})
+            if "USERLOAD" in attrs:
+                data.setdefault("user_loads", []).append(attrs)
+            elif len(vals) > 1:
+                data["source"] = str(vals[1])
+        elif leading == "WIND":
+            if name not in patterns:
+                continue
+            wind_data: dict[str, Any] = {"code": str(vals[1]) if len(vals) > 1 else ""}
+            wind_data.update(attrs)
+            patterns[name].auto_data["WIND"] = wind_data
+        else:
+            logger.debug("Ignoring unrecognised LOAD PATTERNS record %r.", leading)
+    return patterns
+
+
+def _get_load_cases(
+    sections: dict[str, list[GroupedLine]],
+) -> dict[str, LoadCase]:
+    """Extract load cases from ``$ LOAD CASES`` (v19+).
+
+    A ``LOADCASE "name" TYPE …`` header starts a case; later ``LOADCASE "name"
+    LOADPAT "pattern" SF factor`` lines are its static load assignments (stored
+    under the same ``CASE - STATIC 1 - LOAD ASSIGNMENTS`` key the SAP2000 parser
+    writes, so :func:`~fea_toolkit.model.sap_data.patterns_from_case` reads them
+    unchanged).  Modal / response-spectrum parameters are kept losslessly under
+    ``case_data["ETABS"]``.
+    """
+    load_cases: dict[str, LoadCase] = {}
+    for groups in sections.get("LOAD CASES", []):
+        if not groups or groups[0][0] != "LOADCASE":
+            continue
+        vals = groups[0][1]
+        if not vals:
+            continue
+        name = str(vals[0])
+        attrs = {kw: v[0] if len(v) == 1 else tuple(v) for kw, v in groups[1:]}
+        lc = load_cases.setdefault(
+            name,
+            LoadCase(
+                case_name=name,
+                case_type="",
+                design_type_option="Prog Det",
+                design_type="",
+                design_action_option="Prog Det",
+                design_action="",
+                run_case=True,
+            ),
+        )
+        if "TYPE" in attrs:
+            raw_type = str(attrs["TYPE"])
+            lc.case_type = _CASE_TYPE_MAP.get(raw_type.upper(), raw_type)
+        if "INITCOND" in attrs:
+            lc.initial_condition = str(attrs["INITCOND"])
+        if "MODALCASE" in attrs:
+            lc.modal_case = str(attrs["MODALCASE"])
+        if "LOADPAT" in attrs:
+            lc.case_data.setdefault("CASE - STATIC 1 - LOAD ASSIGNMENTS", []).append(
+                {"LoadName": str(attrs["LOADPAT"]), "LoadSF": _as_float(attrs.get("SF", 1.0))}
+            )
+        extra = {
+            k: v
+            for k, v in attrs.items()
+            if k not in {"TYPE", "INITCOND", "MODALCASE", "LOADPAT", "SF"}
+        }
+        if extra:
+            lc.case_data.setdefault("ETABS", {}).update(extra)
+    return load_cases
+
+
+def _get_mass_sources(
+    sections: dict[str, list[GroupedLine]],
+) -> dict[str, MassSource]:
+    """Extract mass sources from ``$ MASS SOURCE`` (v19+).
+
+    ``MASSSOURCE "name" INCLUDEELEMENTS … ISDEFAULT …`` starts a source (the
+    ``Yes``/``No`` flags map to :class:`MassSource`'s ``elements`` / ``masses``
+    / ``loads`` / ``is_default``); each ``MASSSOURCELOAD "name" "pattern"
+    multiplier`` row adds a load-pattern multiplier (summed when a pattern
+    repeats).
+    """
+    mass_sources: dict[str, MassSource] = {}
+    for groups in sections.get("MASS SOURCE", []):
+        if not groups:
+            continue
+        leading, vals = groups[0]
+        attrs = {kw: v[0] if len(v) == 1 else tuple(v) for kw, v in groups[1:]}
+        name = str(vals[0]) if vals else ""
+        if not name:
+            continue
+        if leading == "MASSSOURCE":
+            mass_sources[name] = MassSource(
+                name=name,
+                elements=_yes(attrs.get("INCLUDEELEMENTS")),
+                masses=_yes(attrs.get("INCLUDEADDEDMASS")),
+                loads=_yes(attrs.get("INCLUDELOADS")),
+                is_default=_yes(attrs.get("ISDEFAULT")),
+            )
+        elif leading == "MASSSOURCELOAD":
+            source = mass_sources.get(name)
+            if source is not None and len(vals) >= 3:
+                pattern = str(vals[1])
+                mult = _as_float(vals[2])
+                source.load_pattern[pattern] = source.load_pattern.get(pattern, 0.0) + mult
+        else:
+            logger.debug("Ignoring unrecognised MASS SOURCE record %r.", leading)
+    return mass_sources
+
+
 def _get_load_combinations(
     sections: dict[str, list[GroupedLine]],
 ) -> dict[str, LoadCombination]:
@@ -1677,6 +1851,7 @@ def _get_load_combinations(
         name: Optional[str] = None
         combo_type: Optional[str] = None
         design: Optional[str] = None
+        combo_design_type: Optional[str] = None
         entry_name: Optional[str] = None
         entry_kind: Optional[str] = None
         sf = 1.0
@@ -1687,6 +1862,8 @@ def _get_load_combinations(
                 combo_type = str(vals[0])
             elif kw == "DESIGN":
                 design = str(vals[0])
+            elif kw == "COMBOTYPE":
+                combo_design_type = str(vals[0])
             elif kw in _COMBO_ENTRY_KIND:
                 entry_kind = kw
                 entry_name = str(vals[0])
@@ -1699,6 +1876,8 @@ def _get_load_combinations(
             combo.combo_type = _COMBO_TYPE_MAP.get(combo_type.upper(), combo_type)
         if design is not None:
             combo.design["Design"] = design
+        if combo_design_type is not None:
+            combo.design["ComboType"] = combo_design_type
         if entry_name is not None and entry_kind is not None:
             combo.entries.append(
                 LoadCombinationEntry(
@@ -1726,6 +1905,22 @@ def _iter_object_loads(
         for kw, v in groups[1:]:
             attrs[kw] = v[0] if len(v) == 1 else tuple(v)
         yield name, storey, attrs
+
+
+def _iter_object_loads_any(
+    sections: dict[str, list[GroupedLine]],
+    section_names: tuple[str, ...],
+    keyword: str,
+):
+    """Yield object loads from the first of *section_names* present in *sections*.
+
+    Real ETABS exports name the frame/area load sections ``$ FRAME OBJECT
+    LOADS`` / ``$ SHELL OBJECT LOADS``; the project's synthetic fixtures spell
+    them ``$ LINE OBJECT LOADS`` / ``$ AREA OBJECT LOADS``.  Both use the same
+    ``LINELOAD`` / ``AREALOAD`` record keyword, so both spellings are accepted.
+    """
+    for section in section_names:
+        yield from _iter_object_loads(sections, section, keyword)
 
 
 def _map_direction(direction: Any) -> str:
@@ -1762,9 +1957,12 @@ def _get_joint_loads(sections: dict[str, list[GroupedLine]]) -> list[JointLoad]:
 def _get_frame_distributed_loads(
     sections: dict[str, list[GroupedLine]],
 ) -> list[FrameDistributedLoad]:
-    """Extract frame loads from ``$ LINE OBJECT LOADS`` (``UNIFF`` / ``TRAPF``)."""
+    """Extract frame loads from ``$ FRAME OBJECT LOADS`` (or ``$ LINE OBJECT
+    LOADS``) — ``UNIFF`` / ``TRAPF``."""
     loads: list[FrameDistributedLoad] = []
-    for name, storey, attrs in _iter_object_loads(sections, "LINE OBJECT LOADS", "LINELOAD"):
+    for name, storey, attrs in _iter_object_loads_any(
+        sections, ("FRAME OBJECT LOADS", "LINE OBJECT LOADS"), "LINELOAD"
+    ):
         ltype = str(attrs.get("TYPE", "")).upper()
         pattern = str(attrs.get("LC", ""))
         frame_id = _compose_id(name, storey)
@@ -1814,13 +2012,89 @@ def _get_frame_distributed_loads(
     return loads
 
 
+def _get_shell_uniform_load_sets(
+    sections: dict[str, list[GroupedLine]],
+) -> dict[str, ShellUniformLoadSet]:
+    """Extract shell uniform load sets from ``$ SHELL UNIFORM LOAD SETS`` (v19+).
+
+    A *uniform load set* is a named bundle of gravity-direction pressures keyed
+    by load pattern — e.g. ``{"Roof": {"SDL": 0.0034, "Live": 0.00098}}``.  Each
+    ``SHELLUNIFORMLOADSET "name" LOADPAT "pattern" VALUE value`` row adds one
+    ``(pattern, value)`` pair to the named set.  Sets are assigned to shell
+    objects via ``$ SHELL OBJECT LOADS`` ``TYPE "UNIFLOADSET" "name"`` (see
+    :func:`_get_shell_uniform_load_set_assignments`); the reference is resolved
+    into concrete :class:`AreaUniformLoad` records by
+    :func:`_get_area_uniform_loads`.
+    """
+    sets: dict[str, ShellUniformLoadSet] = {}
+    for groups in sections.get("SHELL UNIFORM LOAD SETS", []):
+        if not groups or groups[0][0] != "SHELLUNIFORMLOADSET":
+            continue
+        vals = groups[0][1]
+        if not vals:
+            continue
+        name = str(vals[0])
+        attrs = {kw: v[0] if len(v) == 1 else tuple(v) for kw, v in groups[1:]}
+        pattern = str(attrs.get("LOADPAT", ""))
+        if not pattern:
+            continue
+        sets.setdefault(name, ShellUniformLoadSet(name=name)).load_pattern[pattern] = _as_float(
+            attrs.get("VALUE", 0.0)
+        )
+    return sets
+
+
+def _get_shell_uniform_load_set_assignments(
+    sections: dict[str, list[GroupedLine]],
+) -> dict[str, str]:
+    """Map each shell object to the uniform load set it references.
+
+    Reads ``$ SHELL OBJECT LOADS`` (or ``$ AREA OBJECT LOADS``) and, for every
+    ``AREALOAD`` whose ``TYPE`` is ``("UNIFLOADSET", set_name)``, records
+    ``composed area_id -> set_name`` (the same ``area_id`` used by
+    :class:`AreaUniformLoad` and :attr:`SAPModelData.area_elements`).
+    """
+    assignments: dict[str, str] = {}
+    for name, storey, attrs in _iter_object_loads_any(
+        sections, ("SHELL OBJECT LOADS", "AREA OBJECT LOADS"), "AREALOAD"
+    ):
+        raw_type = attrs.get("TYPE")
+        if not (isinstance(raw_type, tuple) and len(raw_type) == 2):
+            continue
+        if str(raw_type[0]).upper() != "UNIFLOADSET":
+            continue
+        assignments[_compose_id(name, storey)] = str(raw_type[1])
+    return assignments
+
+
 def _get_area_uniform_loads(
     sections: dict[str, list[GroupedLine]],
+    load_sets: Optional[dict[str, ShellUniformLoadSet]] = None,
 ) -> list[AreaUniformLoad]:
-    """Extract area pressures from ``$ AREA OBJECT LOADS`` (``TYPE "UNIFF"``)."""
+    """Extract area pressures from ``$ SHELL OBJECT LOADS`` (or ``$ AREA OBJECT
+    LOADS``) — ``TYPE "UNIFF"`` and ``TYPE "UNIFLOADSET"``.
+
+    ``UNIFLOADSET`` references a named shell uniform load set (``$ SHELL
+    UNIFORM LOAD SETS``): its ``TYPE`` keyword binds two values —
+    ``("UNIFLOADSET", set_name)`` — and each ``(pattern, value)`` pair in that
+    set becomes one gravity-direction :class:`AreaUniformLoad`.  ``load_sets``
+    may be supplied to reuse an already-parsed mapping (the parser computes it
+    once and also stores it as supplementary metadata); otherwise it is read
+    from *sections*.
+    """
+    if load_sets is None:
+        load_sets = _get_shell_uniform_load_sets(sections)
     loads: list[AreaUniformLoad] = []
-    for name, storey, attrs in _iter_object_loads(sections, "AREA OBJECT LOADS", "AREALOAD"):
-        ltype = str(attrs.get("TYPE", "")).upper()
+    for name, storey, attrs in _iter_object_loads_any(
+        sections, ("SHELL OBJECT LOADS", "AREA OBJECT LOADS"), "AREALOAD"
+    ):
+        raw_type = attrs.get("TYPE")
+        if isinstance(raw_type, tuple):
+            ltype = str(raw_type[0]).upper()
+            set_name = str(raw_type[1]) if len(raw_type) > 1 else ""
+        else:
+            ltype = str(raw_type or "").upper()
+            set_name = ""
         if ltype == "UNIFF":
             loads.append(
                 AreaUniformLoad(
@@ -1830,6 +2104,26 @@ def _get_area_uniform_loads(
                     value=_as_float(attrs.get("FVAL", 0.0)),
                 )
             )
+        elif ltype == "UNIFLOADSET":
+            entry = load_sets.get(set_name)
+            if entry is None:
+                logger.warning(
+                    "Area load %r at %r references unknown uniform load set %r.",
+                    name,
+                    storey,
+                    set_name,
+                )
+                continue
+            for pattern, value in entry.load_pattern.items():
+                loads.append(
+                    AreaUniformLoad(
+                        pattern=pattern,
+                        area_id=_compose_id(name, storey),
+                        direction="Gravity",
+                        value=value,
+                        source_set=set_name,
+                    )
+                )
         elif ltype in _DEFERRED_LOAD_TYPES:
             logger.debug("Area load %r at %r: %s loads are deferred.", name, storey, ltype)
         else:

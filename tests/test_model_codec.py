@@ -66,6 +66,16 @@ class TestSAPRoundTrip:
         md = make_rc_frame_model()
         assert json_to_model(model_to_json(md), cls=SAPModelData) == md
 
+    def test_shell_uniform_load_sets_round_trip(self):
+        from fea_toolkit.model.sap_data import ShellUniformLoadSet
+
+        md = make_sample_model()
+        md.shell_uniform_load_sets = {
+            "RoofSet": ShellUniformLoadSet(name="RoofSet", load_pattern={"SDL": 1.2, "Live": 0.5}),
+        }
+        md.shell_uniform_load_set_assignments = {"A1": "RoofSet"}
+        assert dict_to_model(model_to_dict(md)) == md
+
     def test_deterministic_json(self):
         md = make_sample_model()
         assert model_to_json(md) == model_to_json(md)

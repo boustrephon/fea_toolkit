@@ -2111,6 +2111,23 @@ class MassSource:
 
 
 @dataclass
+class ShellUniformLoadSet:
+    """ETABS shell uniform load set (``$ SHELL UNIFORM LOAD SETS``).
+
+    A named bundle of gravity-direction pressures keyed by load pattern
+    (e.g. ``{"Roof": {"SDL": 0.0034, "Live": 0.00098}}``), assigned to shell
+    objects via ``$ SHELL OBJECT LOADS`` ``TYPE "UNIFLOADSET" "name"``.  The
+    parser expands the reference into concrete :class:`AreaUniformLoad` records
+    at parse time; this dataclass preserves the original definition (and
+    ``SAPModelData.shell_uniform_load_set_assignments`` the per-area
+    assignment) for introspection and editability.
+    """
+
+    name: str
+    load_pattern: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass
 class JointLoad:
     """ "JOINT LOADS - FORCE" : Concentrated load at a joint."""
 
@@ -2149,6 +2166,11 @@ class AreaUniformLoad:
     # ── Uniform-to-Frame (SAP) extension ──────────────────────────
     to_frame: bool = False  # True → apply to panel edge frames
     distribution: str = "TwoWay"  # 'OneWay' | 'TwoWay'
+    # ── ETABS UNIFLOADSET provenance ─────────────────────────────
+    # The named shell uniform load set this load was expanded from (``None`` for
+    # a direct ``UNIFF`` pressure).  Lets re-expansion drop and regenerate exactly
+    # the set-derived loads without touching a same-named ``UNIFF`` pressure.
+    source_set: Optional[str] = None
 
 
 @dataclass
@@ -2347,6 +2369,13 @@ class SAPModelData:
     area_gravity_loads: list[AreaGravityLoad] = field(default_factory=list)
     frame_gravity_loads: list[GravityLoad] = field(default_factory=list)
     mass_sources: dict[str, MassSource] = field(default_factory=dict)
+    # ETABS shell uniform load sets — the original ``$ SHELL UNIFORM LOAD SETS``
+    # definitions (keyed by set name) and the per-area assignment
+    # (``area_id -> set_name``).  The reference is *also* expanded into
+    # ``area_uniform_loads`` at parse time; these two fields retain the
+    # authoring structure for introspection and editability.
+    shell_uniform_load_sets: dict[str, ShellUniformLoadSet] = field(default_factory=dict)
+    shell_uniform_load_set_assignments: dict[str, str] = field(default_factory=dict)
     # Multi-axial (nD) materials for nonlinear shell analysis
     nd_materials: dict[str, NDMaterial] = field(default_factory=dict)
     # Layered shell sections for nonlinear shear walls
@@ -2492,6 +2521,49 @@ class SAPModelData:
             if getattr(lc, "case_type", "").lower() in ("linstatic", "static"):
                 cases.append(getattr(lc, "case_name", str(lc)))
         return cases
+
+    # ── ETABS uniform-load-set editability ────────────────────────
+
+    def reexpand_uniform_load_sets(self) -> list[AreaUniformLoad]:
+        """Regenerate set-derived area loads from the current set definitions.
+
+        Drops every :class:`AreaUniformLoad` whose ``source_set`` is set (those
+        expanded from a ``UNIFLOADSET`` reference at parse time) and re-emits one
+        gravity-direction load per ``(pattern, value)`` pair for each shell still
+        assigned to a set.  Direct ``UNIFF`` pressures (``source_set is None``)
+        are left untouched.
+
+        Call this after editing :attr:`shell_uniform_load_sets` (or
+        :attr:`shell_uniform_load_set_assignments`) so that
+        :attr:`area_uniform_loads` — the analysis source of truth — matches the
+        edited authoring structure.  The helper relies on the ``source_set``
+        provenance set by the ETABS parser; a hand-built model must mark its
+        set-derived loads accordingly.
+
+        Returns:
+            The freshly expanded loads (also stored back onto
+            ``self.area_uniform_loads``).
+        """
+        retained = [ld for ld in self.area_uniform_loads if ld.source_set is None]
+        expanded: list[AreaUniformLoad] = []
+        assignments = self.shell_uniform_load_set_assignments or {}
+        sets = self.shell_uniform_load_sets or {}
+        for area_id, set_name in assignments.items():
+            entry = sets.get(set_name)
+            if entry is None:
+                continue
+            for pattern, value in entry.load_pattern.items():
+                expanded.append(
+                    AreaUniformLoad(
+                        pattern=pattern,
+                        area_id=area_id,
+                        direction="Gravity",
+                        value=value,
+                        source_set=set_name,
+                    )
+                )
+        self.area_uniform_loads = retained + expanded
+        return expanded
 
     def summary_dict(self) -> dict[str, Any]:
         """Return a one‑row dict of model statistics."""
