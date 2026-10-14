@@ -16,6 +16,13 @@ area, centroid and second moments), with `X` mapped to the local 3-axis and
 shapes are skipped.  Multi-polygon composites combine about the shared centroid
 via the parallel-axis theorem.
 
+The same polygon loops also drive the extruded representation:
+`section_profile_outline()` / `section_plates()` emit the actual perimeter
+(centred on the composite centroid) rather than the area-equivalent square the
+`GeneralSection`-style fallback would draw.  A multi-polygon composite is
+decomposed into **regions** — one outer boundary per disjoint part, each with
+its holes — and each region is extruded separately.
+
 ## 2. Known limitations (addressable follow-ups)
 
 1. **`J` is the polar second moment, not St. Venant.**  `polygon_props()`
@@ -46,6 +53,16 @@ via the parallel-axis theorem.
 4. **Centroid offsets are not populated.**  `cg_offset_2`/`cg_offset_3` (and
    shear-centre `ecc_v2`/`ecc_v3`) stay at zero — the section reference-point
    convention needs the same controlled-export check as item 3.
+5. **PyVista end caps for arbitrary hole shapes are not triangulated (future
+   development).**  In the PyVista extrusion, a hole's annular end caps are only
+   produced when the hole loop shares the outer loop's vertex count (``Q == P``,
+   the box case); otherwise the annulus is left **open at the ends**.  Closing
+   it needs polygon triangulation of the outer-minus-holes annulus, which is
+   hard because (a) the outer and each hole are independent point lists with
+   unrelated vertex counts, so there is no trivial edge-pairing, and (b) the
+   holes must be subtracted from the outer while keeping the cap winding outward
+   for both profile orientations.  Rhino is unaffected — ``rg.Extrusion`` /
+   ``AddInnerProfile`` generate their own (correct) caps.
 
 ## 3. Future "section tools" (planned)
 

@@ -28,8 +28,10 @@ from .sap_data import (
     ISection,
     PipeSection,
     RectangularSection,
+    SDSection,
     Section,
 )
+from .section_properties import polygon_props
 
 __all__ = [
     "ProfileOutline",
@@ -151,10 +153,103 @@ def profile_channel(depth: float, bf: float, tf: float, tw: float) -> list[tuple
 
 #: The shape a :func:`section_profile_outline` returns — a polygonal
 #: ``("polygon", [(x, y), ...])``, a hollow ``("polygon", (outer, inner))``
-#: (where *outer* and *inner* are two closed loops), or a
-#: ``("circle", radius)`` pair.  A single union rather than a dataclass keeps
-#: the Rhino / PyVista call sites plain.
+#: (where *outer* and *inner* are two closed loops), a ``("circle", radius)``
+#: pair, or a multi-region ``("regions", [(outer, [holes...]), ...])`` list
+#: (one outer boundary plus its holes per disjoint solid part).  A single
+#: union rather than a dataclass keeps the Rhino / PyVista call sites plain.
 ProfileOutline = tuple[str, Any]
+
+#: One extruded region: an outer boundary loop plus zero or more holes (all
+#: closed ``(x, y)`` loops in the profile convention).
+Region = tuple[list[tuple[float, float]], list[list[tuple[float, float]]]]
+
+
+# ── Section Designer (SD) polygon helpers ──
+# ``SDSection.polygons`` stores each material's closed corner loop in
+# ``(local 2, local 3)`` order (the E2K ``(SD Y, SD X)`` mapping); the profile
+# convention used by the other helpers is ``(x, y)`` = ``(local 3, local 2)``.
+
+
+def _loop_sides(loop: list[tuple[float, float]]) -> list[list[tuple[float, float]]]:
+    """The perimeter edges of a closed loop, as open two-point polylines."""
+    n = len(loop)
+    return [[loop[i], loop[(i + 1) % n]] for i in range(n)]
+
+
+def _point_in_loop(pt: tuple[float, float], loop: list[tuple[float, float]]) -> bool:
+    """Ray-casting point-in-polygon test (on-boundary counts as inside)."""
+    x, y = pt
+    inside = False
+    n = len(loop)
+    for i in range(n):
+        x0, y0 = loop[i]
+        x1, y1 = loop[(i + 1) % n]
+        if (y0 > y) != (y1 > y):
+            x_cross = (x1 - x0) * (y - y0) / (y1 - y0) + x0
+            if x < x_cross:
+                inside = not inside
+    return inside
+
+
+def _loop_inside(inner: list[tuple[float, float]], outer: list[tuple[float, float]]) -> bool:
+    """True when every vertex of *inner* lies inside (or on) *outer*."""
+    return all(_point_in_loop(pt, outer) for pt in inner)
+
+
+def _sd_loops(section: SDSection) -> list[list[tuple[float, float]]]:
+    """The SD section's polygon loops, centred and in profile ``(x, y)`` order.
+
+    Each stored loop is a closed ``(local 2, local 3)`` corner list; the loops
+    are shifted so the composite **area centroid** sits at the origin (so the
+    section centres on the member axis, like the parametric profiles) and then
+    transposed to ``(x, y)`` = ``(local 3, local 2)`` (``x`` = width along local
+    3, ``y`` = depth along local 2).
+    """
+    loops = [list(loop) for (_mat, loop) in section.polygons if len(loop) >= 3]
+    if not loops:
+        return []
+    cy = cz = area = 0.0
+    for loop in loops:
+        props = polygon_props(loop)
+        a = props["A"]
+        cy += a * props["cy"]
+        cz += a * props["cz"]
+        area += a
+    if area > 0.0:
+        cy /= area
+        cz /= area
+    return [[(z - cz, y - cy) for (y, z) in loop] for loop in loops]
+
+
+def _sd_regions(section: SDSection) -> list[Region]:
+    """The SD section's extruded regions — outer boundaries with their holes.
+
+    Classifies the centred, transposed loops into **outer boundaries** (even
+    nesting depth) and **holes** (odd nesting depth) by counting how many other
+    loops contain each one, then groups each hole under its tightest enclosing
+    outer.  Returns one ``(outer, [holes...])`` per disjoint solid part.  An
+    island *inside* a hole reads as its own outer region — the flat region list
+    cannot nest a region inside another region's hole.
+    """
+    loops = _sd_loops(section)
+    if not loops:
+        return []
+    depth = [
+        sum(i != j and _loop_inside(loop, other) for j, other in enumerate(loops))
+        for i, loop in enumerate(loops)
+    ]
+    outers = [loop for loop, d in zip(loops, depth) if d % 2 == 0]
+    holes = [loop for loop, d in zip(loops, depth) if d % 2 == 1]
+    regions: list[Region] = []
+    for outer in outers:
+        tighter = [o for o in outers if o is not outer and _loop_inside(o, outer)]
+        region_holes = [
+            hole
+            for hole in holes
+            if _loop_inside(hole, outer) and not any(_loop_inside(hole, o) for o in tighter)
+        ]
+        regions.append((outer, region_holes))
+    return regions
 
 
 def section_profile_outline(section: Union[Section, Any]) -> Optional[ProfileOutline]:
@@ -167,14 +262,18 @@ def section_profile_outline(section: Union[Section, Any]) -> Optional[ProfileOut
     :mod:`fea_toolkit.rhino.geometry` consumes for ``Extrusion.Create``.  A
     catalogue section with zero dimensions falls back to a square of side
     ``sqrt(A)`` (or 0.1), so a section with no geometry still has an outline.
+    A :class:`~fea_toolkit.model.sap_data.SDSection` returns its polygon
+    perimeter (centred on the composite centroid); a multi-polygon composite
+    becomes ``("regions", [(outer, [holes...]), ...])`` — one outer boundary
+    per disjoint part, each with its holes.
 
     Args:
         section: Any :class:`~fea_toolkit.model.sap_data.Section` (or a subtype).
 
     Returns:
         A ``("polygon", points)`` / ``("polygon", (outer, inner))`` /
-        ``("circle", radius)`` pair, or ``None`` if the section cannot be
-        outlined.
+        ``("circle", radius)`` pair, or a ``("regions", [(outer, [holes...]),
+        ...])`` list, or ``None`` if the section cannot be outlined.
     """
     pts_2d: Any = None
     is_circle = False
@@ -198,6 +297,16 @@ def section_profile_outline(section: Union[Section, Any]) -> Optional[ProfileOut
             pts_2d = profile_box(section.depth, section.bf, section.tf, section.tw)
     elif isinstance(section, ChannelSection) and section.depth > 0 and section.bf > 0:
         pts_2d = profile_channel(section.depth, section.bf, section.tf, section.tw)
+    elif isinstance(section, SDSection):
+        regions = _sd_regions(section)
+        if regions:
+            if len(regions) == 1:
+                outer, holes = regions[0]
+                if not holes:
+                    return ("polygon", outer)
+                if len(holes) == 1:
+                    return ("polygon", (outer, holes[0]))
+            return ("regions", regions)
 
     # Fallback for catalogue sections with zero dimensions.
     if pts_2d is None and not is_circle:
@@ -256,7 +365,9 @@ def section_plates(
     Each returned item is an **open** polyline in the local YZ plane, swept along
     the member axis as flat quads (no end caps): a thin-walled section becomes
     its plate mid-lines (I-section → two flanges + a web, channel → web + two
-    flanges, box → four sides), a solid section becomes its open perimeter, and a
+    flanges, box → four sides), a solid section becomes its open perimeter, an
+    SD (Section Designer) section becomes the perimeter edges of all its
+    polygon loops (every outer and hole boundary), and a
     circular section becomes an open tube of *circle_segments* sides.  A
     catalogue section with zero dimensions falls back to a square.
 
@@ -317,5 +428,14 @@ def section_plates(
             [(-x, -y), (-x, y)],  # left web
             [(x, -y), (x, y)],  # right web
         ]
+
+    if isinstance(section, SDSection):
+        loops = _sd_loops(section)
+        if not loops:
+            return _zero_dimension_plates(section)
+        sides: list[list[tuple[float, float]]] = []
+        for loop in loops:
+            sides.extend(_loop_sides(loop))
+        return sides
 
     return _zero_dimension_plates(section)

@@ -244,7 +244,7 @@ def test_sweep_mesh_hollow_box_winds_outward_for_both_orientations():
 
     for o, i in ((outer, inner), (outer[::-1], inner[::-1])):
         points, quads, caps = _sweep_mesh(
-            o, closed=True, caps=True, s0=s0, s1=s1, vy=vy, vz=vz, inner=i
+            o, closed=True, caps=True, s0=s0, s1=s1, vy=vy, vz=vz, inners=[i]
         )
         assert caps is not None
         assert caps.shape == (8, 4)  # 2 ends × 4 annular quads
@@ -271,9 +271,54 @@ def test_sweep_mesh_hollow_mismatched_loops_skip_caps():
     inner = np.array([[-0.5, -0.5], [0.5, -0.5], [0.5, 0.0], [0.0, 0.5], [-0.5, 0.5]])
 
     points, quads, caps = _sweep_mesh(
-        outer, closed=True, caps=True, s0=s0, s1=s1, vy=vy, vz=vz, inner=inner
+        outer, closed=True, caps=True, s0=s0, s1=s1, vy=vy, vz=vz, inners=[inner]
     )
     assert caps is None
     # Outer tube (4 quads) plus inner tube (5 quads), no cap quads appended.
     assert quads.shape == (9, 4)
     assert points.shape[0] == 9 * 4
+
+
+def test_sweep_mesh_multiple_inners():
+    """Two same-count holes each get their own annular caps."""
+    from fea_toolkit.plotting.extruded_frames import _sweep_mesh
+
+    s0 = np.array([[0.0, 0.0, 0.0]])
+    s1 = np.array([[1.0, 0.0, 0.0]])  # member along +X
+    vy = np.array([[0.0, 1.0, 0.0]])
+    vz = np.array([[0.0, 0.0, 1.0]])
+
+    outer = np.array([[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]])
+    h1 = np.array([[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]])
+    h2 = np.array([[-0.3, -0.3], [0.3, -0.3], [0.3, 0.3], [-0.3, 0.3]])
+
+    points, quads, caps = _sweep_mesh(
+        outer, closed=True, caps=True, s0=s0, s1=s1, vy=vy, vz=vz, inners=[h1, h2]
+    )
+    assert caps is not None
+    assert caps.shape == (16, 4)  # 2 ends × 4 annular quads × 2 holes
+    # Outer tube (4 quads) + two inner tubes (4 quads each).
+    assert quads.shape == (12, 4)
+    assert points.shape[0] > 0
+
+
+def test_sweep_mesh_multiple_inners_mismatched_skips_that_holes_caps():
+    """A mismatched hole is swept without caps; matched holes still cap."""
+    from fea_toolkit.plotting.extruded_frames import _sweep_mesh
+
+    s0 = np.array([[0.0, 0.0, 0.0]])
+    s1 = np.array([[1.0, 0.0, 0.0]])
+    vy = np.array([[0.0, 1.0, 0.0]])
+    vz = np.array([[0.0, 0.0, 1.0]])
+
+    outer = np.array([[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]])  # P=4
+    matched = np.array([[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]])  # Q=4
+    mismatched = np.array([[-0.3, -0.3], [0.3, -0.3], [0.3, 0.3]])  # Q=3
+
+    _points, quads, caps = _sweep_mesh(
+        outer, closed=True, caps=True, s0=s0, s1=s1, vy=vy, vz=vz, inners=[matched, mismatched]
+    )
+    assert caps is not None
+    assert caps.shape == (8, 4)  # only the matched hole caps
+    # Outer tube (4) + matched inner (4) + mismatched inner (3) tubes.
+    assert quads.shape == (11, 4)

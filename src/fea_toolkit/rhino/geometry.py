@@ -41,36 +41,59 @@ def _polyline_curve(pts) -> t.Any:
     return rg.PolylineCurve(pl)
 
 
-def _build_profile_curve(sec) -> tuple[t.Any, t.Optional[t.Any]]:
-    """Build the outer profile curve (and optional inner hole) for ``Extrusion.Create``.
+def _build_profile_curves(sec) -> list[tuple[t.Any, list[t.Any]]]:
+    """Build the profile curves for ``Extrusion.Create`` — one region each.
 
-    Returns:
-        A tuple ``(outer, inner)``.  *outer* is a ``rg.PolylineCurve`` for
-        polygonal sections or a ``("circle", radius)`` tuple for circular
-        sections; *inner* is a ``rg.PolylineCurve`` tracing a hollow section's
-        void (a box), reversed so it winds opposite the outer boundary, or
-        ``None``.  ``(None, None)`` when the section cannot be profiled.
+    Returns a list of ``(outer, inners)`` regions, one per disjoint solid part
+    of the section.  *outer* is a ``rg.PolylineCurve`` for polygonal regions or
+    a ``("circle", radius)`` tuple for circular ones; *inners* is a list of
+    ``rg.PolylineCurve`` holes (a box's void, an SD composite's openings), each
+    reversed so it winds opposite its outer boundary.  An empty list when the
+    section cannot be profiled.
     """
     from ..model.section_profiles import section_profile_outline
 
     outline = section_profile_outline(sec)
     if outline is None:
-        return None, None
-
+        return []
     kind, value = outline
     if kind == "circle":
-        return ("circle", value), None
-
-    inner = None
+        return [(("circle", value), [])]
+    if kind == "regions":
+        return [
+            (_polyline_curve(outer), [_polyline_curve(h[::-1]) for h in holes])
+            for outer, holes in value
+        ]
     if isinstance(value, tuple):
-        # Hollow section (e.g. a box): keep the outer boundary as the extrusion
-        # profile and the inner boundary as a hole, added through
-        # ``Extrusion.AddInnerProfile`` so the section's cavity survives.  The
-        # inner loop is reversed so it winds opposite the outer boundary.
-        value, inner_pts = value
-        inner = _polyline_curve(inner_pts[::-1])
+        # Hollow section (e.g. a box): the inner loop is reversed so it winds
+        # opposite the outer boundary and stays a hole via ``AddInnerProfile``.
+        outer, inner = value
+        return [(_polyline_curve(outer), [_polyline_curve(inner[::-1])])]
+    return [(_polyline_curve(value), [])]
 
-    return _polyline_curve(value), inner
+
+def _make_extrusion(outer, inners, flex_length):
+    """Create one lightweight ``rg.Extrusion`` from an outer profile + holes."""
+    if isinstance(outer, tuple) and outer[0] == "circle":
+        r = outer[1]
+        plane = rg.Plane(rg.Point3d(0, 0, 0), rg.Vector3d(0, 0, 1))
+        profile_curve = rg.Circle(plane, r).ToNurbsCurve()
+        extrusion = rg.Extrusion.Create(profile_curve, flex_length, True)
+    else:
+        signed_area = 0.0
+        n = outer.PointCount  # pyright: ignore[reportAttributeAccessIssue]
+        for j in range(n):
+            p0 = outer.Point(j)  # pyright: ignore[reportAttributeAccessIssue]
+            p1 = outer.Point((j + 1) % n)  # pyright: ignore[reportAttributeAccessIssue]
+            signed_area += p0.X * p1.Y - p1.X * p0.Y
+        signed_area *= 0.5
+        extrusion = rg.Extrusion.Create(
+            outer, -flex_length if signed_area < 0 else flex_length, True
+        )
+    if extrusion is not None:
+        for inner in inners:
+            extrusion.AddInnerProfile(inner)
+    return extrusion
 
 
 # ========================================================================
@@ -398,50 +421,30 @@ def create_frame_extrusions(
 
             sec = md.sections[sec_name]
 
-            # Build profile
-            profile, inner_profile = _build_profile_curve(sec)
-            if profile is None:
+            # Build profile regions (one per disjoint solid part of the section).
+            regions = _build_profile_curves(sec)
+            if not regions:
                 continue
 
             # Interpolate lateral offset at I-end
             oy_i = off_y_i
             oz_i = off_z_i
 
-            extrusion = None
-
-            if isinstance(profile, tuple) and profile[0] == "circle":
-                r = profile[1]
-                plane = rg.Plane(rg.Point3d(0, 0, 0), rg.Vector3d(0, 0, 1))
-                circle = rg.Circle(plane, r)
-                profile_curve = circle.ToNurbsCurve()
-                extrusion = rg.Extrusion.Create(profile_curve, flex_length, True)
-            else:
-                signed_area = 0.0
-                n = profile.PointCount  # pyright: ignore[reportAttributeAccessIssue]
-                for j in range(n):
-                    p0 = profile.Point(j)  # pyright: ignore[reportAttributeAccessIssue]
-                    p1 = profile.Point((j + 1) % n)  # pyright: ignore[reportAttributeAccessIssue]
-                    signed_area += p0.X * p1.Y - p1.X * p0.Y
-                signed_area *= 0.5
-                if signed_area < 0:
-                    extrusion = rg.Extrusion.Create(profile, -flex_length, True)
-                else:
-                    extrusion = rg.Extrusion.Create(profile, flex_length, True)
-
-            if extrusion is None:
-                continue
-
-            if inner_profile is not None:
-                extrusion.AddInnerProfile(inner_profile)
-
             # Check if J-end offsets differ from I-end
             off_diff = abs(oy_i - off_y_j) > 1e-6 or abs(oz_i - off_z_j) > 1e-6
 
             if off_diff:
-                # Different lateral offsets at ends — can't use lightweight
-                # Extrusion. Fall back to swept Brep between shifted endpoints.
-                # ``ei`` / ``ej`` already carry the full I/J offsets, so the
-                # sweep runs centroid-to-centroid between the shifted endpoints.
+                # Different lateral offsets at ends — can't use a lightweight
+                # Extrusion; fall back to a swept Brep between the shifted
+                # endpoints.  Only the first region is swept: a multi-region
+                # section with differing end offsets is not supported
+                # (documented limitation).
+                outer, inners = regions[0]
+                extrusion = _make_extrusion(outer, inners, flex_length)
+                if extrusion is None:
+                    continue
+                # ``ei`` / ``ej`` carry the full I/J offsets, so the sweep runs
+                # centroid-to-centroid between the shifted endpoints.
                 origin_i = rg.Point3d(ei.X, ei.Y, ei.Z)
                 origin_j = rg.Point3d(ej.X, ej.Y, ej.Z)
 
@@ -525,34 +528,40 @@ def create_frame_extrusions(
             xform.M13 = origin_y
             xform.M23 = origin_z
             xform.M33 = 1.0
-            extrusion.Transform(xform)
 
-            attr = rd.ObjectAttributes()
-            attr.LayerIndex = layer_index
-            attr.Name = f"SAP_FrameExt_{eid}"
-            obj_id = doc.Objects.AddExtrusion(extrusion, attr)
-            if obj_id is None:
-                continue
+            multi = len(regions) > 1
+            for r_idx, (outer, inners) in enumerate(regions):
+                extrusion = _make_extrusion(outer, inners, flex_length)
+                if extrusion is None:
+                    continue
+                extrusion.Transform(xform)
 
-            count += 1
-            obj = doc.Objects.Find(obj_id)
-            if obj is None:
-                continue
-            attrs = obj.Attributes
-            attrs.SetUserString("SAP_Type", "FrameExtrusion")
-            attrs.SetUserString("SAP_FrameID", str(eid))
-            attrs.SetUserString("SAP_Section", sec_name)
-            attrs.SetUserString("SAP_JointI", str(elem.node_i))
-            attrs.SetUserString("SAP_JointJ", str(elem.node_j))
-            attrs.SetUserString("SAP_Material", sec.material)
-            attrs.SetUserString("SAP_Shape", sec.shape)
-            attrs.SetUserString("SAP_Angle", str(elem.angle))
-            attrs.SetUserString("FEA_Stage", stage)
-            attrs.SetUserString("FEA_Kind", "FrameExtrusion")
-            attrs.SetUserString("FEA_ElemTag", str(getattr(elem, "elem_tag", "")))
-            if getattr(elem, "parent_id", None):
-                attrs.SetUserString("FEA_ParentID", str(elem.parent_id))
-            obj.CommitChanges()
+                attr = rd.ObjectAttributes()
+                attr.LayerIndex = layer_index
+                attr.Name = f"SAP_FrameExt_{eid}" + (f"_{r_idx}" if multi else "")
+                obj_id = doc.Objects.AddExtrusion(extrusion, attr)
+                if obj_id is None:
+                    continue
+
+                count += 1
+                obj = doc.Objects.Find(obj_id)
+                if obj is None:
+                    continue
+                attrs = obj.Attributes
+                attrs.SetUserString("SAP_Type", "FrameExtrusion")
+                attrs.SetUserString("SAP_FrameID", str(eid))
+                attrs.SetUserString("SAP_Section", sec_name)
+                attrs.SetUserString("SAP_JointI", str(elem.node_i))
+                attrs.SetUserString("SAP_JointJ", str(elem.node_j))
+                attrs.SetUserString("SAP_Material", sec.material)
+                attrs.SetUserString("SAP_Shape", sec.shape)
+                attrs.SetUserString("SAP_Angle", str(elem.angle))
+                attrs.SetUserString("FEA_Stage", stage)
+                attrs.SetUserString("FEA_Kind", "FrameExtrusion")
+                attrs.SetUserString("FEA_ElemTag", str(getattr(elem, "elem_tag", "")))
+                if getattr(elem, "parent_id", None):
+                    attrs.SetUserString("FEA_ParentID", str(elem.parent_id))
+                obj.CommitChanges()
         except Exception:
             continue
 

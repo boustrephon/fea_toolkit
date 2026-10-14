@@ -142,6 +142,109 @@ class TestSectionProfileOutline:
         assert kind == "polygon"
         assert len(pts) == 4  # sqrt(0.25) = 0.5 square
 
+    def test_sd_section_uses_its_polygon(self):
+        from fea_toolkit.model.sap_data import SDSection
+        from fea_toolkit.model.section_profiles import section_profile_outline
+
+        # A 0.4 (local 2) × 0.2 (local 3) rectangle, corners in (y, z).
+        sec = SDSection(
+            name="SD",
+            shape="SD Section",
+            material="CONC",
+            polygons=[("CONC", [(-0.2, -0.1), (-0.2, 0.1), (0.2, 0.1), (0.2, -0.1)])],
+        )
+        kind, pts = section_profile_outline(sec)
+        assert kind == "polygon"
+        assert len(pts) == 4
+        xs = [p[0] for p in pts]  # x = local 3 (width)
+        ys = [p[1] for p in pts]  # y = local 2 (depth)
+        assert abs(max(xs) - 0.1) < 1e-9 and abs(min(xs) + 0.1) < 1e-9
+        assert abs(max(ys) - 0.2) < 1e-9 and abs(min(ys) + 0.2) < 1e-9
+
+    def test_sd_section_centres_on_its_centroid(self):
+        from fea_toolkit.model.sap_data import SDSection
+        from fea_toolkit.model.section_profiles import section_profile_outline
+
+        # Rectangle offset so its (y, z) centroid is (0.5, 0.25), not the origin.
+        sec = SDSection(
+            name="SD",
+            shape="SD Section",
+            material="CONC",
+            polygons=[("CONC", [(0.0, 0.0), (0.0, 0.5), (1.0, 0.5), (1.0, 0.0)])],
+        )
+        _kind, pts = section_profile_outline(sec)
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        assert abs(max(xs) - 0.25) < 1e-9 and abs(min(xs) + 0.25) < 1e-9
+        assert abs(max(ys) - 0.5) < 1e-9 and abs(min(ys) + 0.5) < 1e-9
+
+    def test_sd_section_with_a_hole(self):
+        from fea_toolkit.model.sap_data import SDSection
+        from fea_toolkit.model.section_profiles import section_profile_outline
+
+        outer = [(-0.5, -0.5), (-0.5, 0.5), (0.5, 0.5), (0.5, -0.5)]
+        inner = [(-0.25, -0.25), (-0.25, 0.25), (0.25, 0.25), (0.25, -0.25)]
+        sec = SDSection(
+            name="SD",
+            shape="SD Section",
+            material="CONC",
+            polygons=[("CONC", outer), ("VOID", inner)],
+        )
+        kind, value = section_profile_outline(sec)
+        assert kind == "polygon"
+        assert isinstance(value, tuple)
+        outer_pts, inner_pts = value
+        assert len(outer_pts) == 4
+        assert len(inner_pts) == 4
+
+    def test_sd_section_with_two_holes(self):
+        from fea_toolkit.model.sap_data import SDSection
+        from fea_toolkit.model.section_profiles import section_profile_outline
+
+        outer = [(-0.5, -0.5), (-0.5, 0.5), (0.5, 0.5), (0.5, -0.5)]
+        hole1 = [(-0.4, -0.4), (-0.4, -0.1), (-0.1, -0.1), (-0.1, -0.4)]
+        hole2 = [(0.1, 0.1), (0.1, 0.4), (0.4, 0.4), (0.4, 0.1)]
+        sec = SDSection(
+            name="SD",
+            shape="SD Section",
+            material="CONC",
+            polygons=[("C", outer), ("V", hole1), ("V", hole2)],
+        )
+        kind, value = section_profile_outline(sec)
+        assert kind == "regions"
+        assert len(value) == 1
+        outer_pts, holes = value[0]
+        assert len(outer_pts) == 4
+        assert len(holes) == 2
+
+    def test_sd_section_with_two_disjoint_outers(self):
+        from fea_toolkit.model.sap_data import SDSection
+        from fea_toolkit.model.section_profiles import section_profile_outline
+
+        left = [(-0.4, -0.1), (-0.4, 0.1), (-0.2, 0.1), (-0.2, -0.1)]
+        right = [(0.2, -0.1), (0.2, 0.1), (0.4, 0.1), (0.4, -0.1)]
+        sec = SDSection(
+            name="SD",
+            shape="SD Section",
+            material="CONC",
+            polygons=[("C", left), ("C", right)],
+        )
+        kind, value = section_profile_outline(sec)
+        assert kind == "regions"
+        assert len(value) == 2
+        for outer_pts, holes in value:
+            assert len(outer_pts) == 4
+            assert holes == []
+
+    def test_sd_section_with_no_polygons_falls_back_to_a_square(self):
+        from fea_toolkit.model.sap_data import SDSection
+        from fea_toolkit.model.section_profiles import section_profile_outline
+
+        sec = SDSection(name="SD", shape="SD Section", material="CONC", A=0.25)
+        kind, pts = section_profile_outline(sec)
+        assert kind == "polygon"
+        assert len(pts) == 4  # sqrt(0.25) = 0.5 square
+
 
 class TestSectionPlates:
     """``section_plates`` decomposes a section into its open plate mid-lines."""
@@ -202,3 +305,17 @@ class TestSectionPlates:
             plates = section_plates(sec, circle_segments=12)
             assert len(plates) == 1
             assert len(plates[0]) == 12
+
+    def test_sd_section_is_its_perimeter_edges(self):
+        from fea_toolkit.model.sap_data import SDSection
+        from fea_toolkit.model.section_profiles import section_plates
+
+        sec = SDSection(
+            name="SD",
+            shape="SD Section",
+            material="CONC",
+            polygons=[("CONC", [(-0.2, -0.1), (-0.2, 0.1), (0.2, 0.1), (0.2, -0.1)])],
+        )
+        plates = section_plates(sec)
+        assert len(plates) == 4
+        assert all(len(poly) == 2 for poly in plates)
