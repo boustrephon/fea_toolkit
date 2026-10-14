@@ -15,6 +15,7 @@ __all__ = [
     "build_groups",
     "element_label",
     "load_label",
+    "shell_uniform_load_sets_group",
     "views_group",
 ]
 
@@ -152,6 +153,43 @@ def views_group(views: list) -> TreeGroup:
     )
 
 
+def shell_uniform_load_sets_group(model: Any) -> Optional[TreeGroup]:
+    """Describe the **Shell Uniform Load Sets** group, or ``None`` when empty.
+
+    One row per named set (``SAPModelData.shell_uniform_load_sets``), labelled by
+    its name; the row's entity is the
+    :class:`~fea_toolkit.model.sap_data.ShellUniformLoadSet` itself, so the
+    inspector can show its per-pattern values.  Expanding a row lists the shell
+    objects assigned to that set (``SAPModelData.shell_uniform_load_set_assignments``),
+    surfacing the assignment in the tree rather than only as a string map.
+    """
+    sets = getattr(model, "shell_uniform_load_sets", None) or {}
+    if not sets:
+        return None
+    assignments = getattr(model, "shell_uniform_load_set_assignments", None) or {}
+    areas_by_set: dict[str, list] = {name: [] for name in sets}
+    for area_id, set_name in assignments.items():
+        bucket = areas_by_set.get(set_name)
+        if bucket is not None:
+            bucket.append(area_id)
+    area_elements = getattr(model, "area_elements", None) or {}
+
+    def load_items() -> list:
+        return [(name, sets[name]) for name in sorted(sets)]
+
+    def child_items(set_obj: Any) -> list:
+        assigned = sorted(areas_by_set.get(set_obj.name, []))
+        return [(aid, area_elements.get(aid, aid)) for aid in assigned]
+
+    return TreeGroup(
+        key="shell_uniform_load_sets",
+        label="Shell Uniform Load Sets",
+        count=len(sets),
+        load_items=load_items,
+        child_items=child_items,
+    )
+
+
 def build_groups(model: Any, views: Optional[list] = None) -> list:
     """Describe the tree groups for *model*.
 
@@ -177,6 +215,10 @@ def build_groups(model: Any, views: Optional[list] = None) -> list:
             groups.append(
                 TreeGroup(key=attr, label=label, count=len(bag), load_items=_dict_loader(bag))
             )
+
+    uniform_sets_group = shell_uniform_load_sets_group(source)
+    if uniform_sets_group is not None:
+        groups.append(uniform_sets_group)
 
     for attr, label, kind in _LIST_GROUPS:
         seq = getattr(source, attr, None)

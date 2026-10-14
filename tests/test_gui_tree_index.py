@@ -98,3 +98,34 @@ def test_views_group_treats_an_unknown_parent_as_top_level():
     group = views_group([orphan])
     assert [name for name, _ in group.load_items()] == ["X"]
     assert group.child_items(orphan) == []
+
+
+def test_shell_uniform_load_sets_group_lists_sets_and_assigned_areas():
+    from fea_toolkit.model.sap_data import ShellUniformLoadSet
+
+    md = make_sample_model()
+    md.shell_uniform_load_sets = {
+        "RoofSet": ShellUniformLoadSet(name="RoofSet", load_pattern={"SDL": 1.2, "Live": 0.5}),
+        "OfficeSet": ShellUniformLoadSet(name="OfficeSet", load_pattern={"SDL": 1.0}),
+    }
+    md.shell_uniform_load_set_assignments = {
+        "A1": "RoofSet",
+        "A2": "RoofSet",
+        "A3": "OfficeSet",
+    }
+
+    group = _by_label(md)["Shell Uniform Load Sets"]
+    assert group.count == 2
+    # Rows are sorted by set name.
+    assert [name for name, _ in group.load_items()] == ["OfficeSet", "RoofSet"]
+
+    roof = group.child_items(md.shell_uniform_load_sets["RoofSet"])
+    assert [label for label, _ in roof] == ["A1", "A2"]
+    office = group.child_items(md.shell_uniform_load_sets["OfficeSet"])
+    assert [label for label, _ in office] == ["A3"]
+
+
+def test_shell_uniform_load_sets_group_omitted_when_empty():
+    md = make_sample_model()
+    assert not md.shell_uniform_load_sets
+    assert "Shell Uniform Load Sets" not in _by_label(md)

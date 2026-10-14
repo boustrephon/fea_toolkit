@@ -33,6 +33,7 @@ from .sap_data import (
     ResponseSpectrumFunction,
     Restraint,
     Section,
+    ShellUniformLoadSet,
     apply_material_defaults,
 )
 
@@ -184,6 +185,11 @@ class MeshModel:
     load_cases: dict[str, LoadCase] = field(default_factory=dict)
     load_combinations: dict[str, LoadCombination] = field(default_factory=dict)
     response_spectrum_functions: dict[str, ResponseSpectrumFunction] = field(default_factory=dict)
+    # ETABS shell uniform load sets — carried through unchanged so the Model
+    # Tree can present them (definitions + per-area assignment) without the raw
+    # model at hand.
+    shell_uniform_load_sets: dict[str, ShellUniformLoadSet] = field(default_factory=dict)
+    shell_uniform_load_set_assignments: dict[str, str] = field(default_factory=dict)
 
     # ── Constraints (detected, not yet applied to OpenSees) ───────
     # ── Detected coarse‑fine node pairs (for visualisation only) ──

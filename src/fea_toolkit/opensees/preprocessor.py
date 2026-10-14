@@ -827,6 +827,10 @@ class Preprocessor:
             load_cases=getattr(md, "load_cases", {}),
             load_combinations=getattr(md, "load_combinations", {}),
             response_spectrum_functions=getattr(md, "response_spectrum_functions", {}),
+            shell_uniform_load_sets=getattr(md, "shell_uniform_load_sets", {}),
+            shell_uniform_load_set_assignments=getattr(
+                md, "shell_uniform_load_set_assignments", {}
+            ),
         )
         # Resolve against the mutated md so derived-element IDs
         # (from splitting/meshing) can be matched by selections.

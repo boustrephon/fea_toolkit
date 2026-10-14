@@ -1580,7 +1580,13 @@ class MainWindow(QMainWindow):
         shows Load Cases, Load Combinations and Response Spectra without a
         re-save.
         """
-        for attr in ("load_cases", "load_combinations", "response_spectrum_functions"):
+        for attr in (
+            "load_cases",
+            "load_combinations",
+            "response_spectrum_functions",
+            "shell_uniform_load_sets",
+            "shell_uniform_load_set_assignments",
+        ):
             source = getattr(sap, attr, None)
             if source and not getattr(mesh, attr, None):
                 setattr(mesh, attr, source)
