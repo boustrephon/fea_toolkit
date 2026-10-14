@@ -10,6 +10,7 @@ import pytest
 
 from fea_toolkit.model.geometry import (
     beam_load_to_nodal_loads,
+    beam_moment_to_nodal_moments,
 )
 from fea_toolkit.model.mesh_model import MeshModel
 from fea_toolkit.model.sap_data import (
@@ -189,6 +190,82 @@ class TestBeamLoadToNodalLoads:
         assert abs(total_fz - 37500.0) < 100.0  # allow small numerical tolerance
         # Asymmetric load → unequal end forces
         assert abs(result["i"]["fz"]) != abs(result["j"]["fz"])
+
+
+class TestBeamMomentToNodalMoments:
+    """Tests for beam_moment_to_nodal_moments()."""
+
+    def _load(self, direction: str, val: float = 100.0) -> FrameDistributedLoad:
+        return FrameDistributedLoad(
+            pattern="DEAD",
+            frame_id="1",
+            direction=direction,
+            load_type="Moment",
+            shape="Uniform",
+            val_a=val,
+            val_b=val,
+            rdist_a=0.0,
+            rdist_b=1.0,
+            dist_a=0.0,
+            dist_b=5.0,
+        )
+
+    def _elem_and_coords(self):
+        elem = FrameElement(elem_id="1", elem_tag=1, node_i="1", node_j="2", angle=0.0)
+        node_coords = {"1": (0.0, 0.0, 0.0), "2": (5.0, 0.0, 0.0)}
+        return elem, node_coords
+
+    def test_torsion_local_x(self):
+        # A uniform torque m about the member (local 1) axis on an X-axis
+        # member → equal end moments m·L/2 = 100·5/2 about global X.
+        elem, node_coords = self._elem_and_coords()
+        result = beam_moment_to_nodal_moments(self._load("LocalX"), elem, node_coords, length=5.0)
+        assert result["i"]["mx"] == pytest.approx(250.0)
+        assert result["j"]["mx"] == pytest.approx(250.0)
+        # No forces, no transverse moments.
+        for node in ("i", "j"):
+            assert (
+                result[node]["fx"] == 0.0
+                and result[node]["fy"] == 0.0
+                and result[node]["fz"] == 0.0
+            )
+            assert result[node]["my"] == 0.0 and result[node]["mz"] == 0.0
+
+    def test_bending_local_y(self):
+        # Local 2-axis on an X-axis member is +global Z (SAP2000 convention),
+        # so a moment about local 2 lands on global z.
+        elem, node_coords = self._elem_and_coords()
+        result = beam_moment_to_nodal_moments(self._load("LocalY"), elem, node_coords, length=5.0)
+        assert result["i"]["mz"] == pytest.approx(250.0)
+        assert result["j"]["mz"] == pytest.approx(250.0)
+        assert result["i"]["mx"] == pytest.approx(0.0)
+
+    def test_bending_local_z(self):
+        # Local 3-axis on an X-axis member is -global Y (SAP2000 convention),
+        # so a moment about local 3 lands on negative global y.
+        elem, node_coords = self._elem_and_coords()
+        result = beam_moment_to_nodal_moments(self._load("LocalZ"), elem, node_coords, length=5.0)
+        assert result["i"]["my"] == pytest.approx(-250.0)
+        assert result["j"]["my"] == pytest.approx(-250.0)
+        assert result["i"]["mz"] == pytest.approx(0.0)
+
+    def test_global_y(self):
+        elem, node_coords = self._elem_and_coords()
+        result = beam_moment_to_nodal_moments(self._load("Y"), elem, node_coords, length=5.0)
+        assert result["i"]["my"] == pytest.approx(250.0)
+        assert result["j"]["my"] == pytest.approx(250.0)
+
+    def test_invalid_direction_returns_none(self):
+        elem, node_coords = self._elem_and_coords()
+        assert (
+            beam_moment_to_nodal_moments(self._load("Gravity"), elem, node_coords, length=5.0)
+            is None
+        )
+
+    def test_zero_length_returns_zero_moments(self):
+        elem, node_coords = self._elem_and_coords()
+        result = beam_moment_to_nodal_moments(self._load("LocalX"), elem, node_coords, length=0.0)
+        assert result["i"]["mx"] == 0.0 and result["j"]["mx"] == 0.0
 
 
 # ============================================================================

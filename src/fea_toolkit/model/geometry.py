@@ -24,6 +24,7 @@ from .geometry_core import (
 from .geometry_frames import (
     apply_frame_end_offsets,
     beam_load_to_nodal_loads,
+    beam_moment_to_nodal_moments,
     child_length,
     convert_area_loads_to_edge_loads,
     derive_rigid_end_offsets,
@@ -53,6 +54,7 @@ __all__ = [
     "_segment_intersection_3d",
     "apply_frame_end_offsets",
     "beam_load_to_nodal_loads",
+    "beam_moment_to_nodal_moments",
     "child_length",
     "compute_t_location",
     "convert_area_loads_to_edge_loads",

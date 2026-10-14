@@ -8,7 +8,7 @@ from typing import Any, Optional
 import numpy as np
 import openseespy.opensees as ops
 
-from ..model.geometry import get_local_axes, polygon_area_3d
+from ..model.geometry import beam_moment_to_nodal_moments, get_local_axes, polygon_area_3d
 from ..model.sap_data import FrameElement
 from ..model.tree_utils import collect_descendants
 
@@ -395,6 +395,34 @@ class LoadMixin:
                 ni = self.mesh_model.nodes.get(elem.node_i)
                 nj = self.mesh_model.nodes.get(elem.node_j)
                 if ni is None or nj is None:
+                    continue
+
+                # Uniform distributed *moments* (e.g. ETABS ``UNIFM``) have no
+                # ``eleLoad`` form, so they are replaced by statically
+                # equivalent nodal end moments ``m·L/2`` about the load axis.
+                if getattr(ld, "load_type", "Force") == "Moment":
+                    node_coords = {
+                        elem.node_i: (ni.x, ni.y, ni.z),
+                        elem.node_j: (nj.x, nj.y, nj.z),
+                    }
+                    _L = math.sqrt((nj.x - ni.x) ** 2 + (nj.y - ni.y) ** 2 + (nj.z - ni.z) ** 2)
+                    nodal = beam_moment_to_nodal_moments(ld, elem, node_coords, _L)
+                    if nodal is None:
+                        logger.warning(
+                            "Frame distributed moment on %s has non-moment direction %r — skipped.",
+                            ld.frame_id,
+                            ld.direction,
+                        )
+                        continue
+                    m_i, m_j = nodal["i"], nodal["j"]
+                    ops.load(ni.node_tag, 0.0, 0.0, 0.0, m_i["mx"], m_i["my"], m_i["mz"])
+                    ops.load(nj.node_tag, 0.0, 0.0, 0.0, m_j["mx"], m_j["my"], m_j["mz"])
+                    if pname not in self._dist_load_totals:
+                        self._dist_load_totals[pname] = dict.fromkeys(
+                            ("fx", "fy", "fz", "mx", "my", "mz"), 0.0
+                        )
+                    for _k in ("mx", "my", "mz"):
+                        self._dist_load_totals[pname][_k] += m_i[_k] + m_j[_k]
                     continue
 
                 wa = ld.val_a * scale

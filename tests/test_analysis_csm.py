@@ -605,6 +605,81 @@ class TestBuilderFrameEndOffsets:
             ops.wipe()
 
 
+class TestDistributedMomentLoads:
+    """Uniform distributed moments (``UNIFM``) become statically-equivalent end moments."""
+
+    def test_uniform_torsion_moment_lands_as_end_moments(self):
+        import openseespy.opensees as ops
+
+        md = SAPModelData(
+            nodes={
+                "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+                "2": Node(node_id="2", node_tag=2, x=5, y=0, z=0),
+            },
+            restraints={"1": Restraint([1, 1, 1, 1, 1, 1])},
+            materials={"Steel": Material(name="Steel", type="Steel", E_mod=2e11, G_mod=8e10)},
+            sections={
+                "UB100": Section(
+                    name="UB100",
+                    shape="I/Wide Flange",
+                    material="Steel",
+                    A=0.01,
+                    I33=1e-4,
+                    I22=1e-5,
+                    J=1e-5,
+                )
+            },
+            frame_elements={"1": FrameElement(elem_id="1", elem_tag=1, node_i="1", node_j="2")},
+            area_elements={},
+            frame_assignments={"1": "UB100"},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+            frame_dist_loads=[
+                FrameDistributedLoad(
+                    pattern="DEAD",
+                    frame_id="1",
+                    direction="LocalX",
+                    load_type="Moment",
+                    shape="Uniform",
+                    val_a=100.0,
+                    val_b=100.0,
+                    rdist_a=0.0,
+                    rdist_b=1.0,
+                    dist_a=0.0,
+                    dist_b=5.0,
+                )
+            ],
+        )
+        cfg = {"verbose": False, "use_elastic_sections": True, "split_elements": False}
+        mm = preprocess_model(md, cfg)
+        b = AnalysisBuilder(mm, cfg)
+        try:
+            b.build_domain()
+            b.create_loads({"DEAD": 1.0})
+            # The Moment branch records the applied nodal-moment total: two
+            # equal end moments m·L/2 = 100·5/2 = 250 each → m·L = 500 about X.
+            assert b._dist_load_totals["DEAD"]["mx"] == pytest.approx(500.0)
+            assert b._dist_load_totals["DEAD"]["fz"] == pytest.approx(0.0)
+            assert b._dist_load_totals["DEAD"]["my"] == pytest.approx(0.0)
+            assert b._dist_load_totals["DEAD"]["mz"] == pytest.approx(0.0)
+
+            # End-to-end: solve and confirm the fixed-end reaction balances the
+            # total applied torque m·L = 500 about X (DOF 4).
+            ops.constraints("Transformation")
+            ops.numberer("RCM")
+            ops.system("BandGeneral")
+            ops.test("NormDispIncr", 1e-8, 30)
+            ops.algorithm("Newton")
+            ops.integrator("LoadControl", 1.0)
+            ops.analysis("Static")
+            assert ops.analyze(1) == 0
+            ops.reactions()
+            assert abs(ops.nodeReaction(1, 4) + 500.0) < 1e-3
+        finally:
+            ops.wipe()
+
+
 class TestBuilderAreaMeshing:
     """Verify area elements are meshed during build()."""
 

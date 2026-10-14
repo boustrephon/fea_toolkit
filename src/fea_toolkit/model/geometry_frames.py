@@ -733,6 +733,70 @@ def beam_load_to_nodal_loads(
     }
 
 
+def beam_moment_to_nodal_moments(
+    load: FrameDistributedLoad,
+    elem: FrameElement,
+    node_coords: dict[str, tuple[float, float, float]],
+    length: float,
+) -> Optional[dict[str, dict[str, float]]]:
+    """Statically-equivalent nodal moments for a distributed *moment* load.
+
+    OpenSees ``eleLoad`` has no distributed-moment form, so a uniform moment of
+    intensity ``m`` (moment per length) over an element of length ``L`` is
+    replaced by equal concentrated end moments ``m·L/2`` about the load's
+    moment axis — the standard static-equivalent pair (the resultant ``m·L``
+    and first moment ``m·L²/2`` both match the distributed load).
+
+    The moment axis is resolved from ``load.direction``: ``"X"``/``"Y"``/
+    ``"Z"`` are global axes; ``"LocalX"``/``"LocalY"``/``"LocalZ"`` are the
+    element local 1/2/3 axes (so ``"LocalX"`` is torsion about the member).
+    ``"Gravity"`` and any other token are not a moment axis, so ``None`` is
+    returned and the caller skips the load.
+
+    Args:
+        load: The distributed moment load (``load_type == "Moment"``).
+        elem: The frame element the load acts on.
+        node_coords: ``{node_id: (x, y, z)}`` for both end nodes.
+        length: Element length (in model length units).
+
+    Returns:
+        ``{"i": {fx…mz}, "j": {fx…mz}}`` with zero forces and equal end
+        moments in **global** coordinates, or ``None`` for a non-moment
+        direction.  ``val_a`` / ``val_b`` are averaged (they coincide for a
+        uniform moment; a genuinely varying moment is not decomposed).
+    """
+    zeros = {"fx": 0.0, "fy": 0.0, "fz": 0.0, "mx": 0.0, "my": 0.0, "mz": 0.0}
+    if length <= 0.0:
+        return {"i": dict(zeros), "j": dict(zeros)}
+
+    direction = str(load.direction)
+    if direction == "X":
+        axis = np.array([1.0, 0.0, 0.0])
+    elif direction == "Y":
+        axis = np.array([0.0, 1.0, 0.0])
+    elif direction == "Z":
+        axis = np.array([0.0, 0.0, 1.0])
+    elif direction in ("LocalX", "LocalY", "LocalZ"):
+        a = np.array(node_coords[elem.node_i])
+        b = np.array(node_coords[elem.node_j])
+        vec_x = (b - a) / length
+        vecxz = get_SAP_vecxz(vec_x, elem.angle)
+        vec_z = vecxz / np.linalg.norm(vecxz)
+        vec_y = np.cross(vec_z, vec_x)
+        vec_y = vec_y / np.linalg.norm(vec_y)
+        axis = {"LocalX": vec_x, "LocalY": vec_y, "LocalZ": vec_z}[direction]
+    else:
+        return None
+
+    m = 0.5 * (load.val_a + load.val_b)
+    mx, my, mz = axis * (m * length * 0.5)
+
+    return {
+        "i": {"fx": 0.0, "fy": 0.0, "fz": 0.0, "mx": mx, "my": my, "mz": mz},
+        "j": {"fx": 0.0, "fy": 0.0, "fz": 0.0, "mx": mx, "my": my, "mz": mz},
+    }
+
+
 def convert_area_loads_to_edge_loads(
     nodes: dict[str, Node],
     area_elements: dict[str, AreaElement],
