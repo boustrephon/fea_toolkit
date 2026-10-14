@@ -47,6 +47,7 @@ __all__ = [
     "double_angle_props",
     "i_props",
     "pipe_props",
+    "polygon_props",
     "rect_props",
     "tee_props",
 ]
@@ -263,3 +264,59 @@ def tee_props(depth: float, bf: float, tf: float, tw: float) -> dict[str, float]
         "Z33": 0.0,
         "Z22": 0.0,
     }
+
+
+def polygon_props(vertices: list[tuple[float, float]]) -> dict[str, float]:
+    """Elastic properties of a solid polygon from its ``(y, z)`` corner loop.
+
+    ``vertices`` are the closed corner loop in the section local 2-3 plane,
+    each point an ``(y, z)`` pair with ``y`` along the local 2-axis and ``z``
+    along the local 3-axis (the closing edge, last → first, is implied).  The
+    area, centroid and centroidal second moments are evaluated with the
+    shoelace / Green's-theorem formulas; the result follows the module
+    convention (``I33 = ∫y²dA`` about the local 3-axis, ``I22 = ∫z²dA`` about
+    the local 2-axis).
+
+    ``J`` is the polar second moment ``I33 + I22`` — an upper-bound
+    approximation to the St. Venant torsional constant of a *solid* section
+    (exact for a circle).  Section moduli are **not** returned: they need the
+    extreme-fibre distances, which depend on the section's orientation.
+
+    Args:
+        vertices: The ``(y, z)`` corner coordinates in perimeter order
+            (clockwise or anticlockwise).
+
+    Returns:
+        ``{"A", "I33", "I22", "J", "cy", "cz"}`` — the area, the centroidal
+        second moments, the polar moment and the centroid ``(cy, cz)``.
+        Degenerate (fewer than three vertices or zero area) input returns all
+        zeros.
+    """
+    empty = {"A": 0.0, "I33": 0.0, "I22": 0.0, "J": 0.0, "cy": 0.0, "cz": 0.0}
+    n = len(vertices)
+    if n < 3:
+        return empty
+    a2 = 0.0
+    cy_num = 0.0
+    cz_num = 0.0
+    i33_o = 0.0
+    i22_o = 0.0
+    for i in range(n):
+        y0, z0 = vertices[i]
+        y1, z1 = vertices[(i + 1) % n]
+        cross = y0 * z1 - y1 * z0
+        a2 += cross
+        cy_num += (y0 + y1) * cross
+        cz_num += (z0 + z1) * cross
+        i33_o += (y0 * y0 + y0 * y1 + y1 * y1) * cross
+        i22_o += (z0 * z0 + z0 * z1 + z1 * z1) * cross
+    if abs(a2) < 1e-15:
+        return empty
+    area = abs(a2) * 0.5
+    cy = cy_num / (3.0 * a2)
+    cz = cz_num / (3.0 * a2)
+    i33 = abs(i33_o) / 12.0 - area * cy * cy
+    i22 = abs(i22_o) / 12.0 - area * cz * cz
+    i33 = max(i33, 0.0)
+    i22 = max(i22, 0.0)
+    return {"A": area, "I33": i33, "I22": i22, "J": i33 + i22, "cy": cy, "cz": cz}

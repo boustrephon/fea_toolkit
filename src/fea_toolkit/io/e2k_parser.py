@@ -79,6 +79,7 @@ from ..model.sap_data import (
     RectangularSection,
     Restraint,
     SAPModelData,
+    SDSection,
     Section,
     ShellSection,
     ShellUniformLoadSet,
@@ -92,6 +93,7 @@ from ..model.section_properties import (
     double_angle_props,
     i_props,
     pipe_props,
+    polygon_props,
     rect_props,
     tee_props,
 )
@@ -355,6 +357,14 @@ class ETABSParser:
         all_sections: dict[str, Section] = {}
         all_sections.update(_get_shell_sections(sections))
         all_sections.update(_get_frame_sections(sections, materials, length_unit, catalogues))
+        all_sections.update(_get_sd_sections(sections))
+        # Null "LINE"/"AREA" objects are assigned ETABS's built-in "NONE"
+        # section, which is never defined in ``$ FRAME SECTIONS``.  Synthesise
+        # a zero-stiffness placeholder so those assignments resolve — they
+        # carry no stiffness or mass and exist only to receive loads.
+        assigned = set(frame_assignments.values()) | set(area_assignments.values())
+        if "NONE" in assigned and "NONE" not in all_sections:
+            all_sections["NONE"] = GeneralSection(name="NONE", shape="NA", material="")
 
         # ── Populate area thickness from assigned shell sections ──
         for aid, area in area_elements.items():
@@ -539,19 +549,19 @@ def _get_line_connectivity(
     """Extract line templates: ``{line: (type, point_i, point_j, drop)}``.
 
     The trailing ``drop`` is the number of storeys the *first* end sits below
-    the assigned storey (a column drops 1, a beam drops 0).
+    the assigned storey (a column drops 1, a beam drops 0).  The connectivity
+    *type* is the keyword of the second group: ``COLUMN``/``BEAM``/``BRACE``
+    for structural frames, or ``LINE`` (and ``CABLE``/``TENDON``) for null /
+    drawn lines that carry loads but no stiffness.
     """
     lines: dict[str, tuple] = {}
     for groups in sections.get("LINE CONNECTIVITIES", []):
-        name: Optional[str] = None
-        conn: Optional[tuple] = None
-        for kw, vals in groups:
-            if kw == "LINE":
-                name = str(vals[0])
-            elif kw in ("COLUMN", "BEAM", "BRACE"):
-                conn = (kw, str(vals[0]), str(vals[1]), int(vals[2]))
-        if name is not None and conn is not None:
-            lines[name] = conn
+        if len(groups) < 2 or groups[0][0] != "LINE":
+            continue
+        name = str(groups[0][1][0])
+        kind, vals = groups[1]
+        if kind in ("COLUMN", "BEAM", "BRACE", "LINE", "CABLE", "TENDON"):
+            lines[name] = (kind, str(vals[0]), str(vals[1]), int(vals[2]))
     return lines
 
 
@@ -1499,6 +1509,12 @@ def _build_frame_section(
 
     canonical = SHAPE_NAMES.get(shape)
 
+    # Section Designer sections carry no dimensions here — their polygon
+    # geometry lives in ``$ SECTION DESIGNER SECTIONS`` and is resolved by
+    # :func:`_get_sd_sections` into a :class:`SDSection`.
+    if canonical == "SD":
+        return None
+
     # Catalogue (profile) section: an explicit FILE token, or a SHAPE that is a
     # profile name rather than a recognised shape type.
     if file_name is not None or canonical is None:
@@ -1572,6 +1588,84 @@ def _get_frame_sections(
         if sec is not None:
             frame_sections[name] = sec
     return frame_sections
+
+
+def _get_sd_sections(sections: dict[str, list[GroupedLine]]) -> dict[str, SDSection]:
+    """Extract Section Designer sections into :class:`SDSection`.
+
+    ``$ SECTION DESIGNER SECTIONS`` spreads one section across many lines: a
+    header (``BASEMATERIAL`` …), one ``SHAPE n … SHAPETYPE "POLYGON"`` line per
+    polygon, and one ``POLYCORNER k X … Y …`` line per corner.  Only
+    ``POLYGON`` shapes contribute section area; ``REF LINE`` (and any other
+    non-polygon) shapes are drawing aids and are skipped.
+
+    The polygon corners are read in ``X`` / ``Y`` Section Designer coordinates
+    and mapped onto the section local axes — ``X`` → local 3, ``Y`` → local 2
+    (the ETABS frame-section default; the ``ANGLE`` rotation token is not yet
+    applied).  Gross elastic properties (``A``, ``I33``, ``I22``, ``J``) are
+    computed from the polygon(s) via :func:`polygon_props`; ``J`` is the polar
+    second moment, an upper-bound approximation to the St. Venant torsional
+    constant of a solid section.  Multi-polygon composites are combined with
+    the parallel-axis theorem about their shared centroid.
+    """
+    base_materials: dict[str, str] = {}
+    polygons: dict[str, dict[int, tuple[str, list[tuple[float, float]]]]] = {}
+    corners: dict[str, dict[int, dict[int, tuple[float, float]]]] = {}
+    for groups in sections.get("SECTION DESIGNER SECTIONS", []):
+        if not groups or groups[0][0] != "SDSECTION":
+            continue
+        name = str(groups[0][1][0])
+        attrs = {kw: v[0] if len(v) == 1 else tuple(v) for kw, v in groups[1:]}
+        if "BASEMATERIAL" in attrs:
+            base_materials[name] = str(attrs["BASEMATERIAL"])
+            continue
+        if "SHAPE" not in attrs:
+            continue
+        shape_idx = int(attrs["SHAPE"])
+        if "POLYCORNER" in attrs:
+            corner_idx = int(attrs["POLYCORNER"])
+            x = _as_float(attrs.get("X", 0.0))
+            y = _as_float(attrs.get("Y", 0.0))
+            corners.setdefault(name, {}).setdefault(shape_idx, {})[corner_idx] = (x, y)
+        elif attrs.get("SHAPETYPE"):
+            if str(attrs["SHAPETYPE"]).upper() == "POLYGON":
+                material = (
+                    str(attrs["MATERIAL"]) if "MATERIAL" in attrs else base_materials.get(name, "")
+                )
+                polygons.setdefault(name, {})[shape_idx] = (material, [])
+
+    built: dict[str, SDSection] = {}
+    for name, shape_map in polygons.items():
+        poly_list: list[tuple[str, list[tuple[float, float]]]] = []
+        prop_list: list[dict[str, float]] = []
+        for shape_idx in sorted(shape_map):
+            material, _ = shape_map[shape_idx]
+            corner_map = corners.get(name, {}).get(shape_idx, {})
+            ordered = [corner_map[i] for i in sorted(corner_map)]
+            if len(ordered) < 3:
+                continue
+            # (local 2, local 3) = (SD Y, SD X)
+            verts = [(y, x) for (x, y) in ordered]
+            prop_list.append(polygon_props(verts))
+            poly_list.append((material, verts))
+        area = sum(p["A"] for p in prop_list)
+        if area <= 0.0 or not poly_list:
+            continue
+        cy = sum(p["A"] * p["cy"] for p in prop_list) / area
+        cz = sum(p["A"] * p["cz"] for p in prop_list) / area
+        i33 = sum(p["I33"] + p["A"] * (p["cy"] - cy) ** 2 for p in prop_list)
+        i22 = sum(p["I22"] + p["A"] * (p["cz"] - cz) ** 2 for p in prop_list)
+        built[name] = SDSection(
+            name=name,
+            shape="SD Section",
+            material=base_materials.get(name, ""),
+            A=area,
+            I33=i33,
+            I22=i22,
+            J=i33 + i22,
+            polygons=poly_list,
+        )
+    return built
 
 
 # ── Shell sections ──
@@ -1924,10 +2018,23 @@ def _iter_object_loads_any(
             return
 
 
+# ETABS ``DIR`` numeric codes 1/2/3 are the frame *local* axes (1 = along the
+# member, 2 = local 2, 3 = local 3); global directions are spelled ``X``/``Y``/
+# ``Z`` and gravity is ``GRAV``.
+_LOCAL_DIR_MAP = {"1": "LocalX", "2": "LocalY", "3": "LocalZ"}
+
+
 def _map_direction(direction: Any) -> str:
-    """Map an ETABS ``DIR`` token to the toolkit direction vocabulary."""
+    """Map an ETABS ``DIR`` token to the toolkit direction vocabulary.
+
+    ``GRAV`` maps to ``"Gravity"``; the numeric local-axis codes ``1``/``2``/
+    ``3`` map to ``"LocalX"``/``"LocalY"``/``"LocalZ"`` (the local 1/2/3 axes);
+    everything else passes through unchanged.
+    """
     d = str(direction).strip().upper()
-    return "Gravity" if d == "GRAV" else str(direction)
+    if d == "GRAV":
+        return "Gravity"
+    return _LOCAL_DIR_MAP.get(d, str(direction))
 
 
 def _get_joint_loads(sections: dict[str, list[GroupedLine]]) -> list[JointLoad]:
@@ -2002,6 +2109,25 @@ def _get_frame_distributed_loads(
                     val_b=val_b,
                     rdist_a=rdist_a,
                     rdist_b=rdist_b,
+                    dist_a=0.0,
+                    dist_b=0.0,
+                )
+            )
+        elif ltype == "UNIFM":
+            # Uniform distributed *moment* along the frame (``MVAL`` is the
+            # magnitude in [F·L/L] = force units; ``DIR`` is the moment axis).
+            val = _as_float(attrs.get("MVAL", 0.0))
+            loads.append(
+                FrameDistributedLoad(
+                    pattern=pattern,
+                    frame_id=frame_id,
+                    direction=direction,
+                    load_type="Moment",
+                    shape="Uniform",
+                    val_a=val,
+                    val_b=val,
+                    rdist_a=0.0,
+                    rdist_b=1.0,
                     dist_a=0.0,
                     dist_b=0.0,
                 )

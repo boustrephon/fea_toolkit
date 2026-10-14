@@ -23,8 +23,11 @@ from fea_toolkit.io.e2k_parser import (
     _find_profile,
     _gather,
     _get_diaphragm_names,
+    _get_frame_distributed_loads,
     _get_frame_sections,
+    _get_line_connectivity,
     _get_materials,
+    _get_sd_sections,
     _get_shell_uniform_load_set_assignments,
     _get_shell_uniform_load_sets,
     _line_split,
@@ -50,6 +53,7 @@ from fea_toolkit.model.sap_data import (
     JointLoad,
     LoadCombination,
     PipeSection,
+    SDSection,
     ShellSection,
     ShellUniformLoadSet,
     TeeSection,
@@ -814,3 +818,101 @@ def test_cardinal_point_offset_becomes_frame_end_offset(diaphragm_model):
 
     # Column C1 (default centroid) yields no offset record.
     assert "C1@ROOF" not in diaphragm_model.frame_end_offsets
+
+
+# ── Null "LINE" objects, Section Designer sections, UNIFM line loads ──
+
+
+def test_line_connectivity_accepts_null_line_type():
+    sections = _parse_sections(
+        "$ LINE CONNECTIVITIES\n"
+        '  LINE  "L1"  LINE  "1"  "2"  0\n'
+        '  LINE  "C1"  COLUMN  "3"  "3"  1\n'
+    )
+    assert _get_line_connectivity(sections) == {
+        "L1": ("LINE", "1", "2", 0),
+        "C1": ("COLUMN", "3", "3", 1),
+    }
+
+
+def test_sd_section_computes_polygon_properties():
+    snippet = (
+        "$ SECTION DESIGNER SECTIONS\n"
+        '  SDSECTION "SDWall"  TYPE "FRAME"  DESIGNTYPE "OTHER"  BASEMATERIAL "CONC"  NUMSHAPES 1  ANGLE 90\n'
+        '  SDSECTION "SDWall"  SHAPE 1  MATERIAL "CONC"  SHAPETYPE "POLYGON"  NUMCORNERPTS 4\n'
+        '  SDSECTION "SDWall"  SHAPE 1  POLYCORNER 1  X 0  Y 0\n'
+        '  SDSECTION "SDWall"  SHAPE 1  POLYCORNER 2  X 1.1  Y 0\n'
+        '  SDSECTION "SDWall"  SHAPE 1  POLYCORNER 3  X 1.1  Y 2.2\n'
+        '  SDSECTION "SDWall"  SHAPE 1  POLYCORNER 4  X 0  Y 2.2\n'
+    )
+    sec = _get_sd_sections(_parse_sections(snippet))["SDWall"]
+    assert isinstance(sec, SDSection)
+    assert sec.shape == "SD Section"
+    assert sec.material == "CONC"
+    # (local 2, local 3) = (SD Y, SD X): a 2.2 × 1.1 solid rectangle.
+    assert pytest.approx(2.2 * 1.1) == sec.A
+    assert pytest.approx(1.1 * 2.2**3 / 12) == sec.I33
+    assert pytest.approx(2.2 * 1.1**3 / 12) == sec.I22
+    assert pytest.approx(sec.I33 + sec.I22) == sec.J
+    assert sec.polygons == [("CONC", [(0.0, 0.0), (0.0, 1.1), (2.2, 1.1), (2.2, 0.0)])]
+
+
+def test_sd_section_skips_ref_line_shapes():
+    snippet = (
+        "$ SECTION DESIGNER SECTIONS\n"
+        '  SDSECTION "SDWall"  TYPE "FRAME"  DESIGNTYPE "OTHER"  BASEMATERIAL "CONC"  NUMSHAPES 2  ANGLE 90\n'
+        '  SDSECTION "SDWall"  SHAPE 1  MATERIAL "CONC"  SHAPETYPE "POLYGON"  NUMCORNERPTS 4\n'
+        '  SDSECTION "SDWall"  SHAPE 1  POLYCORNER 1  X 0  Y 0\n'
+        '  SDSECTION "SDWall"  SHAPE 1  POLYCORNER 2  X 1.1  Y 0\n'
+        '  SDSECTION "SDWall"  SHAPE 1  POLYCORNER 3  X 1.1  Y 2.2\n'
+        '  SDSECTION "SDWall"  SHAPE 1  POLYCORNER 4  X 0  Y 2.2\n'
+        '  SDSECTION "SDWall"  SHAPE 2  SHAPETYPE "REF LINE"  X1 0  Y1 0  X2 1.1  Y2 2.2\n'
+    )
+    sec = _get_sd_sections(_parse_sections(snippet))["SDWall"]
+    assert pytest.approx(2.2 * 1.1) == sec.A  # REF LINE adds no area
+    assert len(sec.polygons) == 1
+
+
+def test_unifm_line_load_maps_to_moment():
+    sections = _parse_sections(
+        "$ FRAME OBJECT LOADS\n"
+        '  LINELOAD  "B1"  "ROOF"  TYPE "UNIFM"  DIR "1"  LC "SDLF"  MVAL 1.29\n'
+    )
+    loads = _get_frame_distributed_loads(sections)
+    assert len(loads) == 1
+    load = loads[0]
+    assert load.frame_id == "B1@ROOF"
+    assert load.pattern == "SDLF"
+    assert load.load_type == "Moment"
+    assert load.shape == "Uniform"
+    assert load.val_a == pytest.approx(1.29)
+    assert load.val_b == pytest.approx(1.29)
+    assert load.direction == "LocalX"  # DIR "1" = local 1 (torsion) axis
+
+
+def test_null_line_and_none_section_materialised(tmp_path):
+    content = (
+        "$ CONTROLS\n"
+        '  UNITS  "KN"  "M"\n'
+        "$ MATERIAL PROPERTIES\n"
+        '  MATERIAL  "STEEL"  M 7.85  W 77.0  TYPE "ISOTROPIC"  E 2.0E+08  U 0.3  A 1.17E-05\n'
+        '  MATERIAL  "STEEL"  DESIGNTYPE "STEEL"  FY 345000  FU 448000\n'
+        "$ STORIES - IN SEQUENCE FROM TOP\n"
+        '  STORY "ROOF"  HEIGHT 3\n'
+        '  STORY "BASE"  ELEV 0\n'
+        "$ POINT COORDINATES\n"
+        '  POINT "1"  0 0\n'
+        '  POINT "2"  4 0\n'
+        "$ LINE CONNECTIVITIES\n"
+        '  LINE  "L1"  LINE  "1"  "2"  0\n'
+        "$ LINE ASSIGNS\n"
+        '  LINEASSIGN  "L1"  "ROOF"  SECTION "NONE"\n'
+    )
+    p = tmp_path / "null_line.e2k"
+    p.write_text(content, encoding="utf-8")
+    md = ETABSParser(p).parse().get_model_data()
+
+    assert "L1@ROOF" in md.frame_elements
+    assert md.frame_assignments["L1@ROOF"] == "NONE"
+    assert md.sections["NONE"].shape == "NA"
+    assert md.sections["NONE"].A == 0.0

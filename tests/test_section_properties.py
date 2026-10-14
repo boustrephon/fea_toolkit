@@ -19,6 +19,7 @@ from fea_toolkit.model.section_properties import (
     double_angle_props,
     i_props,
     pipe_props,
+    polygon_props,
     rect_props,
     tee_props,
 )
@@ -128,3 +129,20 @@ def test_double_angle_props():
     assert props["I33"] > 0
     assert props["I22"] > 0
     assert props["J"] > 0
+
+
+def test_polygon_props():
+    # A 2.2 (local 2 / y) × 1.1 (local 3 / z) solid rectangle.
+    verts = [(0.0, 0.0), (2.2, 0.0), (2.2, 1.1), (0.0, 1.1)]
+    props = polygon_props(verts)
+    assert props["A"] == pytest.approx(2.2 * 1.1)
+    assert props["I33"] == pytest.approx(1.1 * 2.2**3 / 12)  # about local 3
+    assert props["I22"] == pytest.approx(2.2 * 1.1**3 / 12)  # about local 2
+    assert props["J"] == pytest.approx(props["I33"] + props["I22"])
+    assert props["cy"] == pytest.approx(1.1)
+    assert props["cz"] == pytest.approx(0.55)
+
+
+def test_polygon_props_degenerate():
+    assert polygon_props([])["A"] == 0.0
+    assert polygon_props([(0.0, 0.0), (1.0, 0.0)])["A"] == 0.0  # fewer than 3

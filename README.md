@@ -673,7 +673,7 @@ SAP2000/ETABS models use a variety of cross‑section shapes. The `Section` data
 | **`RectangularSection`** | `Rectangular`, `Rectangle`, `Steel Plate`, `Concrete Rectangular` | `depth`, `bf` | ✅ 1 `rect` patch |
 | **`CircularSection`** | `Circle`, `Steel Rod`, `Concrete Circle` | `diameter` | ✅ 1 solid `circ` patch |
 | **`GeneralSection`** | `General`, `NA` | — | ❌ Requires a known shape |
-| **`SDSection`** | `SD Section` | `polygons` (multi‑material) | 🚧 Placeholder (needs meshing) |
+| **`SDSection`** | `SD Section` | `polygons` (multi‑material) | ⚠️ Partial — elastic `A`/`I33`/`I22`/`J` from the polygon (shoelace); fiber meshing deferred |
 | **`EncasedSection`** | `Concrete Encasement Rectangle/Circle` | `embedded_section`, `encasement_depth/bf` | ⚠️ Partial (encasement + embedded steel, steel counted twice) |
 | **`ConcreteFilledTubeSection`** | *(programmatic only — parsers map `Filled Steel Tube` to `BoxSection`)* | `depth`, `bf`, `tf`, `tw`, `fill_material` | ⚠️ Partial (steel tube + unconfined concrete core) |
 | **`ConcreteFilledPipeSection`** | *(programmatic only — parsers map `Filled Steel Pipe` to `PipeSection`)* | `od`, `t`, `fill_material` | ⚠️ Partial (steel pipe + unconfined concrete core) |
