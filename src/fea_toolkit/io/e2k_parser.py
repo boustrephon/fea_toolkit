@@ -1787,11 +1787,10 @@ def _get_load_cases(
             lc.case_data.setdefault("CASE - STATIC 1 - LOAD ASSIGNMENTS", []).append(
                 {"LoadName": str(attrs["LOADPAT"]), "LoadSF": _as_float(attrs.get("SF", 1.0))}
             )
-        extra = {
-            k: v
-            for k, v in attrs.items()
-            if k not in {"TYPE", "INITCOND", "MODALCASE", "LOADPAT", "SF"}
-        }
+        extra_skip = {"TYPE", "INITCOND", "MODALCASE", "LOADPAT"}
+        if "LOADPAT" in attrs:
+            extra_skip.add("SF")
+        extra = {k: v for k, v in attrs.items() if k not in extra_skip}
         if extra:
             lc.case_data.setdefault("ETABS", {}).update(extra)
     return load_cases
@@ -1920,7 +1919,9 @@ def _iter_object_loads_any(
     ``LINELOAD`` / ``AREALOAD`` record keyword, so both spellings are accepted.
     """
     for section in section_names:
-        yield from _iter_object_loads(sections, section, keyword)
+        if section in sections:
+            yield from _iter_object_loads(sections, section, keyword)
+            return
 
 
 def _map_direction(direction: Any) -> str:

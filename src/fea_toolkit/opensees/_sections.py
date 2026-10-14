@@ -511,7 +511,9 @@ class SectionMixin:
 
             # Determine section tag
             area_etype = self._area_element_types.get(aid)
+            is_variant = False
             if area_etype and self._get_type_factor(area_etype) != 1.0:
+                is_variant = True
                 variant_key = f"{sec_name}__{area_etype}"
                 if variant_key not in self._shell_sec_variants:
                     tag = next_sec_tag
@@ -558,7 +560,11 @@ class SectionMixin:
             else:
                 ops.element(shell_type, elem_tag, *node_tags[:4], sec_tag)
             self._shell_tag_map[aid] = elem_tag
-            if is_layered:
+            # A stiffness-factored variant of a layered shell is an
+            # ElasticMembranePlateSection (created by
+            # _create_single_shell_section), not a LayeredShell, so it must
+            # not be counted as a nonlinear shell area.
+            if is_layered and not is_variant:
                 self._nonlinear_shell_areas.add(aid)
             shell_count += 1
 
