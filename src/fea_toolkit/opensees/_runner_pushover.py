@@ -165,23 +165,11 @@ class PushoverRunnerMixin:
                     )
                 has_fiber_frames = True
 
-            # A distributed-plasticity pushover must have at least one active
-            # nonlinear yielding mechanism.  Fiber frame sections qualify; a
-            # nonlinear LayeredShell (ShellNLDKGQ) qualifies; a wall
-            # macro-element (SFI_MVLEM_3D / MVLEM_3D) qualifies; an ordinary
-            # elastic ShellSection (ShellMITC4) does not.
-            has_layered_shell = bool(self._active_layered_shell_section_names())
+            # Wall macro-elements (SFI_MVLEM_3D / MVLEM_3D) are a topology
+            # feature and can be detected up front.  The fiber-frame and
+            # layered-shell mechanisms are verified after the rebuild below,
+            # where the actually-created nonlinear shell elements are known.
             has_wall = bool(getattr(self.mesh_model, "wall_elements", None))
-            if not has_fiber_frames and not has_layered_shell and not has_wall:
-                raise ValueError(
-                    "Pushover analysis is nonlinear and requires an active "
-                    "nonlinear yielding mechanism, but the model has no "
-                    "fiber-capable frame sections, no nonlinear layered-shell "
-                    "section, and no wall macro-element.  Use a typed section "
-                    "(ISection, PipeSection, ConcreteRectangularSection, …), "
-                    "hinge_model='lumped', or a nonlinear wall; for a linear "
-                    "check use the static / modal / response-spectrum runners."
-                )
 
         if not _hinge_lumped:
             self.rebuild_with_fiber_sections(
@@ -197,6 +185,31 @@ class PushoverRunnerMixin:
                     "use_elastic_sections": True,
                 }
             )
+
+        # ── Verify the nonlinear yielding mechanism (post-rebuild) ──
+        # A distributed-plasticity pushover must have at least one active
+        # nonlinear yielding mechanism.  Fiber frame sections qualify; a
+        # nonlinear LayeredShell (ShellNLDKGQ) qualifies; a wall
+        # macro-element (SFI_MVLEM_3D / MVLEM_3D) qualifies; an ordinary
+        # elastic ShellSection (ShellMITC4) does not.  The shell count is
+        # taken from the elements actually created by
+        # _create_layered_shell_sections + _create_shell_elements during the
+        # rebuild above — sections skipped for unsupported nD materials are
+        # therefore excluded — so a layered-shell model whose nD materials
+        # are all skipped raises rather than silently degrading to a linear
+        # pushover.
+        if not _hinge_lumped:
+            has_layered_shell = bool(self._nonlinear_shell_areas)
+            if not has_fiber_frames and not has_layered_shell and not has_wall:
+                raise ValueError(
+                    "Pushover analysis is nonlinear and requires an active "
+                    "nonlinear yielding mechanism, but the model has no "
+                    "fiber-capable frame sections, no nonlinear layered-shell "
+                    "section, and no wall macro-element.  Use a typed section "
+                    "(ISection, PipeSection, ConcreteRectangularSection, …), "
+                    "hinge_model='lumped', or a nonlinear wall; for a linear "
+                    "check use the static / modal / response-spectrum runners."
+                )
 
         # ── Re-apply edge constraints ────────────────────────────
         _spring_scale = float(self.config.get("pushover_spring_scale", 1.0))

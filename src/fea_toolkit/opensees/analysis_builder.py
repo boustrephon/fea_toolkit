@@ -208,6 +208,8 @@ class AnalysisBuilder(
         self._shell_tag_map: dict[
             str, int
         ] = {}  # area SAP ID → OpenSees element tag (reset at each build_domain())
+        # area SAP IDs whose created shell element is nonlinear (ShellNLDKGQ)
+        self._nonlinear_shell_areas: set[str] = set()
 
         # Brace state
         self._brace_selection: Optional[set] = None
@@ -516,6 +518,7 @@ class AnalysisBuilder(
             # and sections can recover across rebuilds.
             self._skipped_nd_materials = set()
             self._skipped_shell_sec_names = set()
+            self._nonlinear_shell_areas = set()
             # Clear non-LayeredShell tags from shell section tag maps so
             # ElasticMembranePlateSection types are recreated with fresh tags
             # (they cannot be overwritten at the same tag).  LayeredShell

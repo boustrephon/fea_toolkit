@@ -140,29 +140,6 @@ class SectionMixin:
             if not getattr(elem, "inactive", False) and eid in assignments
         }
 
-    def _active_layered_shell_section_names(self) -> set[str]:
-        """Return nonlinear layered-shell section names on active area elements.
-
-        A :class:`~fea_toolkit.model.sap_data.LayeredShellSection` assigned to
-        an active (non-inactive, non-loads-only) area element produces a
-        ``ShellNLDKGQ`` shell — a nonlinear yielding mechanism.  Ordinary
-        elastic ``ShellSection`` areas (``ShellMITC4``) are excluded because
-        they carry no such section.
-        """
-        layered = self.mesh_model.layered_shell_sections or {}
-        if not layered:
-            return set()
-        assignments = self.mesh_model.area_assignments or {}
-        loads_only = self.mesh_model.loads_only_area_ids or set()
-        return {
-            assignments[aid]
-            for aid, area in self.mesh_model.area_elements.items()
-            if not getattr(area, "inactive", False)
-            and aid in assignments
-            and assignments[aid] in layered
-            and aid not in loads_only
-        }
-
     def _create_sections(self) -> None:
         """Create OpenSees sections from MeshModel sections.
 
@@ -581,6 +558,8 @@ class SectionMixin:
             else:
                 ops.element(shell_type, elem_tag, *node_tags[:4], sec_tag)
             self._shell_tag_map[aid] = elem_tag
+            if is_layered:
+                self._nonlinear_shell_areas.add(aid)
             shell_count += 1
 
         self._log.info("sections", f"Created {shell_count} shell elements")
