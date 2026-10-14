@@ -8,7 +8,7 @@ related: [viewer.md, workflow.md, results_schema.md, rhino_export.md, report_gen
 ---
 # Desktop GUI Roadmap
 
-## Status: ⚠️ Partial — the chrome and the workflow-modelling path are built.  Milestones 1–4 landed (viewport spike, chrome, model tree + inspector, bidirectional selection + display toggles), the mouse-interaction policy is configurable, and the Model Tree carries a **Views** group (geometry views over the storage seam, derived views filtered by a `Selection`, results archives opened as a view per load case).  **Milestone 5** landed for **static** cases and combinations (**Analysis ▸ Run…** solves them in the application and shows each as a case view, no archive needed), as did **Milestone 6** (load rendering) and **Milestone 7** (deformed shape *and* member force diagrams).  **Milestone 11 (workflow authoring) landed its Phases A and B on 2026-09-29** — the `workflow` package, the Recipe dock and the Model-menu presets ([P29](_pending_work.md)).  **Milestone 11's Phases C and E ([P30](_pending_work.md), [P32](_pending_work.md)) have also landed** — the `modal` / `response_spectrum` / `pushover` verbs, `generate_report` composing the registry, and the `Analysis ▸ Modal / Response spectrum / Pushover` entries recast as recipe presets.  Remaining: storey response and the pushover curve, layout persistence (M8) and the quad view (M10), plus the workflow layer's Phase D — its own item, **[P31](_pending_work.md)** (the command palette) — together with the shell result display ([P36](_pending_work.md)) and named selections / document verbs ([P35](_pending_work.md)).
+## Status: ⚠️ Partial — the application chrome and the workflow-modelling path are built.  For the current per-milestone / per-item status, see the [Pending Work Register](_pending_work.md): **P22** for the GUI roadmap and **P29–P36** for the workflow layer.
 
 > **User-facing guide:** [`docs/gui.md`](gui.md) — what the application does
 > today, how to select, the camera and display controls, and the settings file.
@@ -474,21 +474,10 @@ The GUI must respect the existing architectural contracts:
     alongside the existing `needs_pyvista` marker.
 11. **Workflow authoring (P29–P36, added 2026-09-29).**  The `workflow` package
     (verbs, steps, recipes as data), the **Recipe dock**, the `&Recipe` menu,
-    and the Model-menu items re-cast as **presets over the recipe** — landed as
-    **P29** (phases A–B).  **P30** (phase C) ✅ complete: the three
-    model-check verbs (`check_connectivity`, `check_self_weight`,
-    `check_brace_buckling`), the `chart` verb (all five kinds), the GUI's
-    first figure view and a check-table view, the capacity checks
-    (`member_shear_capacity`, `wall_shear_check`, `hinge_length`), the
-    `mesh_checks` verb, `combine`'s view, and a recipe's cases as views all
-    landed; the four charts (`storey_forces`, pushover, modal, CSM) ✅ landed.
-    **P32** (phase E) ✅ landed (2026-10-02): the `modal` / `response_spectrum` /
-    `pushover` verbs and `generate_report` composing the registry.  **P33** (GUI
-    ergonomics) ✅ landed (2026-09-30).  Remaining, as independent items: **P31**
-    (phase D — the command palette and script interop), **P35** (named selections
-    and the document verbs) and **P36** (shell result display).
-    See [`workflow_authoring.md`](workflow_authoring.md) and
-    [`_pending_work.md`](_pending_work.md).
+    and the Model-menu items re-cast as **presets over the recipe**.  Per-phase
+    status lives in the [Pending Work Register](_pending_work.md) (P29–P36); the
+    phase → item → content map is in
+    [`workflow_authoring.md`](workflow_authoring.md#roadmap).
 
 ---
 
@@ -663,6 +652,9 @@ class QtRenderBackend(RenderBackend):
   is disabled then and re-enabled at step boundaries.  One analysis at a time.
 
 ### 9.6 Milestones with acceptance criteria
+
+> Per-milestone status is tracked in the [Pending Work Register](_pending_work.md);
+> the ✅ / ⚠️ markers below are a historical snapshot.
 
 | # | Milestone | Acceptance criteria |
 |---|---|---|

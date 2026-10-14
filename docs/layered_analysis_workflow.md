@@ -10,6 +10,15 @@ related: [workflow.md, builder_reference.md, analysis_builder_migration_plan.md]
 
 This note frames the analysis workflow as a layered system in which the SAP2000 model is treated as a source structural description, then progressively converted into a finite-element-ready model and finally into one or more analysis-specific OpenSees models.
 
+> **Design record, not a status tracker.** This document is the *conceptual
+> design* of the v3 layered model.  Implementation status is tracked in
+> [`analysis_builder_migration_plan.md`](analysis_builder_migration_plan.md) (the
+> reconciliation record) and the [Pending Work Register](_pending_work.md); the
+> current two-stage reference is
+> [`builder_reference.md`](builder_reference.md) / [`workflow.md`](workflow.md).
+> **§11–16 below are the original implementation plan, retained for history —
+> their status is superseded by the migration plan.**
+
 ## 1. Overall structure
 
 The full workflow is best understood as a sequence of coupled layers:
@@ -263,6 +272,10 @@ In short:
 - the analysis stage decides how those model data are materialized for the OpenSees solver needed by the chosen analysis
 
 ## 11. Minimal implementation plan
+
+> **Superseded — historical.** This is the original implementation plan;
+> for what actually landed, see
+> [`analysis_builder_migration_plan.md`](analysis_builder_migration_plan.md).
 
 The minimal strategy is to keep the current architecture and make the ownership of the three domains explicit:
 
@@ -554,6 +567,10 @@ Entry points: ``AnalysisBuilder.run_pushover_analysis()`` and the
 
 ### 14.3 Current status of placeholders
 
+> **Superseded — historical.** This placeholder list predates the migration;
+> see [`analysis_builder_migration_plan.md`](analysis_builder_migration_plan.md)
+> for current status.
+
 The following items remain as placeholders pending implementation:
 
 - ``AnalysisCaseSpec`` for nonlinear OpenSeesPy cases
@@ -564,6 +581,10 @@ The following items remain as placeholders pending implementation:
   ``Hysteretic`` material)
 
 ## 15. Task list for the migration
+
+> **Superseded — historical.** This is the planned task breakdown; the
+> per-task ✅ / ⚠️ status is recorded in
+> [`analysis_builder_migration_plan.md`](analysis_builder_migration_plan.md).
 
 The work should be broken into the following tasks.
 
@@ -603,6 +624,9 @@ The work should be broken into the following tasks.
 - keep them as consumers of already-prepared analysis results only
 
 ## 16. Answer to the incidental question: does `MeshModel` still contain the original SAP elements?
+
+> This answer is also recorded in
+> [`analysis_builder_migration_plan.md`](analysis_builder_migration_plan.md).
 
 Yes — in the current implementation, the original super-elements are preserved in the element dictionaries and are marked inactive once the mesh/subdivision process creates children.
 

@@ -1,7 +1,7 @@
 ---
 title: "Linting Fix Plan"
 description: "Pyright error baseline and phased fix strategy for src/fea_toolkit (reference for cleanup work)."
-status: "draft"
+status: "complete"
 tags: [planning, linting, pyright, cleanup]
 category: [planning]
 ---
@@ -67,12 +67,18 @@ category: [planning]
 > `pd.Series.to_numpy()` convention (§11.2).  Treat this as the renewed
 > baseline — re-run and diff against it, don't re-derive.
 
-## Quick Start (for a fresh task)
+## Baseline (for future re-runs)
 
-1. **Read this document** to understand the overall strategy.
-2. **Check the current state**: `python -m pyright src/ --outputjson > /tmp/pyright_src.json`
-3. **Compare** against the baseline counts below to see what's already been fixed.
-4. **Phase 1 (real bugs) is already fixed** (was (9 findings → 13 diagnostics), then **Phase 2 (config)**, then **Phase 3 (optional type improvements)**.
+> **Phases 1–2 are complete and Phase 3 is accepted as known-benign
+> (2026-10-11).**  This document is now a *baseline*, not an active plan: the
+> per-file diagnostics below are historical.  Re-run and diff against the
+> 2026-10-11 baseline (`308 errors / 890 warnings / 157 files`) rather than
+> re-deriving it.  The only tracked, non-blocking cleanup is the
+> `pd.Series.to_numpy()` convention (`.clinerules` §11.2).
+
+1. **Check the current state**: `python -m pyright src/ --outputjson > /tmp/pyright_src.json`
+2. **Compare** against the 2026-10-11 baseline counts below.
+3. **Phase 1 (real bugs) is already fixed** (9 findings → 13 diagnostics), **Phase 2 (config)** is committed, and **Phase 3 (optional type improvements)** was triaged and accepted as known-benign — do not re-open without a concrete new bug.
 
 ---
 

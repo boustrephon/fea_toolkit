@@ -5,12 +5,12 @@ status: "draft"
 tags: [planning, work-log, internal]
 category: [planning]
 ---
-# Pending work — fea_toolkit (2026-10-02)
+# Pending work — fea_toolkit (2026-10-14)
 
 ## Strategy — the next steps
 
 > The register is the single source of truth; this section is the
-> *sequencing layer* over it (maintained 2026-10-11).  The standalone plan
+> *sequencing layer* over it (maintained 2026-10-14).  The standalone plan
 > documents are historical records — `analysis_builder_migration_plan.md`,
 > `csm_test_model_plan.md`, `deprecation_plan.md` and `linting_fix_plan.md`
 > are ✅ complete (P9's Phase 3 triage resolved 2026-10-11 — baseline renewed,
@@ -19,14 +19,14 @@ category: [planning]
 
 **Near term — finish the workflow layer.**
 
-1. **P32** — `generate_report` composes the registry (keeping its NPZ/HDF5
+1. ~~**P32** — `generate_report` composes the registry (keeping its NPZ/HDF5
    storage and HTML-rendering stages, which are *not* verbs) and the greyed
-   `Analysis ▸ Modal / Response spectrum / Pushover` entries become presets.
-   Landed 2026-10-02: the `pushover` verb declares `gravity_patterns`,
-   `brace_type`, `brace_sections` and `return_builders`; `generate_report`
-   composes the modal / RS / pushover verbs (its storage and rendering stages
-   stay report-only); and the `Analysis ▸ Modal / Response spectrum / Pushover`
-   entries are recipe presets.
+   `Analysis ▸ Modal / Response spectrum / Pushover` entries become
+   presets~~ ✅ **Landed 2026-10-02** — the `pushover` verb declares
+   `gravity_patterns`, `brace_type`, `brace_sections` and `return_builders`;
+   `generate_report` composes the modal / RS / pushover verbs (its storage and
+   rendering stages stay report-only); and the `Analysis ▸ Modal / Response
+   spectrum / Pushover` entries are recipe presets.
 2. ~~**P30 charts** — the remaining `chart` plots (`storey_forces`, pushover,
    modal, CSM), consuming P32's results~~ ✅ **Landed 2026-10-11.**  All four
    `chart` kinds now draw from a preceding step's results: `storey_forces`
@@ -35,8 +35,8 @@ category: [planning]
    `io.report.modal_participation_df`) and `csm`.  The earlier P19 flag proved
    non-blocking — `sum_storey_forces`' `cut` mode already provided the member
    force transport.
-3. **P36** — shell (area) result display (repository seam → per-case
-   collection → renderer → GUI toggle).  ✅ **Landed 2026-10-12** — see the
+3. ~~**P36** — shell (area) result display (repository seam → per-case
+   collection → renderer → GUI toggle)~~ ✅ **Landed 2026-10-12** — see the
    P36 entry below.
 4. **P35** — named selections first, then the `open`/`close`/`save`/`select`
    document verbs.  **P31** (command palette) is independent input ergonomics
@@ -155,11 +155,11 @@ warranted — `pushover_step_stride` and the per-block flags are the answer):
 
 ### Tier 2 — Correctness / physics follow-ups
 
-#### P5 — Post-peak / shear-failure modelling (Vecchio & Emara follow-up)
+#### P5 — Post-peak / shear-failure modelling (Vecchio & Emara follow-up) — CLOSED
 Source: 2026-08-16 rigid-end-zone batch (DONE, below);
 `docs/vecchio_emara_benchmark.md`; `docs/shear_failure_modelling.md`.
 
-**Status: documented, not reproduced — the nonlinear-shear mechanism is
+**Status: ✅ CLOSED — documented, not reproduced — the nonlinear-shear mechanism is
 validated (Duong); the fiber-concrete softening (Phase A) and `Bond_SP01`
 slip springs (Phase B) are implemented (both default-off) but cannot
 produce the sustained ≥ 10 % post-peak descent; P5 closes per the
@@ -1276,6 +1276,14 @@ layers (Phases 1–4) are stable.
   wheel's PSUMAT is a stub ("PSUMAT - NOT DEFINED IN THIS VERSION, SOURCE
   CODE RESTRICTED") and CSMM construction still fails.  Blocked on a full
   (non-restricted) build — see `docs/shell_support.md` Options C/D1.
+- **Archive / retire the historical plan documents (2026-10-14).**  The
+  standalone plan docs that are now complete historical records
+  (`analysis_builder_migration_plan.md`, `deprecation_plan.md`,
+  `csm_test_model_plan.md`, `linting_fix_plan.md`) overlap with each other and
+  with the register's DONE entries.  Future cleanup: fold each one's unique
+  reconciliation content into the register's DONE log (or a dedicated archive
+  page), then either retire it from the nav or delete it — do **not** delete
+  without folding the unique tables first.  See the 2026-10-14 docs review.
 
 #### P12 — LoadCombination table parsing (README §3 reconciliation)
 Source: repo-root `README.md` §3 "Load Combinations and Analysis Types";

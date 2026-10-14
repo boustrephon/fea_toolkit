@@ -1,7 +1,7 @@
 ---
 title: "CFT (concrete-filled steel tube) confinement — plan & recommendations"
 description: "Design record for modelling the confined concrete core of concrete-filled steel tubes (CHS/RHS) in fiber sections: options, pros/cons, recommendations, and researched model choices."
-status: "planned"
+status: "partial"
 tags: [cft, confinement, fiber, composite, section, research]
 category: [model-features]
 related: [mander_confinement_validation.md, e2k_import_plan.md, pushover_analysis.md]
@@ -165,6 +165,7 @@ concern that would need a degrading material or a shell model).
    `model/cft_confinement.py::cft_confined(fc, steel_fy, D, t) → {fcc, ecc, ecu}`.
 2. `ConcreteFilledPipeSection.fiber_confinement` → delegate to `cft_confined`;
    roles → `["steel","core","rebar"]`.
-3. `docs/cft_confinement_validation.md` — hand-checks against Sakino/Han test data.
+3. `docs/cft_confinement_validation.md` — a *planned* validation doc (does not
+   exist yet): hand-checks against Sakino/Han test data once the ξ-model lands.
 4. Decide (separately) whether RHS confinement is worth a validated model.
 

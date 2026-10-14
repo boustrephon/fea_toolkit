@@ -1,12 +1,19 @@
 ---
 title: "ETABS (.E2K / .$ET) import"
-description: "Plan for adding an ETABS text-export parser to fea_toolkit, and the grammar / deferred-geometry model it is built on."
-status: "in-progress"
+description: "Implemented ETABS text-export parser (geometry, sections, materials, restraints, loads, combinations) plus the deferred-geometry model it is built on; M6 auto-meshing and M7 v21 loads remain open."
+status: "partial"
 tags: [etabs, e2k, io, parser]
 category: [import]
 related: [json_serialization.md, parser_coverage.md, llm_guide.md, gui_roadmap.md]
 ---
 # ETABS (`.E2K` / `.$ET`) import
+
+> **Status: ⚠️ Partial.** The core parser (milestones M0–M5 plus the M2
+> parametric-shape hardening) is **implemented and wired** through
+> `load_model_data()`, the review CLI, the GUI file dialog and the examples
+> (2026-10-13).  Remaining: **M6** (object auto-meshing via `gmsh`) and
+> **M7** (ETABS v21 `$ LOAD PATTERNS` / `$ LOAD CASES`), plus `AUTOSECTION`
+> auto-select lists and multi-tower elevations — see §6.
 
 `fea_toolkit` historically parses SAP2000 text exports (`.s2k` / `.$2k`) only.
 This document records the design for adding an ETABS text-export parser and the

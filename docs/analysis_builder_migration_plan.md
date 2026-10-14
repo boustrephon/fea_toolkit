@@ -10,8 +10,12 @@ related: [layered_analysis_workflow.md, workflow.md, dev_notes.md]
 # AnalysisBuilder Migration Plan
 
 **Status:** ✅ **Complete — two-stage pipeline fully implemented**
-**Last updated:** 2026-08-01
-**Total test count:** 533
+**Last updated:** 2026-08-01 *(historical snapshot)*
+**Total test count:** 533 *(historical snapshot)*
+
+This document reconciles the design in
+[`layered_analysis_workflow.md`](layered_analysis_workflow.md) — the *design*
+record — against what actually landed.
 
 > **2026-08-21 follow-up:** the `analysis/` layer was subsequently simplified.
 > The `Analysis` ABC and `AnalysisManager` were removed and replaced by

@@ -8,12 +8,10 @@ related: [gui.md, gui_roadmap.md, analysis.md, workflow.md, report_generation.md
 ---
 # Workflow Authoring — Steps and Recipes
 
-> **Status: ⚠️ Partial.** Phases A, B and E — the `fea_toolkit.workflow`
-> package, the GUI's Recipe panel and Model-menu presets, and the
-> `modal` / `response_spectrum` / `pushover` verbs with `generate_report`
-> composing the registry — and Phase C (the `check` and `chart` verbs: all
-> checks and all five chart kinds) have landed.  Phase D (the command
-> palette) is planned; see [Roadmap](#roadmap).
+> **Status: ⚠️ Partial.** For the current per-phase status, see the
+> [Pending Work Register](_pending_work.md) (P29–P36).  This document is the
+> *design / spec* — the phase → item → content map is in [Roadmap](#roadmap);
+> statuses themselves are not tracked here.
 
 ## Why this layer exists
 
@@ -258,13 +256,16 @@ rather than mutating it; the recipe object stays the single source of truth.
 
 ## Roadmap
 
-| Phase | Register item | Content | Status |
-|---|---|---|---|
-| **A** | [P29](_pending_work.md) | the `workflow` package: steps, recipes, registry, and the four verbs | ✅ landed |
-| **B** | [P29](_pending_work.md) | the Recipe panel, the `&Recipe` menu, the Model-menu presets | ✅ landed |
-| **C** | **[P30](_pending_work.md)** | **computed results become visible** — the three model-check verbs (`check_connectivity`, `check_self_weight`, `check_brace_buckling`) ✅ complete, a recipe's solved cases and combinations ✅ register as result views, the `chart` verb (`storey_displacements`) plus the GUI's **first figure view** and a check-table view ✅ land, and the capacity checks (`member_shear_capacity`, `wall_shear_check`, `hinge_length`) plus the `mesh_checks` verb ✅ land; the other `plotting.report.*` charts (`storey_forces`, pushover, modal, CSM) ✅ landed 2026-10-11 | ✅ Complete |
-| **D** | **[P31](_pending_work.md)** | **authoring ergonomics** — the command palette (`Ctrl+K`) compiling a command string into a step, a command-echo log recording every action as its equivalent step, and importing a Python script back into a recipe | 🚧 planned |
-| **E** | **[P32](_pending_work.md)** | **the report pipeline joins the vocabulary** — the *analysis* verbs the reconciliation needs (`modal`, `response_spectrum`, `pushover`) and `generate_report` composing the same registry; the greyed `Analysis ▸ Modal / Response spectrum / Pushover` entries became recipe presets; see *Resolving the `generate_report` duality* below | ✅ landed |
+| Phase | Register item | Content |
+|---|---|---|
+| **A** | [P29](_pending_work.md) | the `workflow` package: steps, recipes, registry, and the four verbs |
+| **B** | [P29](_pending_work.md) | the Recipe panel, the `&Recipe` menu, the Model-menu presets |
+| **C** | **[P30](_pending_work.md)** | **computed results become visible** — the three model-check verbs (`check_connectivity`, `check_self_weight`, `check_brace_buckling`), a recipe's solved cases and combinations as result views, the `chart` verb (`storey_displacements`) plus the GUI's **first figure view** and a check-table view, the capacity checks (`member_shear_capacity`, `wall_shear_check`, `hinge_length`) plus the `mesh_checks` verb, and the other `plotting.report.*` charts (`storey_forces`, pushover, modal, CSM) |
+| **D** | **[P31](_pending_work.md)** | **authoring ergonomics** — the command palette (`Ctrl+K`) compiling a command string into a step, a command-echo log recording every action as its equivalent step, and importing a Python script back into a recipe |
+| **E** | **[P32](_pending_work.md)** | **the report pipeline joins the vocabulary** — the *analysis* verbs the reconciliation needs (`modal`, `response_spectrum`, `pushover`) and `generate_report` composing the same registry; the greyed `Analysis ▸ Modal / Response spectrum / Pushover` entries as recipe presets; see *Resolving the `generate_report` duality* below |
+
+> **Statuses are tracked in the [Pending Work Register](_pending_work.md); this
+> table is the phase → register-item → content map only.**
 
 **C, D and E are deliberately separate register items** (P30, P31, P32): C makes
 computed results *visible*, D makes authoring *fast*, and E reconciles an
