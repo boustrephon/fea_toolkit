@@ -27,6 +27,7 @@ from fea_toolkit.io.e2k_parser import (
     _get_materials,
     _line_split,
     _load_catalogues,
+    _merge_assign_value,
     _normalise_catalogue_key,
     _parse_sections,
     _split_id,
@@ -100,6 +101,31 @@ def test_compose_id_round_trips():
 def test_split_id_rejects_malformed():
     with pytest.raises(ValueError):
         _split_id("no-separator")
+
+
+# ── Assignment attribute merging ──────────────────────────────────────
+
+
+def test_merge_assign_value_scalars_aggregate_flat():
+    # ``MESHAT "BEAMS" MESHAT "WALLS"`` — two scalar groups fold into one list.
+    acc = _merge_assign_value(None, "BEAMS", "MESHAT")
+    acc = _merge_assign_value(acc, "WALLS", "MESHAT")
+    assert acc == ["BEAMS", "WALLS"]
+
+
+def test_merge_assign_value_sequence_is_extended_not_nested():
+    # ``MESHAT "BEAMS" "WALLS"`` — a single multi-valued group must extend the
+    # accumulated list rather than become a nested element.
+    assert _merge_assign_value(None, ("BEAMS", "WALLS"), "MESHAT") == ["BEAMS", "WALLS"]
+    assert _merge_assign_value(["BEAMS"], ("WALLS", "GRID"), "MESHAT") == [
+        "BEAMS",
+        "WALLS",
+        "GRID",
+    ]
+
+
+def test_merge_assign_value_scalar_keywords_replace():
+    assert _merge_assign_value("Col", "Beam", "SECTION") == "Beam"
 
 
 # ── Geometry resolution ─────────────────────────────────────────────

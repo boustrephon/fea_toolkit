@@ -586,15 +586,19 @@ def _merge_assign_value(existing: Any, value: Any, kw: str) -> Any:
     """Merge a repeated assignment attribute value.
 
     Multi-valued keys (see :data:`_MULTI_VALUE_ASSIGN_KEYS`) aggregate repeated
-    values into a list; every other key is scalar, so a later value replaces an
+    values into a flat list.  When the incoming value is itself a sequence
+    (e.g. ``MESHAT "BEAMS" "WALLS"``), its elements are extended into the
+    accumulated values rather than appended as a nested element; a scalar value
+    is appended.  Every other key is scalar, so a later value replaces an
     earlier one.
     """
     if kw in _MULTI_VALUE_ASSIGN_KEYS:
+        items = list(value) if isinstance(value, (list, tuple)) else [value]
         if existing is None:
-            return value
+            return items
         if isinstance(existing, list):
-            return [*existing, value]
-        return [existing, value]
+            return [*existing, *items]
+        return [existing, *items]
     return value
 
 

@@ -173,9 +173,22 @@ def run_pushover(
     lateral: str,
 ) -> dict:
     """Run the two-stage gravity + lateral pushover on a prepared model."""
+    # Topology preprocessing stays elastic; the builder enables fiber sections
+    # and runs the pushover rebuild on a nonlinear (dispBeamColumn) element.
+    # forceBeamColumn is deliberately not used: the CFT fiber section carries
+    # zero torsional rigidity (GJ = 0), so forceBeamColumn cannot invert its
+    # flexibility matrix and fails the gravity stage.
     cfg = {"element_type": "elasticBeamColumn", "split_elements": True, "verbose": False}
     mm = preprocess_model(md, cfg)
-    builder = AnalysisBuilder(mm, {"element_type": "elasticBeamColumn", "verbose": False})
+    builder = AnalysisBuilder(
+        mm,
+        {
+            "element_type": "dispBeamColumn",
+            "create_fiber_sections": True,
+            "fiber_element_type": "dispBeamColumn",
+            "verbose": False,
+        },
+    )
     builder.build_domain()
     return builder.run_pushover_analysis(
         gravity_patterns={"DEAD": 1.0},
