@@ -415,6 +415,11 @@ class LoadMixin:
                         )
                         continue
                     m_i, m_j = nodal["i"], nodal["j"]
+                    # ``pattern_scales`` scales force loads via ``val_a``/``val_b``
+                    # above; the moment branch derives nodal moments from the
+                    # unscaled load, so apply the scale here (forces are zero).
+                    m_i = {k: v * scale for k, v in m_i.items()}
+                    m_j = {k: v * scale for k, v in m_j.items()}
                     ops.load(ni.node_tag, 0.0, 0.0, 0.0, m_i["mx"], m_i["my"], m_i["mz"])
                     ops.load(nj.node_tag, 0.0, 0.0, 0.0, m_j["mx"], m_j["my"], m_j["mz"])
                     if pname not in self._dist_load_totals:

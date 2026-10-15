@@ -267,6 +267,39 @@ class TestBeamMomentToNodalMoments:
         result = beam_moment_to_nodal_moments(self._load("LocalX"), elem, node_coords, length=0.0)
         assert result["i"]["mx"] == 0.0 and result["j"]["mx"] == 0.0
 
+    def _load_span(self, direction, val_a, val_b, rdist_a, rdist_b):
+        return FrameDistributedLoad(
+            pattern="DEAD",
+            frame_id="1",
+            direction=direction,
+            load_type="Moment",
+            shape="Uniform",
+            val_a=val_a,
+            val_b=val_b,
+            rdist_a=rdist_a,
+            rdist_b=rdist_b,
+            dist_a=0.0,
+            dist_b=5.0,
+        )
+
+    def test_partial_span_uniform_moment(self):
+        # Uniform moment intensity 100 over x ∈ [0.5, 2.5] on a 5 m member.
+        # Resultant = 100·2 = 200 at centroid x = 1.5 → M_i = 140, M_j = 60.
+        elem, node_coords = self._elem_and_coords()
+        load = self._load_span("LocalX", 100.0, 100.0, 0.1, 0.5)
+        result = beam_moment_to_nodal_moments(load, elem, node_coords, length=5.0)
+        assert result["i"]["mx"] == pytest.approx(140.0)
+        assert result["j"]["mx"] == pytest.approx(60.0)
+
+    def test_varying_moment(self):
+        # Linear intensity 100 → 200 over the full 5 m span.  Resultant =
+        # (100+200)/2·5 = 750 at centroid 25/9 m → M_i = 1000/3, M_j = 1250/3.
+        elem, node_coords = self._elem_and_coords()
+        load = self._load_span("LocalX", 100.0, 200.0, 0.0, 1.0)
+        result = beam_moment_to_nodal_moments(load, elem, node_coords, length=5.0)
+        assert result["i"]["mx"] == pytest.approx(1000.0 / 3.0)
+        assert result["j"]["mx"] == pytest.approx(1250.0 / 3.0)
+
 
 # ============================================================================
 # MassSource tests

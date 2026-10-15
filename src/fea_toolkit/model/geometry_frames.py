@@ -741,11 +741,11 @@ def beam_moment_to_nodal_moments(
 ) -> Optional[dict[str, dict[str, float]]]:
     """Statically-equivalent nodal moments for a distributed *moment* load.
 
-    OpenSees ``eleLoad`` has no distributed-moment form, so a uniform moment of
-    intensity ``m`` (moment per length) over an element of length ``L`` is
-    replaced by equal concentrated end moments ``m·L/2`` about the load's
-    moment axis — the standard static-equivalent pair (the resultant ``m·L``
-    and first moment ``m·L²/2`` both match the distributed load).
+    OpenSees ``eleLoad`` has no distributed-moment form, so the moment
+    intensity is integrated over the loaded ``rdist_a``–``rdist_b`` span and
+    the resultant is split between the two ends in proportion to the span
+    centroid's position — the standard static-equivalent pair (both the
+    resultant and the first moment match the distributed load).
 
     The moment axis is resolved from ``load.direction``: ``"X"``/``"Y"``/
     ``"Z"`` are global axes; ``"LocalX"``/``"LocalY"``/``"LocalZ"`` are the
@@ -760,10 +760,12 @@ def beam_moment_to_nodal_moments(
         length: Element length (in model length units).
 
     Returns:
-        ``{"i": {fx…mz}, "j": {fx…mz}}`` with zero forces and equal end
-        moments in **global** coordinates, or ``None`` for a non-moment
-        direction.  ``val_a`` / ``val_b`` are averaged (they coincide for a
-        uniform moment; a genuinely varying moment is not decomposed).
+        ``{"i": {fx…mz}, "j": {fx…mz}}`` with zero forces and the two
+        statically-equivalent end moments in **global** coordinates, or
+        ``None`` for a non-moment direction.  ``val_a`` / ``val_b`` are the
+        intensities at ``rdist_a`` / ``rdist_b``; a linear intensity is
+        integrated exactly, so a partial-span uniform moment yields an
+        unequal end-moment pair.
     """
     zeros = {"fx": 0.0, "fy": 0.0, "fz": 0.0, "mx": 0.0, "my": 0.0, "mz": 0.0}
     if length <= 0.0:
@@ -788,12 +790,32 @@ def beam_moment_to_nodal_moments(
     else:
         return None
 
-    m = 0.5 * (load.val_a + load.val_b)
-    mx, my, mz = axis * (m * length * 0.5)
+    a = float(load.rdist_a)
+    b = float(load.rdist_b)
+    if b < a:
+        a, b = b, a
+        ma, mb = load.val_b, load.val_a
+    else:
+        ma, mb = load.val_a, load.val_b
+    a = min(max(a, 0.0), 1.0)
+    b = min(max(b, 0.0), 1.0)
+
+    span = (b - a) * length
+    resultant = 0.5 * (ma + mb) * span
+    if span <= 0.0 or abs(resultant) <= 1e-15 * length:
+        return {"i": dict(zeros), "j": dict(zeros)}
+
+    # Trapezoid centroid of the intensity, measured from end ``i``.
+    x_c = a * length + span * (ma + 2.0 * mb) / (3.0 * (ma + mb))
+    m_j = resultant * (x_c / length)
+    m_i = resultant - m_j
+
+    mx_i, my_i, mz_i = axis * m_i
+    mx_j, my_j, mz_j = axis * m_j
 
     return {
-        "i": {"fx": 0.0, "fy": 0.0, "fz": 0.0, "mx": mx, "my": my, "mz": mz},
-        "j": {"fx": 0.0, "fy": 0.0, "fz": 0.0, "mx": mx, "my": my, "mz": mz},
+        "i": {"fx": 0.0, "fy": 0.0, "fz": 0.0, "mx": mx_i, "my": my_i, "mz": mz_i},
+        "j": {"fx": 0.0, "fy": 0.0, "fz": 0.0, "mx": mx_j, "my": my_j, "mz": mz_j},
     }
 
 

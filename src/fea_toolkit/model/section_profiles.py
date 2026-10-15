@@ -196,6 +196,35 @@ def _loop_inside(inner: list[tuple[float, float]], outer: list[tuple[float, floa
     return all(_point_in_loop(pt, outer) for pt in inner)
 
 
+def _signed_loop_properties(
+    loops: list[list[tuple[float, float]]],
+) -> dict[str, float]:
+    """Composite elastic properties of loops, holes subtracted by nesting depth.
+
+    Each loop is a closed ``(y, z)`` = ``(local 2, local 3)`` corner list.  A
+    loop's containment depth — the number of other loops that contain it —
+    classifies it as an outer boundary (even depth, positive) or a hole (odd
+    depth, negative), so the composite area, centroid and second moments treat
+    holes as voids.  Returns ``{"A", "cy", "cz", "I33", "I22"}``; a non-positive
+    signed area returns all zeros.
+    """
+    if not loops:
+        return {"A": 0.0, "cy": 0.0, "cz": 0.0, "I33": 0.0, "I22": 0.0}
+    props = [polygon_props(loop) for loop in loops]
+    signs = []
+    for i, loop in enumerate(loops):
+        depth = sum(i != j and _loop_inside(loop, other) for j, other in enumerate(loops))
+        signs.append(-1.0 if depth % 2 == 1 else 1.0)
+    area = sum(s * p["A"] for s, p in zip(signs, props))
+    if area <= 0.0:
+        return {"A": 0.0, "cy": 0.0, "cz": 0.0, "I33": 0.0, "I22": 0.0}
+    cy = sum(s * p["A"] * p["cy"] for s, p in zip(signs, props)) / area
+    cz = sum(s * p["A"] * p["cz"] for s, p in zip(signs, props)) / area
+    i33 = sum(s * (p["I33"] + p["A"] * (p["cy"] - cy) ** 2) for s, p in zip(signs, props))
+    i22 = sum(s * (p["I22"] + p["A"] * (p["cz"] - cz) ** 2) for s, p in zip(signs, props))
+    return {"A": area, "cy": cy, "cz": cz, "I33": i33, "I22": i22}
+
+
 def _sd_loops(section: SDSection) -> list[list[tuple[float, float]]]:
     """The SD section's polygon loops, centred and in profile ``(x, y)`` order.
 
@@ -208,16 +237,8 @@ def _sd_loops(section: SDSection) -> list[list[tuple[float, float]]]:
     loops = [list(loop) for (_mat, loop) in section.polygons if len(loop) >= 3]
     if not loops:
         return []
-    cy = cz = area = 0.0
-    for loop in loops:
-        props = polygon_props(loop)
-        a = props["A"]
-        cy += a * props["cy"]
-        cz += a * props["cz"]
-        area += a
-    if area > 0.0:
-        cy /= area
-        cz /= area
+    props = _signed_loop_properties(loops)
+    cy, cz = props["cy"], props["cz"]
     return [[(z - cz, y - cy) for (y, z) in loop] for loop in loops]
 
 

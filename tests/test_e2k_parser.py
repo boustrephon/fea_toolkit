@@ -873,6 +873,29 @@ def test_sd_section_skips_ref_line_shapes():
     assert len(sec.polygons) == 1
 
 
+def test_sd_section_with_a_hole_subtracts_void_area():
+    snippet = (
+        "$ SECTION DESIGNER SECTIONS\n"
+        '  SDSECTION "SDHole"  TYPE "FRAME"  DESIGNTYPE "OTHER"  BASEMATERIAL "CONC"  NUMSHAPES 2  ANGLE 90\n'
+        '  SDSECTION "SDHole"  SHAPE 1  MATERIAL "CONC"  SHAPETYPE "POLYGON"  NUMCORNERPTS 4\n'
+        '  SDSECTION "SDHole"  SHAPE 1  POLYCORNER 1  X 0  Y 0\n'
+        '  SDSECTION "SDHole"  SHAPE 1  POLYCORNER 2  X 2  Y 0\n'
+        '  SDSECTION "SDHole"  SHAPE 1  POLYCORNER 3  X 2  Y 2\n'
+        '  SDSECTION "SDHole"  SHAPE 1  POLYCORNER 4  X 0  Y 2\n'
+        '  SDSECTION "SDHole"  SHAPE 2  MATERIAL "VOID"  SHAPETYPE "POLYGON"  NUMCORNERPTS 4\n'
+        '  SDSECTION "SDHole"  SHAPE 2  POLYCORNER 1  X 0.5  Y 0.5\n'
+        '  SDSECTION "SDHole"  SHAPE 2  POLYCORNER 2  X 1.5  Y 0.5\n'
+        '  SDSECTION "SDHole"  SHAPE 2  POLYCORNER 3  X 1.5  Y 1.5\n'
+        '  SDSECTION "SDHole"  SHAPE 2  POLYCORNER 4  X 0.5  Y 1.5\n'
+    )
+    sec = _get_sd_sections(_parse_sections(snippet))["SDHole"]
+    # A 2 × 2 solid square with a concentric 1 × 1 void: the void loop has odd
+    # nesting depth, so its area and inertias subtract from the outer boundary.
+    assert pytest.approx(2 * 2 - 1 * 1) == sec.A
+    assert pytest.approx(2 * 2**3 / 12 - 1 * 1**3 / 12) == sec.I33
+    assert pytest.approx(2 * 2**3 / 12 - 1 * 1**3 / 12) == sec.I22
+
+
 def test_unifm_line_load_maps_to_moment():
     sections = _parse_sections(
         "$ FRAME OBJECT LOADS\n"
@@ -916,3 +939,36 @@ def test_null_line_and_none_section_materialised(tmp_path):
     assert md.frame_assignments["L1@ROOF"] == "NONE"
     assert md.sections["NONE"].shape == "NA"
     assert md.sections["NONE"].A == 0.0
+
+
+def test_missing_sd_section_gets_placeholder(tmp_path):
+    content = (
+        "$ CONTROLS\n"
+        '  UNITS  "KN"  "M"\n'
+        "$ MATERIAL PROPERTIES\n"
+        '  MATERIAL  "STEEL"  M 7.85  W 77.0  TYPE "ISOTROPIC"  E 2.0E+08  U 0.3  A 1.17E-05\n'
+        '  MATERIAL  "STEEL"  DESIGNTYPE "STEEL"  FY 345000  FU 448000\n'
+        "$ STORIES - IN SEQUENCE FROM TOP\n"
+        '  STORY "ROOF"  HEIGHT 3\n'
+        '  STORY "BASE"  ELEV 0\n'
+        "$ POINT COORDINATES\n"
+        '  POINT "1"  0 0\n'
+        '  POINT "2"  4 0\n'
+        "$ LINE CONNECTIVITIES\n"
+        '  LINE  "B1"  BEAM  "1"  "2"  0\n'
+        "$ FRAME SECTIONS\n"
+        '  FRAMESECTION  "SDEmpty"  MATERIAL  "STEEL"  SHAPE  "SD Section"\n'
+        "$ SECTION DESIGNER SECTIONS\n"
+        '  SDSECTION "SDEmpty"  TYPE "FRAME"  DESIGNTYPE "OTHER"  BASEMATERIAL "STEEL"  NUMSHAPES 1  ANGLE 0\n'
+        '  SDSECTION "SDEmpty"  SHAPE 1  SHAPETYPE "REF LINE"  X1 0  Y1 0  X2 1  Y2 1\n'
+        "$ LINE ASSIGNS\n"
+        '  LINEASSIGN  "B1"  "ROOF"  SECTION "SDEmpty"\n'
+    )
+    p = tmp_path / "missing_sd.e2k"
+    p.write_text(content, encoding="utf-8")
+    md = ETABSParser(p).parse().get_model_data()
+
+    assert md.frame_assignments["B1@ROOF"] == "SDEmpty"
+    assert "SDEmpty" in md.sections
+    assert isinstance(md.sections["SDEmpty"], GeneralSection)
+    assert md.sections["SDEmpty"].A == 0.0

@@ -85,6 +85,7 @@ from ..model.sap_data import (
     ShellUniformLoadSet,
     TeeSection,
 )
+from ..model.section_profiles import _signed_loop_properties
 from ..model.section_properties import (
     angle_props,
     box_props,
@@ -93,7 +94,6 @@ from ..model.section_properties import (
     double_angle_props,
     i_props,
     pipe_props,
-    polygon_props,
     rect_props,
     tee_props,
 )
@@ -365,6 +365,15 @@ class ETABSParser:
         assigned = set(frame_assignments.values()) | set(area_assignments.values())
         if "NONE" in assigned and "NONE" not in all_sections:
             all_sections["NONE"] = GeneralSection(name="NONE", shape="NA", material="")
+        # Section Designer sections with no polygon area (e.g. only ``REF LINE``
+        # shapes) are dropped by :func:`_get_sd_sections`, yet frames can still
+        # be assigned to them.  Synthesise a zero-stiffness placeholder so those
+        # assignments resolve instead of dangling.
+        for sec_name in frame_assignments.values():
+            if sec_name not in all_sections:
+                all_sections[sec_name] = GeneralSection(
+                    name=sec_name, shape="SD Section", material=""
+                )
 
         # ── Populate area thickness from assigned shell sections ──
         for aid, area in area_elements.items():
@@ -1637,7 +1646,6 @@ def _get_sd_sections(sections: dict[str, list[GroupedLine]]) -> dict[str, SDSect
     built: dict[str, SDSection] = {}
     for name, shape_map in polygons.items():
         poly_list: list[tuple[str, list[tuple[float, float]]]] = []
-        prop_list: list[dict[str, float]] = []
         for shape_idx in sorted(shape_map):
             material, _ = shape_map[shape_idx]
             corner_map = corners.get(name, {}).get(shape_idx, {})
@@ -1646,23 +1654,21 @@ def _get_sd_sections(sections: dict[str, list[GroupedLine]]) -> dict[str, SDSect
                 continue
             # (local 2, local 3) = (SD Y, SD X)
             verts = [(y, x) for (x, y) in ordered]
-            prop_list.append(polygon_props(verts))
             poly_list.append((material, verts))
-        area = sum(p["A"] for p in prop_list)
-        if area <= 0.0 or not poly_list:
+        if not poly_list:
             continue
-        cy = sum(p["A"] * p["cy"] for p in prop_list) / area
-        cz = sum(p["A"] * p["cz"] for p in prop_list) / area
-        i33 = sum(p["I33"] + p["A"] * (p["cy"] - cy) ** 2 for p in prop_list)
-        i22 = sum(p["I22"] + p["A"] * (p["cz"] - cz) ** 2 for p in prop_list)
+        props = _signed_loop_properties([verts for (_mat, verts) in poly_list])
+        area = props["A"]
+        if area <= 0.0:
+            continue
         built[name] = SDSection(
             name=name,
             shape="SD Section",
             material=base_materials.get(name, ""),
             A=area,
-            I33=i33,
-            I22=i22,
-            J=i33 + i22,
+            I33=props["I33"],
+            I22=props["I22"],
+            J=props["I33"] + props["I22"],
             polygons=poly_list,
         )
     return built
