@@ -992,6 +992,77 @@ class TestRestraintGlyphs:
             viewer._backend.plotter.close()
 
 
+class TestRenderLoads:
+    """``PyVistaRenderer.render_loads`` draws flags and arrows under "loads"."""
+
+    @staticmethod
+    def _line(start=(0.0, 0.0, 0.0), end=(4.0, 0.0, 0.0), val_a=10.0, val_b=10.0):
+        from fea_toolkit.model.load_glyphs import LoadGeom
+
+        return LoadGeom(
+            kind="line",
+            pattern="WIND",
+            label="WIND Uniform",
+            start=np.array(start, dtype=float),
+            end=np.array(end, dtype=float),
+            direction=np.array([0.0, 0.0, 1.0]),
+            val_a=val_a,
+            val_b=val_b,
+            rdist_a=0.0,
+            rdist_b=1.0,
+        )
+
+    @staticmethod
+    def _point(anchor=(2.0, 0.0, 0.0), magnitude=-50.0):
+        from fea_toolkit.model.load_glyphs import LoadGeom
+
+        return LoadGeom(
+            kind="point",
+            pattern="DEAD",
+            label="DEAD",
+            anchor=np.array(anchor, dtype=float),
+            direction=np.array([0.0, 0.0, -1.0]),
+            magnitude=magnitude,
+        )
+
+    def test_render_loads_builds_flag_and_arrow_actors(self):
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_loads([self._line(), self._point()], size=1.0)
+            assert len(renderer.actors("loads")) == 2  # one flag mesh, one arrow mesh
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_the_loads_toggle_hides_the_glyphs(self):
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_loads([self._line()], size=1.0)
+            actor = renderer.actors("loads")[0]
+            renderer.set_category_visible("loads", False)
+            assert not actor.GetVisibility()
+            renderer.set_category_visible("loads", True)
+            assert actor.GetVisibility()
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_a_zero_intensity_line_load_contributes_no_actor(self):
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_loads([self._line(val_a=0.0, val_b=0.0)], size=1.0)
+            assert renderer.actors("loads") == []
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+
 class TestNodeMarkersAndSelection:
     """What marks a restrained node, and what marks a selected element.
 

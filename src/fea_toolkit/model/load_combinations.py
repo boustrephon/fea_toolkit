@@ -37,7 +37,7 @@ from typing import Optional, Union
 
 import numpy as np
 
-from .sap_data import LoadCase, LoadCombination, LoadCombinationEntry
+from .sap_data import LoadCase, LoadCombination, LoadCombinationEntry, patterns_from_case
 
 __all__ = [
     "ComboTree",
@@ -50,6 +50,7 @@ __all__ = [
     "calculate_aggregate_factors",
     "classify_combination_refs",
     "combination_case_meta",
+    "combination_pattern_factors",
     "combination_set_from_dict",
     "combination_set_to_dict",
     "expand_linear_combination",
@@ -1090,6 +1091,45 @@ def expand_linear_combination(
             f"{sorted({r.operator for r in results})})"
         )
     return dict(results[0].cases)
+
+
+def combination_pattern_factors(
+    combo: LoadCombination,
+    load_cases: dict[str, LoadCase],
+    load_combinations: dict[str, LoadCombination],
+) -> Optional[dict[str, float]]:
+    """Resolve a combination to ``{pattern: factor}`` for applied-load display.
+
+    Displaying a combination means drawing its factored applied loads, not its
+    results.  Only a **purely linear** combination (no envelope / SRSS / signed
+    magnitude fork) has a single signed applied-load picture: such a combination
+    expands to ``{case: factor}``, and each static case contributes its own
+    ``{pattern: factor}`` assignments scaled by that combined factor.  Modal and
+    response-spectrum cases carry no applied-load glyphs and are skipped.
+
+    Args:
+        combo: Combination to resolve.  Its entries should be classified — see
+            :func:`merge_combination_sets` / :func:`classify_combination_refs`.
+        load_cases: Flat ``{name: LoadCase}`` mapping.
+        load_combinations: Flat ``{name: LoadCombination}`` mapping.
+
+    Returns:
+        ``{pattern: combined_factor}``, or ``None`` when the combination does
+        not reduce to one linear signed set (an envelope / SRSS / magnitude fork
+        has no single load display).
+    """
+    try:
+        cases = expand_linear_combination(combo, load_cases, load_combinations)
+    except ValueError:
+        return None
+    factors: dict[str, float] = {}
+    for case_name, case_factor in cases.items():
+        lc = load_cases.get(case_name)
+        if lc is None:
+            continue
+        for pattern, pattern_factor in patterns_from_case(lc).items():
+            factors[pattern] = factors.get(pattern, 0.0) + case_factor * pattern_factor
+    return factors
 
 
 # ═══════════════════════════════════════════════════════════════════════

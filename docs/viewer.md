@@ -121,7 +121,8 @@ ModelViewer(builder=None, model_data=None, mesh_model=None, backend="pyvista", *
 ```python
 viewer.show_model(show_nodes=True, show_shells=True,
                   color_by_section=True, opacity=1.0, node_size=0.02,
-                  shrink=1.0, shell_opacity=None, show_restraints=True)
+                  shrink=1.0, shell_opacity=None, show_restraints=True,
+                  show_loads=False, load_factors=None, load_scale=0.05)
 ```
 
 Draws the structural model — frame elements as coloured lines, shell
@@ -143,6 +144,18 @@ itself is never modified:
 * ``show_restraints`` draws a support symbol at every restrained node — one glyph
   per restrained DOF (an arrow per translation, a curl per rotation), sized to the
   model.  See :mod:`fea_toolkit.plotting.restraint_glyphs`.
+* ``show_loads`` draws applied-load glyphs — a **rectangular flag** for a uniform
+  distributed load, a **trapezoidal flag** for a linear/trapezoidal one (read
+  as-authored, before the builder decomposes them), and an **arrow** for joint and
+  frame point loads.  ``load_factors`` is an optional ``{pattern: factor}`` map
+  narrowing and scaling which loads are drawn — pass a
+  :class:`~fea_toolkit.model.load_glyphs.LoadSource`'s ``patterns`` (from
+  :func:`~fea_toolkit.model.load_glyphs.list_load_sources`) to show one pattern,
+  static case or combination; ``None`` draws every load at factor 1.0.
+  ``load_scale`` is the fraction of the model diagonal a peak load value is drawn
+  at; the peak *intensity* of line loads and the peak *force* of point loads are
+  each normalised to that length, so flags and arrows stay legible together.  Off
+  by default — the glyphs are dense.  See :mod:`fea_toolkit.model.load_glyphs`.
 
 Change the opacity live, without re-drawing:
 

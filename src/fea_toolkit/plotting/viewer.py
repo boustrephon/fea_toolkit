@@ -31,6 +31,7 @@ from typing import Any, Optional, Union
 import numpy as np
 
 from ..model.geometry import frame_end_offsets_global
+from ..model.load_glyphs import extract_load_glyphs
 from .renderers import AnnotationDef, FrameGeom, HighlightDef, NodeGeom, RenderBackend, ShellGeom
 from .renderers.base import RestraintGeom
 
@@ -139,6 +140,13 @@ _HIGHLIGHT_RADIUS_MIN = 0.01
 #: highlight's 0.75 % would be a pixel or two.
 _RESTRAINT_SIZE_FRACTION = 0.04
 _RESTRAINT_SIZE_MIN = 0.08
+
+#: Applied-load glyphs — the fraction of the model diagonal a peak load value is
+#: drawn at.  A line-load *intensity* and a point-load *force* are different
+#: units, so the renderer normalises each kind to its own peak at this length
+#: (see ``render_loads``).
+_LOAD_SIZE_FRACTION = 0.05
+_LOAD_SIZE_MIN = 0.05
 
 #: Node markers.  A restrained node is drawn a little larger, in green, so a
 #: model's supports read at a glance.  Both values stay **under** the selection
@@ -256,11 +264,13 @@ class ModelViewer:
         self._shells: list[ShellGeom] = []
         self._nodes: list[NodeGeom] = []
         self._restraints: list[RestraintGeom] = []
+        self._loads: list = []
         self._section_colors: dict[str, tuple[float, float, float]] = {}
         # Display transforms — applied when drawing, never to the geometry above,
         # so the model itself stays the source of truth for results and selection.
         self._shrink: float = 1.0
         self._shell_opacity: float = 1.0
+        self._load_scale_fraction: float = _LOAD_SIZE_FRACTION
         self._geom_extracted = False
         self._model_diag: Optional[float] = None
 
@@ -412,6 +422,9 @@ class ModelViewer:
         shell_opacity: Optional[float] = None,
         show_restraints: bool = True,
         restraint_style: str = "block",
+        show_loads: bool = False,
+        load_factors: Optional[dict[str, float]] = None,
+        load_scale: float = _LOAD_SIZE_FRACTION,
         show_extruded: bool = False,
         extruded_detail: str = "plates",
     ) -> "ModelViewer":
@@ -439,6 +452,17 @@ class ModelViewer:
                 nothing.
             restraint_style: Support-symbol style — ``"block"`` (plates and
                 discs, the default) or ``"arrow"`` (arrows and curls).
+            show_loads: If True, draw applied-load glyphs — rectangular /
+                trapezoidal flags for distributed loads and arrows for point
+                loads (see :mod:`fea_toolkit.model.load_glyphs`).  Off by
+                default: glyphs are dense and overlap the structure.
+            load_factors: Optional ``{pattern: factor}`` narrowing and scaling
+                which loads are drawn — pass a
+                :class:`~fea_toolkit.model.load_glyphs.LoadSource`'s
+                ``patterns`` to draw one source (a pattern, case or
+                combination).  ``None`` draws every load at factor 1.0.
+            load_scale: Fraction of the model diagonal a peak load value is
+                drawn at (default :data:`_LOAD_SIZE_FRACTION`).
             show_extruded: When True, draw each frame as an extruded solid
                 (its cross-section swept along the member) *in addition to* the
                 line skeleton, which remains the pickable layer.
@@ -458,6 +482,7 @@ class ModelViewer:
         self._shrink = shrink
         self._shell_opacity = opacity if shell_opacity is None else shell_opacity
         self._restraint_style = restraint_style
+        self._load_scale_fraction = load_scale
 
         if show_extruded:
             # The extruded solids are pure decoration (non-pickable); the line
@@ -502,6 +527,11 @@ class ModelViewer:
             self._backend.render_restraints(
                 self._restraints, size=self.restraint_size(), style=self._restraint_style
             )
+
+        if show_loads:
+            self._loads = extract_load_glyphs(self._model, pattern_factors=load_factors)
+        if show_loads and self._loads:
+            self._backend.render_loads(self._loads, size=self.load_size())
 
         return self
 
@@ -830,6 +860,16 @@ class ModelViewer:
         """
         scaled = max(_RESTRAINT_SIZE_FRACTION * self._model_diagonal(), _RESTRAINT_SIZE_MIN)
         return min(scaled, self._restraint_size_cap())
+
+    def load_size(self) -> float:
+        """Target glyph length for applied loads, in model units.
+
+        The peak value of each load kind is drawn at this length (see
+        :meth:`fea_toolkit.plotting.renderers.RenderBackend.render_loads`).
+        Scaled to the model diagonal exactly like :meth:`restraint_size` — a
+        fixed length would be invisible on a bridge and swamp a small frame.
+        """
+        return max(self._load_scale_fraction * self._model_diagonal(), _LOAD_SIZE_MIN)
 
     def _restraint_size_cap(self) -> float:
         """The support-glyph maximum size: 500 mm in the model's length unit."""

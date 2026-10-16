@@ -80,6 +80,7 @@ from .load_combinations import (
     calculate_aggregate_factors,
     classify_combination_refs,
     combination_case_meta,
+    combination_pattern_factors,
     combination_set_from_dict,
     combination_set_to_dict,
     expand_linear_combination,
@@ -88,6 +89,7 @@ from .load_combinations import (
     merge_combination_sets,
     to_e2k_combo_dict,
 )
+from .load_glyphs import LoadGeom, LoadSource, extract_load_glyphs, list_load_sources
 from .mesh_model import MeshModel
 from .sap_data import (
     AngleSection,
@@ -252,7 +254,9 @@ __all__ = [
     "LoadCase",
     "LoadCombination",
     "LoadCombinationEntry",
+    "LoadGeom",
     "LoadPattern",
+    "LoadSource",
     "MassSource",
     # Materials & shells
     "Material",
@@ -303,6 +307,7 @@ __all__ = [
     # Tree utils
     "collect_descendants",
     "combination_case_meta",
+    "combination_pattern_factors",
     "combination_set_from_dict",
     "combination_set_to_dict",
     "compute_asce41_hinge_length",
@@ -312,6 +317,7 @@ __all__ = [
     "convert_area_loads_to_edge_loads",
     "convert_mesh_units",
     "expand_linear_combination",
+    "extract_load_glyphs",
     "find_constraint_edges",
     "find_wall_nodes_inside_slabs",
     "format_review_markdown",
@@ -328,6 +334,7 @@ __all__ = [
     "group_shell_forces_by_section",
     # Stories
     "identify_stories",
+    "list_load_sources",
     # Confinement
     "mander_confined",
     "merge_combination_sets",

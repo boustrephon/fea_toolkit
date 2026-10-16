@@ -2,9 +2,12 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from ...model.load_glyphs import LoadGeom
 
 # ── Intermediate geometry representations ──────────────────────────────
 
@@ -299,6 +302,27 @@ class RenderBackend(ABC):
             quantity: Local component name (e.g. ``'Mz'``, ``'Fx'``).  Also
                 selects the flag extrusion direction.
             scale_factor: Scaling for flag size.
+        """
+        ...
+
+    @abstractmethod
+    def render_loads(
+        self,
+        loads: list["LoadGeom"],
+        size: float = 1.0,
+    ) -> None:
+        """Draw applied-load glyphs — flags for line loads, arrows for points.
+
+        Glyphs are resolved by
+        :func:`fea_toolkit.model.load_glyphs.extract_load_glyphs`; magnitudes
+        are in model units and are scaled here for display only.
+
+        Args:
+            loads: Load glyphs (``kind`` ``"point"`` or ``"line"``).
+            size: Target glyph length in model units.  The peak value of each
+                kind — a line-load *intensity* and a point-load *force* are
+                different units — is drawn at this length, so flags and arrows
+                both stay legible on one model.
         """
         ...
 

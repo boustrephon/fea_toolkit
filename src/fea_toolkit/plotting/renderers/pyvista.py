@@ -220,6 +220,25 @@ def _flag_rgb(col_val: float, max_abs: float) -> tuple[float, float, float]:
     return (0.3 - 0.3 * t, 0.3 - 0.2 * t, 0.3 + 0.7 * t)
 
 
+def _dedupe_load_vertices(vertices, length: float) -> list[np.ndarray]:
+    """Drop coincident corners from a load-flag polygon (defence in depth).
+
+    A load with one zero end intensity collapses two corners onto the same
+    point; dropping the duplicate leaves a clean triangle instead of a
+    degenerate quad.
+    """
+    out: list[np.ndarray] = []
+    for raw in vertices:
+        v = np.asarray(raw, dtype=float)
+        dup = any(
+            np.array_equal(v, w) or (length > 0.0 and float(np.linalg.norm(v - w)) <= 1e-9 * length)
+            for w in out
+        )
+        if not dup:
+            out.append(v)
+    return out
+
+
 class PyVistaRenderer(RenderBackend):
     """Render backend using PyVista.
 
@@ -840,6 +859,100 @@ class PyVistaRenderer(RenderBackend):
             show_scalar_bar=False,
         )
         self._add_overlay(actor, "force_flags")
+
+    def render_loads(self, loads, size: float = 1.0) -> None:
+        """Draw applied-load glyphs: flags for line loads, arrows for points.
+
+        Args:
+            loads: Load glyphs (``kind`` ``"point"`` / ``"line"``), as produced
+                by :func:`fea_toolkit.model.load_glyphs.extract_load_glyphs`.
+            size: Target glyph length in model units — the peak |value| of each
+                kind is drawn at this length, so a line-load *intensity* and a
+                point-load *force* (different units) are each normalised to a
+                legible size.
+        """
+        if not loads:
+            return
+        p = self.plotter
+        import pyvista as pv
+
+        line_peak = max(
+            (max(abs(g.val_a), abs(g.val_b)) for g in loads if g.kind == "line"),
+            default=0.0,
+        )
+        point_peak = max(
+            (abs(g.magnitude) for g in loads if g.kind == "point"),
+            default=0.0,
+        )
+        color = (0.9, 0.55, 0.1)  # amber — distinct from the red/blue force flags
+
+        # ── Line-load flags (one filled polygon per load) ──────────────
+        verts_acc: list[np.ndarray] = []
+        faces_acc: list[int] = []
+        vert_offset = 0
+        line_scale = size / line_peak if line_peak > 0.0 else 1.0
+        for g in loads:
+            if g.kind != "line" or g.start is None or g.end is None:
+                continue
+            if g.val_a == 0.0 and g.val_b == 0.0:
+                continue
+            axis = np.asarray(g.end, dtype=float) - np.asarray(g.start, dtype=float)
+            length = float(np.linalg.norm(axis))
+            if length < 1e-12:
+                continue
+            ra = max(0.0, min(1.0, float(g.rdist_a)))
+            rb = max(ra, min(1.0, float(g.rdist_b)))
+            a = np.asarray(g.start, dtype=float) + axis * ra
+            b = np.asarray(g.start, dtype=float) + axis * rb
+            d = (
+                np.asarray(g.direction, dtype=float)
+                if g.direction is not None
+                else np.array([0.0, 0.0, -1.0])
+            )
+            corners = _dedupe_load_vertices(
+                [a, b, b + d * (g.val_b * line_scale), a + d * (g.val_a * line_scale)],
+                length,
+            )
+            if len(corners) < 3:
+                continue
+            n = len(corners)
+            verts_acc.append(np.vstack(corners))
+            faces_acc.extend([n, *range(vert_offset, vert_offset + n)])
+            vert_offset += n
+
+        if verts_acc:
+            mesh = pv.PolyData(np.vstack(verts_acc), faces=np.asarray(faces_acc, dtype=int))
+            self._add_overlay(
+                p.add_mesh(mesh, color=color, opacity=0.7, lighting=False, show_scalar_bar=False),
+                "loads",
+            )
+
+        # ── Point-load arrows (tip at the application point) ──────────
+        arrows = []
+        point_scale = size / point_peak if point_peak > 0.0 else 1.0
+        for g in loads:
+            if g.kind != "point" or g.anchor is None or g.direction is None:
+                continue
+            if g.magnitude == 0.0:
+                continue
+            d = np.asarray(g.direction, dtype=float)
+            length = abs(g.magnitude) * point_scale
+            arrows.append(
+                pv.Arrow(
+                    start=np.asarray(g.anchor, dtype=float) - d * length,
+                    direction=d,
+                    scale=length,
+                    tip_length=0.25,
+                    tip_radius=0.1,
+                    shaft_radius=0.03,
+                )
+            )
+        if arrows:
+            merged = pv.merge(arrows) if len(arrows) > 1 else arrows[0]
+            self._add_overlay(
+                p.add_mesh(merged, color=color, lighting=False, show_scalar_bar=False),
+                "loads",
+            )
 
     def render_shell_scalar_field(
         self,
