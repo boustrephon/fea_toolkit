@@ -265,6 +265,7 @@ class MainWindow(QMainWindow):
         self._source_label = source
         self._reset_view_baseline = None
         self._store = None
+        self._external_combinations: dict = {}
         self._views = ViewRegistry()
         self._reset_session_display()
         if isinstance(model, SAPModelData):
@@ -799,7 +800,11 @@ class MainWindow(QMainWindow):
             tip="Show or hide support symbols at restrained nodes",
         )
         a["view.show_labels"] = self._placeholder("Show element labels", "P23")
-        a["view.show_loads"] = self._placeholder("Show loads", "Milestone 6")
+        a["view.show_loads"] = self._toggle_action(
+            "Show loads",
+            self._on_show_loads,
+            tip="Show or hide applied-load glyphs (flags for line loads, arrows for point loads)",
+        )
         a["view.show_forces"] = self._toggle_action(
             "Show force diagrams",
             self._on_forces_toggled,
@@ -835,6 +840,21 @@ class MainWindow(QMainWindow):
         )
         a["model.selections"] = self._placeholder("Selections", "a future release")
         a["model.units"] = self._placeholder("Units", "a future release")
+        a["model.combinations_edit"] = self._real_action(
+            "Edit combinations\u2026",
+            self._on_combinations_edit,
+            tip="Add, edit or delete the external load-combination set (listed in the load-source dropdown)",
+        )
+        a["model.combinations_open"] = self._real_action(
+            "Open combinations\u2026",
+            self._on_combinations_open,
+            tip="Load an external load-combination set from JSON",
+        )
+        a["model.combinations_save"] = self._real_action(
+            "Save combinations\u2026",
+            self._on_combinations_save,
+            tip="Save the external load-combination set to JSON",
+        )
         # ── Recipe: the workflow as an ordered list of steps ──
         a["recipe.run"] = self._real_action(
             "Run recipe",
@@ -987,6 +1007,13 @@ class MainWindow(QMainWindow):
         m = bar.addMenu("&Model")
         for key in ("model.mesh", "model.selections", "model.units"):
             m.addAction(a[key])
+        combos = m.addMenu("Combinations")
+        for key in (
+            "model.combinations_edit",
+            "model.combinations_open",
+            "model.combinations_save",
+        ):
+            combos.addAction(a[key])
 
         m = bar.addMenu("&Analysis")
         m.addAction(a["analysis.run"])
@@ -1054,6 +1081,28 @@ class MainWindow(QMainWindow):
         self._force_scale.setStatusTip("Force-diagram size (% of model diagonal)")
         self._force_scale.valueChanged.connect(self._on_force_scale_changed)
 
+        self._load_scale = QDoubleSpinBox(self)
+        self._load_scale.setObjectName("load_scale")
+        self._load_scale.setRange(0.1, 1000.0)
+        self._load_scale.setDecimals(1)
+        self._load_scale.setSingleStep(5.0)
+        self._load_scale.setValue(self._display.load_scale)
+        self._load_scale.setSuffix("%")
+        self._load_scale.setToolTip("Applied-load glyph size (% of model diagonal)")
+        self._load_scale.setStatusTip("Applied-load glyph size (% of model diagonal)")
+        self._load_scale.valueChanged.connect(self._on_load_scale_changed)
+
+        # Which load source "Show loads" draws — a pattern, static case or
+        # (linear) combination.  The list depends on the model, so it is
+        # repopulated in :meth:`_load_source_factors` on every display.
+        self._load_source = QComboBox(self)
+        self._load_source.setObjectName("load_source")
+        self._load_source.setToolTip(
+            "Load source drawn when Show loads is on (pattern, case or combination)"
+        )
+        self._load_source.setStatusTip("Load source drawn when Show loads is on")
+        self._load_source.currentIndexChanged.connect(self._on_load_source_changed)
+
         # Which end-force component a flag diagram shows.  The SAP local-DOF
         # names read better than the schema's x/y/z keys and are the same six
         # local DOFs (see FORCE_QUANTITY_LABELS); the combo therefore holds the
@@ -1114,6 +1163,8 @@ class MainWindow(QMainWindow):
             widgets = {
                 "@deformed_scale": ("Deform %", self._deformed_scale),
                 "@force_scale": ("Flags %", self._force_scale),
+                "@load_source": ("Load", self._load_source),
+                "@load_scale": ("Loads %", self._load_scale),
                 "@force_quantity": ("Force", self._force_quantity),
                 "@shell_quantity": ("Shell", self._shell_quantity),
                 "@shell_opacity": ("Shells", self._shell_opacity),
@@ -1164,6 +1215,8 @@ class MainWindow(QMainWindow):
             "view.show_restraints",
             "view.show_labels",
             "view.show_loads",
+            "@load_source",
+            "@load_scale",
             "view.show_forces",
             None,
             "results.deformed",
@@ -1469,6 +1522,9 @@ class MainWindow(QMainWindow):
             shrink=float(self._shrink.value()),
             show_restraints=self._actions["view.show_restraints"].isChecked(),
             restraint_style=self._display.restraint_style,
+            show_loads=self._actions["view.show_loads"].isChecked(),
+            load_factors=self._load_source_factors(model),
+            load_scale=self._load_scale.value() / 100.0,
             show_extruded=self._actions["view.show_extruded"].isChecked(),
             extruded_detail=self._display.extruded_detail,
         )
@@ -1527,6 +1583,13 @@ class MainWindow(QMainWindow):
             "view.show_restraints",
         ):
             self._set_toggle_checked(key, True)
+        # Loads are dense, so they start hidden until asked for.
+        self._set_toggle_checked("view.show_loads", False)
+        # ... and the load source falls back to the new model's first case.
+        from dataclasses import replace
+
+        self._display = replace(self._display, load_source="")
+        self._load_source.clear()
         # Extruded shapes is a user preference, not a per-model default: it
         # keeps the state the settings file loaded (off unless the user asked).
         self._set_toggle_checked("view.show_extruded", self._display.show_extruded)
@@ -2266,6 +2329,64 @@ class MainWindow(QMainWindow):
         """Show or hide the support symbols."""
         self._backend.set_category_visible("restraints", checked)
 
+    def _on_show_loads(self, _checked: bool) -> None:
+        """Show or hide applied-load glyphs; a geometry change, so re-render."""
+        self._refresh_display()
+
+    def _on_load_scale_changed(self, _value: float) -> None:
+        """Re-size the load glyphs when shown (same rule: the knob never starts)."""
+        if self._actions["view.show_loads"].isChecked():
+            self._refresh_display()
+
+    def _on_load_source_changed(self, _index: int) -> None:
+        """Re-draw the loads for the newly selected source (never starts drawing)."""
+        from dataclasses import replace
+
+        name = self._load_source.currentData() or ""
+        self._display = replace(self._display, load_source=name)
+        if self._actions["view.show_loads"].isChecked():
+            self._refresh_display()
+
+    def _load_source_factors(self, model: Any) -> Optional[dict[str, float]]:
+        """Populate the load-source combo for *model* and return the selected factors.
+
+        Lists every pattern, static case and linear combination of the model
+        (plus any external combination set), selecting the persisted
+        ``load_source`` when it still exists and otherwise the first case — the
+        default.  Returns the selected source's ``{pattern: factor}`` map, or
+        ``None`` when the model has no loads.
+        """
+        from ..model.load_glyphs import list_load_sources
+
+        sources = list_load_sources(model, getattr(self, "_external_combinations", None))
+        desired = self._display.load_source or ""
+
+        self._load_source.blockSignals(True)
+        self._load_source.clear()
+        for src in sources:
+            self._load_source.addItem(f"{src.kind.title()} · {src.name}", src.name)
+        if desired:
+            idx = self._load_source.findData(desired)
+            if idx >= 0:
+                self._load_source.setCurrentIndex(idx)
+        if self._load_source.currentIndex() < 0:
+            for i, src in enumerate(sources):
+                if src.kind == "case":
+                    self._load_source.setCurrentIndex(i)
+                    break
+            else:
+                if sources:
+                    self._load_source.setCurrentIndex(0)
+        self._load_source.blockSignals(False)
+
+        selected = self._load_source.currentData()
+        if selected is None:
+            return None
+        for src in sources:
+            if src.name == selected:
+                return dict(src.patterns)
+        return None
+
     def _on_hide_selected(self) -> None:
         """**View ▸ Display ▸ Hide selected**: hide the selected elements.
 
@@ -2393,6 +2514,50 @@ class MainWindow(QMainWindow):
         )
 
     # ── Preprocessing (Model menu) ───────────────────────────────────
+
+    def _on_combinations_edit(self) -> None:
+        """**Model ▸ Combinations ▸ Edit…**: add / edit / delete the external set."""
+        from .views.combination_editor import CombinationDialog
+
+        edited = CombinationDialog.edit(self._external_combinations, self)
+        if edited is None:
+            return
+        self._external_combinations = edited
+        self._refresh_display()
+        self.log(f"Load combinations updated: {len(edited)} combination(s).")
+
+    def _on_combinations_open(self) -> None:
+        """**Model ▸ Combinations ▸ Open…**: load an external set from JSON."""
+        from ..io.combination_set import read_combination_set
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open combinations", "", "Combination JSON (*.json)"
+        )
+        if not path:
+            return
+        try:
+            self._external_combinations = read_combination_set(path)
+        except (OSError, ValueError, TypeError) as exc:
+            self.log(f"Could not read combinations: {exc}", "error")
+            return
+        self._refresh_display()
+        self.log(f"Loaded {len(self._external_combinations)} combination(s) from {path}.")
+
+    def _on_combinations_save(self) -> None:
+        """**Model ▸ Combinations ▸ Save…**: write the external set to JSON."""
+        from ..io.combination_set import write_combination_set
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save combinations", "combinations.json", "Combination JSON (*.json)"
+        )
+        if not path:
+            return
+        try:
+            write_combination_set(path, self._external_combinations)
+        except OSError as exc:
+            self.log(f"Could not save combinations: {exc}", "error")
+            return
+        self.log(f"Saved {len(self._external_combinations)} combination(s) to {path}.")
 
     def _on_mesh_dialog(self) -> None:
         """**Model ▸ Mesh…**: compose the ``mesh`` step in a dialog, then run it.
@@ -4111,6 +4276,7 @@ class MainWindow(QMainWindow):
             "shrink": float(self._shrink.value()),
             "deformed_scale": float(self._deformed_scale.value()),
             "force_scale": float(self._force_scale.value()),
+            "load_scale": float(self._load_scale.value()),
             "force_quantity": self._force_quantity.currentText(),
             "restraint_style": self._display.restraint_style,
             "show_extruded": self._display.show_extruded,
@@ -4119,6 +4285,8 @@ class MainWindow(QMainWindow):
             "show_frames": self._actions["view.show_frames"].isChecked(),
             "show_shells": self._actions["view.show_shells"].isChecked(),
             "show_restraints": self._actions["view.show_restraints"].isChecked(),
+            "show_loads": self._actions["view.show_loads"].isChecked(),
+            "load_source": self._display.load_source,
         }
 
     def _apply_display_values(self, display: dict) -> None:
@@ -4150,6 +4318,7 @@ class MainWindow(QMainWindow):
             (self._shrink, "shrink"),
             (self._deformed_scale, "deformed_scale"),
             (self._force_scale, "force_scale"),
+            (self._load_scale, "load_scale"),
         ):
             widget.blockSignals(True)
             widget.setValue(float(getattr(resolved, name)))
@@ -4162,12 +4331,14 @@ class MainWindow(QMainWindow):
             restraint_style=resolved.restraint_style,
             show_extruded=resolved.show_extruded,
             extruded_detail=resolved.extruded_detail,
+            load_source=resolved.load_source,
         )
         self._set_toggle_checked("view.show_extruded", resolved.show_extruded)
         self._set_toggle_checked("view.show_nodes", resolved.show_nodes)
         self._set_toggle_checked("view.show_frames", resolved.show_frames)
         self._set_toggle_checked("view.show_shells", resolved.show_shells)
         self._set_toggle_checked("view.show_restraints", resolved.show_restraints)
+        self._set_toggle_checked("view.show_loads", resolved.show_loads)
 
     def _save_display_settings(self) -> None:
         """Write the display knobs to the settings file, best effort.

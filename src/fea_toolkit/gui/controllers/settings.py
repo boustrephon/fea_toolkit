@@ -44,7 +44,7 @@ __all__ = [
 ]
 
 #: JSON keys a ``display`` section may carry, mirroring the toolbar knobs.
-_DISPLAY_NUMERIC_FIELDS = ("shell_opacity", "shrink", "deformed_scale", "force_scale")
+_DISPLAY_NUMERIC_FIELDS = ("shell_opacity", "shrink", "deformed_scale", "force_scale", "load_scale")
 
 #: Inclusive range each numeric knob may take, mirroring the toolbar spin boxes
 #: in ``main_window`` (kept here, Qt-free, so :func:`resolve_display` can reject
@@ -54,6 +54,7 @@ _DISPLAY_RANGES = {
     "shrink": (0.5, 1.0),
     "deformed_scale": (0.1, 1000.0),
     "force_scale": (0.1, 1000.0),
+    "load_scale": (0.1, 1000.0),
 }
 
 #: Support-symbol styles ``restraint_style`` may name.
@@ -77,11 +78,13 @@ DISPLAY_FIELDS = frozenset(
         "show_frames",
         "show_shells",
         "show_restraints",
+        "show_loads",
+        "load_source",
     )
 )
 
 #: Boolean element-visibility toggles (defaulting to shown).
-_DISPLAY_BOOL_FIELDS = ("show_nodes", "show_frames", "show_shells", "show_restraints")
+_DISPLAY_BOOL_FIELDS = ("show_nodes", "show_frames", "show_shells", "show_restraints", "show_loads")
 
 
 @dataclass(frozen=True)
@@ -95,6 +98,7 @@ class DisplaySettings:
         shrink: Fraction of full size elements are drawn at, 0.5–1.0.
         deformed_scale: Deformed-shape size as % of the model diagonal, 0.1–1000.0.
         force_scale: Force-diagram size as % of the model diagonal, 0.1–1000.0.
+        load_scale: Applied-load glyph size as % of the model diagonal, 0.1–1000.0.
         force_quantity: SAP local-DOF label for the drawn end-force component
             (a key of :data:`fea_toolkit.model.sap_data.FORCE_QUANTITY_LABELS`).
         shell_quantity: Shell resultant label for the drawn area overlay (a key
@@ -110,12 +114,17 @@ class DisplaySettings:
         show_frames: Draw the frame line skeleton.
         show_shells: Draw area elements.
         show_restraints: Draw support symbols.
+        show_loads: Draw applied-load glyphs (flags and arrows).
+        load_source: Name of the load source drawn when ``show_loads`` is on —
+            a pattern, static case or combination name, or ``""`` for the
+            default (the first case).
     """
 
     shell_opacity: float = 0.7
     shrink: float = 1.0
     deformed_scale: float = 10.0
     force_scale: float = 10.0
+    load_scale: float = 10.0
     force_quantity: str = "M3"
     shell_quantity: str = "Nxy"
     restraint_style: str = "block"
@@ -125,6 +134,8 @@ class DisplaySettings:
     show_frames: bool = True
     show_shells: bool = True
     show_restraints: bool = True
+    show_loads: bool = False
+    load_source: str = ""
 
 
 #: The defaults, as a reusable constant (callers may ``replace`` over it).
@@ -219,6 +230,12 @@ def resolve_display(config: Any = None) -> "tuple[DisplaySettings, list[str]]":
             )
         else:
             overrides["extruded_detail"] = detail
+
+    if "load_source" in settings:
+        # A free-form name (pattern / case / combination); the valid set depends
+        # on the model, so it is validated against the model at display time, not
+        # here.
+        overrides["load_source"] = str(settings["load_source"])
 
     for key in _DISPLAY_BOOL_FIELDS:
         if key in settings:
