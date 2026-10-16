@@ -123,6 +123,7 @@ HANDLED_TABLES: frozenset[str] = frozenset(
         "FRAME LOADS - DISTRIBUTED",
         "FRAME LOADS - GRAVITY",
         "FRAME LOADS - OPEN STRUCTURE WIND",
+        "FRAME LOADS - POINT",
         "AREA LOADS - UNIFORM",
         "AREA LOADS - UNIFORM TO FRAME",
         "AREA LOADS - GRAVITY",
@@ -219,11 +220,6 @@ IGNORED_PREFIXES: tuple[tuple[str, str], ...] = (
 KNOWN_GAP_TABLES: dict[str, str] = {
     "SOLID PROPERTY DEFINITIONS": "solid (brick) elements not supported",
     "JOINT PATTERN DEFINITIONS": "joint patterns (thickness / offset overwrites) not consumed",
-    # Recognised, structurally relevant, not parsed — P14 in the register tracks
-    # adding it (a new ``frame_point_loads`` field + OpenSees ``eleLoad`` point
-    # loads).  Registered here so a model that *has* point loads is reported as
-    # a known gap rather than as an unrecognised table.
-    "FRAME LOADS - POINT": "point loads on frames not parsed (see P14)",
 }
 
 #: Prefixes for known-gap families.

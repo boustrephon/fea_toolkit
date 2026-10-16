@@ -1280,13 +1280,18 @@ class TeeSection(Section):
 class SDSection(Section):
     """Section Designer section — may be composite, with multiple materials.
 
-    Each polygon is a closed loop of (y, z) coordinates associated with a
-    material.  For composite sections the list holds contributions from
-    steel, concrete, rebar etc.
+    Each polygon is a closed loop of ``(y, z)`` = ``(local 2, local 3)``
+    coordinates associated with a material.  For composite sections the list
+    holds contributions from steel, concrete, rebar etc.  ``angle`` is the
+    section local-axis angle (degrees, counter-clockwise about +local 1); the
+    stored ``polygons`` are **already rotated** by it, so consumers must not
+    apply it again.
     """
 
     polygons: list[tuple[str, list[tuple[float, float]]]] = field(default_factory=list)
     # Each tuple: (material_name, [(y1, z1), (y2, z2), ...])
+    angle: float = 0.0
+    # Section local-axis angle (degrees, CCW about +local 1) — already applied.
 
     def fiber_roles(self) -> list[str]:
         return []
@@ -2206,18 +2211,25 @@ class AreaGravityLoad:
 
 @dataclass
 class FramePointLoad:
-    """Concentrated load on a frame element."""
+    """Concentrated load at a point along a frame ("FRAME LOADS - POINT").
 
-    pattern: str  # name of the load pattern
-    # coord_sys: CoordSys
-    node_id: str
-    # node_tag: int
-    fx: float = 0.0
-    fy: float = 0.0
-    fz: float = 0.0
-    mx: float = 0.0
-    my: float = 0.0
-    mz: float = 0.0
+    A single scalar load — a force (``load_type="Force"``) or a moment
+    (``load_type="Moment"``) — applied at one position along a frame member,
+    resolved in a direction exactly like the distributed-load sibling
+    (:class:`FrameDistributedLoad`).  ``value`` is the magnitude in model
+    units at ``rdist`` (0..1) from the I-end; ``dist`` is the same position in
+    absolute model length units.
+
+    Frame=5   LoadPat="DEAD"   CoordSys=GLOBAL   Type=Force   Dir=Gravity   DistType=RelDist   RelDist=0.5   AbsDist=2.54   F=100
+    """
+
+    pattern: str
+    frame_id: str
+    direction: str  # 'Gravity', 'X', 'Y', 'Z', 'LocalX', 'LocalY', 'LocalZ'
+    load_type: str  # 'Force' or 'Moment'
+    value: float  # magnitude (force or moment) in model units
+    rdist: float  # relative distance from start (0..1)
+    dist: float  # absolute distance from start (model units)
     coord_sys: str = "GLOBAL"
 
 
@@ -2365,6 +2377,7 @@ class SAPModelData:
     load_combinations: dict[str, LoadCombination] = field(default_factory=dict)
     joint_loads: list[JointLoad] = field(default_factory=list)
     frame_dist_loads: list[FrameDistributedLoad] = field(default_factory=list)
+    frame_point_loads: list[FramePointLoad] = field(default_factory=list)
     area_uniform_loads: list[AreaUniformLoad] = field(default_factory=list)
     area_gravity_loads: list[AreaGravityLoad] = field(default_factory=list)
     frame_gravity_loads: list[GravityLoad] = field(default_factory=list)

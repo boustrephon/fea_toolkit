@@ -446,7 +446,7 @@ def test_a_non_load_auto_table_is_not_swallowed_by_the_family_prefixes():
 
 def test_load_tables_that_are_tracked_holes_read_as_gaps_not_surprises():
     """A known gap must classify as a gap, so the report distinguishes them."""
-    assert classify("FRAME LOADS - POINT") == "known-gap"  # tracked by P14
+    assert classify("FRAME LOADS - POINT") == "handled"  # parsed since P14
     assert classify("LINK PROPERTY DEFINITIONS 01 - GENERAL") == "known-gap"
     assert classify("LINK PROPERTY DEFINITIONS 02 - LINEAR") == "known-gap"
 

@@ -21,6 +21,7 @@ from fea_toolkit.model.sap_data import (
     ConcreteRectangularSection,
     FrameElement,
     FrameEndOffset,
+    FramePointLoad,
     GravityLoad,
     ISection,
     Node,
@@ -174,6 +175,34 @@ TABLE:  "FRAME LOADS - GRAVITY"
     assert gl.multiplier_x == 0.0
     # Second: has Y multiplier
     assert md.frame_gravity_loads[1].multiplier_y == 0.1
+
+
+def test_parse_frame_point_loads(tmp_path):
+    """Parse FRAME LOADS - POINT table (concentrated loads on frames)."""
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "FRAME LOADS - POINT"
+   Frame=5   LoadPat="DEAD"   CoordSys=GLOBAL   Type=Force   Dir=Gravity   DistType=RelDist   RelDist=0.5   AbsDist=2.54   F=-100
+   Frame=7   LoadPat="WIND"   CoordSys=GLOBAL   Type=Force   Dir=2   DistType=RelDist   RelDist=0.25   AbsDist=1.0   Value=250
+"""
+    s2k = tmp_path / "test_frame_point.s2k"
+    s2k.write_text(content)
+    parser = SAP2000Parser(s2k)
+    parser.parse()
+    md = parser.get_model_data()
+    assert len(md.frame_point_loads) == 2
+    pl = md.frame_point_loads[0]
+    assert isinstance(pl, FramePointLoad)
+    assert pl.frame_id == "5"
+    assert pl.pattern == "DEAD"
+    assert pl.direction == "Gravity"
+    assert pl.load_type == "Force"
+    assert pl.value == -100.0
+    assert pl.rdist == 0.5
+    assert pl.dist == 2.54
+    # A numeric local Dir=2 maps to the toolkit's "LocalY" vocabulary, and the
+    # value column is read defensively (here "Value" rather than "F").
+    assert md.frame_point_loads[1].direction == "LocalY"
+    assert md.frame_point_loads[1].value == 250.0
 
 
 def test_parse_area_section_properties(tmp_path):

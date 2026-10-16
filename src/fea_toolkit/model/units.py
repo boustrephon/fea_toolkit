@@ -249,6 +249,15 @@ def _scale_loads(mesh: MeshModel, m: dict[str, float]) -> None:
         ld.mx *= m["force_times_length"]
         ld.my *= m["force_times_length"]
         ld.mz *= m["force_times_length"]
+    for ld in mesh.frame_point_loads:
+        # A point force scales by force; a point moment by force·length.
+        _val_scale = (
+            m["force_times_length"]
+            if str(getattr(ld, "load_type", "")).lower() == "moment"
+            else m["force"]
+        )
+        ld.value *= _val_scale
+        ld.dist *= m["length"]
     for ld in mesh.area_uniform_loads:
         ld.value *= m["force_per_area"]
     # Gravity load / area-gravity multipliers are dimensionless — unchanged.

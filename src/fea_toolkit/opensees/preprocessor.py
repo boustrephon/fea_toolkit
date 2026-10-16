@@ -819,6 +819,7 @@ class Preprocessor:
             orphan_nodes=orphan_nodes,
             # Pass through load collections for AnalysisBuilder consumption
             joint_loads=getattr(md, "joint_loads", []),
+            frame_point_loads=getattr(md, "frame_point_loads", []),
             frame_gravity_loads=getattr(md, "frame_gravity_loads", []),
             area_gravity_loads=getattr(md, "area_gravity_loads", []),
             area_uniform_loads=getattr(md, "area_uniform_loads", []),

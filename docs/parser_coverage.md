@@ -126,7 +126,7 @@ registry below.  Three things about how they are matched:
 
 *Generated from `src/fea_toolkit/io/table_registry.py` — do not edit by hand.  Regenerate with `python docs/_generate_parser_tables.py`.*
 
-### Handled (45 exact names)
+### Handled (46 exact names)
 
 - `AREA AUTO MESH ASSIGNMENTS`
 - `AREA EDGE CONSTRAINT ASSIGNMENTS`
@@ -148,6 +148,7 @@ registry below.  Three things about how they are matched:
 - `FRAME LOADS - DISTRIBUTED`
 - `FRAME LOADS - GRAVITY`
 - `FRAME LOADS - OPEN STRUCTURE WIND`
+- `FRAME LOADS - POINT`
 - `FRAME LOCAL AXES ASSIGNMENTS 1 - TYPICAL`
 - `FRAME OFFSET ALONG LENGTH ASSIGNMENTS`
 - `FRAME RELEASE ASSIGNMENTS`
@@ -183,9 +184,8 @@ registry below.  Three things about how they are matched:
 - `AUTO SEISMIC - *`
 - `AUTO WIND - *`
 
-### Known gaps (3 exact names)
+### Known gaps (2 exact names)
 
-- `FRAME LOADS - POINT` — point loads on frames not parsed (see P14)
 - `JOINT PATTERN DEFINITIONS` — joint patterns (thickness / offset overwrites) not consumed
 - `SOLID PROPERTY DEFINITIONS` — solid (brick) elements not supported
 

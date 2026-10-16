@@ -810,7 +810,7 @@ cross‑reference section.
 #### Medium Priority
 
 7. **Improved Load Handling**  
-   - **Point loads** on frames (`FRAME LOADS - POINT`) — tracked as **P14** in `docs/_pending_work.md`.  
+   - **Point loads** on frames (`FRAME LOADS - POINT`) — parsed into `frame_point_loads` and visualised (⚠️ OpenSees `eleLoad` propagation still open, **P14** in `docs/_pending_work.md`).  
    - **Temperature loads** — only if needed (no current demand; P14).  
    - Option to convert linear loads to uniform (simplification) via config flag.
 

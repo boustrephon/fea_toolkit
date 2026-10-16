@@ -18,6 +18,7 @@ from .sap_data import (
     FrameElement,
     FrameElementProperties,
     FrameEndOffset,
+    FramePointLoad,
     FrameRelease,
     GravityLoad,
     Group,
@@ -174,6 +175,7 @@ class MeshModel:
     #   elem_id → WallElement
     # (list of tuples — exact format matches builder's edge_loads_from_areas)
     joint_loads: list[JointLoad] = field(default_factory=list)
+    frame_point_loads: list[FramePointLoad] = field(default_factory=list)
     frame_gravity_loads: list[GravityLoad] = field(default_factory=list)
     area_gravity_loads: list[AreaGravityLoad] = field(default_factory=list)
     area_uniform_loads: list[AreaUniformLoad] = field(default_factory=list)

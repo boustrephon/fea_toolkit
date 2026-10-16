@@ -22,6 +22,7 @@ from ..model.sap_data import (
     FrameDistributedLoad,
     FrameElement,
     FrameEndOffset,
+    FramePointLoad,
     FrameRelease,
     GravityLoad,
     Group,
@@ -355,6 +356,7 @@ class SAP2000Parser:
         joint_loads = self._get_joint_loads()
         frame_dist_loads = self._get_frame_distributed_loads()
         frame_gravity_loads = self._get_frame_gravity_loads()
+        frame_point_loads = self._get_frame_point_loads()
         area_uniform_loads, area_gravity_loads = self._get_area_loads()
         load_cases = self.get_load_cases()
         load_combinations = self._get_load_combinations(load_cases)
@@ -418,6 +420,7 @@ class SAP2000Parser:
             mass_sources=mass_sources,
             joint_loads=joint_loads,
             frame_dist_loads=frame_dist_loads,
+            frame_point_loads=frame_point_loads,
             frame_gravity_loads=frame_gravity_loads,
             area_uniform_loads=area_uniform_loads,
             area_gravity_loads=area_gravity_loads,
@@ -2173,6 +2176,44 @@ class SAP2000Parser:
                     mx=float(rec.get("M1", 0.0)),
                     my=float(rec.get("M2", 0.0)),
                     mz=float(rec.get("M3", 0.0)),
+                )
+            )
+        return loads
+
+    def _get_frame_point_loads(self) -> list[FramePointLoad]:
+        """Parse the ``FRAME LOADS - POINT`` table (concentrated loads on frames).
+
+        A point load is a single scalar at one position along a frame, resolved
+        in a direction exactly like ``FRAME LOADS - DISTRIBUTED``: ``Type``
+        (Force/Moment), ``Dir`` (X/Y/Z/Gravity, or a numeric local 1/2/3) and
+        ``RelDist``.  The value column is read defensively — the CSI export
+        names it ``F`` (the point-load sibling of ``FOverLA``/``FOverLB``), but
+        ``Value`` / ``P`` / ``M`` are accepted too so a slightly different
+        export still parses.  Confirm against a real export if the field name
+        ever proves wrong.
+        """
+        loads = []
+        dir_map = {1: "LocalX", 2: "LocalY", 3: "LocalZ"}
+        for rec in self._raw_tables.get("FRAME LOADS - POINT", []):
+            direction = rec.get("Dir", "Gravity")
+            if str(direction).strip().isdigit():
+                direction = dir_map.get(int(direction), direction)
+            value = 0.0
+            for key in ("F", "Value", "P", "M"):
+                raw = rec.get(key)
+                if raw is not None and str(raw).strip() != "":
+                    value = float(raw)
+                    break
+            loads.append(
+                FramePointLoad(
+                    pattern=rec.get("LoadPat", ""),
+                    frame_id=str(rec.get("Frame", "")),
+                    direction=direction,
+                    load_type=rec.get("Type", "Force"),
+                    value=value,
+                    rdist=float(rec.get("RelDist", 0.0)),
+                    dist=float(rec.get("AbsDist", 0.0)),
+                    coord_sys=rec.get("CoordSys", "GLOBAL"),
                 )
             )
         return loads

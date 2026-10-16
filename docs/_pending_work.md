@@ -279,12 +279,13 @@ it.
 4. **Centroid/shear-centre offsets** (`cg_offset_2/3`, `ecc_v2/v3`) once the
    reference-point convention is confirmed.
 
-**Also unresolved (same doc).**  The SD `ANGLE` rotation token and the
-wall-pier (vs frame) local-axis convention are not applied — `I33`/`I22`
-follow the ETABS frame-section default and may be swapped for asymmetric piers
-until a controlled ETABS export pins the convention down.  Each follow-up above
-should be validated against such an export (a small model with hand-computable
-SD sections, at `ANGLE 0` and a known rotation).
+**Resolved / remaining (same doc).**  The SD frame-section axis mapping
+(`X` → local 2, `Y` → local 3) is now applied and confirmed against a real
+ETABS export, so `I33`/`I22` are no longer swapped.  Still open: the
+wall-pier (vs frame) local-axis default, and whether a non-90 `ANGLE` is
+already baked into the exported `POLYCORNER` coordinates.  Each follow-up
+above should be validated against such an export (a small model with
+hand-computable SD sections, at `ANGLE 0` and a known rotation).
 
 **Where.**  `src/fea_toolkit/model/section_tools.py` (pure geometry, no
 OpenSees); wire `st_venant_j` into `polygon_props()` once item 1 lands.
@@ -705,10 +706,12 @@ loads.  Note: the pushover `lateral_load_pattern='point'` is a synthetic
 unit point load for benchmark pushes — distinct from parsing user-supplied
 `FRAME LOADS - POINT` data.
 
-**Outline steps.** 1) Add `FRAME LOADS - POINT` parsing to a new
-`frame_point_loads` field; 2) propagate to OpenSees `eleLoad` point loads;
-3) ~~temperature loads~~ ✅ **closed 2026-10-14 — no current demand** (do not
-implement until a model actually needs them).
+**Outline steps.** 1) ✅ **done 2026-10-16** — `FRAME LOADS - POINT` parsing into
+a new `frame_point_loads` field (carried through the Preprocessor and
+visualised by ``extract_load_glyphs``); 2) propagate to OpenSees `eleLoad`
+point loads — **still open** (display-only for now, see the load-display
+work); 3) ~~temperature loads~~ ✅ **closed 2026-10-14 — no current demand**
+(do not implement until a model actually needs them).
 
 
 #### P16 — Parsed-but-unconsumed parser keywords
