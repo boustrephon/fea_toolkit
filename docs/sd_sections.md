@@ -11,8 +11,8 @@
 placeholder).  The polygon corners (`SHAPETYPE "POLYGON"` + `POLYCORNER … X …
 Y …`) are read and their **gross elastic** properties computed by
 `polygon_props()` in `model/section_properties.py` (shoelace / Green's-theorem
-area, centroid and second moments), with `X` mapped to the local 3-axis and
-`Y` to the local 2-axis (the ETABS **frame-section** default).  `REF LINE`
+area, centroid and second moments), with `X` mapped to the local 2-axis and
+`Y` to the local 3-axis (the ETABS **frame-section** default).  `REF LINE`
 shapes are skipped.  Multi-polygon composites combine about the shared centroid
 via the parallel-axis theorem.
 
@@ -41,14 +41,15 @@ its holes — and each region is extruded separately.
    reinforcement records, with per-shape materials (`BASEMATERIAL`, the
    `MATERIAL` per polygon, and rebar).
 
-3. **Local-axis convention is not fully resolved.**  `I33`/`I22` follow the
-   ETABS **frame-section** default (`X` → local 3, `Y` → local 2), but the
-   `ANGLE` rotation token (present on every SDSECTION record) and the
-   **wall-pier** (vs frame) section default are not yet applied.  A controlled
-   ETABS export of a *known symmetric* SD section (e.g. a rectangle with
-   `ANGLE 0`) should be used to pin down (a) whether `ANGLE` rotates the
-   geometry or the local axes, and (b) the wall-pier axis mapping.  Until
-   then `I33`/`I22` may be swapped for strongly asymmetric piers.
+3. **Local-axis convention.**  `I33`/`I22` follow the ETABS
+   **frame-section** default (`X` → local 2, `Y` → local 3), and the `ANGLE`
+   section local-axis angle is applied (a counter-clockwise rotation about
+   +local 1).  The axis mapping is confirmed against a real ETABS wall-pier
+   export (a polygon whose `ANGLE 90` plus a line `ANG 270` must render as the
+   raw SD polygon).  The **wall-pier** (vs frame) section default is still not
+   applied, and whether the `ANGLE` is already baked into the exported
+   `POLYCORNER` coordinates is still worth validating with a non-90 `ANGLE`
+   section.
 
 4. **Centroid offsets are not populated.**  `cg_offset_2`/`cg_offset_3` (and
    shear-centre `ecc_v2`/`ecc_v3`) stay at zero — the section reference-point

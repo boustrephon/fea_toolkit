@@ -225,6 +225,29 @@ def _signed_loop_properties(
     return {"A": area, "cy": cy, "cz": cz, "I33": i33, "I22": i22}
 
 
+def _rotate_loops_about(
+    loops: list[list[tuple[float, float]]],
+    cy: float,
+    cz: float,
+    angle_deg: float,
+) -> list[list[tuple[float, float]]]:
+    """Rotate ``(local 2, local 3)`` loops counter-clockwise about +local 1.
+
+    Applies the Section Designer section local-axis angle: the section's local
+    2/3 axes rotate counter-clockwise about the positive local 1 axis — the same
+    convention as the frame ``ANG`` — so the shape rotates CCW in the 2-3 plane.
+    Rotation is about the section centroid ``(cy, cz)``, which preserves it.
+    """
+    if angle_deg == 0.0:
+        return loops
+    th = math.radians(angle_deg)
+    c, s = math.cos(th), math.sin(th)
+    return [
+        [(cy + (y - cy) * c - (z - cz) * s, cz + (y - cy) * s + (z - cz) * c) for y, z in loop]
+        for loop in loops
+    ]
+
+
 def _sd_loops(section: SDSection) -> list[list[tuple[float, float]]]:
     """The SD section's polygon loops, centred and in profile ``(x, y)`` order.
 

@@ -838,7 +838,7 @@ def test_line_connectivity_accepts_null_line_type():
 def test_sd_section_computes_polygon_properties():
     snippet = (
         "$ SECTION DESIGNER SECTIONS\n"
-        '  SDSECTION "SDWall"  TYPE "FRAME"  DESIGNTYPE "OTHER"  BASEMATERIAL "CONC"  NUMSHAPES 1  ANGLE 90\n'
+        '  SDSECTION "SDWall"  TYPE "FRAME"  DESIGNTYPE "OTHER"  BASEMATERIAL "CONC"  NUMSHAPES 1\n'
         '  SDSECTION "SDWall"  SHAPE 1  MATERIAL "CONC"  SHAPETYPE "POLYGON"  NUMCORNERPTS 4\n'
         '  SDSECTION "SDWall"  SHAPE 1  POLYCORNER 1  X 0  Y 0\n'
         '  SDSECTION "SDWall"  SHAPE 1  POLYCORNER 2  X 1.1  Y 0\n'
@@ -849,12 +849,91 @@ def test_sd_section_computes_polygon_properties():
     assert isinstance(sec, SDSection)
     assert sec.shape == "SD Section"
     assert sec.material == "CONC"
-    # (local 2, local 3) = (SD Y, SD X): a 2.2 × 1.1 solid rectangle.
+    # (local 2, local 3) = (SD X, SD Y): a 1.1 × 2.2 solid rectangle.
+    assert pytest.approx(2.2 * 1.1) == sec.A
+    assert pytest.approx(2.2 * 1.1**3 / 12) == sec.I33
+    assert pytest.approx(1.1 * 2.2**3 / 12) == sec.I22
+    assert pytest.approx(sec.I33 + sec.I22) == sec.J
+    assert sec.polygons == [("CONC", [(0.0, 0.0), (1.1, 0.0), (1.1, 2.2), (0.0, 2.2)])]
+
+
+def test_sd_section_applies_angle_rotation():
+    snippet = (
+        "$ SECTION DESIGNER SECTIONS\n"
+        '  SDSECTION "SDWall"  TYPE "FRAME"  DESIGNTYPE "OTHER"  BASEMATERIAL "CONC"  NUMSHAPES 1  ANGLE 90\n'
+        '  SDSECTION "SDWall"  SHAPE 1  MATERIAL "CONC"  SHAPETYPE "POLYGON"  NUMCORNERPTS 4\n'
+        '  SDSECTION "SDWall"  SHAPE 1  POLYCORNER 1  X 0  Y 0\n'
+        '  SDSECTION "SDWall"  SHAPE 1  POLYCORNER 2  X 1.1  Y 0\n'
+        '  SDSECTION "SDWall"  SHAPE 1  POLYCORNER 3  X 1.1  Y 2.2\n'
+        '  SDSECTION "SDWall"  SHAPE 1  POLYCORNER 4  X 0  Y 2.2\n'
+    )
+    sec = _get_sd_sections(_parse_sections(snippet))["SDWall"]
+    assert sec.angle == 90.0
+    # A 90° CCW rotation about +local 1 exchanges the strong/weak axes.
     assert pytest.approx(2.2 * 1.1) == sec.A
     assert pytest.approx(1.1 * 2.2**3 / 12) == sec.I33
     assert pytest.approx(2.2 * 1.1**3 / 12) == sec.I22
     assert pytest.approx(sec.I33 + sec.I22) == sec.J
-    assert sec.polygons == [("CONC", [(0.0, 0.0), (0.0, 1.1), (2.2, 1.1), (2.2, 0.0)])]
+
+
+def test_sd_section_polygon_and_mirror_are_not_transposed():
+    """SD ``X`` → local 2 and ``Y`` → local 3; the old transpose mirrored walls.
+
+    The ``(SD Y, SD X)`` mapping was a reflection: with the section ``ANGLE 90``
+    and a line ``ANG 270`` a wall pier rendered mirrored and rotated 90° about
+    its axis.  The corrected mapping plus the ``ANGLE 90`` (CCW about +local 1,
+    about the centroid) yields the stored ``(local 2, local 3)`` corners below.
+    The second section is the mirror image of the first (reversed winding) and
+    must survive the same mapping.
+    """
+    snippet = (
+        "$ SECTION DESIGNER SECTIONS\n"
+        '  SDSECTION "SDPentagon"  TYPE "FRAME"  DESIGNTYPE "OTHER"  '
+        'BASEMATERIAL "CONC"  NUMSHAPES 1  ANGLE 90\n'
+        '  SDSECTION "SDPentagon"  SHAPE 1  MATERIAL "CONC"  '
+        'SHAPETYPE "POLYGON"  NUMCORNERPTS 5\n'
+        '  SDSECTION "SDPentagon"  SHAPE 1  POLYCORNER 1  X -1  Y -6\n'
+        '  SDSECTION "SDPentagon"  SHAPE 1  POLYCORNER 2  X 1.078461  Y -7.2\n'
+        '  SDSECTION "SDPentagon"  SHAPE 1  POLYCORNER 3  X 1.955737  Y -5.680513\n'
+        '  SDSECTION "SDPentagon"  SHAPE 1  POLYCORNER 4  X 1.955737  Y -3.780514\n'
+        '  SDSECTION "SDPentagon"  SHAPE 1  POLYCORNER 5  X 0.7  Y -3.055514\n'
+        '  SDSECTION "SDPentagonMirror"  TYPE "FRAME"  DESIGNTYPE "OTHER"  '
+        'BASEMATERIAL "CONC"  NUMSHAPES 1  ANGLE 90\n'
+        '  SDSECTION "SDPentagonMirror"  SHAPE 1  MATERIAL "CONC"  '
+        'SHAPETYPE "POLYGON"  NUMCORNERPTS 5\n'
+        '  SDSECTION "SDPentagonMirror"  SHAPE 1  POLYCORNER 1  X 50.45771  Y -7.444145\n'
+        '  SDSECTION "SDPentagonMirror"  SHAPE 1  POLYCORNER 2  X 51.71344  Y -6.719145\n'
+        '  SDSECTION "SDPentagonMirror"  SHAPE 1  POLYCORNER 3  X 51.71344  Y -4.819145\n'
+        '  SDSECTION "SDPentagonMirror"  SHAPE 1  POLYCORNER 4  X 50.83617  Y -3.299659\n'
+        '  SDSECTION "SDPentagonMirror"  SHAPE 1  POLYCORNER 5  X 48.75771  Y -4.499659\n'
+    )
+    secs = _get_sd_sections(_parse_sections(snippet))
+
+    _mat, loop = secs["SDPentagon"].polygons[0]
+    assert _mat == "CONC"
+    expected = [
+        (1.5605978322366285, -6.933815025653028),
+        (2.7605978322366287, -4.855354025653028),
+        (1.2411108322366293, -3.978078025653028),
+        (-0.6588881677633710, -3.978078025653028),
+        (-1.3838881677633712, -5.233815025653028),
+    ]
+    for got, want in zip(loop, expected):
+        assert got[0] == pytest.approx(want[0])
+        assert got[1] == pytest.approx(want[1])
+
+    _mat, loop = secs["SDPentagonMirror"].polygons[0]
+    assert _mat == "CONC"
+    expected = [
+        (52.63600857932746, -5.360252979394357),
+        (51.91100857932746, -4.104522979394357),
+        (50.01100857932746, -4.104522979394357),
+        (48.49152257932746, -4.981792979394353),
+        (49.691522579327454, -7.0602529793943525),
+    ]
+    for got, want in zip(loop, expected):
+        assert got[0] == pytest.approx(want[0])
+        assert got[1] == pytest.approx(want[1])
 
 
 def test_sd_section_skips_ref_line_shapes():

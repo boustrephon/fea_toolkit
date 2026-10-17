@@ -85,7 +85,7 @@ from ..model.sap_data import (
     ShellUniformLoadSet,
     TeeSection,
 )
-from ..model.section_profiles import _signed_loop_properties
+from ..model.section_profiles import _rotate_loops_about, _signed_loop_properties
 from ..model.section_properties import (
     angle_props,
     box_props,
@@ -1609,15 +1609,17 @@ def _get_sd_sections(sections: dict[str, list[GroupedLine]]) -> dict[str, SDSect
     non-polygon) shapes are drawing aids and are skipped.
 
     The polygon corners are read in ``X`` / ``Y`` Section Designer coordinates
-    and mapped onto the section local axes — ``X`` → local 3, ``Y`` → local 2
-    (the ETABS frame-section default; the ``ANGLE`` rotation token is not yet
-    applied).  Gross elastic properties (``A``, ``I33``, ``I22``, ``J``) are
-    computed from the polygon(s) via :func:`polygon_props`; ``J`` is the polar
-    second moment, an upper-bound approximation to the St. Venant torsional
-    constant of a solid section.  Multi-polygon composites are combined with
-    the parallel-axis theorem about their shared centroid.
+    and mapped onto the section local axes — ``X`` → local 2, ``Y`` → local 3
+    (the ETABS frame-section default) — then rotated by the ``ANGLE`` section
+    local-axis angle (counter-clockwise about +local 1) about the composite
+    centroid.  Gross elastic properties (``A``, ``I33``, ``I22``, ``J``) are
+    computed from the rotated polygon(s) via :func:`_signed_loop_properties`;
+    ``J`` is the polar second moment, an upper-bound approximation to the
+    St. Venant torsional constant of a solid section.  Multi-polygon composites
+    are combined with the parallel-axis theorem about their shared centroid.
     """
     base_materials: dict[str, str] = {}
+    angles: dict[str, float] = {}
     polygons: dict[str, dict[int, tuple[str, list[tuple[float, float]]]]] = {}
     corners: dict[str, dict[int, dict[int, tuple[float, float]]]] = {}
     for groups in sections.get("SECTION DESIGNER SECTIONS", []):
@@ -1627,6 +1629,8 @@ def _get_sd_sections(sections: dict[str, list[GroupedLine]]) -> dict[str, SDSect
         attrs = {kw: v[0] if len(v) == 1 else tuple(v) for kw, v in groups[1:]}
         if "BASEMATERIAL" in attrs:
             base_materials[name] = str(attrs["BASEMATERIAL"])
+            if "ANGLE" in attrs:
+                angles[name] = _as_float(attrs["ANGLE"])
             continue
         if "SHAPE" not in attrs:
             continue
@@ -1652,12 +1656,21 @@ def _get_sd_sections(sections: dict[str, list[GroupedLine]]) -> dict[str, SDSect
             ordered = [corner_map[i] for i in sorted(corner_map)]
             if len(ordered) < 3:
                 continue
-            # (local 2, local 3) = (SD Y, SD X)
-            verts = [(y, x) for (x, y) in ordered]
+            # (local 2, local 3) = (SD X, SD Y)
+            verts = [(x, y) for (x, y) in ordered]
             poly_list.append((material, verts))
         if not poly_list:
             continue
-        props = _signed_loop_properties([verts for (_mat, verts) in poly_list])
+        loops = [verts for (_mat, verts) in poly_list]
+        # Apply the section local-axis angle (ANGLE) — a CCW rotation about
+        # +local 1, about the composite centroid — so both the stored geometry
+        # and the derived I33/I22 sit in the rotated axes ETABS reports them in.
+        angle = angles.get(name, 0.0)
+        centroid = _signed_loop_properties(loops)
+        if angle != 0.0:
+            loops = _rotate_loops_about(loops, centroid["cy"], centroid["cz"], angle)
+            poly_list = [(mat, loop) for (mat, _), loop in zip(poly_list, loops)]
+        props = _signed_loop_properties(loops)
         area = props["A"]
         if area <= 0.0:
             continue
@@ -1670,6 +1683,7 @@ def _get_sd_sections(sections: dict[str, list[GroupedLine]]) -> dict[str, SDSect
             I22=props["I22"],
             J=props["I33"] + props["I22"],
             polygons=poly_list,
+            angle=angle,
         )
     return built
 
