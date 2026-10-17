@@ -2195,8 +2195,8 @@ class SAP2000Parser:
         loads = []
         dir_map = {1: "LocalX", 2: "LocalY", 3: "LocalZ"}
         for rec in self._raw_tables.get("FRAME LOADS - POINT", []):
-            direction = rec.get("Dir", "Gravity")
-            if str(direction).strip().isdigit():
+            direction = str(rec.get("Dir", "Gravity")).strip()
+            if direction.isdigit():
                 direction = dir_map.get(int(direction), direction)
             value = 0.0
             for key in ("F", "Value", "P", "M"):
@@ -2206,10 +2206,10 @@ class SAP2000Parser:
                     break
             loads.append(
                 FramePointLoad(
-                    pattern=rec.get("LoadPat", ""),
+                    pattern=str(rec.get("LoadPat", "")),
                     frame_id=str(rec.get("Frame", "")),
                     direction=direction,
-                    load_type=rec.get("Type", "Force"),
+                    load_type=str(rec.get("Type", "Force")),
                     value=value,
                     rdist=float(rec.get("RelDist", 0.0)),
                     dist=float(rec.get("AbsDist", 0.0)),

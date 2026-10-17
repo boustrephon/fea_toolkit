@@ -368,12 +368,33 @@ class ETABSParser:
         # Section Designer sections with no polygon area (e.g. only ``REF LINE``
         # shapes) are dropped by :func:`_get_sd_sections`, yet frames can still
         # be assigned to them.  Synthesise a zero-stiffness placeholder so those
-        # assignments resolve instead of dangling.
+        # assignments resolve instead of dangling — but only for names genuinely
+        # defined as Section Designer sections (in ``$ SECTION DESIGNER
+        # SECTIONS``, or as a ``SD Section`` shape in ``$ FRAME SECTIONS``),
+        # never for typos, unresolved auto-select lists or other missing names.
+        sd_section_names: set[str] = set()
+        for groups in sections.get("SECTION DESIGNER SECTIONS", []):
+            if groups and groups[0][0] == "SDSECTION" and groups[0][1]:
+                sd_section_names.add(str(groups[0][1][0]))
+        for groups in sections.get("FRAME SECTIONS", []):
+            name: Optional[str] = None
+            shape: Optional[str] = None
+            for kw, vals in groups:
+                if kw == "FRAMESECTION":
+                    name = str(vals[0]) if vals else None
+                elif kw == "SHAPE":
+                    shape = str(vals[0]) if vals else None
+            if name is not None and shape is not None and SHAPE_NAMES.get(shape) == "SD":
+                sd_section_names.add(name)
         for sec_name in frame_assignments.values():
-            if sec_name not in all_sections:
-                all_sections[sec_name] = GeneralSection(
-                    name=sec_name, shape="SD Section", material=""
-                )
+            if sec_name in all_sections or sec_name not in sd_section_names:
+                continue
+            logger.warning(
+                "Section Designer section %r has no polygon geometry; using a "
+                "zero-stiffness placeholder.",
+                sec_name,
+            )
+            all_sections[sec_name] = GeneralSection(name=sec_name, shape="SD Section", material="")
 
         # ── Populate area thickness from assigned shell sections ──
         for aid, area in area_elements.items():
