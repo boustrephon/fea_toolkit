@@ -18,6 +18,8 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from ...model.load_queries import load_rows
+
 # Attribute names that identify an entity, tried in order.
 _ID_ATTRS = ("elem_id", "area_id", "node_id", "name", "id")
 _MAX_VALUE_CHARS = 120
@@ -142,8 +144,10 @@ class PropertyInspector(QWidget):
         A node also reports its support conditions — restrained DOFs and its
         joint constraint — taken from the model set by
         :meth:`set_source_model`.  A frame or area additionally reports its
-        assigned section, that section's material, and the groups it belongs to,
-        resolved through the same model.
+        assigned section, that section's material, the groups it belongs to,
+        and the applied loads referencing it (see
+        :func:`fea_toolkit.model.load_queries.load_rows`), resolved through the
+        same model.
         """
         self._title.setText(object_title(obj))
         self._title.setEnabled(obj is not None)
@@ -151,6 +155,7 @@ class PropertyInspector(QWidget):
             describe(obj)
             + _support_rows(obj, self._source_model)
             + _context_rows(obj, self._source_model)
+            + load_rows(self._source_model, obj)
         )
         self._table.setRowCount(len(rows))
         for row, (name, value) in enumerate(rows):

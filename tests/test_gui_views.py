@@ -446,6 +446,36 @@ class TestElementContext:
         assert "Section" not in rows
         assert "Material" not in rows
 
+    def test_an_element_reports_its_applied_loads(self, window):
+        """Loads live on the model, so the Inspector appends them like sections."""
+        from fea_toolkit.model.sap_data import AreaElement, AreaUniformLoad, Node, SAPModelData
+
+        md = SAPModelData(
+            nodes={
+                "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+                "2": Node(node_id="2", node_tag=2, x=1.0, y=0.0, z=0.0),
+                "3": Node(node_id="3", node_tag=3, x=1.0, y=1.0, z=0.0),
+                "4": Node(node_id="4", node_tag=4, x=0.0, y=1.0, z=0.0),
+            },
+            restraints={},
+            materials={},
+            sections={},
+            frame_elements={},
+            area_elements={
+                "A1": AreaElement(area_id="A1", area_tag=1, node_ids=["1", "2", "3", "4"])
+            },
+            frame_assignments={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+            area_uniform_loads=[
+                AreaUniformLoad(pattern="SDL", area_id="A1", direction="Z", value=12.5)
+            ],
+        )
+        window._inspector.set_source_model(md)
+        window._inspector.show_object(md.area_elements["A1"])
+        assert _inspector_rows(window)["Load: SDL (Z)"] == "12.5"
+
 
 class TestSelectionFeedback:
     """Selecting an element has to be visible in the viewport.

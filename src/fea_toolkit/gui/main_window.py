@@ -803,7 +803,12 @@ class MainWindow(QMainWindow):
         a["view.show_loads"] = self._toggle_action(
             "Show loads",
             self._on_show_loads,
-            tip="Show or hide applied-load glyphs (flags for line loads, arrows for point loads)",
+            tip="Show or hide applied-load glyphs (flags for line loads, arrows for point loads, arrows/flags for area loads)",
+        )
+        a["view.show_load_colours"] = self._toggle_action(
+            "Colour area loads",
+            self._on_show_load_colours,
+            tip="Colour each area element by its shell-face pressure (with a scale bar)",
         )
         a["view.show_forces"] = self._toggle_action(
             "Show force diagrams",
@@ -992,6 +997,7 @@ class MainWindow(QMainWindow):
             "view.show_restraints",
             "view.show_labels",
             "view.show_loads",
+            "view.show_load_colours",
             "view.show_forces",
         ):
             display.addAction(a[key])
@@ -1103,6 +1109,22 @@ class MainWindow(QMainWindow):
         self._load_source.setStatusTip("Load source drawn when Show loads is on")
         self._load_source.currentIndexChanged.connect(self._on_load_source_changed)
 
+        # How an area pressure is drawn — a grid of arrows or a one-sided
+        # extrusion flag.  The combo holds the style name as user data and the
+        # display text as a title, mirroring the force/shell quantity combos.
+        from .controllers.settings import AREA_LOAD_STYLES
+
+        self._area_style = QComboBox(self)
+        self._area_style.setObjectName("load_area_style")
+        for style in AREA_LOAD_STYLES:
+            self._area_style.addItem(style.title(), style)
+        self._area_style.setCurrentIndex(
+            max(0, self._area_style.findData(self._display.load_area_style))
+        )
+        self._area_style.setToolTip("How an area pressure is drawn (arrows or extrusion)")
+        self._area_style.setStatusTip("How an area pressure is drawn")
+        self._area_style.currentIndexChanged.connect(self._on_area_style_changed)
+
         # Which end-force component a flag diagram shows.  The SAP local-DOF
         # names read better than the schema's x/y/z keys and are the same six
         # local DOFs (see FORCE_QUANTITY_LABELS); the combo therefore holds the
@@ -1165,6 +1187,7 @@ class MainWindow(QMainWindow):
                 "@force_scale": ("Flags %", self._force_scale),
                 "@load_source": ("Load", self._load_source),
                 "@load_scale": ("Loads %", self._load_scale),
+                "@area_style": ("Area", self._area_style),
                 "@force_quantity": ("Force", self._force_quantity),
                 "@shell_quantity": ("Shell", self._shell_quantity),
                 "@shell_opacity": ("Shells", self._shell_opacity),
@@ -1215,8 +1238,10 @@ class MainWindow(QMainWindow):
             "view.show_restraints",
             "view.show_labels",
             "view.show_loads",
+            "view.show_load_colours",
             "@load_source",
             "@load_scale",
+            "@area_style",
             "view.show_forces",
             None,
             "results.deformed",
@@ -1525,6 +1550,8 @@ class MainWindow(QMainWindow):
             show_loads=self._actions["view.show_loads"].isChecked(),
             load_factors=self._load_source_factors(model),
             load_scale=self._load_scale.value() / 100.0,
+            load_area_style=self._display.load_area_style,
+            show_load_colours=self._actions["view.show_load_colours"].isChecked(),
             show_extruded=self._actions["view.show_extruded"].isChecked(),
             extruded_detail=self._display.extruded_detail,
         )
@@ -1585,6 +1612,7 @@ class MainWindow(QMainWindow):
             self._set_toggle_checked(key, True)
         # Loads are dense, so they start hidden until asked for.
         self._set_toggle_checked("view.show_loads", False)
+        self._set_toggle_checked("view.show_load_colours", False)
         # ... and the load source falls back to the new model's first case.
         from dataclasses import replace
 
@@ -2332,6 +2360,19 @@ class MainWindow(QMainWindow):
     def _on_show_loads(self, _checked: bool) -> None:
         """Show or hide applied-load glyphs; a geometry change, so re-render."""
         self._refresh_display()
+
+    def _on_show_load_colours(self, _checked: bool) -> None:
+        """Colour shells by their face pressure; a geometry change, so re-render."""
+        self._refresh_display()
+
+    def _on_area_style_changed(self, _index: int) -> None:
+        """Re-draw area glyphs in the chosen style (never starts drawing)."""
+        from dataclasses import replace
+
+        style = self._area_style.currentData() or "arrows"
+        self._display = replace(self._display, load_area_style=style)
+        if self._actions["view.show_loads"].isChecked():
+            self._refresh_display()
 
     def _on_load_scale_changed(self, _value: float) -> None:
         """Re-size the load glyphs when shown (same rule: the knob never starts)."""
@@ -4287,6 +4328,8 @@ class MainWindow(QMainWindow):
             "show_restraints": self._actions["view.show_restraints"].isChecked(),
             "show_loads": self._actions["view.show_loads"].isChecked(),
             "load_source": self._display.load_source,
+            "load_area_style": self._display.load_area_style,
+            "show_load_colours": self._actions["view.show_load_colours"].isChecked(),
         }
 
     def _apply_display_values(self, display: dict) -> None:
@@ -4325,6 +4368,9 @@ class MainWindow(QMainWindow):
             widget.blockSignals(False)
 
         self._force_quantity.setCurrentText(resolved.force_quantity)
+        idx = self._area_style.findData(resolved.load_area_style)
+        if idx >= 0:
+            self._area_style.setCurrentIndex(idx)
 
         self._display = replace(
             self._display,
@@ -4332,6 +4378,7 @@ class MainWindow(QMainWindow):
             show_extruded=resolved.show_extruded,
             extruded_detail=resolved.extruded_detail,
             load_source=resolved.load_source,
+            load_area_style=resolved.load_area_style,
         )
         self._set_toggle_checked("view.show_extruded", resolved.show_extruded)
         self._set_toggle_checked("view.show_nodes", resolved.show_nodes)
@@ -4339,6 +4386,7 @@ class MainWindow(QMainWindow):
         self._set_toggle_checked("view.show_shells", resolved.show_shells)
         self._set_toggle_checked("view.show_restraints", resolved.show_restraints)
         self._set_toggle_checked("view.show_loads", resolved.show_loads)
+        self._set_toggle_checked("view.show_load_colours", resolved.show_load_colours)
 
     def _save_display_settings(self) -> None:
         """Write the display knobs to the settings file, best effort.

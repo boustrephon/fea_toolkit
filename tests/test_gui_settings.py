@@ -129,6 +129,22 @@ def test_unknown_extruded_detail_falls_back_to_the_default():
     assert any("extruded_detail" in note for note in notes)
 
 
+def test_load_area_style_defaults_to_arrows():
+    assert DISPLAY_DEFAULTS.load_area_style == "arrows"
+    assert DISPLAY_DEFAULTS.show_load_colours is False
+
+
+def test_load_area_style_is_applied_and_validated():
+    settings, notes = resolve_display({"load_area_style": "extrusion", "show_load_colours": True})
+    assert settings.load_area_style == "extrusion"
+    assert settings.show_load_colours is True
+    assert notes == []
+
+    settings, notes = resolve_display({"load_area_style": "spheres"})
+    assert settings.load_area_style == DISPLAY_DEFAULTS.load_area_style
+    assert any("load_area_style" in note for note in notes)
+
+
 def test_non_finite_numeric_value_falls_back_to_the_default():
     for value in (float("nan"), float("inf"), float("-inf")):
         settings, notes = resolve_display({"shell_opacity": value})
@@ -227,6 +243,8 @@ def test_apply_display_values_restores_widgets(qapp, monkeypatch, tmp_path):
             "restraint_style": "arrow",
             "show_extruded": True,
             "extruded_detail": "solid",
+            "load_area_style": "extrusion",
+            "show_load_colours": True,
         }
     )
     assert win._shell_opacity.value() == pytest.approx(0.3)
@@ -237,5 +255,8 @@ def test_apply_display_values_restores_widgets(qapp, monkeypatch, tmp_path):
     assert win._display.restraint_style == "arrow"
     assert win._display.show_extruded is True
     assert win._display.extruded_detail == "solid"
+    assert win._display.load_area_style == "extrusion"
+    assert win._area_style.currentData() == "extrusion"
     assert win._actions["view.show_extruded"].isChecked() is True
+    assert win._actions["view.show_load_colours"].isChecked() is True
     win.close()

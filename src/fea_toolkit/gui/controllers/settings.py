@@ -63,6 +63,9 @@ RESTRAINT_STYLES = ("block", "arrow")
 #: Extruded-frame detail levels ``extruded_detail`` may name.
 EXTRUDED_DETAILS = ("plates", "solid")
 
+#: Area-load glyph styles ``load_area_style`` may name.
+AREA_LOAD_STYLES = ("arrows", "extrusion")
+
 #: Every field a ``display`` section may name (the numeric knobs plus the
 #: force-diagram quantity label, the restraint style, the extruded-frame
 #: toggle / detail, and the four element-visibility toggles).
@@ -80,11 +83,20 @@ DISPLAY_FIELDS = frozenset(
         "show_restraints",
         "show_loads",
         "load_source",
+        "load_area_style",
+        "show_load_colours",
     )
 )
 
 #: Boolean element-visibility toggles (defaulting to shown).
-_DISPLAY_BOOL_FIELDS = ("show_nodes", "show_frames", "show_shells", "show_restraints", "show_loads")
+_DISPLAY_BOOL_FIELDS = (
+    "show_nodes",
+    "show_frames",
+    "show_shells",
+    "show_restraints",
+    "show_loads",
+    "show_load_colours",
+)
 
 
 @dataclass(frozen=True)
@@ -118,6 +130,9 @@ class DisplaySettings:
         load_source: Name of the load source drawn when ``show_loads`` is on —
             a pattern, static case or combination name, or ``""`` for the
             default (the first case).
+        load_area_style: How an area pressure is drawn — ``"arrows"`` (a grid
+            of arrows over the face) or ``"extrusion"`` (a one-sided prism).
+        show_load_colours: Colour each area element by its shell-face pressure.
     """
 
     shell_opacity: float = 0.7
@@ -136,6 +151,8 @@ class DisplaySettings:
     show_restraints: bool = True
     show_loads: bool = False
     load_source: str = ""
+    load_area_style: str = "arrows"
+    show_load_colours: bool = False
 
 
 #: The defaults, as a reusable constant (callers may ``replace`` over it).
@@ -230,6 +247,16 @@ def resolve_display(config: Any = None) -> "tuple[DisplaySettings, list[str]]":
             )
         else:
             overrides["extruded_detail"] = detail
+
+    if "load_area_style" in settings:
+        style = str(settings["load_area_style"])
+        if style not in AREA_LOAD_STYLES:
+            notes.append(
+                f"display setting 'load_area_style' {style!r} is not one of "
+                f"{AREA_LOAD_STYLES}; using {DISPLAY_DEFAULTS.load_area_style!r}"
+            )
+        else:
+            overrides["load_area_style"] = style
 
     if "load_source" in settings:
         # A free-form name (pattern / case / combination); the valid set depends
