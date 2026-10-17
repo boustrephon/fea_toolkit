@@ -146,6 +146,7 @@ class CombinationEditor(QWidget):
         combo = self._combinations.get(self._current)
         if combo is None:
             return
+        original = list(combo.entries)
         entries = []
         for row in range(self._table.rowCount()):
             ref_item = self._table.item(row, 0)
@@ -153,8 +154,22 @@ class CombinationEditor(QWidget):
             if ref_item is None or spin is None:
                 continue
             ref = ref_item.text().strip()
-            if ref:
-                entries.append(LoadCombinationEntry(name=ref, factor=float(spin.value())))
+            if not ref:
+                continue
+            factor = float(spin.value())
+            prior = original[row] if row < len(original) else None
+            if prior is not None and prior.name == ref:
+                entries.append(
+                    LoadCombinationEntry(
+                        name=ref,
+                        factor=factor,
+                        kind=prior.kind,
+                        mode=prior.mode,
+                        magnitude=prior.magnitude,
+                    )
+                )
+            else:
+                entries.append(LoadCombinationEntry(name=ref, factor=factor))
         combo.entries = entries
 
     def _on_type_changed(self, index: int) -> None:
