@@ -443,11 +443,11 @@ resolution).
      bound), not the St. Venant torsional constant.
   2. `to_fiber_patches()` is **not implemented** for `SDSection`, so nonlinear
      analysis of SD piers falls back to elastic sections.
-  3. The `ANGLE` section local-axis angle is applied (CCW about +local 1), but
-     the wall-pier (vs frame) local-axis convention is **not applied**, and the
-     `ANGLE` sign has not yet been confirmed against a controlled export —
-     `I33`/`I22` follow the ETABS frame-section default (`X` → local 3,
-     `Y` → local 2).
+  3. The `ANGLE` section local-axis angle is applied (a counter-clockwise
+     rotation about +local 1), and `I33`/`I22` follow the confirmed ETABS
+     frame-section axis mapping (`X` → local 2, `Y` → local 3); the wall-pier
+     (vs frame) local-axis convention and non-90 `ANGLE` cases remain to be
+     pinned down.
 * **Uniform distributed moments (`UNIFM`)** are converted to statically
   equivalent nodal end moments `m·L/2` (`beam_moment_to_nodal_moments`); the
   sign follows the right-hand rule of the resolved local axis and should be

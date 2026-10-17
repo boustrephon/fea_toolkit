@@ -532,7 +532,7 @@ jarring than a greyed-out one.
 |---|---|---|
 | **File** | Open (`Ctrl+O`), Open results…, Save model…, Save results…, Quit | Export Tcl, Export screenshot |
 | **Edit** | Duplicate view, Edit view selection… | Copy, Preferences |
-| **View** | Zoom to fit, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show beams, Show shells, Show restraints, Show loads, Show force diagrams, Clear highlights) | Show element labels, Reset layout |
+| **View** | Zoom to fit, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show beams, Show shells, Show restraints, Show loads, Colour area loads, Show force diagrams, Clear highlights) | Show element labels, Reset layout |
 | **Model** | Mesh… (composes a `mesh` step in a dialog and runs it on OK), Combinations (Edit… / Open… / Save…) | Selections, Units |
 | **Analysis** | Run… (`Ctrl+R`), Stop, Modal analysis, Response spectrum, Pushover | — |
 | **Recipe** | Run recipe (`Ctrl+Shift+R`), Open recipe…, Save recipe…, Export as Python…, Clear recipe | — |
