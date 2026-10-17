@@ -122,7 +122,9 @@ ModelViewer(builder=None, model_data=None, mesh_model=None, backend="pyvista", *
 viewer.show_model(show_nodes=True, show_shells=True,
                   color_by_section=True, opacity=1.0, node_size=0.02,
                   shrink=1.0, shell_opacity=None, show_restraints=True,
-                  show_loads=False, load_factors=None, load_scale=0.05)
+                  show_loads=False, load_factors=None, load_scale=0.05,
+                  load_area_style="arrows", load_arrows_per_shell=9,
+                  show_load_colours=False)
 ```
 
 Draws the structural model — frame elements as coloured lines, shell
@@ -146,16 +148,24 @@ itself is never modified:
   model.  See :mod:`fea_toolkit.plotting.restraint_glyphs`.
 * ``show_loads`` draws applied-load glyphs — a **rectangular flag** for a uniform
   distributed load, a **trapezoidal flag** for a linear/trapezoidal one (read
-  as-authored, before the builder decomposes them), and an **arrow** for joint and
-  frame point loads.  ``load_factors`` is an optional ``{pattern: factor}`` map
+  as-authored, before the builder decomposes them), an **arrow** for joint and
+  frame point loads, and a **grid of arrows** over the face (or a one-sided
+  **extrusion flag**, via ``load_area_style``) for an area pressure.
+  ``load_factors`` is an optional ``{pattern: factor}`` map
   narrowing and scaling which loads are drawn — pass a
   :class:`~fea_toolkit.model.load_glyphs.LoadSource`'s ``patterns`` (from
   :func:`~fea_toolkit.model.load_glyphs.list_load_sources`) to show one pattern,
   static case or combination; ``None`` draws every load at factor 1.0.
   ``load_scale`` is the fraction of the model diagonal a peak load value is drawn
-  at; the peak *intensity* of line loads and the peak *force* of point loads are
-  each normalised to that length, so flags and arrows stay legible together.  Off
-  by default — the glyphs are dense.  See :mod:`fea_toolkit.model.load_glyphs`.
+  at; the peak *intensity* of line loads, the peak *force* of point loads and the
+  peak *pressure* of area loads are each normalised to that length, so every kind
+  stays legible together.  ``load_arrows_per_shell`` sets how many arrows cover
+  each area face.  Off by default — the glyphs are dense.  See
+  :mod:`fea_toolkit.model.load_glyphs`.
+* ``show_load_colours`` colours each area element by its shell-face pressure (the
+  diverging warm/cool scale with a scalar bar), independent of ``show_loads`` —
+  a value can be read back from the colour bar or, exactly, from the GUI's
+  Inspector (:func:`fea_toolkit.model.load_queries.load_rows`).
 
 Change the opacity live, without re-drawing:
 

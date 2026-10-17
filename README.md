@@ -811,6 +811,7 @@ cross‑reference section.
 
 7. **Improved Load Handling**  
    - **Point loads** on frames (`FRAME LOADS - POINT`) — parsed into `frame_point_loads` and visualised (⚠️ OpenSees `eleLoad` propagation still open, **P14** in `docs/_pending_work.md`).  
+   - **Area uniform loads** — visualised as a grid of arrows or a one-sided extrusion flag over the shell face, with an optional pressure colour-fill and per-element load values in the GUI Inspector.  
    - **Temperature loads** — only if needed (no current demand; P14).  
    - Option to convert linear loads to uniform (simplification) via config flag.
 

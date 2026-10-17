@@ -48,7 +48,7 @@ runs the Preprocessor and replaces the display with the prepared topology (see
 |---|---|
 | Central viewport | Embedded PyVista view; the model is coloured by section |
 | **Model** dock (left, top) | Tabs: **Model Tree** (live — a **Views** group, then the model's own groups) and **Property Tree** (not yet implemented) |
-| **Inspector** dock (left, bottom) | Every field of the selected object, read-only |
+| **Inspector** dock (left, bottom) | Every field of the selected object, read-only — plus a node's supports, an element's section/material/groups and its applied loads |
 | **Messages** dock (bottom) | Log of what the application did, including any settings-file problems |
 | Status bar | Unit system, cursor coordinates, a busy indicator while preprocessing runs, and read-outs reserved for the analysis milestone |
 | Toolbars | Top: Open, Save results, Run, Stop, Mesh.  Right edge: camera views, display toggles and results controls (Deform %, Flags %) |
@@ -359,7 +359,8 @@ menu appears only when the right button is *not* the selecting button — under 
 | **View ▸ Display ▸ Show restraints** | Live — support symbols at restrained nodes (one glyph per restrained DOF) |
 | **View ▸ Display ▸ Clear highlights** | Live — drop the selection highlight |
 | **View ▸ Display ▸ Show element labels** | Not yet — nothing draws labels, so the toggle waits for that renderer ([P23](_pending_work.md)) |
-| **View ▸ Display ▸ Show loads** | Live — draws the **Load** source's glyphs (rectangular/trapezoidal flags for line loads, arrows for point loads), scaled by **Loads %** |
+| **View ▸ Display ▸ Show loads** | Live — draws the **Load** source's glyphs (rectangular/trapezoidal flags for line loads, arrows for point loads, a grid of arrows or a one-sided extrusion flag for area pressures), scaled by **Loads %**; the **Area** selector picks the area-glyph style |
+| **View ▸ Display ▸ Colour area loads** | Live — colours each area element by its shell-face pressure (diverging scale with a colour bar); the exact value is in the Inspector when the element is selected |
 | **View ▸ Display ▸ Show force diagrams** | Live — the same toggle as **Results ▸ Force diagrams**, kept in lockstep |
 
 ### Display quality
@@ -538,7 +539,7 @@ jarring than a greyed-out one.
 | **Results** | Deformed shape (+ Deform %), Force diagrams (+ Force selector + Flags %), Clear results | Storey response, Pushover curve |
 | **Help** | Documentation, About | — |
 | Toolbars | Open; Save results; Run / Stop; Mesh | Save results (until a result is shown), Export Tcl / screenshot |
-| View toolbar | Zoom/camera; display toggles (nodes, beams, shells, restraints, force diagrams); **Show loads** + the **Load** source selector + **Loads %**; Deformed shape + Deform %; Force diagrams + Force selector + Flags %; **Shells** opacity and **Shrink** | Show labels |
+| View toolbar | Zoom/camera; display toggles (nodes, beams, shells, restraints, force diagrams); **Show loads** + the **Load** source selector + **Loads %** + the **Area** style selector + **Colour area loads**; Deformed shape + Deform %; Force diagrams + Force selector + Flags %; **Shells** opacity and **Shrink** | Show labels |
 
 ## Application identity
 
