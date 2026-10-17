@@ -801,13 +801,15 @@ def beam_moment_to_nodal_moments(
     b = min(max(b, 0.0), 1.0)
 
     span = (b - a) * length
-    resultant = 0.5 * (ma + mb) * span
-    if span <= 0.0 or abs(resultant) <= 1e-15 * length:
+    if span <= 0.0:
         return {"i": dict(zeros), "j": dict(zeros)}
 
-    # Trapezoid centroid of the intensity, measured from end ``i``.
-    x_c = a * length + span * (ma + 2.0 * mb) / (3.0 * (ma + mb))
-    m_j = resultant * (x_c / length)
+    resultant = 0.5 * (ma + mb) * span
+    # First moment of the linear intensity about end ``i``, computed directly
+    # (no division by ``ma + mb``), so a pure couple — ``ma + mb == 0`` and a
+    # zero resultant — still yields its equal-and-opposite end pair.
+    first_moment = a * length * resultant + span * span * (ma + 2.0 * mb) / 6.0
+    m_j = first_moment / length
     m_i = resultant - m_j
 
     mx_i, my_i, mz_i = axis * m_i

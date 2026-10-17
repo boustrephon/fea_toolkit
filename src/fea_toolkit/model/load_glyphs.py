@@ -385,7 +385,11 @@ def extract_load_glyphs(
                 val_a=float(getattr(dl, "val_a", 0.0) or 0.0) * scale,
                 val_b=float(getattr(dl, "val_b", 0.0) or 0.0) * scale,
                 rdist_a=float(getattr(dl, "rdist_a", 0.0) or 0.0),
-                rdist_b=float(getattr(dl, "rdist_b", 1.0) or 1.0),
+                rdist_b=float(
+                    getattr(dl, "rdist_b", None)
+                    if getattr(dl, "rdist_b", None) is not None
+                    else 1.0
+                ),
                 load_type=getattr(dl, "load_type", "Force"),
             )
         )
@@ -398,6 +402,10 @@ def extract_load_glyphs(
         scale = factors[pattern] if factors is not None else 1.0
         geom = _frame_geometry(frames, nodes, getattr(pl, "frame_id", ""))
         if geom is None:
+            continue
+        # A moment needs a curl glyph, not a straight arrow — skip it, exactly
+        # as the joint-load moments are excluded from the point glyphs.
+        if str(getattr(pl, "load_type", "") or "").strip().lower() == "moment":
             continue
         start, end, angle = geom
         rdist = max(0.0, min(1.0, float(getattr(pl, "rdist", 0.0) or 0.0)))

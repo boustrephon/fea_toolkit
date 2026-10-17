@@ -1230,7 +1230,7 @@ class PyVistaRenderer(RenderBackend):
         """
         self.clear_category("load_colours")
         with contextlib.suppress(Exception):
-            self.plotter.remove_scalar_bar()
+            self.plotter.remove_scalar_bar(title="Area load (pressure)")
         if not shells:
             return
         p = self.plotter
