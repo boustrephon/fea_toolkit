@@ -7,11 +7,14 @@ Turns a model's load collections into a flat list of display glyphs:
   uniform load and a trapezoidal flag otherwise, read straight from ``shape``
   / ``val_a`` / ``val_b`` / ``rdist_*``, i.e. **before** the AnalysisBuilder
   decomposes non-uniform loads into uniform segments,
-* frame point loads → ``point`` glyphs anchored on the frame.
+* frame point loads → ``point`` glyphs anchored on the frame,
+* area uniform loads → ``area`` glyphs — the shell face with a pressure
+  magnitude, which the renderer draws as a grid of arrows (default) or a
+  one-sided extrusion, resolved to the area's active leaf sub-elements.
 
-Area and gravity loads are designed for but not yet produced: ``kind``
-reserves ``"area"`` and ``"gravity"``, and the docstrings document the
-intended representation so the follow-up only adds extraction.
+Gravity loads are designed for but not yet produced: ``kind`` reserves
+``"gravity"`` and the docstring documents the intended representation so
+the follow-up only adds extraction.
 
 Magnitudes are read **in model units** and scaled only for display by the
 renderer — no physical-constant hardcoding; gravity is implied through
@@ -26,6 +29,7 @@ import numpy as np
 from .geometry_core import get_local_axes
 from .load_combinations import combination_pattern_factors, merge_combination_sets
 from .sap_data import patterns_from_case
+from .tree_utils import collect_descendants
 
 # ── Global direction vocabulary (shared with opensees/_loads.py) ──────────
 # Kept local so the model layer never imports OpenSees.
@@ -56,9 +60,14 @@ class LoadGeom:
       the relative span ``[rdist_a, rdist_b]``, extruded along
       :attr:`direction` by the intensity at each end (:attr:`val_a` /
       :attr:`val_b`).  Equal intensities give a rectangle, unequal a trapezoid.
+    * ``kind == "area"`` — a pressure on the shell face :attr:`vertices`
+      (shape ``(N, 3)``) acting along :attr:`direction`, sized by
+      :attr:`magnitude` (force/area).  The renderer draws it either as a grid
+      of arrows over the face or as a one-sided extrusion along
+      :attr:`direction`.
 
-    ``"area"`` and ``"gravity"`` are reserved for the follow-up and carry no
-    geometry in this release.
+    ``"gravity"`` is reserved for the follow-up and carries no geometry in
+    this release.
     """
 
     kind: str  # 'point' | 'line' | 'area' | 'gravity'
@@ -76,6 +85,8 @@ class LoadGeom:
     rdist_a: float = 0.0
     rdist_b: float = 1.0
     load_type: str = "Force"
+    # ── area glyph ──
+    vertices: Optional[np.ndarray] = None  # (N, 3) shell-face polygon
 
 
 # ── Geometry helpers ──────────────────────────────────────────────────────
@@ -119,6 +130,83 @@ def _load_direction(direction, start, end, angle) -> np.ndarray:
         return {"LocalX": vx, "LocalY": vy, "LocalZ": vz}[key].copy()
     # Unknown direction — fall back to gravity (mirrors opensees/_loads.py).
     return np.array([0.0, 0.0, -1.0])
+
+
+# ── Area-glyph helpers ─────────────────────────────────────────────────────
+
+
+def _leaf_area_ids(source, area_id) -> list[str]:
+    """Active leaf area ids for *area_id*, excluding loads-only areas.
+
+    An area uniform load is authored on a panel id; meshing may have split that
+    panel into sub-areas, so the load's face is each **active leaf** descendant
+    (or the id itself when unsplit).  Loads-only areas carry no shell face —
+    their pressure is redistributed to the panel's edge frames — so they are
+    dropped.
+    """
+    areas = getattr(source, "area_elements", None) or {}
+    loads_only = getattr(source, "loads_only_area_ids", None) or set()
+    leaves = collect_descendants(str(area_id), areas) or [str(area_id)]
+    return [lid for lid in leaves if lid not in loads_only]
+
+
+def _area_polygon(source, area_id) -> Optional[np.ndarray]:
+    """``(N, 3)`` vertex array for an area's face, or ``None`` if unresolvable."""
+    areas = getattr(source, "area_elements", None) or {}
+    nodes = getattr(source, "nodes", None) or {}
+    elem = areas.get(str(area_id))
+    if elem is None:
+        return None
+    pts = []
+    for nid in getattr(elem, "node_ids", None) or []:
+        pos = _node_pos(nodes, nid)
+        if pos is None:
+            return None
+        pts.append(pos)
+    if len(pts) < 3:
+        return None
+    return np.vstack(pts)
+
+
+def area_load_values(
+    source, pattern_factors: Optional[dict[str, float]] = None
+) -> dict[str, float]:
+    """``{area_id: factored pressure}`` for shell-face area uniform loads.
+
+    The scalar counterpart of the ``area`` glyphs, for a colour-fill overlay:
+    each shell-face pressure is keyed by **both** the authored panel id and its
+    active leaf sub-areas, so the lookup matches the drawn shells whether they
+    are split children (default) or collapsed parents.  ``to_frame=True``
+    (uniform-to-frame) and loads-only panels are excluded — their load is on the
+    panel edges, not the face.
+
+    Args:
+        source: An ``SAPModelData`` or ``MeshModel``.
+        pattern_factors: Optional ``{pattern: factor}`` narrowing and scaling
+            the loads, exactly as in :func:`extract_load_glyphs`.
+
+    Returns:
+        ``{area_id: pressure}`` — empty when the model carries no face loads.
+    """
+    values: dict[str, float] = {}
+    for al in getattr(source, "area_uniform_loads", None) or []:
+        if getattr(al, "to_frame", False):
+            continue
+        pattern = getattr(al, "pattern", "")
+        if pattern_factors is not None and pattern not in pattern_factors:
+            continue
+        scale = pattern_factors[pattern] if pattern_factors is not None else 1.0
+        value = float(getattr(al, "value", 0.0) or 0.0) * scale
+        if value == 0.0:
+            continue
+        aid = str(getattr(al, "area_id", ""))
+        loads_only = getattr(source, "loads_only_area_ids", None) or set()
+        if aid not in loads_only:
+            values[aid] = values.get(aid, 0.0) + value
+        for leaf in _leaf_area_ids(source, aid):
+            if leaf != aid:
+                values[leaf] = values.get(leaf, 0.0) + value
+    return values
 
 
 # ── Load-source listing ───────────────────────────────────────────────────
@@ -224,7 +312,10 @@ def extract_load_glyphs(
     load collections.  Joint loads and frame point loads become ``point``
     arrows; frame distributed loads become ``line`` flags preserving their
     original shape (uniform → rectangle, linear/trapezoidal → trapezoid),
-    never the AnalysisBuilder's uniform decomposition.
+    never the AnalysisBuilder's uniform decomposition; area uniform loads
+    become ``area`` glyphs (shell face + pressure + direction), resolved to
+    their leaf sub-elements and excluding uniform-to-frame and loads-only
+    panels.
 
     Args:
         source: A model exposing ``nodes``, ``frame_elements``,
@@ -322,5 +413,35 @@ def extract_load_glyphs(
                 magnitude=float(getattr(pl, "value", 0.0) or 0.0) * scale,
             )
         )
+
+    # Area uniform loads → one "area" glyph per shell face.
+    for al in getattr(source, "area_uniform_loads", None) or []:
+        pattern = getattr(al, "pattern", "")
+        if factors is not None and pattern not in factors:
+            continue
+        if getattr(al, "to_frame", False):
+            continue  # uniform-to-frame: applied on the panel's edges, not the face
+        scale = factors[pattern] if factors is not None else 1.0
+        magnitude = float(getattr(al, "value", 0.0) or 0.0) * scale
+        if magnitude == 0.0:
+            continue
+        direction = _DIR.get(
+            str(getattr(al, "direction", "Gravity") or "Gravity").strip(),
+            _DIR["Gravity"],
+        ).copy()
+        for leaf in _leaf_area_ids(source, getattr(al, "area_id", "")):
+            vertices = _area_polygon(source, leaf)
+            if vertices is None:
+                continue
+            glyphs.append(
+                LoadGeom(
+                    kind="area",
+                    pattern=pattern,
+                    label=f"{pattern} {getattr(al, 'direction', 'Gravity')}",
+                    direction=direction,
+                    magnitude=magnitude,
+                    vertices=vertices,
+                )
+            )
 
     return glyphs

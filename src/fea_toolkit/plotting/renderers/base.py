@@ -310,6 +310,8 @@ class RenderBackend(ABC):
         self,
         loads: list["LoadGeom"],
         size: float = 1.0,
+        area_style: str = "arrows",
+        arrows_per_shell: int = 9,
     ) -> None:
         """Draw applied-load glyphs — flags for line loads, arrows for points.
 
@@ -318,11 +320,37 @@ class RenderBackend(ABC):
         are in model units and are scaled here for display only.
 
         Args:
-            loads: Load glyphs (``kind`` ``"point"`` or ``"line"``).
+            loads: Load glyphs (``kind`` ``"point"``, ``"line"`` or
+                ``"area"``).
             size: Target glyph length in model units.  The peak value of each
-                kind — a line-load *intensity* and a point-load *force* are
-                different units — is drawn at this length, so flags and arrows
-                both stay legible on one model.
+                kind — a line-load *intensity*, a point-load *force* and an
+                area *pressure* are all different units — is drawn at this
+                length, so every kind stays legible on one model.
+            area_style: How an ``"area"`` glyph is drawn — ``"arrows"`` (a grid
+                of arrows over the face, the default) or ``"extrusion"`` (a
+                one-sided prism along the pressure direction).
+            arrows_per_shell: Number of arrows drawn over each area face when
+                ``area_style == "arrows"``.
+        """
+        ...
+
+    @abstractmethod
+    def render_load_colours(
+        self,
+        shells: list[ShellGeom],
+        values: dict[str, float],
+    ) -> None:
+        """Colour area elements by their shell-face applied pressure.
+
+        The applied-load counterpart of :meth:`render_shell_scalar_field`: each
+        shell face is coloured on the same diverging scale (positive → warm,
+        negative → cool, saturated by ``|value| / max_abs``), a shell with no
+        face load left grey, and a scalar bar labels the scale so a colour reads
+        back to a pressure.
+
+        Args:
+            shells: Shell geometries (undeformed) providing the faces to colour.
+            values: ``{area_id: pressure}`` — one value per shell to colour.
         """
         ...
 

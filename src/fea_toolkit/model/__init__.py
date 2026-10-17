@@ -89,7 +89,14 @@ from .load_combinations import (
     merge_combination_sets,
     to_e2k_combo_dict,
 )
-from .load_glyphs import LoadGeom, LoadSource, extract_load_glyphs, list_load_sources
+from .load_glyphs import (
+    LoadGeom,
+    LoadSource,
+    area_load_values,
+    extract_load_glyphs,
+    list_load_sources,
+)
+from .load_queries import load_rows
 from .mesh_model import MeshModel
 from .sap_data import (
     AngleSection,
@@ -288,6 +295,7 @@ __all__ = [
     "TeeSection",
     "apply_composite_load_case",
     "apply_frame_end_offsets",
+    "area_load_values",
     "as_combination_mapping",
     "beam_load_to_nodal_loads",
     "bilinearize_composite",
@@ -335,6 +343,7 @@ __all__ = [
     # Stories
     "identify_stories",
     "list_load_sources",
+    "load_rows",
     # Confinement
     "mander_confined",
     "merge_combination_sets",

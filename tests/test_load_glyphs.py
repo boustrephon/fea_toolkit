@@ -9,8 +9,11 @@ decomposition.
 
 import numpy as np
 
-from fea_toolkit.model.load_glyphs import extract_load_glyphs, list_load_sources
+from fea_toolkit.model.load_glyphs import area_load_values, extract_load_glyphs, list_load_sources
+from fea_toolkit.model.load_queries import load_rows
 from fea_toolkit.model.sap_data import (
+    AreaElement,
+    AreaUniformLoad,
     FrameDistributedLoad,
     FrameElement,
     FramePointLoad,
@@ -243,3 +246,138 @@ def test_extract_load_glyphs_filters_and_scales_by_pattern_factors():
     assert not any(g.pattern == "DEAD" for g in glyphs)
     line = next(g for g in glyphs if g.kind == "line")
     assert (line.val_a, line.val_b) == (14.0, 14.0)
+
+
+# ── Area uniform loads (shell-face pressures) ──────────────────────────────
+
+
+def _area_model(**loads):
+    """A one-quad area model with the given load collections."""
+    return SAPModelData(
+        nodes={
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=4.0, y=0.0, z=0.0),
+            "3": Node(node_id="3", node_tag=3, x=4.0, y=4.0, z=0.0),
+            "4": Node(node_id="4", node_tag=4, x=0.0, y=4.0, z=0.0),
+        },
+        restraints={},
+        materials={},
+        sections={},
+        frame_elements={},
+        area_elements={"A1": AreaElement(area_id="A1", area_tag=1, node_ids=["1", "2", "3", "4"])},
+        frame_assignments={},
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
+        **loads,
+    )
+
+
+def _area_uniform(**overrides):
+    kwargs = {"pattern": "SDL", "area_id": "A1", "direction": "Z", "value": 12.5}
+    kwargs.update(overrides)
+    return AreaUniformLoad(**kwargs)
+
+
+def test_area_uniform_load_becomes_an_area_glyph():
+    md = _area_model(area_uniform_loads=[_area_uniform()])
+    glyphs = [g for g in extract_load_glyphs(md) if g.kind == "area"]
+    assert len(glyphs) == 1
+    g = glyphs[0]
+    assert g.vertices.shape == (4, 3)
+    assert g.magnitude == 12.5
+    assert np.allclose(g.direction, [0.0, 0.0, 1.0])
+
+
+def test_area_gravity_pressure_points_down():
+    md = _area_model(area_uniform_loads=[_area_uniform(direction="Gravity", value=-5.0)])
+    g = next(g for g in extract_load_glyphs(md) if g.kind == "area")
+    assert g.magnitude == -5.0
+    assert np.allclose(g.direction, [0.0, 0.0, -1.0])
+
+
+def test_to_frame_area_load_is_not_drawn_on_the_face():
+    md = _area_model(area_uniform_loads=[_area_uniform(to_frame=True)])
+    assert [g for g in extract_load_glyphs(md) if g.kind == "area"] == []
+
+
+def test_area_load_resolves_to_leaf_sub_areas():
+    md = SAPModelData(
+        nodes={
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=4.0, y=0.0, z=0.0),
+            "3": Node(node_id="3", node_tag=3, x=4.0, y=4.0, z=0.0),
+            "4": Node(node_id="4", node_tag=4, x=0.0, y=4.0, z=0.0),
+            "5": Node(node_id="5", node_tag=5, x=4.0, y=2.0, z=0.0),
+            "6": Node(node_id="6", node_tag=6, x=0.0, y=2.0, z=0.0),
+        },
+        restraints={},
+        materials={},
+        sections={},
+        frame_elements={},
+        area_elements={
+            "A1": AreaElement(
+                area_id="A1",
+                area_tag=1,
+                node_ids=["1", "2", "3", "4"],
+                inactive=True,
+                child_ids=["A1-0", "A1-1"],
+            ),
+            "A1-0": AreaElement(
+                area_id="A1-0", area_tag=2, node_ids=["1", "2", "5", "6"], parent_id="A1"
+            ),
+            "A1-1": AreaElement(
+                area_id="A1-1", area_tag=3, node_ids=["2", "3", "4", "6"], parent_id="A1"
+            ),
+        },
+        frame_assignments={},
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
+        area_uniform_loads=[_area_uniform()],
+    )
+    glyphs = [g for g in extract_load_glyphs(md) if g.kind == "area"]
+    assert len(glyphs) == 2  # one per active leaf
+    assert all(g.magnitude == 12.5 for g in glyphs)
+
+
+def test_area_load_values_keys_the_panel_id():
+    md = _area_model(area_uniform_loads=[_area_uniform()])
+    assert area_load_values(md) == {"A1": 12.5}
+
+
+def test_area_load_values_filters_and_scales_by_pattern_factors():
+    md = _area_model(
+        area_uniform_loads=[
+            _area_uniform(pattern="DEAD", value=10.0),
+            _area_uniform(pattern="LIVE", value=2.0),
+        ]
+    )
+    assert area_load_values(md, pattern_factors={"DEAD": 1.4}) == {"A1": 14.0}
+
+
+def test_area_load_values_excludes_to_frame_loads():
+    md = _area_model(
+        area_uniform_loads=[
+            _area_uniform(value=10.0),
+            _area_uniform(pattern="TOFRAME", to_frame=True, value=7.0),
+        ]
+    )
+    assert area_load_values(md) == {"A1": 10.0}
+
+
+# ── Inspector queries (load_rows) ──────────────────────────────────────────
+
+
+def test_load_rows_reports_an_areas_pressure():
+    md = _area_model(area_uniform_loads=[_area_uniform()])
+    assert ("Load: SDL (Z)", "12.5") in load_rows(md, md.area_elements["A1"])
+
+
+def test_load_rows_reports_frame_and_joint_loads():
+    md = _model(
+        joint_loads=[JointLoad(pattern="DEAD", node_id="2", fz=-100.0)],
+        frame_dist_loads=[_uniform()],
+    )
+    assert ("Load: DEAD (fz)", "-100") in load_rows(md, md.nodes["2"])
+    assert ("Load: WIND (Z Uniform)", "10 \u2192 10") in load_rows(md, md.frame_elements["F1"])

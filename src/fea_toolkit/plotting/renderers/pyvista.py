@@ -239,6 +239,146 @@ def _dedupe_load_vertices(vertices, length: float) -> list[np.ndarray]:
     return out
 
 
+def _point_in_polygon_2d(point, poly) -> bool:
+    """Even-odd ray cast for a point in a 2D polygon (``poly`` shape ``(N, 2)``)."""
+    x, y = point
+    inside = False
+    j = len(poly) - 1
+    for i in range(len(poly)):
+        xi, yi = poly[i]
+        xj, yj = poly[j]
+        if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+            inside = not inside
+        j = i
+    return inside
+
+
+def _points_in_polygon(vertices, n: int) -> list[np.ndarray]:
+    """``n`` points spread over a planar polygon, deterministic and inside it.
+
+    The polygon is projected onto its dominant plane, a square-ish lattice is
+    laid over the bounding box, and the lattice points inside the face (even-odd
+    ray cast) are kept.  When the face is too thin for the lattice to cover
+    ``n`` cells, fan-triangle centroids fill the remainder.
+    """
+    verts = np.asarray(vertices, dtype=float)
+    m = len(verts)
+    if m < 3 or n <= 0:
+        return []
+    normal = _polygon_normal(verts)
+    if normal is None:
+        return [verts[i].copy() for i in range(min(n, m))]
+
+    drop = int(np.argmax(np.abs(normal)))
+    axes = [ax for ax in (0, 1, 2) if ax != drop]
+    pts2d = verts[:, axes]
+    minxy = pts2d.min(axis=0)
+    maxxy = pts2d.max(axis=0)
+    span = maxxy - minxy
+    if span[0] <= 1e-12 and span[1] <= 1e-12:
+        return [verts[i].copy() for i in range(min(n, m))]
+
+    cols = max(1, int(np.ceil(np.sqrt(n * span[0] / span[1])))) if span[1] > 1e-12 else 1
+    rows = max(1, int(np.ceil(n / cols)))
+    xs = np.linspace(minxy[0], maxxy[0], cols + 2)[1:-1]
+    ys = np.linspace(minxy[1], maxxy[1], rows + 2)[1:-1]
+
+    inside = [q for q in ((x, y) for x in xs for y in ys) if _point_in_polygon_2d(q, pts2d)]
+    if len(inside) < n:
+        centroid = pts2d.mean(axis=0)
+        for i in range(m):
+            if len(inside) >= n:
+                break
+            a, b = pts2d[i], pts2d[(i + 1) % m]
+            inside.append((a + b + centroid) / 3.0)
+
+    a0, a1 = axes
+    origin = verts[0]
+    points = []
+    for q in inside[:n]:
+        p = np.zeros(3)
+        p[a0], p[a1] = q
+        p[drop] = (float(np.dot(normal, origin)) - normal[a0] * q[0] - normal[a1] * q[1]) / normal[
+            drop
+        ]
+        points.append(p)
+    return points
+
+
+def _extrude_area_flag(vertices, direction, height):
+    """A one-sided pressure prism: the face plus an offset copy and a rim.
+
+    Returns PyVista-ready ``(points, faces)``, or ``([], [])`` for a degenerate
+    face or zero height.  The base is the original face, the top is offset by
+    ``direction * height``, and the rim joins the two so the prism reads as a
+    3D flag whose offset side is the pressure direction.
+    """
+    face = np.asarray(vertices, dtype=float)
+    n = len(face)
+    if n < 3:
+        return [], []
+    d = np.asarray(direction, dtype=float)
+    norm = float(np.linalg.norm(d))
+    if norm < 1e-12 or abs(float(height)) < 1e-12:
+        return [], []
+    top = face + d * (height / norm)
+    points = np.vstack([face, top])
+    faces: list[int] = [n, *range(n), n, *range(n, 2 * n)]
+    for i in range(n):
+        j = (i + 1) % n
+        faces += [4, i, j, n + j, n + i]
+    return points, faces
+
+
+def _add_load_colour_legend(plotter, max_abs: float, title: str = "Area load (pressure)") -> None:
+    """Scalar bar mapping the diverging :func:`_flag_rgb` scale back to pressure.
+
+    The colour-fill mesh is drawn with direct RGB (no scalar range), so this
+    legend is informational: it maps ``-max_abs → 0 → +max_abs`` through the
+    same diverging colours, so a colour on a face reads back to a value.
+    """
+    import pyvista as pv
+
+    if max_abs <= 0.0:
+        return
+    lut = pv.LookupTable()
+    lut.n_values = 256
+    lut.scalar_range = (-max_abs, max_abs)
+    colors = np.zeros((256, 4), dtype=np.uint8)
+    for i in range(256):
+        t = -1.0 + 2.0 * i / 255.0
+        r, g, b = _flag_rgb(t * max_abs, max_abs)
+        colors[i] = (int(r * 255), int(g * 255), int(b * 255), 255)
+    lut.values = colors
+    try:
+        plotter.add_scalar_bar(
+            title=title,
+            lookup_table=lut,
+            position_x=0.82,
+            position_y=0.1,
+            width=0.06,
+            height=0.6,
+            title_font_size=10,
+            label_font_size=8,
+            bold=False,
+            italic=False,
+            shadow=False,
+        )
+    except TypeError:
+        plotter.add_scalar_bar(
+            title=title,
+            position_x=0.82,
+            position_y=0.1,
+            width=0.06,
+            height=0.6,
+            title_font_size=10,
+            label_font_size=8,
+            bold=False,
+            italic=False,
+            shadow=False,
+        )
+
+
 class PyVistaRenderer(RenderBackend):
     """Render backend using PyVista.
 
@@ -860,16 +1000,28 @@ class PyVistaRenderer(RenderBackend):
         )
         self._add_overlay(actor, "force_flags")
 
-    def render_loads(self, loads, size: float = 1.0) -> None:
+    def render_loads(
+        self,
+        loads,
+        size: float = 1.0,
+        area_style: str = "arrows",
+        arrows_per_shell: int = 9,
+    ) -> None:
         """Draw applied-load glyphs: flags for line loads, arrows for points.
 
         Args:
-            loads: Load glyphs (``kind`` ``"point"`` / ``"line"``), as produced
-                by :func:`fea_toolkit.model.load_glyphs.extract_load_glyphs`.
+            loads: Load glyphs (``kind`` ``"point"`` / ``"line"`` / ``"area"``),
+                as produced by
+                :func:`fea_toolkit.model.load_glyphs.extract_load_glyphs`.
             size: Target glyph length in model units — the peak |value| of each
-                kind is drawn at this length, so a line-load *intensity* and a
-                point-load *force* (different units) are each normalised to a
-                legible size.
+                kind is drawn at this length, so a line-load *intensity*, a
+                point-load *force* and an area *pressure* (all different units)
+                are each normalised to a legible size.
+            area_style: How an ``"area"`` glyph is drawn — ``"arrows"`` (a grid
+                of arrows over the face, the default) or ``"extrusion"`` (a
+                one-sided prism along the pressure direction).
+            arrows_per_shell: Number of arrows drawn over each area face when
+                ``area_style == "arrows"``.
         """
         if not loads:
             return
@@ -954,6 +1106,64 @@ class PyVistaRenderer(RenderBackend):
                 "loads",
             )
 
+        # ── Area-load glyphs (a grid of arrows, or a one-sided extrusion) ──
+        area_peak = max(
+            (abs(g.magnitude) for g in loads if g.kind == "area"),
+            default=0.0,
+        )
+        area_scale = size / area_peak if area_peak > 0.0 else 1.0
+        if area_style == "extrusion":
+            area_verts: list[np.ndarray] = []
+            area_faces: list[int] = []
+            area_offset = 0
+            for g in loads:
+                if g.kind != "area" or g.vertices is None or g.direction is None:
+                    continue
+                if g.magnitude == 0.0:
+                    continue
+                points, faces = _extrude_area_flag(
+                    g.vertices, g.direction, g.magnitude * area_scale
+                )
+                if len(points) == 0:
+                    continue
+                area_verts.append(points)
+                area_faces.extend([c + area_offset for c in faces])
+                area_offset += len(points)
+            if area_verts:
+                mesh = pv.PolyData(np.vstack(area_verts), faces=np.asarray(area_faces, dtype=int))
+                self._add_overlay(
+                    p.add_mesh(
+                        mesh, color=color, opacity=0.7, lighting=False, show_scalar_bar=False
+                    ),
+                    "loads",
+                )
+        else:
+            area_arrows = []
+            for g in loads:
+                if g.kind != "area" or g.vertices is None or g.direction is None:
+                    continue
+                if g.magnitude == 0.0:
+                    continue
+                d = np.asarray(g.direction, dtype=float)
+                length = abs(g.magnitude) * area_scale
+                for pt in _points_in_polygon(g.vertices, arrows_per_shell):
+                    area_arrows.append(
+                        pv.Arrow(
+                            start=pt - d * length,
+                            direction=d,
+                            scale=length,
+                            tip_length=0.25,
+                            tip_radius=0.1,
+                            shaft_radius=0.03,
+                        )
+                    )
+            if area_arrows:
+                merged = pv.merge(area_arrows) if len(area_arrows) > 1 else area_arrows[0]
+                self._add_overlay(
+                    p.add_mesh(merged, color=color, lighting=False, show_scalar_bar=False),
+                    "loads",
+                )
+
     def render_shell_scalar_field(
         self,
         shells: list[ShellGeom],
@@ -1004,6 +1214,53 @@ class PyVistaRenderer(RenderBackend):
             show_scalar_bar=False,
         )
         self._add_overlay(actor, "shell_forces")
+
+    def render_load_colours(self, shells, values) -> None:
+        """Colour area elements by their shell-face applied pressure.
+
+        The applied-load counterpart of :meth:`render_shell_scalar_field`: each
+        shell face is coloured on the same diverging scale (positive → warm,
+        negative → cool, saturated by ``|value| / max_abs``), a shell with no
+        face load left grey, and a scalar bar labels the scale so a colour reads
+        back to a pressure.
+
+        Args:
+            shells: Shell geometries (undeformed) providing the faces to colour.
+            values: ``{area_id: pressure}`` — one value per shell to colour.
+        """
+        self.clear_category("load_colours")
+        with contextlib.suppress(Exception):
+            self.plotter.remove_scalar_bar()
+        if not shells:
+            return
+        p = self.plotter
+        import pyvista as pv
+
+        max_abs = max((abs(value) for value in values.values()), default=0.0)
+        verts = np.vstack([s.vertices for s in shells])
+        faces, face_counts = _polygon_cells([s.vertices for s in shells])
+
+        cell_colors: list[tuple[float, float, float]] = []
+        for s, n_faces in zip(shells, face_counts):
+            value = values.get(s.area_id)
+            color = _flag_rgb(value, max_abs) if value is not None else (0.7, 0.7, 0.7)
+            cell_colors.extend([color] * n_faces)
+
+        mesh = pv.PolyData(verts, faces=faces)
+        mesh.cell_data["rgb"] = np.array(cell_colors, dtype=float)
+        actor = p.add_mesh(
+            mesh,
+            scalars="rgb",
+            rgb=True,
+            opacity=1.0,
+            show_edges=True,
+            edge_color="grey",
+            lighting=False,
+            show_scalar_bar=False,
+        )
+        self._add_overlay(actor, "load_colours")
+        if max_abs > 0.0:
+            _add_load_colour_legend(p, max_abs)
 
     # ── Scene management ─────────────────────────────────────────────
 

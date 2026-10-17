@@ -1025,6 +1025,22 @@ class TestRenderLoads:
             magnitude=magnitude,
         )
 
+    @staticmethod
+    def _area(magnitude=12.5, direction=(0.0, 0.0, 1.0)):
+        from fea_toolkit.model.load_glyphs import LoadGeom
+
+        return LoadGeom(
+            kind="area",
+            pattern="SDL",
+            label="SDL Z",
+            direction=np.array(direction, dtype=float),
+            magnitude=magnitude,
+            vertices=np.array(
+                [[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [4.0, 4.0, 0.0], [0.0, 4.0, 0.0]],
+                dtype=float,
+            ),
+        )
+
     def test_render_loads_builds_flag_and_arrow_actors(self):
         from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
 
@@ -1058,6 +1074,48 @@ class TestRenderLoads:
         try:
             renderer.render_loads([self._line(val_a=0.0, val_b=0.0)], size=1.0)
             assert renderer.actors("loads") == []
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_render_loads_draws_area_arrows_by_default(self):
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_loads([self._area()], size=1.0)
+            assert len(renderer.actors("loads")) == 1  # one merged arrow mesh
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_render_loads_draws_area_extrusion_when_asked(self):
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            renderer.render_loads([self._area()], size=1.0, area_style="extrusion")
+            assert len(renderer.actors("loads")) == 1  # one prism mesh
+        finally:
+            renderer.clear()
+            renderer.plotter.close()
+
+    def test_render_load_colours_builds_an_overlay(self):
+        from fea_toolkit.plotting.renderers.base import ShellGeom
+        from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
+
+        renderer = PyVistaRenderer(off_screen=True)
+        try:
+            shell = ShellGeom(
+                area_id="A1",
+                section="SLAB",
+                vertices=np.array(
+                    [[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [4.0, 4.0, 0.0], [0.0, 4.0, 0.0]],
+                    dtype=float,
+                ),
+            )
+            renderer.render_load_colours([shell], {"A1": 5.0})
+            assert len(renderer.actors("load_colours")) == 1
         finally:
             renderer.clear()
             renderer.plotter.close()

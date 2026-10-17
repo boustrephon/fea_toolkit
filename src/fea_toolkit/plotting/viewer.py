@@ -31,7 +31,7 @@ from typing import Any, Optional, Union
 import numpy as np
 
 from ..model.geometry import frame_end_offsets_global
-from ..model.load_glyphs import extract_load_glyphs
+from ..model.load_glyphs import area_load_values, extract_load_glyphs
 from .renderers import AnnotationDef, FrameGeom, HighlightDef, NodeGeom, RenderBackend, ShellGeom
 from .renderers.base import RestraintGeom
 
@@ -425,6 +425,9 @@ class ModelViewer:
         show_loads: bool = False,
         load_factors: Optional[dict[str, float]] = None,
         load_scale: float = _LOAD_SIZE_FRACTION,
+        load_area_style: str = "arrows",
+        load_arrows_per_shell: int = 9,
+        show_load_colours: bool = False,
         show_extruded: bool = False,
         extruded_detail: str = "plates",
     ) -> "ModelViewer":
@@ -453,8 +456,9 @@ class ModelViewer:
             restraint_style: Support-symbol style — ``"block"`` (plates and
                 discs, the default) or ``"arrow"`` (arrows and curls).
             show_loads: If True, draw applied-load glyphs — rectangular /
-                trapezoidal flags for distributed loads and arrows for point
-                loads (see :mod:`fea_toolkit.model.load_glyphs`).  Off by
+                trapezoidal flags for distributed loads, arrows for point loads,
+                and a grid of arrows (or a one-sided extrusion) for area
+                pressures (see :mod:`fea_toolkit.model.load_glyphs`).  Off by
                 default: glyphs are dense and overlap the structure.
             load_factors: Optional ``{pattern: factor}`` narrowing and scaling
                 which loads are drawn — pass a
@@ -463,6 +467,14 @@ class ModelViewer:
                 combination).  ``None`` draws every load at factor 1.0.
             load_scale: Fraction of the model diagonal a peak load value is
                 drawn at (default :data:`_LOAD_SIZE_FRACTION`).
+            load_area_style: How an area pressure is drawn — ``"arrows"`` (a
+                grid of arrows over the face, the default) or ``"extrusion"``
+                (a one-sided prism along the pressure direction).
+            load_arrows_per_shell: Number of arrows drawn over each area face
+                when ``load_area_style == "arrows"``.
+            show_load_colours: If True, colour each area element by its
+                shell-face pressure (a diverging warm/cool scale with a scalar
+                bar), independent of ``show_loads``.
             show_extruded: When True, draw each frame as an extruded solid
                 (its cross-section swept along the member) *in addition to* the
                 line skeleton, which remains the pickable layer.
@@ -528,10 +540,19 @@ class ModelViewer:
                 self._restraints, size=self.restraint_size(), style=self._restraint_style
             )
 
-        if show_loads:
+        if show_loads or show_load_colours:
             self._loads = extract_load_glyphs(self._model, pattern_factors=load_factors)
         if show_loads and self._loads:
-            self._backend.render_loads(self._loads, size=self.load_size())
+            self._backend.render_loads(
+                self._loads,
+                size=self.load_size(),
+                area_style=load_area_style,
+                arrows_per_shell=load_arrows_per_shell,
+            )
+        if show_load_colours:
+            self._backend.render_load_colours(
+                self._shells, area_load_values(self._model, pattern_factors=load_factors)
+            )
 
         return self
 
