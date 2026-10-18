@@ -2335,16 +2335,19 @@ class MainWindow(QMainWindow):
         action.blockSignals(False)
 
     def _on_show_nodes(self, checked: bool) -> None:
-        """Show or hide the node-marker overlay."""
+        """Show or hide the node-marker overlay (and the loads on those nodes)."""
         self._backend.set_category_visible("nodes", checked)
+        self._backend.set_category_visible("loads_nodes", checked)
 
     def _on_show_shells(self, checked: bool) -> None:
-        """Show or hide the area-element overlay."""
+        """Show or hide the area-element overlay (and the loads on those areas)."""
         self._backend.set_category_visible("shells", checked)
+        self._backend.set_category_visible("loads_shells", checked)
 
     def _on_show_frames(self, checked: bool) -> None:
-        """Show or hide the frame-element overlay."""
+        """Show or hide the frame-element overlay (and the loads on those frames)."""
         self._backend.set_category_visible("frames", checked)
+        self._backend.set_category_visible("loads_frames", checked)
 
     def _on_show_extruded(self, checked: bool) -> None:
         """Toggle extruded-solid frames; a geometry change, so re-render."""
@@ -2421,12 +2424,16 @@ class MainWindow(QMainWindow):
         self._load_source.blockSignals(False)
 
         selected = self._load_source.currentData()
-        if selected is None:
-            return None
-        for src in sources:
-            if src.name == selected:
-                return dict(src.patterns)
-        return None
+        factors: Optional[dict[str, float]] = None
+        if selected is not None:
+            for src in sources:
+                if src.name == selected:
+                    factors = dict(src.patterns)
+                    break
+        inspector = getattr(self, "_inspector", None)
+        if inspector is not None:
+            inspector.set_load_factors(factors)
+        return factors
 
     def _on_hide_selected(self) -> None:
         """**View ▸ Display ▸ Hide selected**: hide the selected elements.

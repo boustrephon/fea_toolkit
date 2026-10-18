@@ -106,6 +106,7 @@ class PropertyInspector(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._source_model: Any = None
+        self._load_factors: Any = None
         self._title = QLabel(object_title(None), self)
         self._title.setEnabled(False)
 
@@ -138,6 +139,16 @@ class PropertyInspector(QWidget):
         """
         self._source_model = model
 
+    def set_load_factors(self, factors: Any) -> None:
+        """Set the active load source's ``{pattern: factor}`` map (or ``None``).
+
+        Applied-load rows (:func:`~fea_toolkit.model.load_queries.load_rows`)
+        are filtered and scaled by these factors so the Inspector reports the
+        same factored value the viewport draws for the selected source.
+        ``None`` (no loads, or every load at authored value) is the default.
+        """
+        self._load_factors = factors
+
     def show_object(self, obj: Any) -> None:
         """Display *obj*'s fields (``None`` clears the inspector).
 
@@ -155,7 +166,7 @@ class PropertyInspector(QWidget):
             describe(obj)
             + _support_rows(obj, self._source_model)
             + _context_rows(obj, self._source_model)
-            + load_rows(self._source_model, obj)
+            + load_rows(self._source_model, obj, self._load_factors)
         )
         self._table.setRowCount(len(rows))
         for row, (name, value) in enumerate(rows):
