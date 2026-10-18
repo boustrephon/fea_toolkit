@@ -149,6 +149,18 @@ def test_frame_point_load_anchors_at_rdist():
 # ── Source polymorphism ───────────────────────────────────────────────────
 
 
+def test_glyphs_carry_their_owner_element():
+    md = _model(
+        joint_loads=[JointLoad(pattern="DEAD", node_id="2", fz=-100.0)],
+        frame_dist_loads=[_uniform()],
+    )
+    glyphs = extract_load_glyphs(md)
+    line = next(g for g in glyphs if g.kind == "line")
+    assert (line.owner_kind, line.owner_id) == ("frame", "F1")
+    node_points = [g for g in glyphs if g.kind == "point"]
+    assert all((g.owner_kind, g.owner_id) == ("node", "2") for g in node_points)
+
+
 def test_mesh_model_is_accepted_as_a_source():
     from fea_toolkit.model.mesh_model import MeshModel
 
@@ -191,11 +203,12 @@ def _static_case(name, *assignments, design_type="DEAD"):
     )
 
 
-def test_list_load_sources_lists_patterns_cases_and_combinations():
+def test_list_load_sources_lists_cases_combinations_and_orphan_patterns():
     md = _model(
         load_patterns={
             "DEAD": LoadPattern(name="DEAD", pattern_type="DEAD"),
             "WIND": LoadPattern(name="WIND", pattern_type="WIND"),
+            "SNOW": LoadPattern(name="SNOW", pattern_type="SNOW"),
         },
         load_cases={
             "DEAD": _static_case("DEAD", ("DEAD", 1.0)),
@@ -209,14 +222,17 @@ def test_list_load_sources_lists_patterns_cases_and_combinations():
             )
         },
         joint_loads=[JointLoad(pattern="DEAD", node_id="2", fz=-100.0)],
-        frame_dist_loads=[_uniform(pattern="WIND")],
+        frame_dist_loads=[_uniform(pattern="WIND"), _uniform(pattern="SNOW")],
     )
     sources = list_load_sources(md)
     kinds = {(s.kind, s.name) for s in sources}
-    assert ("pattern", "WIND") in kinds
     assert ("case", "DEAD") in kinds
     assert ("case", "ULT") in kinds
     assert ("combination", "COMB1") in kinds
+    # A pattern a static case already covers is not listed again — only the
+    # orphan SNOW (loads but no case references it) appears on its own.
+    assert ("pattern", "SNOW") in kinds
+    assert not any(s.kind == "pattern" and s.name in ("DEAD", "WIND") for s in sources)
     combo = next(s for s in sources if s.kind == "combination")
     assert combo.patterns == {"DEAD": 1.3, "WIND": 1.4}
 
@@ -287,6 +303,7 @@ def test_area_uniform_load_becomes_an_area_glyph():
     assert g.vertices.shape == (4, 3)
     assert g.magnitude == 12.5
     assert np.allclose(g.direction, [0.0, 0.0, 1.0])
+    assert (g.owner_kind, g.owner_id) == ("area", "A1")
 
 
 def test_area_gravity_pressure_points_down():
@@ -339,6 +356,11 @@ def test_area_load_resolves_to_leaf_sub_areas():
     glyphs = [g for g in extract_load_glyphs(md) if g.kind == "area"]
     assert len(glyphs) == 2  # one per active leaf
     assert all(g.magnitude == 12.5 for g in glyphs)
+    # Collapse draws the authored panel instead of fanning to leaves.
+    collapsed = [g for g in extract_load_glyphs(md, collapse=True) if g.kind == "area"]
+    assert len(collapsed) == 1
+    assert collapsed[0].owner_id == "A1"
+    assert collapsed[0].vertices.shape == (4, 3)
 
 
 def test_area_load_values_keys_the_panel_id():
@@ -381,3 +403,9 @@ def test_load_rows_reports_frame_and_joint_loads():
     )
     assert ("Load: DEAD (fz)", "-100") in load_rows(md, md.nodes["2"])
     assert ("Load: WIND (Z Uniform)", "10 \u2192 10") in load_rows(md, md.frame_elements["F1"])
+
+
+def test_load_rows_filters_and_scales_by_pattern_factors():
+    md = _area_model(area_uniform_loads=[_area_uniform(pattern="SDL", value=10.0)])
+    assert ("Load: SDL (Z)", "14") in load_rows(md, md.area_elements["A1"], {"SDL": 1.4})
+    assert load_rows(md, md.area_elements["A1"], {"DEAD": 1.0}) == []

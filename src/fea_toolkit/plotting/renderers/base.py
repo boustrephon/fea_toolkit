@@ -169,17 +169,29 @@ class RenderBackend(ABC):
         colors: dict[str, tuple[float, float, float]],
         opacity: float = 1.0,
         shrink: float = 1.0,
+        scalar_field: Optional[dict[str, float]] = None,
+        scalar_bar_title: Optional[str] = None,
     ) -> None:
         """Draw shell elements as planar surfaces.
 
         Args:
             shells: List of shell geometries.
-            colors: ``{section_name: (r, g, b)}`` — RGB in 0..1 range.
+            colors: ``{section_name: (r, g, b)}`` — RGB in 0..1 range, used
+                when *scalar_field* is ``None``.
             opacity: Opacity (0 = transparent, 1 = opaque).
             shrink: Display shrink factor toward each element's centroid, so a
                 joint or a node can be seen between the elements (SAP2000's
                 *shrink elements*).  Display only — the caller's geometry is
                 never modified.
+            scalar_field: Optional ``{area_id: value}`` that recolours the
+                faces on a diverging per-face scale (positive → warm, negative
+                → cool) instead of the section palette; a shell without a value
+                is drawn grey.  This recolours the shells in place — no
+                separate overlay is added, so the colour-fill hides and shows
+                with the shells themselves.
+            scalar_bar_title: When set (and *scalar_field* has a non-zero
+                value), add a scalar bar mapping the colour scale back to the
+                value — used by the applied-load colour-fill.
         """
         ...
 
@@ -317,7 +329,10 @@ class RenderBackend(ABC):
 
         Glyphs are resolved by
         :func:`fea_toolkit.model.load_glyphs.extract_load_glyphs`; magnitudes
-        are in model units and are scaled here for display only.
+        are in model units and are scaled here for display only.  Each glyph
+        carries its ``owner_kind`` / ``owner_id`` (the element or node it acts
+        on), so a backend can group glyphs under their host element's category
+        and tie their visibility to that element.
 
         Args:
             loads: Load glyphs (``kind`` ``"point"``, ``"line"`` or
@@ -331,26 +346,6 @@ class RenderBackend(ABC):
                 one-sided prism along the pressure direction).
             arrows_per_shell: Number of arrows drawn over each area face when
                 ``area_style == "arrows"``.
-        """
-        ...
-
-    @abstractmethod
-    def render_load_colours(
-        self,
-        shells: list[ShellGeom],
-        values: dict[str, float],
-    ) -> None:
-        """Colour area elements by their shell-face applied pressure.
-
-        The applied-load counterpart of :meth:`render_shell_scalar_field`: each
-        shell face is coloured on the same diverging scale (positive → warm,
-        negative → cool, saturated by ``|value| / max_abs``), a shell with no
-        face load left grey, and a scalar bar labels the scale so a colour reads
-        back to a pressure.
-
-        Args:
-            shells: Shell geometries (undeformed) providing the faces to colour.
-            values: ``{area_id: pressure}`` — one value per shell to colour.
         """
         ...
 

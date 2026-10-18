@@ -636,6 +636,8 @@ class PyVistaRenderer(RenderBackend):
         colors: dict[str, tuple[float, float, float]],
         opacity: float = 1.0,
         shrink: float = 1.0,
+        scalar_field: Optional[dict[str, float]] = None,
+        scalar_bar_title: Optional[str] = None,
     ) -> None:
         if not shells:
             return
@@ -646,10 +648,22 @@ class PyVistaRenderer(RenderBackend):
         faces, face_counts = _polygon_cells([s.vertices for s in shells])
 
         # One colour per *face*: a quad is a single face and takes a single
-        # colour, and only a fanned n-gon contributes more than one.
+        # colour, and only a fanned n-gon contributes more than one.  A scalar
+        # field (e.g. the applied-load pressure) recolours the faces on the
+        # diverging scale instead of the section palette — no separate overlay.
+        max_abs = (
+            max((abs(v) for v in scalar_field.values() if v is not None), default=0.0)
+            if scalar_field is not None
+            else 0.0
+        )
         cell_colors: list[tuple] = []
         for s, n_faces in zip(shells, face_counts):
-            cell_colors.extend([colors.get(s.section, (0.7, 0.7, 0.7))] * n_faces)
+            if scalar_field is not None:
+                value = scalar_field.get(s.area_id)
+                color = _flag_rgb(value, max_abs) if value is not None else (0.7, 0.7, 0.7)
+            else:
+                color = colors.get(s.section, (0.7, 0.7, 0.7))
+            cell_colors.extend([color] * n_faces)
         if not cell_colors:
             return
 
@@ -666,6 +680,8 @@ class PyVistaRenderer(RenderBackend):
             show_scalar_bar=False,
         )
         self._add_actor(actor, "shells")
+        if scalar_bar_title and max_abs > 0.0:
+            _add_load_colour_legend(p, max_abs, title=scalar_bar_title)
 
     # ── Nodes ────────────────────────────────────────────────────────
 
@@ -1076,12 +1092,13 @@ class PyVistaRenderer(RenderBackend):
             mesh = pv.PolyData(np.vstack(verts_acc), faces=np.asarray(faces_acc, dtype=int))
             self._add_overlay(
                 p.add_mesh(mesh, color=color, opacity=0.7, lighting=False, show_scalar_bar=False),
-                "loads",
+                "loads_frames",
             )
 
         # ── Point-load arrows (tip at the application point) ──────────
-        arrows = []
         point_scale = size / point_peak if point_peak > 0.0 else 1.0
+        node_arrows: list = []
+        frame_arrows: list = []
         for g in loads:
             if g.kind != "point" or g.anchor is None or g.direction is None:
                 continue
@@ -1089,22 +1106,25 @@ class PyVistaRenderer(RenderBackend):
                 continue
             d = np.asarray(g.direction, dtype=float)
             length = abs(g.magnitude) * point_scale
-            arrows.append(
-                pv.Arrow(
-                    start=np.asarray(g.anchor, dtype=float) - d * length,
-                    direction=d,
-                    scale=length,
-                    tip_length=0.25,
-                    tip_radius=0.1,
-                    shaft_radius=0.03,
+            arrow = pv.Arrow(
+                start=np.asarray(g.anchor, dtype=float) - d * length,
+                direction=d,
+                scale=length,
+                tip_length=0.25,
+                tip_radius=0.1,
+                shaft_radius=0.03,
+            )
+            if getattr(g, "owner_kind", "") == "frame":
+                frame_arrows.append(arrow)
+            else:
+                node_arrows.append(arrow)
+        for category, batch in (("loads_nodes", node_arrows), ("loads_frames", frame_arrows)):
+            if batch:
+                merged = pv.merge(batch) if len(batch) > 1 else batch[0]
+                self._add_overlay(
+                    p.add_mesh(merged, color=color, lighting=False, show_scalar_bar=False),
+                    category,
                 )
-            )
-        if arrows:
-            merged = pv.merge(arrows) if len(arrows) > 1 else arrows[0]
-            self._add_overlay(
-                p.add_mesh(merged, color=color, lighting=False, show_scalar_bar=False),
-                "loads",
-            )
 
         # ── Area-load glyphs (a grid of arrows, or a one-sided extrusion) ──
         area_peak = max(
@@ -1135,7 +1155,7 @@ class PyVistaRenderer(RenderBackend):
                     p.add_mesh(
                         mesh, color=color, opacity=0.7, lighting=False, show_scalar_bar=False
                     ),
-                    "loads",
+                    "loads_shells",
                 )
         else:
             area_arrows = []
@@ -1161,7 +1181,7 @@ class PyVistaRenderer(RenderBackend):
                 merged = pv.merge(area_arrows) if len(area_arrows) > 1 else area_arrows[0]
                 self._add_overlay(
                     p.add_mesh(merged, color=color, lighting=False, show_scalar_bar=False),
-                    "loads",
+                    "loads_shells",
                 )
 
     def render_shell_scalar_field(
@@ -1214,53 +1234,6 @@ class PyVistaRenderer(RenderBackend):
             show_scalar_bar=False,
         )
         self._add_overlay(actor, "shell_forces")
-
-    def render_load_colours(self, shells, values) -> None:
-        """Colour area elements by their shell-face applied pressure.
-
-        The applied-load counterpart of :meth:`render_shell_scalar_field`: each
-        shell face is coloured on the same diverging scale (positive → warm,
-        negative → cool, saturated by ``|value| / max_abs``), a shell with no
-        face load left grey, and a scalar bar labels the scale so a colour reads
-        back to a pressure.
-
-        Args:
-            shells: Shell geometries (undeformed) providing the faces to colour.
-            values: ``{area_id: pressure}`` — one value per shell to colour.
-        """
-        self.clear_category("load_colours")
-        with contextlib.suppress(Exception):
-            self.plotter.remove_scalar_bar(title="Area load (pressure)")
-        if not shells:
-            return
-        p = self.plotter
-        import pyvista as pv
-
-        max_abs = max((abs(value) for value in values.values()), default=0.0)
-        verts = np.vstack([s.vertices for s in shells])
-        faces, face_counts = _polygon_cells([s.vertices for s in shells])
-
-        cell_colors: list[tuple[float, float, float]] = []
-        for s, n_faces in zip(shells, face_counts):
-            value = values.get(s.area_id)
-            color = _flag_rgb(value, max_abs) if value is not None else (0.7, 0.7, 0.7)
-            cell_colors.extend([color] * n_faces)
-
-        mesh = pv.PolyData(verts, faces=faces)
-        mesh.cell_data["rgb"] = np.array(cell_colors, dtype=float)
-        actor = p.add_mesh(
-            mesh,
-            scalars="rgb",
-            rgb=True,
-            opacity=1.0,
-            show_edges=True,
-            edge_color="grey",
-            lighting=False,
-            show_scalar_bar=False,
-        )
-        self._add_overlay(actor, "load_colours")
-        if max_abs > 0.0:
-            _add_load_colour_legend(p, max_abs)
 
     # ── Scene management ─────────────────────────────────────────────
 

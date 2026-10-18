@@ -13,7 +13,7 @@ element's whole split **family** — the root, the selected id itself and every
 descendant leaf — rather than on the exact id alone.
 """
 
-from typing import Any
+from typing import Any, Optional
 
 from .sap_data import AreaElement, FrameElement, Node
 
@@ -38,7 +38,11 @@ def _family_ids(model: Any, etype: str, eid: str) -> set[str]:
     return ids
 
 
-def load_rows(model: Any, obj: Any) -> list:
+def load_rows(
+    model: Any,
+    obj: Any,
+    pattern_factors: Optional[dict[str, float]] = None,
+) -> list:
     """``[(name, value), ...]`` for every applied load on *obj*, or ``[]``.
 
     A node reports its joint-load force components; a frame its distributed and
@@ -51,6 +55,11 @@ def load_rows(model: Any, obj: Any) -> list:
         model: A ``SAPModelData`` or ``MeshModel``, or ``None``.
         obj: The selected :class:`FrameElement`, :class:`AreaElement` or
             :class:`Node`.
+        pattern_factors: Optional ``{pattern: factor}`` narrowing and scaling
+            the loads, matching the viewport's active load source — only loads
+            whose pattern is a key are kept, and their magnitudes are
+            multiplied by the factor.  ``None`` (the default) reports every
+            load at its authored value.
 
     Returns:
         One ``(name, value)`` pair per load, or an empty list when the element
@@ -59,14 +68,23 @@ def load_rows(model: Any, obj: Any) -> list:
     if model is None or obj is None:
         return []
 
+    def _kept(pattern: str) -> bool:
+        return pattern_factors is None or pattern in pattern_factors
+
+    def _scale(pattern: str) -> float:
+        return pattern_factors[pattern] if pattern_factors is not None else 1.0
+
     if isinstance(obj, Node):
         eid = obj.node_id
         rows = []
         for jl in getattr(model, "joint_loads", None) or []:
             if str(getattr(jl, "node_id", "")) != eid:
                 continue
+            if not _kept(getattr(jl, "pattern", "")):
+                continue
+            scale = _scale(getattr(jl, "pattern", ""))
             for comp in ("fx", "fy", "fz"):
-                value = float(getattr(jl, comp, 0.0) or 0.0)
+                value = float(getattr(jl, comp, 0.0) or 0.0) * scale
                 if value:
                     rows.append((f"Load: {jl.pattern} ({comp})", f"{value:g}"))
         return rows
@@ -77,19 +95,25 @@ def load_rows(model: Any, obj: Any) -> list:
         for dl in getattr(model, "frame_dist_loads", None) or []:
             if str(getattr(dl, "frame_id", "")) not in family:
                 continue
+            if not _kept(getattr(dl, "pattern", "")):
+                continue
+            scale = _scale(getattr(dl, "pattern", ""))
             rows.append(
                 (
                     f"Load: {dl.pattern} ({dl.direction} {dl.shape})",
-                    f"{dl.val_a:g} → {dl.val_b:g}",
+                    f"{dl.val_a * scale:g} → {dl.val_b * scale:g}",
                 )
             )
         for pl in getattr(model, "frame_point_loads", None) or []:
             if str(getattr(pl, "frame_id", "")) not in family:
                 continue
+            if not _kept(getattr(pl, "pattern", "")):
+                continue
+            scale = _scale(getattr(pl, "pattern", ""))
             rows.append(
                 (
                     f"Load: {pl.pattern} ({pl.direction} {pl.load_type})",
-                    f"{pl.value:g} @ {pl.rdist:g}L",
+                    f"{pl.value * scale:g} @ {pl.rdist:g}L",
                 )
             )
         return rows
@@ -100,7 +124,10 @@ def load_rows(model: Any, obj: Any) -> list:
         for al in getattr(model, "area_uniform_loads", None) or []:
             if str(getattr(al, "area_id", "")) not in family:
                 continue
-            rows.append((f"Load: {al.pattern} ({al.direction})", f"{al.value:g}"))
+            if not _kept(getattr(al, "pattern", "")):
+                continue
+            scale = _scale(getattr(al, "pattern", ""))
+            rows.append((f"Load: {al.pattern} ({al.direction})", f"{al.value * scale:g}"))
         return rows
 
     return []

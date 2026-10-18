@@ -508,12 +508,15 @@ def split_elements(
             parent.child_ids.append(child_id)
             child_elements.append(child)
 
-        # Now split distributed loads on this element
-        for ld in dist_loads:
-            if ld.frame_id != eid:
-                continue
+        # Now split distributed loads on this element — retaining the authored
+        # load (inactive) alongside the child loads so a collapsed view can
+        # draw the original span and audit can trace child → source.
+        elem_loads = [ld for ld in dist_loads if ld.frame_id == eid]
+        for idx, ld in enumerate(elem_loads):
             if abs(ld.val_a) < 1e-12 and abs(ld.val_b) < 1e-12:
-                continue
+                continue  # a zero load contributes nothing — drop, as before
+            lid = f"{eid}:{idx}"
+            new_dist_loads.append(replace(ld, load_id=lid, inactive=True))
 
             # Compute global fractions for load start/end
             t_a = ld.dist_a / length if length > 0 else 0.0
@@ -553,6 +556,7 @@ def split_elements(
                     rdist_b=t_end_local,
                     dist_a=child_dist_a,
                     dist_b=child_dist_b,
+                    parent_load_id=lid,
                 )
                 new_dist_loads.append(child_load)
 

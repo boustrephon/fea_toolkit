@@ -979,10 +979,11 @@ class Selection:
 
         Args:
             model: The ``SAPModelData`` or ``MeshModel`` to resolve against.
-            include_parents: Keep superseded (inactive) split parents, which a
-                viewport in collapse-to-parents mode draws.  The default drops
-                them, matching what a view draws — and keeping a view's reported
-                counts equal to what it actually shows.
+            include_parents: Keep the original unsplit roots (elements with no
+                ``parent_id``), which a viewport in collapse-to-parents mode
+                draws.  The default drops them, matching what a view draws —
+                and keeping a view's reported counts equal to what it actually
+                shows.
 
         Returns:
             ``(frame_ids, area_ids, node_ids)`` as sets of SAP labels.
@@ -993,7 +994,11 @@ class Selection:
 
         def visible(elem: Any) -> bool:
             """Whether a view would draw *elem* at all."""
-            return include_parents or not getattr(elem, "inactive", False)
+            if include_parents:
+                # Collapse draws the original unsplit roots — not intermediate
+                # split levels, which are inactive but still have a parent.
+                return getattr(elem, "parent_id", None) is None
+            return not getattr(elem, "inactive", False)
 
         # ``get_*_ids`` match on the criteria alone (and nodes ignore section /
         # material criteria trivially), so the visibility of a matched element is

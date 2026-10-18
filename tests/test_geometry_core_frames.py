@@ -177,6 +177,46 @@ class TestParserModelIntegration:
                 assert len(elem.child_ids) > 0, f"Inactive element {eid} should have children"
 
 
+def test_split_elements_retains_authored_loads_with_parent_links():
+    """A split frame keeps its authored load (inactive) + linked children."""
+    from fea_toolkit.model.geometry import split_elements
+    from fea_toolkit.model.sap_data import FrameDistributedLoad
+
+    nodes = {
+        "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+        "2": Node(node_id="2", node_tag=2, x=4.0, y=0.0, z=0.0),
+        "3": Node(node_id="3", node_tag=3, x=2.0, y=0.0, z=0.0),
+    }
+    elements = {"F1": FrameElement(elem_id="F1", elem_tag=1, node_i="1", node_j="2")}
+    dist_loads = [
+        FrameDistributedLoad(
+            pattern="DEAD",
+            frame_id="F1",
+            direction="Gravity",
+            load_type="Force",
+            shape="Uniform",
+            val_a=10.0,
+            val_b=10.0,
+            rdist_a=0.0,
+            rdist_b=1.0,
+            dist_a=0.0,
+            dist_b=4.0,
+        )
+    ]
+    new_elements, _assigns, new_loads = split_elements(
+        nodes, elements, {"F1": "SEC"}, dist_loads, auto_mesh={"F1": {"AtJoints": True}}
+    )
+    authored = [ld for ld in new_loads if getattr(ld, "inactive", False)]
+    children = [ld for ld in new_loads if not getattr(ld, "inactive", False)]
+    assert len(authored) == 1
+    assert authored[0].frame_id == "F1"
+    assert authored[0].load_id
+    assert len(children) == 2
+    assert {c.frame_id for c in children} == {"F1-0", "F1-1"}
+    assert all(c.parent_load_id == authored[0].load_id for c in children)
+    assert "F1" in new_elements and new_elements["F1"].inactive
+
+
 # ============================================================================
 # Edge cases
 # ============================================================================

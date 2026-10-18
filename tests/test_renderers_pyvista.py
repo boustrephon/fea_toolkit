@@ -425,9 +425,7 @@ class TestModelViewerSplitElements:
             if not getattr(e, "inactive", False) and getattr(e, "parent_id", None) is not None
         )
         n_collapsed = sum(
-            1
-            for e in mm.frame_elements.values()
-            if getattr(e, "inactive", False) or getattr(e, "parent_id", None) is None
+            1 for e in mm.frame_elements.values() if getattr(e, "parent_id", None) is None
         )
         assert n_children > 0, "fixture must contain split children for this regression"
 
@@ -443,6 +441,63 @@ class TestModelViewerSplitElements:
         finally:
             active._backend.plotter.close()
             collapsed._backend.plotter.close()
+
+    def test_collapse_shows_only_roots_for_two_level_splits(self):
+        """A twice-split frame collapses to its root, not intermediate levels."""
+        from fea_toolkit.model.mesh_model import MeshModel
+        from fea_toolkit.model.sap_data import FrameElement, Node
+        from fea_toolkit.plotting import ModelViewer
+
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=4.0, y=0.0, z=0.0),
+            "3": Node(node_id="3", node_tag=3, x=2.0, y=0.0, z=0.0),
+            "4": Node(node_id="4", node_tag=4, x=1.0, y=0.0, z=0.0),
+        }
+        frames = {
+            "F1": FrameElement(
+                elem_id="F1",
+                elem_tag=1,
+                node_i="1",
+                node_j="2",
+                inactive=True,
+                child_ids=["F1-0", "F1-1"],
+            ),
+            "F1-0": FrameElement(
+                elem_id="F1-0",
+                elem_tag=2,
+                node_i="1",
+                node_j="3",
+                inactive=True,
+                parent_id="F1",
+                child_ids=["F1-0-0", "F1-0-1"],
+            ),
+            "F1-1": FrameElement(
+                elem_id="F1-1", elem_tag=3, node_i="3", node_j="2", parent_id="F1"
+            ),
+            "F1-0-0": FrameElement(
+                elem_id="F1-0-0", elem_tag=4, node_i="1", node_j="4", parent_id="F1-0"
+            ),
+            "F1-0-1": FrameElement(
+                elem_id="F1-0-1", elem_tag=5, node_i="4", node_j="3", parent_id="F1-0"
+            ),
+        }
+        mm = MeshModel(
+            nodes=nodes,
+            frame_elements=frames,
+            frame_assignments={},
+            area_elements={},
+            area_assignments={},
+            frame_dist_loads=[],
+        )
+        viewer = ModelViewer(
+            mesh_model=mm, backend="pyvista", off_screen=True, collapse_to_parents=True
+        )
+        try:
+            viewer.show_model(show_nodes=False, show_shells=False)
+            assert {f.elem_id for f in viewer._frames} == {"F1"}
+        finally:
+            viewer._backend.plotter.close()
 
 
 def _shell(area_id="1", section="SLAB", n_vertices=4):
@@ -993,7 +1048,7 @@ class TestRestraintGlyphs:
 
 
 class TestRenderLoads:
-    """``PyVistaRenderer.render_loads`` draws flags and arrows under "loads"."""
+    """``PyVistaRenderer.render_loads`` draws flags and arrows under owner categories."""
 
     @staticmethod
     def _line(start=(0.0, 0.0, 0.0), end=(4.0, 0.0, 0.0), val_a=10.0, val_b=10.0):
@@ -1003,6 +1058,8 @@ class TestRenderLoads:
             kind="line",
             pattern="WIND",
             label="WIND Uniform",
+            owner_kind="frame",
+            owner_id="F1",
             start=np.array(start, dtype=float),
             end=np.array(end, dtype=float),
             direction=np.array([0.0, 0.0, 1.0]),
@@ -1020,6 +1077,8 @@ class TestRenderLoads:
             kind="point",
             pattern="DEAD",
             label="DEAD",
+            owner_kind="node",
+            owner_id="2",
             anchor=np.array(anchor, dtype=float),
             direction=np.array([0.0, 0.0, -1.0]),
             magnitude=magnitude,
@@ -1033,6 +1092,8 @@ class TestRenderLoads:
             kind="area",
             pattern="SDL",
             label="SDL Z",
+            owner_kind="area",
+            owner_id="A1",
             direction=np.array(direction, dtype=float),
             magnitude=magnitude,
             vertices=np.array(
@@ -1047,7 +1108,8 @@ class TestRenderLoads:
         renderer = PyVistaRenderer(off_screen=True)
         try:
             renderer.render_loads([self._line(), self._point()], size=1.0)
-            assert len(renderer.actors("loads")) == 2  # one flag mesh, one arrow mesh
+            assert len(renderer.actors("loads_frames")) == 1  # the flag mesh
+            assert len(renderer.actors("loads_nodes")) == 1  # the arrow mesh
         finally:
             renderer.clear()
             renderer.plotter.close()
@@ -1058,10 +1120,10 @@ class TestRenderLoads:
         renderer = PyVistaRenderer(off_screen=True)
         try:
             renderer.render_loads([self._line()], size=1.0)
-            actor = renderer.actors("loads")[0]
-            renderer.set_category_visible("loads", False)
+            actor = renderer.actors("loads_frames")[0]
+            renderer.set_category_visible("loads_frames", False)
             assert not actor.GetVisibility()
-            renderer.set_category_visible("loads", True)
+            renderer.set_category_visible("loads_frames", True)
             assert actor.GetVisibility()
         finally:
             renderer.clear()
@@ -1073,7 +1135,7 @@ class TestRenderLoads:
         renderer = PyVistaRenderer(off_screen=True)
         try:
             renderer.render_loads([self._line(val_a=0.0, val_b=0.0)], size=1.0)
-            assert renderer.actors("loads") == []
+            assert renderer.actors("loads_frames") == []
         finally:
             renderer.clear()
             renderer.plotter.close()
@@ -1084,7 +1146,7 @@ class TestRenderLoads:
         renderer = PyVistaRenderer(off_screen=True)
         try:
             renderer.render_loads([self._area()], size=1.0)
-            assert len(renderer.actors("loads")) == 1  # one merged arrow mesh
+            assert len(renderer.actors("loads_shells")) == 1  # one merged arrow mesh
         finally:
             renderer.clear()
             renderer.plotter.close()
@@ -1095,12 +1157,12 @@ class TestRenderLoads:
         renderer = PyVistaRenderer(off_screen=True)
         try:
             renderer.render_loads([self._area()], size=1.0, area_style="extrusion")
-            assert len(renderer.actors("loads")) == 1  # one prism mesh
+            assert len(renderer.actors("loads_shells")) == 1  # one prism mesh
         finally:
             renderer.clear()
             renderer.plotter.close()
 
-    def test_render_load_colours_builds_an_overlay(self):
+    def test_render_shells_recolours_by_load_scalar_field(self):
         from fea_toolkit.plotting.renderers.base import ShellGeom
         from fea_toolkit.plotting.renderers.pyvista import PyVistaRenderer
 
@@ -1114,8 +1176,10 @@ class TestRenderLoads:
                     dtype=float,
                 ),
             )
-            renderer.render_load_colours([shell], {"A1": 5.0})
-            assert len(renderer.actors("load_colours")) == 1
+            renderer.render_shells([shell], {"SLAB": (0.5, 0.5, 0.5)}, scalar_field={"A1": 5.0})
+            # Recoloured in place — one shell actor, no separate overlay.
+            assert len(renderer.actors("shells")) == 1
+            assert renderer.actors("load_colours") == []
         finally:
             renderer.clear()
             renderer.plotter.close()

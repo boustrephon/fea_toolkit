@@ -2231,6 +2231,9 @@ class FramePointLoad:
     rdist: float  # relative distance from start (0..1)
     dist: float  # absolute distance from start (model units)
     coord_sys: str = "GLOBAL"
+    load_id: str = ""  # stable id set on the retained authored source
+    parent_load_id: str = ""  # a redistributed child's authored source load_id
+    inactive: bool = False  # True for the retained authored source load
 
 
 @dataclass
@@ -2253,6 +2256,9 @@ class FrameDistributedLoad:
     dist_a: float  # absolute distance from start (in model units)
     dist_b: float  # absolute distance from start
     coord_sys: str = "GLOBAL"
+    load_id: str = ""  # stable id set on the retained authored source
+    parent_load_id: str = ""  # a redistributed child's authored source load_id
+    inactive: bool = False  # True for the retained authored source load
 
 
 def apply_material_defaults(materials: dict[str, Material], units: dict[str, str]) -> None:

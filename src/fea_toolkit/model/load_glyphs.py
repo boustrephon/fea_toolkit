@@ -68,11 +68,17 @@ class LoadGeom:
 
     ``"gravity"`` is reserved for the follow-up and carries no geometry in
     this release.
+
+    ``owner_kind`` / ``owner_id`` name the element or node a glyph is applied
+    to — ``"frame"``, ``"area"`` or ``"node"`` — so a renderer can tie a
+    glyph's visibility to its host element's.
     """
 
     kind: str  # 'point' | 'line' | 'area' | 'gravity'
     pattern: str
     label: str
+    owner_kind: str = ""  # 'node' | 'frame' | 'area' — the element the glyph acts on
+    owner_id: str = ""  # SAP id of that node/element ('' when unknown)
     # ── point glyph ──
     anchor: Optional[np.ndarray] = None  # (3,)
     direction: Optional[np.ndarray] = None  # unit vector (3,)
@@ -267,14 +273,17 @@ def list_load_sources(source, external_combinations=None) -> list[LoadSource]:
             definition wins (see :func:`merge_combination_sets`).
 
     Returns:
-        One :class:`LoadSource` per pattern, static case and linear
-        combination, in that order.  Combinations that do not reduce to a
-        single signed load set (envelope / SRSS / magnitude fork) are omitted,
-        because they have no single applied-load picture.
+        One :class:`LoadSource` per static case and linear combination, in
+        that order, plus one per pattern that no static case references (an
+        *orphan* — e.g. a hand-built or partially-exported model).  Cases and
+        combinations take precedence over their own patterns, so a pattern a
+        case already covers is not listed again.  Combinations that do not
+        reduce to a single signed load set (envelope / SRSS / magnitude fork)
+        are omitted, because they have no single applied-load picture.
 
     Examples:
         >>> sources = list_load_sources(md)
-        >>> sources[0].name  # the first pattern (or case) in model order
+        >>> sources[0].name  # the first case (or orphan pattern) in model order
     """
     load_cases = getattr(source, "load_cases", None) or {}
     combos = merge_combination_sets(
@@ -284,18 +293,23 @@ def list_load_sources(source, external_combinations=None) -> list[LoadSource]:
     )
 
     sources: list[LoadSource] = []
-    for name in _pattern_names(source):
-        sources.append(LoadSource(name=name, kind="pattern", patterns={name: 1.0}))
+    referenced: set[str] = set()
     for cname, lc in load_cases.items():
         if str(getattr(lc, "case_type", "") or "").lower() not in _STATIC_CASE_TYPES:
             continue
         pats = patterns_from_case(lc)
         if pats:
+            referenced.update(pats)
             sources.append(LoadSource(name=cname, kind="case", patterns=dict(pats)))
     for cname, combo in combos.items():
         factors = combination_pattern_factors(combo, load_cases, combos)
         if factors:
             sources.append(LoadSource(name=cname, kind="combination", patterns=factors))
+    # A pattern is its own source only when no static case references it —
+    # otherwise the case already shows exactly that pattern (de-duplicated).
+    for name in _pattern_names(source):
+        if name not in referenced:
+            sources.append(LoadSource(name=name, kind="pattern", patterns={name: 1.0}))
     return sources
 
 
@@ -303,7 +317,7 @@ def list_load_sources(source, external_combinations=None) -> list[LoadSource]:
 
 
 def extract_load_glyphs(
-    source, pattern_factors: Optional[dict[str, float]] = None
+    source, pattern_factors: Optional[dict[str, float]] = None, collapse: bool = False
 ) -> list[LoadGeom]:
     """Resolve a model's applied loads into display glyphs.
 
@@ -325,6 +339,12 @@ def extract_load_glyphs(
             magnitudes are multiplied by the factor (e.g. a
             :class:`LoadSource`'s ``patterns``).  ``None`` (the default)
             extracts every load at factor 1.0.
+        collapse: When True, an area load is drawn once on its authored panel
+            (the collapsed parent) instead of fanned across its active leaf
+            sub-areas, matching ``ModelViewer(collapse_to_parents=True)``.
+            Frame loads are unaffected: a split frame's *retained authored*
+            load and its *redistributed child* loads are both emitted, and the
+            caller's element-visibility filter chooses which one is drawn.
 
     Returns:
         A list of :class:`LoadGeom` in insertion order.
@@ -357,6 +377,8 @@ def extract_load_glyphs(
                     kind="point",
                     pattern=pattern,
                     label=f"{pattern} {comp}",
+                    owner_kind="node",
+                    owner_id=str(getattr(jl, "node_id", "")),
                     anchor=anchor,
                     direction=vec,
                     magnitude=mag,
@@ -379,6 +401,8 @@ def extract_load_glyphs(
                 kind="line",
                 pattern=pattern,
                 label=f"{pattern} {getattr(dl, 'shape', '')}",
+                owner_kind="frame",
+                owner_id=str(getattr(dl, "frame_id", "")),
                 start=start,
                 end=end,
                 direction=direction,
@@ -416,6 +440,8 @@ def extract_load_glyphs(
                 kind="point",
                 pattern=pattern,
                 label=f"{pattern} {getattr(pl, 'load_type', '')}",
+                owner_kind="frame",
+                owner_id=str(getattr(pl, "frame_id", "")),
                 anchor=anchor,
                 direction=direction,
                 magnitude=float(getattr(pl, "value", 0.0) or 0.0) * scale,
@@ -437,8 +463,14 @@ def extract_load_glyphs(
             str(getattr(al, "direction", "Gravity") or "Gravity").strip(),
             _DIR["Gravity"],
         ).copy()
-        for leaf in _leaf_area_ids(source, getattr(al, "area_id", "")):
-            vertices = _area_polygon(source, leaf)
+        aid = str(getattr(al, "area_id", ""))
+        loads_only = getattr(source, "loads_only_area_ids", None) or set()
+        if collapse:
+            faces = [aid] if aid not in loads_only else []
+        else:
+            faces = _leaf_area_ids(source, aid)
+        for face in faces:
+            vertices = _area_polygon(source, face)
             if vertices is None:
                 continue
             glyphs.append(
@@ -446,6 +478,8 @@ def extract_load_glyphs(
                     kind="area",
                     pattern=pattern,
                     label=f"{pattern} {getattr(al, 'direction', 'Gravity')}",
+                    owner_kind="area",
+                    owner_id=str(face),
                     direction=direction,
                     magnitude=magnitude,
                     vertices=vertices,

@@ -316,9 +316,10 @@ class ModelViewer:
             inactive = getattr(elem, "inactive", False)
             has_parent = getattr(elem, "parent_id", None) is not None
             if collapse:
-                # Collapsed view: unsplit originals (active, no parent) plus
-                # the inactive parents they were subdivided into.
-                return inactive or not has_parent
+                # Collapsed view: the original unsplit members (roots) only.
+                # An intermediate level from a *second* split pass is inactive
+                # but still has a parent, so it must not be drawn over its root.
+                return not has_parent
             # Default view: every active element, including split children.
             return not inactive
 
@@ -472,9 +473,10 @@ class ModelViewer:
                 (a one-sided prism along the pressure direction).
             load_arrows_per_shell: Number of arrows drawn over each area face
                 when ``load_area_style == "arrows"``.
-            show_load_colours: If True, colour each area element by its
+            show_load_colours: If True, recolour the area elements by their
                 shell-face pressure (a diverging warm/cool scale with a scalar
-                bar), independent of ``show_loads``.
+                bar) instead of by section.  This recolours the shells in
+                place, so it only shows while shells are drawn.
             show_extruded: When True, draw each frame as an extruded solid
                 (its cross-section swept along the member) *in addition to* the
                 line skeleton, which remains the pickable layer.
@@ -511,9 +513,22 @@ class ModelViewer:
         if show_frames:
             self._backend.render_frames(self._frames, colors, opacity=opacity, shrink=shrink)
 
+        # Applied-load colour-fill recolours the shells themselves — no separate
+        # overlay — so it is a colouring mode of the shell elements: it only
+        # shows when shells are drawn, and it hides/shows with them.
+        load_values = (
+            area_load_values(self._model, pattern_factors=load_factors)
+            if show_load_colours
+            else None
+        )
         if show_shells:
             self._backend.render_shells(
-                self._shells, colors, opacity=self._shell_opacity, shrink=shrink
+                self._shells,
+                colors,
+                opacity=self._shell_opacity,
+                shrink=shrink,
+                scalar_field=load_values or None,
+                scalar_bar_title="Area load (pressure)" if load_values else None,
             )
 
         if show_nodes:
@@ -540,19 +555,39 @@ class ModelViewer:
                 self._restraints, size=self.restraint_size(), style=self._restraint_style
             )
 
-        if show_loads or show_load_colours:
-            self._loads = extract_load_glyphs(self._model, pattern_factors=load_factors)
-        if show_loads and self._loads:
-            self._backend.render_loads(
-                self._loads,
-                size=self.load_size(),
-                area_style=load_area_style,
-                arrows_per_shell=load_arrows_per_shell,
-            )
-        if show_load_colours:
-            self._backend.render_load_colours(
-                self._shells, area_load_values(self._model, pattern_factors=load_factors)
-            )
+        if show_loads:
+            # A load glyph only draws when its host element is drawn: filter the
+            # extracted glyphs to the visible frames/shells/nodes so hide /
+            # isolate / selection keep their loads with them.
+            visible_frames = {f.elem_id for f in self._frames}
+            visible_areas = {s.area_id for s in self._shells}
+            visible_nodes = {n.node_id for n in self._nodes}
+
+            def _glyph_visible(g) -> bool:
+                if g.owner_kind == "frame":
+                    return g.owner_id in visible_frames
+                if g.owner_kind == "area":
+                    return g.owner_id in visible_areas
+                if g.owner_kind == "node":
+                    return g.owner_id in visible_nodes
+                return True  # no owner — keep (defensive)
+
+            self._loads = [
+                g
+                for g in extract_load_glyphs(
+                    self._model,
+                    pattern_factors=load_factors,
+                    collapse=self._collapse_to_parents,
+                )
+                if _glyph_visible(g)
+            ]
+            if self._loads:
+                self._backend.render_loads(
+                    self._loads,
+                    size=self.load_size(),
+                    area_style=load_area_style,
+                    arrows_per_shell=load_arrows_per_shell,
+                )
 
         return self
 

@@ -132,6 +132,23 @@ def _build_deformed_mesh(
     return frame_mesh, shell_mesh
 
 
+def _root_sap_id(source: dict, kind: str, i: int, n: int) -> Optional[str]:
+    """The ultimate root parent id for element *i*, or ``None`` when unsplit.
+
+    Prefers the ``{kind}_root_sap_id`` array (the ultimate split root);
+    archives written before that array existed fall back to the immediate
+    ``{kind}_parent_sap_id``.
+    """
+    root_arr = source.get(f"{kind}_root_sap_id")
+    if root_arr is not None and i < len(root_arr):
+        pid = str(root_arr[i])
+        if pid and pid not in {"", "?"}:
+            return pid
+    parent_arr = source.get(f"{kind}_parent_sap_id", [""] * n)
+    pid = str(parent_arr[i]) if i < len(parent_arr) else ""
+    return pid if pid and pid not in {"", "?"} else None
+
+
 def _collapse_to_parents(data, source):
     """Post‑process mesh data to replace child elements with their parents.
 
@@ -452,20 +469,18 @@ def _resolve_mesh_data(source, collapse_to_parents=False):
                     "ni_tag": int(source["frame_node_i"][i]),
                     "nj_tag": int(source["frame_node_j"][i]),
                     "sec": str(source["frame_sec_name"][i]),
-                    "parent": str(source.get("frame_parent_sap_id", [""] * nf)[i]),
+                    "parent": _root_sap_id(source, "frame", i, nf),
                 }
             )
 
         ns = len(source.get("shell_eid", []))
-        shell_parent_arr = source.get("shell_parent_sap_id", [""] * ns)
         for i in range(ns):
-            pid = str(shell_parent_arr[i]) if i < len(shell_parent_arr) else ""
             data["shells"].append(
                 {
                     "id": str(source["shell_sap_id"][i]),
                     "sec": str(source["shell_sec_name"][i]),
                     "node_tags": [int(source[f"shell_node_{k}"][i]) for k in (1, 2, 3, 4)],
-                    "parent": pid if pid and pid not in {"", "?"} else None,
+                    "parent": _root_sap_id(source, "shell", i, ns),
                 }
             )
 
@@ -515,15 +530,15 @@ def _resolve_mesh_data(source, collapse_to_parents=False):
             }
 
     if collapse_to_parents:
-        # When collapsing, include inactive parents instead of children
-        # Use the model's full frame_elements (including inactive parents)
+        # When collapsing, include the original unsplit roots only — inactive
+        # split parents *and* unsplit originals, i.e. every element with no
+        # ``parent_id``.  An intermediate level from a second split pass has a
+        # parent and must be excluded, or it would be drawn over its root.
         all_elements = model.frame_elements
         all_assignments = model.frame_assignments
 
-        # Add inactive parent elements as frame entries
         for eid, elem in all_elements.items():
-            if not getattr(elem, "inactive", False):
-                # Not a parent — skip, will be added by the normal loop
+            if getattr(elem, "parent_id", None) is not None:
                 continue
             data["frames"].append(
                 {
@@ -535,9 +550,8 @@ def _resolve_mesh_data(source, collapse_to_parents=False):
                 }
             )
 
-        # Add inactive parent area elements as shell entries
         for aid, area in model.area_elements.items():
-            if not getattr(area, "inactive", False):
+            if getattr(area, "parent_id", None) is not None:
                 continue
             data["shells"].append(
                 {
