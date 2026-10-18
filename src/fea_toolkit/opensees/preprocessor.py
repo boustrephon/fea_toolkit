@@ -14,6 +14,7 @@ from typing import Any, Optional
 from ..io.log import PipelineLog, coerce_log
 from ..model.geometry import (
     apply_frame_end_offsets,
+    compute_t_location,
     convert_area_loads_to_edge_loads,
     derive_rigid_end_offsets,
     find_constraint_edges,
@@ -31,6 +32,7 @@ from ..model.sap_data import (
     FrameElement,
     FrameElementProperties,
     FrameEndOffset,
+    FramePointLoad,
     FrameRelease,
     LayeredShellSection,
     NDMaterial,
@@ -320,6 +322,66 @@ def _resolve_rigid_offset_method(config: dict[str, Any]) -> str:
             f"Unknown rigid_offset_method {method!r}; expected one of {_RIGID_OFFSET_METHODS}."
         )
     return method
+
+
+def _redistribute_frame_point_loads(
+    point_loads: list[FramePointLoad],
+    frame_elements: dict[str, FrameElement],
+    nodes: dict[str, Node],
+) -> list[FramePointLoad]:
+    """Move point loads off split (inactive) parents onto their active leaf.
+
+    A point load authored on a frame that later splits stays keyed to the
+    (now-inactive) parent — which the AnalysisBuilder skips, silently dropping
+    the load.  This normalises it: the authored source is retained
+    (``inactive``) for audit and collapse, and a copy is re-keyed to the active
+    child that contains its ``rdist`` position, recomputed relative to that
+    child.  Point loads on unsplit frames are returned untouched.
+    """
+    out: list[FramePointLoad] = []
+    for idx, pl in enumerate(point_loads):
+        eid = pl.frame_id
+        elem = frame_elements.get(eid)
+        if elem is None or not getattr(elem, "inactive", False):
+            out.append(pl)
+            continue
+        lid = f"{eid}:{idx}"
+        out.append(replace(pl, load_id=lid, inactive=True))
+        r = max(0.0, min(1.0, float(pl.rdist)))
+        cur_eid = eid
+        cur_r = r
+        while True:
+            cur = frame_elements.get(cur_eid)
+            cids = list(getattr(cur, "child_ids", None) or [])
+            if not cids or not getattr(cur, "inactive", False):
+                break
+            ni = nodes.get(cur.node_i)
+            nj = nodes.get(cur.node_j)
+            if ni is None or nj is None:
+                break
+            p1 = (ni.x, ni.y, ni.z)
+            p2 = (nj.x, nj.y, nj.z)
+            bounds = [0.0]
+            for cid in cids:
+                child = frame_elements.get(cid)
+                cnj = nodes.get(child.node_j) if child is not None else None
+                if cnj is None:
+                    bounds.append(1.0)
+                else:
+                    bounds.append(compute_t_location((cnj.x, cnj.y, cnj.z), p1, p2))
+            bounds[-1] = 1.0
+            k = len(cids) - 1
+            for i in range(len(cids)):
+                if bounds[i] - 1e-9 <= cur_r <= bounds[i + 1] + 1e-9:
+                    k = i
+                    break
+            span = bounds[k + 1] - bounds[k]
+            cur_r = (cur_r - bounds[k]) / span if span > 1e-12 else 0.0
+            cur_eid = cids[k]
+        final = frame_elements.get(cur_eid)
+        if cur_eid != eid and final is not None and not getattr(final, "inactive", False):
+            out.append(replace(pl, frame_id=cur_eid, rdist=cur_r, dist=0.0, parent_load_id=lid))
+    return out
 
 
 class Preprocessor:
@@ -788,6 +850,9 @@ class Preprocessor:
         # Build the MeshModel first, then resolve properties directly
         # onto it using the mutated model_data (md) which contains
         # derived elements (split/meshed children).
+        redistributed_point_loads = _redistribute_frame_point_loads(
+            getattr(md, "frame_point_loads", []), new_elems, md.nodes
+        )
         mesh_model = MeshModel(
             nodes=md.nodes,
             frame_elements=new_elems,
@@ -819,7 +884,7 @@ class Preprocessor:
             orphan_nodes=orphan_nodes,
             # Pass through load collections for AnalysisBuilder consumption
             joint_loads=getattr(md, "joint_loads", []),
-            frame_point_loads=getattr(md, "frame_point_loads", []),
+            frame_point_loads=redistributed_point_loads,
             frame_gravity_loads=getattr(md, "frame_gravity_loads", []),
             area_gravity_loads=getattr(md, "area_gravity_loads", []),
             area_uniform_loads=getattr(md, "area_uniform_loads", []),
@@ -1363,9 +1428,12 @@ class Preprocessor:
             # Compute per-child parametric boundaries from split-node positions
             boundaries = [0.0] + [t for t, _ in t_values] + [1.0]
 
-            # Redistribute distributed loads
+            # Redistribute distributed loads — retaining the authored source
+            # (inactive) alongside the children for audit and collapse.
             elem_loads = [ld for ld in dist_loads if ld.frame_id == eid]
-            for ld in elem_loads:
+            for idx, ld in enumerate(elem_loads):
+                lid = f"{eid}:{idx}"
+                new_loads.append(replace(ld, load_id=lid, inactive=True))
                 load_span = ld.rdist_b - ld.rdist_a
                 for i, cid in enumerate(child_ids):
                     a_local = boundaries[i]
@@ -1383,12 +1451,16 @@ class Preprocessor:
                         dist_a=0.0,
                         dist_b=0.0,
                         coord_sys=ld.coord_sys,
+                        parent_load_id=lid,
                     )
                     new_loads.append(new_ld)
 
-            # Redistribute edge loads (from area-to-frame conversion)
+            # Redistribute edge loads (from area-to-frame conversion) — same
+            # retain-authored + child-back-link convention.
             elem_edge_loads = [ld for ld in _edge_loads_in if ld.frame_id == eid]
-            for ld in elem_edge_loads:
+            for idx, ld in enumerate(elem_edge_loads):
+                lid = f"{eid}:edge:{idx}"
+                new_edge_loads.append(replace(ld, load_id=lid, inactive=True))
                 load_span = ld.rdist_b - ld.rdist_a
                 for i, cid in enumerate(child_ids):
                     a_local = boundaries[i]
@@ -1406,6 +1478,7 @@ class Preprocessor:
                         dist_a=0.0,
                         dist_b=0.0,
                         coord_sys=ld.coord_sys,
+                        parent_load_id=lid,
                     )
                     new_edge_loads.append(new_el)
 

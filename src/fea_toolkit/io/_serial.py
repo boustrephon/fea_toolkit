@@ -20,6 +20,8 @@ import typing as t
 
 import numpy as np
 
+from ..model.tree_utils import get_root_parent
+
 #: Allowed stage names, in logical pipeline order.
 STAGE_NAMES = ("sap", "mesh")
 
@@ -84,7 +86,7 @@ def collect_geometry_arrays(
             if p_ni is not None and p_nj is not None:
                 parent_endpoints[eid] = (p_ni.node_tag, p_nj.node_tag)
 
-    f_ids, f_sap, f_parent, f_sec, f_ni, f_nj = [], [], [], [], [], []
+    f_ids, f_sap, f_parent, f_root, f_sec, f_ni, f_nj = [], [], [], [], [], [], []
     f_pni, f_pnj = [], []
     f_t0, f_t1, f_angle, f_card, f_tag = [], [], [], [], []
     frame_assignments = getattr(model, "frame_assignments", {})
@@ -98,6 +100,8 @@ def collect_geometry_arrays(
         f_ids.append(len(f_ids))
         f_sap.append(str(eid))
         f_parent.append(str(elem.parent_id) if elem.parent_id else "")
+        root = get_root_parent(eid, frame_elements)
+        f_root.append(str(root) if root and root != eid else "")
         f_sec.append(frame_assignments.get(eid, ""))
         f_ni.append(ni.node_tag)
         f_nj.append(nj.node_tag)
@@ -129,6 +133,7 @@ def collect_geometry_arrays(
     arrays["frame_eid"] = np.array(f_ids, dtype=int)
     arrays["frame_sap_id"] = np.array(f_sap, dtype=str)
     arrays["frame_parent_sap_id"] = np.array(f_parent, dtype=str)
+    arrays["frame_root_sap_id"] = np.array(f_root, dtype=str)
     arrays["frame_sec_name"] = np.array(f_sec, dtype=str)
     arrays["frame_node_i"] = np.array(f_ni, dtype=int)
     arrays["frame_node_j"] = np.array(f_nj, dtype=int)
@@ -140,7 +145,7 @@ def collect_geometry_arrays(
     arrays["frame_cardinal_point"] = np.array(f_card, dtype=int)
     arrays["frame_elem_tag"] = np.array(f_tag, dtype=int)
     # ── Shells ─────────────────────────────────────────────────────
-    s_ids, s_sap, s_parent, s_sec, s_tag, s_thick = [], [], [], [], [], []
+    s_ids, s_sap, s_parent, s_root, s_sec, s_tag, s_thick = [], [], [], [], [], [], []
     area_assignments = getattr(model, "area_assignments", {})
     if ragged:
         flat: list[int] = []
@@ -154,6 +159,8 @@ def collect_geometry_arrays(
             s_ids.append(len(s_ids))
             s_sap.append(str(aid))
             s_parent.append(str(area.parent_id) if getattr(area, "parent_id", None) else "")
+            root = get_root_parent(aid, getattr(model, "area_elements", {}))
+            s_root.append(str(root) if root and root != aid else "")
             s_sec.append(area_assignments.get(aid, ""))
             s_tag.append(int(getattr(area, "area_tag", 0)))
             s_thick.append(float(getattr(area, "thickness", 0.0)))
@@ -168,6 +175,7 @@ def collect_geometry_arrays(
         arrays["shell_thickness"] = np.array(s_thick, dtype=float)
         arrays["shell_node_ids_flat"] = np.array(flat, dtype=int)
         arrays["shell_node_offsets"] = np.array(offsets, dtype=int)
+        arrays["shell_root_sap_id"] = np.array(s_root, dtype=str)
     else:
         s1, s2, s3, s4 = [], [], [], []
         for aid, area in getattr(model, "area_elements", {}).items():
@@ -181,6 +189,8 @@ def collect_geometry_arrays(
             s_ids.append(len(s_ids))
             s_sap.append(str(aid))
             s_parent.append(str(area.parent_id) if getattr(area, "parent_id", None) else "")
+            root = get_root_parent(aid, getattr(model, "area_elements", {}))
+            s_root.append(str(root) if root and root != aid else "")
             s_sec.append(area_assignments.get(aid, ""))
             s_tag.append(int(getattr(area, "area_tag", 0)))
             s_thick.append(float(getattr(area, "thickness", 0.0)))
@@ -198,6 +208,7 @@ def collect_geometry_arrays(
         arrays["shell_node_2"] = np.array(s2, dtype=int)
         arrays["shell_node_3"] = np.array(s3, dtype=int)
         arrays["shell_node_4"] = np.array(s4, dtype=int)
+        arrays["shell_root_sap_id"] = np.array(s_root, dtype=str)
 
     return arrays
 

@@ -51,6 +51,7 @@ GEOMETRY_ARRAYS: dict[str, tuple] = {
     "frame_eid": ("N_frame", "int"),
     "frame_sap_id": ("N_frame", "str"),
     "frame_parent_sap_id": ("N_frame", "str"),
+    "frame_root_sap_id": ("N_frame", "str"),
     "frame_sec_name": ("N_frame", "str"),
     "frame_node_i": ("N_frame", "int"),
     "frame_node_j": ("N_frame", "int"),
@@ -61,6 +62,7 @@ GEOMETRY_ARRAYS: dict[str, tuple] = {
     "shell_eid": ("N_shell", "int"),
     "shell_sap_id": ("N_shell", "str"),
     "shell_parent_sap_id": ("N_shell", "str"),
+    "shell_root_sap_id": ("N_shell", "str"),
     "shell_sec_name": ("N_shell", "str"),
     "shell_node_1": ("N_shell", "int"),
     "shell_node_2": ("N_shell", "int"),
@@ -527,6 +529,8 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
         "frame_parent_node_i",
         "frame_parent_node_j",
         "shell_parent_sap_id",
+        "frame_root_sap_id",
+        "shell_root_sap_id",
         # Ragged shell form is accepted as an alternative to the
         # fixed-quad ``shell_node_1..4`` layout (see
         # ``io/_serial.py::collect_geometry_arrays``).

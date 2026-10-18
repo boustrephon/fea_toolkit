@@ -324,3 +324,49 @@ class TestLoadDefinitionsCarryThrough:
         assert mesh.load_combinations["COMB1"].entries[0].name == "DEAD"
         assert set(mesh.response_spectrum_functions) == {"RS1"}
         assert mesh.response_spectrum_functions["RS1"].accels == [0.1, 0.2]
+
+
+def test_point_loads_redistribute_onto_split_children():
+    """A point load on a split frame lands on its child + retained source."""
+    from fea_toolkit.model.sap_data import FramePointLoad
+    from fea_toolkit.opensees.preprocessor import _redistribute_frame_point_loads
+
+    nodes = {
+        "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+        "2": Node(node_id="2", node_tag=2, x=4.0, y=0.0, z=0.0),
+        "3": Node(node_id="3", node_tag=3, x=2.0, y=0.0, z=0.0),
+    }
+    frames = {
+        "F1": FrameElement(
+            elem_id="F1",
+            elem_tag=1,
+            node_i="1",
+            node_j="2",
+            inactive=True,
+            child_ids=["F1-0", "F1-1"],
+        ),
+        "F1-0": FrameElement(elem_id="F1-0", elem_tag=2, node_i="1", node_j="3", parent_id="F1"),
+        "F1-1": FrameElement(elem_id="F1-1", elem_tag=3, node_i="3", node_j="2", parent_id="F1"),
+    }
+    point_loads = [
+        FramePointLoad(
+            pattern="DEAD",
+            frame_id="F1",
+            direction="Gravity",
+            load_type="Force",
+            value=-50.0,
+            rdist=0.75,
+            dist=3.0,
+        )
+    ]
+    out = _redistribute_frame_point_loads(point_loads, frames, nodes)
+    authored = [pl for pl in out if pl.inactive]
+    children = [pl for pl in out if not pl.inactive]
+    assert len(authored) == 1
+    assert authored[0].frame_id == "F1"
+    assert authored[0].load_id
+    assert len(children) == 1
+    child = children[0]
+    assert child.frame_id == "F1-1"  # rdist 0.75 falls in the second child
+    assert abs(child.rdist - 0.5) < 1e-9  # (0.75 - 0.5) / 0.5
+    assert child.parent_load_id == authored[0].load_id

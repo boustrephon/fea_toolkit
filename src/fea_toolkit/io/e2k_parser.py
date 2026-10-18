@@ -1813,6 +1813,9 @@ def _get_load_cases_and_patterns(
                 design_action_option="Prog Det",
                 design_action="",
                 run_case=True,
+                case_data={
+                    "CASE - STATIC 1 - LOAD ASSIGNMENTS": [{"LoadName": name, "LoadSF": 1.0}]
+                },
             )
             load_patterns[name] = LoadPattern(
                 name=name,

@@ -32,6 +32,7 @@ analysis results.
 | `frame_eid` | `(N_frame,)` | `int` | Frame element index (0‑based) |
 | `frame_sap_id` | `(N_frame,)` | `str` | SAP2000 FrameID |
 | `frame_parent_sap_id` | `(N_frame,)` | `str` | Parent SAP ID (empty if unsplit) |
+| `frame_root_sap_id` | `(N_frame,)` | `str` | Ultimate split root SAP ID (empty if unsplit) |
 | `frame_sec_name` | `(N_frame,)` | `str` | Section name |
 | `frame_node_i` / `j` | `(N_frame,)` | `int` | I/J node tags |
 | `frame_t_start` | `(N_frame,)` | `float` | Parametric start along parent [0,1] — optional |
@@ -84,6 +85,7 @@ Keys follow the pattern `static/{case_name}/{array_name}`.
 | OpenSees node tag | `int` | `1` | `node_tag` |
 | SAP2000 Frame ID | `str` | `"1"` or `"1-0"` (split) | `frame_sap_id` |
 | Parent SAP ID | `str` | `"1"` (empty = unsplit) | `frame_parent_sap_id` |
+| Root SAP ID | `str` | `"1"` (empty = unsplit) | `frame_root_sap_id` |
 
 Use helpers from `npz_reader.py`:
 

@@ -27,6 +27,7 @@ was analysed).
 |---|---|---|
 | `frame_sap_id` | `["1-0", "1-1", "1-2"]` | Element IDs that were analysed |
 | `frame_parent_sap_id` | `["1", "1", "1"]` | Original SAP2000 ID of each child |
+| `frame_root_sap_id` | `["1", "1", "1"]` | Ultimate split root (same as parent for a single split) |
 | `static/DEAD/fx_i` | `[12.3, 15.1, 11.8]` | Results ordered by the above |
 
 Inactive parents (the original `"1"`) are **excluded** — they have no results.

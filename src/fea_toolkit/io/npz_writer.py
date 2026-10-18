@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Optional
 import numpy as np
 
 from ..model.sap_data import SAPModelData
+from ..model.tree_utils import get_root_parent
 from ..utils import force_unit_label, length_unit_label
 from .results_schema import SCHEMA_VERSION, case_meta_arrays, make_pushover_key, make_static_key
 
@@ -81,7 +82,13 @@ def _collect_geometry(
     arrays["node_z"] = np.array(node_z, dtype=float)
 
     # Frame elements — active only (skip inactive parents)
-    frame_eid, frame_sap_id, frame_parent_sap_id, frame_sec_name = [], [], [], []
+    frame_eid, frame_sap_id, frame_parent_sap_id, frame_root_sap_id, frame_sec_name = (
+        [],
+        [],
+        [],
+        [],
+        [],
+    )
     frame_ni, frame_nj = [], []
     frame_parent_ni, frame_parent_nj = [], []
     frame_t_start, frame_t_end = [], []
@@ -110,6 +117,8 @@ def _collect_geometry(
         frame_eid.append(len(frame_eid))
         frame_sap_id.append(str(eid))
         frame_parent_sap_id.append(str(elem.parent_id) if elem.parent_id else "")
+        root = get_root_parent(eid, _frame_elements)
+        frame_root_sap_id.append(str(root) if root and root != eid else "")
         sec = _frame_assignments.get(eid, "")
         frame_sec_name.append(sec)
         frame_ni.append(ni.node_tag)
@@ -144,6 +153,7 @@ def _collect_geometry(
     arrays["frame_eid"] = np.array(frame_eid, dtype=int)
     arrays["frame_sap_id"] = np.array(frame_sap_id, dtype=str)
     arrays["frame_parent_sap_id"] = np.array(frame_parent_sap_id, dtype=str)
+    arrays["frame_root_sap_id"] = np.array(frame_root_sap_id, dtype=str)
     arrays["frame_sec_name"] = np.array(frame_sec_name, dtype=str)
     arrays["frame_node_i"] = np.array(frame_ni, dtype=int)
     arrays["frame_node_j"] = np.array(frame_nj, dtype=int)
@@ -153,7 +163,13 @@ def _collect_geometry(
     arrays["frame_t_end"] = np.array(frame_t_end, dtype=float)
 
     # Shell elements (quad only)
-    shell_eid, shell_sap_id, shell_sec_name, shell_parent_sap_id = [], [], [], []
+    shell_eid, shell_sap_id, shell_sec_name, shell_parent_sap_id, shell_root_sap_id = (
+        [],
+        [],
+        [],
+        [],
+        [],
+    )
     s1, s2, s3, s4 = [], [], [], []
     for aid, area in _area_elements.items():
         if getattr(area, "inactive", False):
@@ -183,6 +199,8 @@ def _collect_geometry(
         # Record parent SAP ID for collapse_to_parents visualisation
         pid = getattr(area, "parent_id", None)
         shell_parent_sap_id.append(str(pid) if pid else "")
+        root = get_root_parent(aid, _area_elements)
+        shell_root_sap_id.append(str(root) if root and root != aid else "")
 
     arrays["shell_eid"] = np.array(shell_eid, dtype=int)
     arrays["shell_sap_id"] = np.array(shell_sap_id, dtype=str)
@@ -192,6 +210,7 @@ def _collect_geometry(
     arrays["shell_node_3"] = np.array(s3, dtype=int)
     arrays["shell_node_4"] = np.array(s4, dtype=int)
     arrays["shell_parent_sap_id"] = np.array(shell_parent_sap_id, dtype=str)
+    arrays["shell_root_sap_id"] = np.array(shell_root_sap_id, dtype=str)
 
     return arrays
 
