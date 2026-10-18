@@ -274,6 +274,20 @@ class LoadMixin:
         dist_loads = self.mesh_model.frame_dist_loads
         edge_loads = self.edge_loads_from_areas
 
+        # Frame point loads (FRAME LOADS - POINT) are parsed and visualised but
+        # not yet propagated to OpenSees ``eleLoad`` — warn once per builder so
+        # the coverage report does not imply the loads are applied.
+        _point_loads = getattr(self.mesh_model, "frame_point_loads", None) or []
+        if _point_loads and not getattr(self, "_warned_frame_point_loads", False):
+            self._warned_frame_point_loads = True
+            logger.warning(
+                "The model carries %d frame point load(s) (FRAME LOADS - POINT); "
+                "they are parsed and visualised but not yet applied as OpenSees "
+                "eleLoad point loads (see docs/parser_coverage.md and "
+                "_pending_work.md P14).",
+                len(_point_loads),
+            )
+
         patterns_created: set = set()
         self.load_totals = {}
         self._sw_load_totals = {}

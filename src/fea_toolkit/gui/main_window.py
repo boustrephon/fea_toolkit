@@ -194,6 +194,7 @@ class MainWindow(QMainWindow):
         self._store: Any = None
         self._views = ViewRegistry()
         self._source_label = ""
+        self._external_combinations: dict = {}
         self._viewer: Any = None
         self._interactor: Any = None
         self._backend: Any = None

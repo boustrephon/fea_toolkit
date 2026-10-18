@@ -394,7 +394,7 @@ class ETABSParser:
                 "zero-stiffness placeholder.",
                 sec_name,
             )
-            all_sections[sec_name] = GeneralSection(name=sec_name, shape="SD Section", material="")
+            all_sections[sec_name] = GeneralSection(name=sec_name, shape="NA", material="")
 
         # ── Populate area thickness from assigned shell sections ──
         for aid, area in area_elements.items():
@@ -1683,15 +1683,17 @@ def _get_sd_sections(sections: dict[str, list[GroupedLine]]) -> dict[str, SDSect
         if not poly_list:
             continue
         loops = [verts for (_mat, verts) in poly_list]
+        materials = [mat for (mat, _) in poly_list]
+        base_material = base_materials.get(name, "")
         # Apply the section local-axis angle (ANGLE) — a CCW rotation about
         # +local 1, about the composite centroid — so both the stored geometry
         # and the derived I33/I22 sit in the rotated axes ETABS reports them in.
         angle = angles.get(name, 0.0)
-        centroid = _signed_loop_properties(loops)
+        centroid = _signed_loop_properties(loops, materials, base_material)
         if angle != 0.0:
             loops = _rotate_loops_about(loops, centroid["cy"], centroid["cz"], angle)
             poly_list = [(mat, loop) for (mat, _), loop in zip(poly_list, loops)]
-        props = _signed_loop_properties(loops)
+        props = _signed_loop_properties(loops, materials, base_material)
         area = props["A"]
         if area <= 0.0:
             continue

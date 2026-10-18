@@ -57,6 +57,8 @@ GEOMETRY_ARRAYS: dict[str, tuple] = {
     "frame_node_j": ("N_frame", "int"),
     "frame_parent_node_i": ("N_frame", "int"),
     "frame_parent_node_j": ("N_frame", "int"),
+    "frame_root_node_i": ("N_frame", "int"),  # optional — ultimate root endpoint
+    "frame_root_node_j": ("N_frame", "int"),  # optional — ultimate root endpoint
     "frame_t_start": ("N_frame", "float"),  # optional — 0..1 parametric position
     "frame_t_end": ("N_frame", "float"),  # optional — 0..1 parametric position
     "shell_eid": ("N_shell", "int"),
@@ -68,6 +70,10 @@ GEOMETRY_ARRAYS: dict[str, tuple] = {
     "shell_node_2": ("N_shell", "int"),
     "shell_node_3": ("N_shell", "int"),
     "shell_node_4": ("N_shell", "int"),
+    "shell_root_node_1": ("N_shell", "int"),  # optional — ultimate root corner
+    "shell_root_node_2": ("N_shell", "int"),  # optional — ultimate root corner
+    "shell_root_node_3": ("N_shell", "int"),  # optional — ultimate root corner
+    "shell_root_node_4": ("N_shell", "int"),  # optional — ultimate root corner
 }
 
 #: Nodal displacement arrays — sized ``N_node`` (not ``N_frame``).
@@ -528,9 +534,15 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
         "frame_t_end",
         "frame_parent_node_i",
         "frame_parent_node_j",
+        "frame_root_node_i",
+        "frame_root_node_j",
         "shell_parent_sap_id",
         "frame_root_sap_id",
         "shell_root_sap_id",
+        "shell_root_node_1",
+        "shell_root_node_2",
+        "shell_root_node_3",
+        "shell_root_node_4",
         # Ragged shell form is accepted as an alternative to the
         # fixed-quad ``shell_node_1..4`` layout (see
         # ``io/_serial.py::collect_geometry_arrays``).

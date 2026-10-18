@@ -2188,9 +2188,9 @@ class SAP2000Parser:
         (Force/Moment), ``Dir`` (X/Y/Z/Gravity, or a numeric local 1/2/3) and
         ``RelDist``.  The value column is read defensively — the CSI export
         names it ``F`` (the point-load sibling of ``FOverLA``/``FOverLB``), but
-        ``Value`` / ``P`` / ``M`` are accepted too so a slightly different
-        export still parses.  Confirm against a real export if the field name
-        ever proves wrong.
+        ``Value`` / ``P`` / ``M`` / ``Force`` / ``Moment`` are accepted too so a
+        slightly different export still parses; a row with no recognised value
+        column logs a warning instead of silently reading 0.0.
         """
         loads = []
         dir_map = {1: "LocalX", 2: "LocalY", 3: "LocalZ"}
@@ -2199,11 +2199,20 @@ class SAP2000Parser:
             if direction.isdigit():
                 direction = dir_map.get(int(direction), direction)
             value = 0.0
-            for key in ("F", "Value", "P", "M"):
+            value_key = None
+            for key in ("F", "Value", "P", "M", "Force", "Moment"):
                 raw = rec.get(key)
                 if raw is not None and str(raw).strip() != "":
                     value = float(raw)
+                    value_key = key
                     break
+            if value_key is None:
+                logging.warning(
+                    "FRAME LOADS - POINT row for frame %r has no recognised "
+                    "value column (expected one of F / Value / P / M / Force / "
+                    "Moment); using 0.0.",
+                    rec.get("Frame", ""),
+                )
             loads.append(
                 FramePointLoad(
                     pattern=str(rec.get("LoadPat", "")),

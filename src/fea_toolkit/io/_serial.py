@@ -87,7 +87,7 @@ def collect_geometry_arrays(
                 parent_endpoints[eid] = (p_ni.node_tag, p_nj.node_tag)
 
     f_ids, f_sap, f_parent, f_root, f_sec, f_ni, f_nj = [], [], [], [], [], [], []
-    f_pni, f_pnj = [], []
+    f_pni, f_pnj, f_rni, f_rnj = [], [], [], []
     f_t0, f_t1, f_angle, f_card, f_tag = [], [], [], [], []
     frame_assignments = getattr(model, "frame_assignments", {})
     for eid, elem in frame_elements.items():
@@ -115,6 +115,16 @@ def collect_geometry_arrays(
         else:
             f_pni.append(0)
             f_pnj.append(0)
+        # Root endpoints for collapse_to_parents — the ultimate root's tags.
+        if root and root != eid:
+            root_elem = frame_elements.get(root)
+            r_ni = nodes.get(root_elem.node_i) if root_elem is not None else None
+            r_nj = nodes.get(root_elem.node_j) if root_elem is not None else None
+            f_rni.append(r_ni.node_tag if r_ni is not None else 0)
+            f_rnj.append(r_nj.node_tag if r_nj is not None else 0)
+        else:
+            f_rni.append(0)
+            f_rnj.append(0)
         if elem.parent_id and elem.parent_id in parent_lookup:
             t_locs, children = parent_lookup[elem.parent_id]
             try:
@@ -144,6 +154,8 @@ def collect_geometry_arrays(
     arrays["frame_angle"] = np.array(f_angle, dtype=float)
     arrays["frame_cardinal_point"] = np.array(f_card, dtype=int)
     arrays["frame_elem_tag"] = np.array(f_tag, dtype=int)
+    arrays["frame_root_node_i"] = np.array(f_rni, dtype=int)
+    arrays["frame_root_node_j"] = np.array(f_rnj, dtype=int)
     # ── Shells ─────────────────────────────────────────────────────
     s_ids, s_sap, s_parent, s_root, s_sec, s_tag, s_thick = [], [], [], [], [], [], []
     area_assignments = getattr(model, "area_assignments", {})
@@ -178,6 +190,7 @@ def collect_geometry_arrays(
         arrays["shell_root_sap_id"] = np.array(s_root, dtype=str)
     else:
         s1, s2, s3, s4 = [], [], [], []
+        sr1, sr2, sr3, sr4 = [], [], [], []
         for aid, area in getattr(model, "area_elements", {}).items():
             if getattr(area, "inactive", False):
                 continue
@@ -198,6 +211,22 @@ def collect_geometry_arrays(
             s2.append(tags[1])
             s3.append(tags[2])
             s4.append(tags[3])
+            if root and root != aid:
+                root_area = getattr(model, "area_elements", {}).get(root)
+                rtags = (
+                    _node_tags(nodes, list(root_area.node_ids)[:4]) if root_area is not None else []
+                )
+                while len(rtags) < 4:
+                    rtags.append(rtags[-1] if rtags else 0)
+                sr1.append(rtags[0])
+                sr2.append(rtags[1])
+                sr3.append(rtags[2])
+                sr4.append(rtags[3])
+            else:
+                sr1.append(0)
+                sr2.append(0)
+                sr3.append(0)
+                sr4.append(0)
         arrays["shell_eid"] = np.array(s_ids, dtype=int)
         arrays["shell_sap_id"] = np.array(s_sap, dtype=str)
         arrays["shell_parent_sap_id"] = np.array(s_parent, dtype=str)
@@ -209,6 +238,10 @@ def collect_geometry_arrays(
         arrays["shell_node_3"] = np.array(s3, dtype=int)
         arrays["shell_node_4"] = np.array(s4, dtype=int)
         arrays["shell_root_sap_id"] = np.array(s_root, dtype=str)
+        arrays["shell_root_node_1"] = np.array(sr1, dtype=int)
+        arrays["shell_root_node_2"] = np.array(sr2, dtype=int)
+        arrays["shell_root_node_3"] = np.array(sr3, dtype=int)
+        arrays["shell_root_node_4"] = np.array(sr4, dtype=int)
 
     return arrays
 

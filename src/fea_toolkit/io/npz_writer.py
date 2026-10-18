@@ -91,6 +91,7 @@ def _collect_geometry(
     )
     frame_ni, frame_nj = [], []
     frame_parent_ni, frame_parent_nj = [], []
+    frame_root_ni, frame_root_nj = [], []
     frame_t_start, frame_t_end = [], []
 
     # Build parent-index lookup for t_start/t_end computation and parent endpoints.
@@ -134,6 +135,20 @@ def _collect_geometry(
             frame_parent_ni.append(0)
             frame_parent_nj.append(0)
 
+        # Root endpoints for collapse_to_parents visualisation — the ultimate
+        # root's node tags (not the immediate parent's), so grandchildren
+        # collapse in root-axis order.
+        root = get_root_parent(eid, _frame_elements)
+        if root and root != eid:
+            root_elem = _frame_elements.get(root)
+            r_ni = _nodes.get(root_elem.node_i) if root_elem is not None else None
+            r_nj = _nodes.get(root_elem.node_j) if root_elem is not None else None
+            frame_root_ni.append(r_ni.node_tag if r_ni is not None else 0)
+            frame_root_nj.append(r_nj.node_tag if r_nj is not None else 0)
+        else:
+            frame_root_ni.append(0)
+            frame_root_nj.append(0)
+
         # Compute parametric position along parent
         if pid and pid in parent_lookup:
             t_locs, children = parent_lookup[pid]
@@ -159,6 +174,8 @@ def _collect_geometry(
     arrays["frame_node_j"] = np.array(frame_nj, dtype=int)
     arrays["frame_parent_node_i"] = np.array(frame_parent_ni, dtype=int)
     arrays["frame_parent_node_j"] = np.array(frame_parent_nj, dtype=int)
+    arrays["frame_root_node_i"] = np.array(frame_root_ni, dtype=int)
+    arrays["frame_root_node_j"] = np.array(frame_root_nj, dtype=int)
     arrays["frame_t_start"] = np.array(frame_t_start, dtype=float)
     arrays["frame_t_end"] = np.array(frame_t_end, dtype=float)
 
@@ -171,6 +188,7 @@ def _collect_geometry(
         [],
     )
     s1, s2, s3, s4 = [], [], [], []
+    sr1, sr2, sr3, sr4 = [], [], [], []
     for aid, area in _area_elements.items():
         if getattr(area, "inactive", False):
             continue
@@ -201,6 +219,25 @@ def _collect_geometry(
         shell_parent_sap_id.append(str(pid) if pid else "")
         root = get_root_parent(aid, _area_elements)
         shell_root_sap_id.append(str(root) if root and root != aid else "")
+        # Root corner connectivity for collapse_to_parents visualisation.
+        if root and root != aid:
+            root_area = _area_elements.get(root)
+            rtags = []
+            if root_area is not None:
+                for nid in root_area.node_ids[:4]:
+                    nd = _nodes.get(nid)
+                    rtags.append(nd.node_tag if nd is not None else 0)
+            while len(rtags) < 4:
+                rtags.append(rtags[-1] if rtags else 0)
+            sr1.append(rtags[0])
+            sr2.append(rtags[1])
+            sr3.append(rtags[2])
+            sr4.append(rtags[3])
+        else:
+            sr1.append(0)
+            sr2.append(0)
+            sr3.append(0)
+            sr4.append(0)
 
     arrays["shell_eid"] = np.array(shell_eid, dtype=int)
     arrays["shell_sap_id"] = np.array(shell_sap_id, dtype=str)
@@ -211,6 +248,10 @@ def _collect_geometry(
     arrays["shell_node_4"] = np.array(s4, dtype=int)
     arrays["shell_parent_sap_id"] = np.array(shell_parent_sap_id, dtype=str)
     arrays["shell_root_sap_id"] = np.array(shell_root_sap_id, dtype=str)
+    arrays["shell_root_node_1"] = np.array(sr1, dtype=int)
+    arrays["shell_root_node_2"] = np.array(sr2, dtype=int)
+    arrays["shell_root_node_3"] = np.array(sr3, dtype=int)
+    arrays["shell_root_node_4"] = np.array(sr4, dtype=int)
 
     return arrays
 

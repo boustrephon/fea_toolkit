@@ -559,9 +559,9 @@ class ModelViewer:
             # A load glyph only draws when its host element is drawn: filter the
             # extracted glyphs to the visible frames/shells/nodes so hide /
             # isolate / selection keep their loads with them.
-            visible_frames = {f.elem_id for f in self._frames}
-            visible_areas = {s.area_id for s in self._shells}
-            visible_nodes = {n.node_id for n in self._nodes}
+            visible_frames = {f.elem_id for f in self._frames} if show_frames else set()
+            visible_areas = {s.area_id for s in self._shells} if show_shells else set()
+            visible_nodes = {n.node_id for n in self._nodes} if show_nodes else set()
 
             def _glyph_visible(g) -> bool:
                 if g.owner_kind == "frame":

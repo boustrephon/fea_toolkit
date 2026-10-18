@@ -20,8 +20,16 @@ from .sap_data import AreaElement, FrameElement, Node
 __all__ = ["load_rows"]
 
 
-def _family_ids(model: Any, etype: str, eid: str) -> set[str]:
-    """The selected element's split family: root, self and every leaf descendant."""
+def _family_ids(model: Any, etype: str, eid: str, elem: Any = None) -> set[str]:
+    """The selected element's split family: its ancestors, itself and its descendants.
+
+    The family is the root→leaf *path* through the split hierarchy, not the
+    whole root subtree — a sibling of *eid* is deliberately excluded, so a load
+    authored on one child is not reported on its brother.  When the element
+    collection does not contain *eid* (the Inspector is handed the raw, unsplit
+    model while the tree shows a meshed child), the element's own ``parent_id``
+    chain supplies the ancestors the raw collection still recognises.
+    """
     coll = (
         getattr(model, "frame_elements", None) or {}
         if etype == "Frame"
@@ -29,12 +37,22 @@ def _family_ids(model: Any, etype: str, eid: str) -> set[str]:
     )
     if not coll:
         return {eid}
-    from .tree_utils import collect_descendants, get_root_parent
+    from .tree_utils import collect_descendants, get_element_chain
 
-    root = get_root_parent(eid, coll) or eid
-    ids = set(collect_descendants(root, coll))
-    ids.add(root)
+    ids = set(get_element_chain(eid, coll))
+    ids.update(collect_descendants(eid, coll))
     ids.add(eid)
+    if eid not in coll and elem is not None:
+        # Follow the element's own parent chain (the raw collection lacks the
+        # split child) so the authored root is included.
+        current = elem
+        while current is not None:
+            pid = getattr(current, "parent_id", None)
+            if not pid:
+                break
+            ids.add(str(pid))
+            parent = coll.get(str(pid))
+            current = parent if parent is not None else None
     return ids
 
 
@@ -90,10 +108,13 @@ def load_rows(
         return rows
 
     if isinstance(obj, FrameElement):
-        family = _family_ids(model, "Frame", obj.elem_id)
+        eid = obj.elem_id
+        family = _family_ids(model, "Frame", eid, elem=obj)
         rows = []
         for dl in getattr(model, "frame_dist_loads", None) or []:
             if str(getattr(dl, "frame_id", "")) not in family:
+                continue
+            if getattr(dl, "inactive", False) and str(getattr(dl, "frame_id", "")) != eid:
                 continue
             if not _kept(getattr(dl, "pattern", "")):
                 continue
@@ -107,6 +128,8 @@ def load_rows(
         for pl in getattr(model, "frame_point_loads", None) or []:
             if str(getattr(pl, "frame_id", "")) not in family:
                 continue
+            if getattr(pl, "inactive", False) and str(getattr(pl, "frame_id", "")) != eid:
+                continue
             if not _kept(getattr(pl, "pattern", "")):
                 continue
             scale = _scale(getattr(pl, "pattern", ""))
@@ -119,7 +142,7 @@ def load_rows(
         return rows
 
     if isinstance(obj, AreaElement):
-        family = _family_ids(model, "Area", obj.area_id)
+        family = _family_ids(model, "Area", obj.area_id, elem=obj)
         rows = []
         for al in getattr(model, "area_uniform_loads", None) or []:
             if str(getattr(al, "area_id", "")) not in family:

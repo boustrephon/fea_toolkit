@@ -350,33 +350,27 @@ def _add_load_colour_legend(plotter, max_abs: float, title: str = "Area load (pr
         r, g, b = _flag_rgb(t * max_abs, max_abs)
         colors[i] = (int(r * 255), int(g * 255), int(b * 255), 255)
     lut.values = colors
-    try:
-        plotter.add_scalar_bar(
-            title=title,
-            lookup_table=lut,
-            position_x=0.82,
-            position_y=0.1,
-            width=0.06,
-            height=0.6,
-            title_font_size=10,
-            label_font_size=8,
-            bold=False,
-            italic=False,
-            shadow=False,
-        )
-    except TypeError:
-        plotter.add_scalar_bar(
-            title=title,
-            position_x=0.82,
-            position_y=0.1,
-            width=0.06,
-            height=0.6,
-            title_font_size=10,
-            label_font_size=8,
-            bold=False,
-            italic=False,
-            shadow=False,
-        )
+
+    # A standalone scalar bar must not fall back to the last mesh's mapper, so
+    # give it its own mapper carrying the lookup table and the pressure range.
+    import vtk
+
+    mapper = vtk.vtkDataSetMapper()
+    mapper.SetLookupTable(lut)
+    mapper.SetScalarRange(-max_abs, max_abs)
+    plotter.add_scalar_bar(
+        title=title,
+        mapper=mapper,
+        position_x=0.82,
+        position_y=0.1,
+        width=0.06,
+        height=0.6,
+        title_font_size=10,
+        label_font_size=8,
+        bold=False,
+        italic=False,
+        shadow=False,
+    )
 
 
 class PyVistaRenderer(RenderBackend):
@@ -401,6 +395,7 @@ class PyVistaRenderer(RenderBackend):
         # rebuilding the whole scene -- repeated selection highlighting and
         # the GUI's display toggles both need this.
         self._categories: dict = {}
+        self._scalar_bar_title: Optional[str] = None
         if plotter is not None:
             # An injected plotter -- e.g. a ``pyvistaqt.QtInteractor`` that
             # embeds the viewport in a Qt app.  Use it directly and
@@ -681,6 +676,7 @@ class PyVistaRenderer(RenderBackend):
         )
         self._add_actor(actor, "shells")
         if scalar_bar_title and max_abs > 0.0:
+            self._scalar_bar_title = scalar_bar_title
             _add_load_colour_legend(p, max_abs, title=scalar_bar_title)
 
     # ── Nodes ────────────────────────────────────────────────────────
@@ -1105,10 +1101,12 @@ class PyVistaRenderer(RenderBackend):
             if g.magnitude == 0.0:
                 continue
             d = np.asarray(g.direction, dtype=float)
+            sign = 1.0 if g.magnitude >= 0 else -1.0
+            direction = d * sign
             length = abs(g.magnitude) * point_scale
             arrow = pv.Arrow(
-                start=np.asarray(g.anchor, dtype=float) - d * length,
-                direction=d,
+                start=np.asarray(g.anchor, dtype=float) - direction * length,
+                direction=direction,
                 scale=length,
                 tip_length=0.25,
                 tip_radius=0.1,
@@ -1165,12 +1163,14 @@ class PyVistaRenderer(RenderBackend):
                 if g.magnitude == 0.0:
                     continue
                 d = np.asarray(g.direction, dtype=float)
+                sign = 1.0 if g.magnitude >= 0 else -1.0
+                direction = d * sign
                 length = abs(g.magnitude) * area_scale
                 for pt in _points_in_polygon(g.vertices, arrows_per_shell):
                     area_arrows.append(
                         pv.Arrow(
-                            start=pt - d * length,
-                            direction=d,
+                            start=pt - direction * length,
+                            direction=direction,
                             scale=length,
                             tip_length=0.25,
                             tip_radius=0.1,
@@ -1243,8 +1243,12 @@ class PyVistaRenderer(RenderBackend):
             for actor in self._actors:
                 with contextlib.suppress(Exception):
                     p.remove_actor(actor)
+            if self._scalar_bar_title is not None:
+                with contextlib.suppress(Exception):
+                    p.remove_scalar_bar(title=self._scalar_bar_title)
         self._actors = []
         self._categories = {}
+        self._scalar_bar_title = None
 
     def show(self) -> None:
         p = self.plotter

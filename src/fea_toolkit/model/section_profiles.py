@@ -17,6 +17,7 @@ matching CSI and the OpenSees fibre-section patches.
 from __future__ import annotations
 
 import math
+import warnings
 from typing import Any, Optional, Union
 
 from .sap_data import (
@@ -198,6 +199,8 @@ def _loop_inside(inner: list[tuple[float, float]], outer: list[tuple[float, floa
 
 def _signed_loop_properties(
     loops: list[list[tuple[float, float]]],
+    materials: Optional[list[str]] = None,
+    base_material: Optional[str] = None,
 ) -> dict[str, float]:
     """Composite elastic properties of loops, holes subtracted by nesting depth.
 
@@ -205,8 +208,17 @@ def _signed_loop_properties(
     loop's containment depth — the number of other loops that contain it —
     classifies it as an outer boundary (even depth, positive) or a hole (odd
     depth, negative), so the composite area, centroid and second moments treat
-    holes as voids.  Returns ``{"A", "cy", "cz", "I33", "I22"}``; a non-positive
-    signed area returns all zeros.
+    holes as voids.
+
+    ETABS openings are not yet parsed as a distinct marker, so a nested loop is
+    treated as a hole on containment depth alone.  When *materials* and
+    *base_material* are supplied, a nested loop whose material differs from the
+    base material is ambiguous — it may be a nested *solid* (an embedded
+    material) rather than a void, and nested solid materials are unsupported —
+    so a warning is emitted and the loop is still subtracted as a hole.
+
+    Returns ``{"A", "cy", "cz", "I33", "I22"}``; a non-positive signed area
+    returns all zeros.
     """
     if not loops:
         return {"A": 0.0, "cy": 0.0, "cz": 0.0, "I33": 0.0, "I22": 0.0}
@@ -214,7 +226,19 @@ def _signed_loop_properties(
     signs = []
     for i, loop in enumerate(loops):
         depth = sum(i != j and _loop_inside(loop, other) for j, other in enumerate(loops))
-        signs.append(-1.0 if depth % 2 == 1 else 1.0)
+        is_hole = depth % 2 == 1
+        if is_hole and materials is not None and i < len(materials) and base_material:
+            mat = str(materials[i] or "").strip()
+            base = str(base_material or "").strip()
+            if mat and base and mat.upper() != base.upper():
+                warnings.warn(
+                    f"Nested loop {i} has material {mat!r} differing from the "
+                    f"base material {base!r}; nested solid materials are "
+                    "unsupported and the loop is subtracted as a hole.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+        signs.append(-1.0 if is_hole else 1.0)
     area = sum(s * p["A"] for s, p in zip(signs, props))
     if area <= 0.0:
         return {"A": 0.0, "cy": 0.0, "cz": 0.0, "I33": 0.0, "I22": 0.0}

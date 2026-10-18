@@ -381,6 +381,30 @@ def _redistribute_frame_point_loads(
         final = frame_elements.get(cur_eid)
         if cur_eid != eid and final is not None and not getattr(final, "inactive", False):
             out.append(replace(pl, frame_id=cur_eid, rdist=cur_r, dist=0.0, parent_load_id=lid))
+        elif final is None:
+            warnings.warn(
+                f"Frame point load {eid!r} at rdist={pl.rdist} could not be "
+                "redistributed: the walk resolved to a missing frame; it will "
+                "not be applied by the AnalysisBuilder.",
+                UserWarning,
+                stacklevel=2,
+            )
+        elif cur_eid == eid:
+            warnings.warn(
+                f"Frame point load {eid!r} at rdist={pl.rdist} could not be "
+                "redistributed: it remained on the original (inactive) frame; "
+                "it will not be applied by the AnalysisBuilder.",
+                UserWarning,
+                stacklevel=2,
+            )
+        else:
+            warnings.warn(
+                f"Frame point load {eid!r} at rdist={pl.rdist} could not be "
+                f"redistributed: it resolved to inactive frame {cur_eid!r}; it "
+                "will not be applied by the AnalysisBuilder.",
+                UserWarning,
+                stacklevel=2,
+            )
     return out
 
 

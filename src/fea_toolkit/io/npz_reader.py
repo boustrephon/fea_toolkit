@@ -154,6 +154,8 @@ GEOMETRY_ARRAY_KEYS = frozenset(
         "frame_node_j",
         "frame_parent_node_i",
         "frame_parent_node_j",
+        "frame_root_node_i",
+        "frame_root_node_j",
         "frame_t_start",
         "frame_t_end",
         "shell_eid",
@@ -165,6 +167,10 @@ GEOMETRY_ARRAY_KEYS = frozenset(
         "shell_node_2",
         "shell_node_3",
         "shell_node_4",
+        "shell_root_node_1",
+        "shell_root_node_2",
+        "shell_root_node_3",
+        "shell_root_node_4",
     }
 )
 

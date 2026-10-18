@@ -202,23 +202,30 @@ def _collapse_to_parents(data, source):
                 if getattr(elem, "inactive", False):
                     parent_frame_endpoints[eid] = (elem.node_i, elem.node_j)
 
-        # For NPZ sources, read parent endpoints from the new arrays
-        # Keyed by parent_sap_id so the collapse_to_parents lookup by pid works.
+        # For NPZ sources, read the *root* endpoints — keyed by the ultimate
+        # split root so grandchildren collapse in root-axis order, not by their
+        # immediate parent's endpoints.
         npz_parent_node_i: dict[str, int] = {}
         npz_parent_node_j: dict[str, int] = {}
         if isinstance(source, dict):
             nf = len(source.get("frame_eid", []))
+            root_ni = source.get("frame_root_node_i")
+            root_nj = source.get("frame_root_node_j")
             for i in range(nf):
-                pid = str(source.get("frame_parent_sap_id", [""] * nf)[i])
-                sid = str(source["frame_sap_id"][i])
-                pni = int(source.get("frame_parent_node_i", [0] * nf)[i])
-                pnj = int(source.get("frame_parent_node_j", [0] * nf)[i])
-                if pid and pni != 0 and pnj != 0:
-                    npz_parent_node_i[pid] = pni
-                    npz_parent_node_j[pid] = pnj
-                elif not pid or pid == sid:
-                    # unsplit elements store their own node tags
-                    pass
+                root = _root_sap_id(source, "frame", i, nf)
+                if not root:
+                    continue
+                if root_ni is not None and root_nj is not None:
+                    pni = int(root_ni[i])
+                    pnj = int(root_nj[i])
+                else:
+                    # Archives written before frame_root_node_* existed fall back
+                    # to the immediate parent's endpoints.
+                    pni = int(source.get("frame_parent_node_i", [0] * nf)[i])
+                    pnj = int(source.get("frame_parent_node_j", [0] * nf)[i])
+                if pni != 0 and pnj != 0:
+                    npz_parent_node_i.setdefault(root, pni)
+                    npz_parent_node_j.setdefault(root, pnj)
 
         for fr in data["frames"]:
             pid = fr.get("parent")
@@ -297,6 +304,21 @@ def _collapse_to_parents(data, source):
         data["frames"] = collapsed_frames
 
     # ── Collapse shells ─────────────────────────────────────────
+    # For NPZ sources, the root shell's original corner tags (for the root
+    # polygon reconstruction) are keyed by the ultimate split root.
+    npz_shell_root_tags: dict[str, list[int]] = {}
+    if isinstance(source, dict):
+        ns = len(source.get("shell_eid", []))
+        root_arrays = [source.get(f"shell_root_node_{k}") for k in (1, 2, 3, 4)]
+        if all(arr is not None for arr in root_arrays):
+            for i in range(ns):
+                root = _root_sap_id(source, "shell", i, ns)
+                if not root:
+                    continue
+                tags = [int(arr[i]) for arr in root_arrays]
+                if all(t != 0 for t in tags):
+                    npz_shell_root_tags.setdefault(root, tags)
+
     shell_parent_groups: dict[str, list] = {}
     for sh in data["shells"]:
         pid = sh.get("parent")
@@ -313,20 +335,34 @@ def _collapse_to_parents(data, source):
                     continue
                 seen_shell_parents.add(pid)
                 children = shell_parent_groups.get(pid, [])
-                # Reconstruct parent from first child's parent reference
-                # (parent node IDs are stored in the original area_element)
+                # Reconstruct the root polygon from its original connectivity:
+                # the builder path reads the inactive parent area's node ids;
+                # the NPZ path reads the root's corner tags written per
+                # descendant (shell_root_node_1..4).
                 parent_node_ids = None
+                parent_node_tags = None
                 if not isinstance(source, dict):
                     model = source.model if hasattr(source, "model") else source
                     parent_area = model.area_elements.get(pid)
                     if parent_area is not None:
                         parent_node_ids = parent_area.node_ids[:4]
+                else:
+                    parent_node_tags = npz_shell_root_tags.get(pid)
                 if parent_node_ids:
                     collapsed_shells.append(
                         {
                             "id": pid,
                             "sec": children[0].get("sec", "unknown"),
                             "node_ids": parent_node_ids,
+                            "inactive": False,
+                        }
+                    )
+                elif parent_node_tags:
+                    collapsed_shells.append(
+                        {
+                            "id": pid,
+                            "sec": children[0].get("sec", "unknown"),
+                            "node_tags": list(parent_node_tags),
                             "inactive": False,
                         }
                     )
