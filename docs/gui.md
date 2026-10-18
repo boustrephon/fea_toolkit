@@ -359,8 +359,8 @@ menu appears only when the right button is *not* the selecting button — under 
 | **View ▸ Display ▸ Show restraints** | Live — support symbols at restrained nodes (one glyph per restrained DOF) |
 | **View ▸ Display ▸ Clear highlights** | Live — drop the selection highlight |
 | **View ▸ Display ▸ Show element labels** | Not yet — nothing draws labels, so the toggle waits for that renderer ([P23](_pending_work.md)) |
-| **View ▸ Display ▸ Show loads** | Live — draws the **Load** source's glyphs (rectangular/trapezoidal flags for line loads, arrows for point loads, a grid of arrows or a one-sided extrusion flag for area pressures), scaled by **Loads %**; the **Area** selector picks the area-glyph style |
-| **View ▸ Display ▸ Colour area loads** | Live — colours each area element by its shell-face pressure (diverging scale with a colour bar); the exact value is in the Inspector when the element is selected |
+| **View ▸ Display ▸ Show loads** | Live — draws the **Load** source's glyphs (rectangular/trapezoidal flags for line loads, arrows for point loads, a grid of arrows or a one-sided extrusion flag for area pressures), scaled by **Loads %**; the **Area** selector picks the area-glyph style.  Glyphs draw only on the elements they act on, so **Show beams/shells/nodes** hide them with their hosts |
+| **View ▸ Display ▸ Colour area loads** | Live — recolours the area elements themselves by their shell-face pressure (diverging scale with a colour bar), tied to **Show shells**; the exact value is in the Inspector when the element is selected |
 | **View ▸ Display ▸ Show force diagrams** | Live — the same toggle as **Results ▸ Force diagrams**, kept in lockstep |
 
 ### Display quality

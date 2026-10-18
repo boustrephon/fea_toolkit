@@ -70,7 +70,19 @@ accept three source types:
 When ``collapse_to_parents=True``, split children are replaced by their
 original unsplit parent elements.  The displayed geometry then matches what
 the engineer drew in SAP2000 (one beam per bay, one column per storey),
-while the underlying analysis still uses the solver‑ready split mesh.
+while the underlying analysis still uses the solver‑ready split mesh.  Only
+the **roots** are drawn: an intermediate level produced by a *second* split
+pass (an inactive element that itself has a parent) is skipped, so a
+twice-split member collapses to one original member rather than a stack of
+parents.
+
+Applied loads collapse the same way: the Preprocessor retains the **authored**
+load (keyed to the parent, flagged ``inactive``) alongside the redistributed
+child loads, each child carrying ``parent_load_id`` back to its source.  A
+collapsed view therefore draws the authored load on the parent (a single flag
+on the unsplit member, one pressure face on the unsplit panel), while the
+default view draws the redistributed children.  The colour-fill works in both
+modes because ``area_load_values`` keys both the panel id and its leaves.
 
 This works for all three source types:
 
@@ -160,12 +172,16 @@ itself is never modified:
   at; the peak *intensity* of line loads, the peak *force* of point loads and the
   peak *pressure* of area loads are each normalised to that length, so every kind
   stays legible together.  ``load_arrows_per_shell`` sets how many arrows cover
-  each area face.  Off by default — the glyphs are dense.  See
+  each area face.  Off by default — the glyphs are dense.  A glyph only draws
+  when its host element (frame, area or node) is drawn, so hiding a beam or
+  slab also hides the loads applied to it.  See
   :mod:`fea_toolkit.model.load_glyphs`.
-* ``show_load_colours`` colours each area element by its shell-face pressure (the
-  diverging warm/cool scale with a scalar bar), independent of ``show_loads`` —
-  a value can be read back from the colour bar or, exactly, from the GUI's
-  Inspector (:func:`fea_toolkit.model.load_queries.load_rows`).
+* ``show_load_colours`` recolours the area elements themselves by their
+  shell-face pressure (the diverging warm/cool scale with a scalar bar) instead
+  of by section — there is no separate overlay, so the colour-fill shows and
+  hides with the shells.  A value can be read back from the colour bar or,
+  exactly, from the GUI's Inspector
+  (:func:`fea_toolkit.model.load_queries.load_rows`).
 
 Change the opacity live, without re-drawing:
 
