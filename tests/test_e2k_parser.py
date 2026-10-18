@@ -918,6 +918,7 @@ def test_sd_section_polygon_and_mirror_are_not_transposed():
         (-0.6588881677633710, -3.978078025653028),
         (-1.3838881677633712, -5.233815025653028),
     ]
+    assert len(loop) == len(expected)
     for got, want in zip(loop, expected):
         assert got[0] == pytest.approx(want[0])
         assert got[1] == pytest.approx(want[1])
@@ -931,6 +932,7 @@ def test_sd_section_polygon_and_mirror_are_not_transposed():
         (48.49152257932746, -4.981792979394353),
         (49.691522579327454, -7.0602529793943525),
     ]
+    assert len(loop) == len(expected)
     for got, want in zip(loop, expected):
         assert got[0] == pytest.approx(want[0])
         assert got[1] == pytest.approx(want[1])

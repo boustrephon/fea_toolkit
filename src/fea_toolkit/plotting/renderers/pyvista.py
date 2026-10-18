@@ -1156,7 +1156,9 @@ class PyVistaRenderer(RenderBackend):
                     "loads_shells",
                 )
         else:
-            area_arrows = []
+            area_points: list[np.ndarray] = []
+            area_directions: list[np.ndarray] = []
+            area_lengths: list[float] = []
             for g in loads:
                 if g.kind != "area" or g.vertices is None or g.direction is None:
                     continue
@@ -1167,20 +1169,23 @@ class PyVistaRenderer(RenderBackend):
                 direction = d * sign
                 length = abs(g.magnitude) * area_scale
                 for pt in _points_in_polygon(g.vertices, arrows_per_shell):
-                    area_arrows.append(
-                        pv.Arrow(
-                            start=pt - direction * length,
-                            direction=direction,
-                            scale=length,
-                            tip_length=0.25,
-                            tip_radius=0.1,
-                            shaft_radius=0.03,
-                        )
-                    )
-            if area_arrows:
-                merged = pv.merge(area_arrows) if len(area_arrows) > 1 else area_arrows[0]
+                    # A glyph's tail sits on its point, so back the point off by
+                    # the arrow length to keep the tip on the face.
+                    area_points.append(np.asarray(pt, dtype=float) - direction * length)
+                    area_directions.append(direction)
+                    area_lengths.append(length)
+            if area_points:
+                cloud = pv.PolyData(np.asarray(area_points, dtype=float))
+                cloud["vectors"] = np.asarray(area_directions, dtype=float)
+                cloud["lengths"] = np.asarray(area_lengths, dtype=float)
+                arrows = cloud.glyph(
+                    orient="vectors",
+                    scale="lengths",
+                    factor=1.0,
+                    geom=pv.Arrow(tip_length=0.25, tip_radius=0.1, shaft_radius=0.03),
+                )
                 self._add_overlay(
-                    p.add_mesh(merged, color=color, lighting=False, show_scalar_bar=False),
+                    p.add_mesh(arrows, color=color, lighting=False, show_scalar_bar=False),
                     "loads_shells",
                 )
 
