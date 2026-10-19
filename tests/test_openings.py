@@ -3,6 +3,7 @@
 import pytest
 
 from fea_toolkit.model.openings import (
+    conform_cell_to_openings,
     net_area,
     opening_overlap_area,
     point_in_polygon_2d,
@@ -151,3 +152,108 @@ def test_subdivide_area_mesh_drops_cells_inside_opening():
     assert areas["S1"].inactive is True
     assert areas["O1"].opening is True
     assert areas["O1"].inactive is False
+
+
+def test_net_area_of_opening_area_is_zero():
+    """An opening (void) area itself contributes zero net area."""
+    md = _slab_with_opening()
+    opening = md.area_elements["O1"]
+    assert net_area(md, opening) == 0.0
+
+
+def test_opening_overlap_area_unions_overlapping_openings():
+    """Overlapping openings contribute their union area, not the sum."""
+    nodes = {
+        "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+        "2": Node(node_id="2", node_tag=2, x=4.0, y=0.0, z=0.0),
+        "3": Node(node_id="3", node_tag=3, x=4.0, y=4.0, z=0.0),
+        "4": Node(node_id="4", node_tag=4, x=0.0, y=4.0, z=0.0),
+        "a1": Node(node_id="a1", node_tag=5, x=1.0, y=1.0, z=0.0),
+        "a2": Node(node_id="a2", node_tag=6, x=3.0, y=1.0, z=0.0),
+        "a3": Node(node_id="a3", node_tag=7, x=3.0, y=3.0, z=0.0),
+        "a4": Node(node_id="a4", node_tag=8, x=1.0, y=3.0, z=0.0),
+        "b1": Node(node_id="b1", node_tag=9, x=2.0, y=2.0, z=0.0),
+        "b2": Node(node_id="b2", node_tag=10, x=3.5, y=2.0, z=0.0),
+        "b3": Node(node_id="b3", node_tag=11, x=3.5, y=3.5, z=0.0),
+        "b4": Node(node_id="b4", node_tag=12, x=2.0, y=3.5, z=0.0),
+    }
+    slab = AreaElement(area_id="S1", area_tag=1, node_ids=["1", "2", "3", "4"])
+    areas = {
+        "S1": slab,
+        "A": AreaElement(area_id="A", area_tag=2, node_ids=["a1", "a2", "a3", "a4"], opening=True),
+        "B": AreaElement(area_id="B", area_tag=3, node_ids=["b1", "b2", "b3", "b4"], opening=True),
+    }
+    md = SAPModelData(
+        nodes=nodes,
+        restraints={},
+        materials={},
+        sections={},
+        frame_elements={},
+        area_elements=areas,
+        frame_assignments={},
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
+    )
+    # A = 4.0, B = 2.25, their overlap = 1.0 → union = 5.25 (not 6.25).
+    assert opening_overlap_area(md, slab) == pytest.approx(5.25)
+    assert net_area(md, slab) == pytest.approx(16.0 - 5.25)
+
+
+def test_opening_overlap_area_handles_concave_parent():
+    """An opening clipped against a concave parent gives the right area."""
+    nodes = {
+        "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+        "2": Node(node_id="2", node_tag=2, x=2.0, y=0.0, z=0.0),
+        "3": Node(node_id="3", node_tag=3, x=2.0, y=1.0, z=0.0),
+        "4": Node(node_id="4", node_tag=4, x=1.0, y=1.0, z=0.0),
+        "5": Node(node_id="5", node_tag=5, x=1.0, y=2.0, z=0.0),
+        "6": Node(node_id="6", node_tag=6, x=0.0, y=2.0, z=0.0),
+        "o1": Node(node_id="o1", node_tag=7, x=0.0, y=0.0, z=0.0),
+        "o2": Node(node_id="o2", node_tag=8, x=2.0, y=0.0, z=0.0),
+        "o3": Node(node_id="o3", node_tag=9, x=2.0, y=2.0, z=0.0),
+        "o4": Node(node_id="o4", node_tag=10, x=0.0, y=2.0, z=0.0),
+    }
+    l_shape = AreaElement(area_id="L", area_tag=1, node_ids=["1", "2", "3", "4", "5", "6"])
+    opening = AreaElement(area_id="O", area_tag=2, node_ids=["o1", "o2", "o3", "o4"], opening=True)
+    md = SAPModelData(
+        nodes=nodes,
+        restraints={},
+        materials={},
+        sections={},
+        frame_elements={},
+        area_elements={"L": l_shape, "O": opening},
+        frame_assignments={},
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
+    )
+    # The 2×2 opening fully covers the L-shape (area 3), so the overlap is 3.
+    assert opening_overlap_area(md, l_shape) == pytest.approx(3.0)
+
+
+def test_conform_cell_to_openings_uses_boundary_not_centroid():
+    cell = [(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]
+    # Partially-covered cell (centroid outside) is kept.
+    assert conform_cell_to_openings(cell, [[(1.0, 1.0), (3.0, 1.0), (3.0, 3.0), (1.0, 3.0)]]) == [
+        cell
+    ]
+    # Fully-covered cell is dropped.
+    assert conform_cell_to_openings(cell, [[(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]]) == []
+    # Disjoint opening keeps the cell.
+    assert conform_cell_to_openings(cell, [[(5.0, 5.0), (6.0, 5.0), (6.0, 6.0), (5.0, 6.0)]]) == [
+        cell
+    ]
+
+
+def test_opening_nodes_kept_in_mesh_model_nodes():
+    """Unconnected opening corners stay in ``MeshModel.nodes`` for net_area."""
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+
+    mm = preprocess_model(_slab_with_opening(), {"create_shells": True, "verbose": False})
+
+    # The opening's corner nodes survive in ``nodes`` (for net_area resolution)…
+    for nid in ("o1", "o2", "o3", "o4"):
+        assert nid in mm.nodes
+    # …and are recorded as excluded from OpenSees node creation.
+    assert mm.opening_node_ids == {"o1", "o2", "o3", "o4"}

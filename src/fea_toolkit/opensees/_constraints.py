@@ -742,9 +742,16 @@ class ConstraintMixin:
         return reports
 
     def _create_nodes(self) -> None:
-        """Create OpenSees nodes from MeshModel nodes."""
+        """Create OpenSees nodes from MeshModel nodes.
+
+        Unconnected opening (void) corner nodes are kept in ``nodes`` for
+        ``net_area`` resolution but carry no element, so they are skipped.
+        """
         self._created_node_tags = set()
-        for node in self.mesh_model.nodes.values():
+        skip = getattr(self.mesh_model, "opening_node_ids", set()) or set()
+        for node_id, node in self.mesh_model.nodes.items():
+            if node_id in skip:
+                continue
             tag = node.node_tag
             ops.node(tag, node.x, node.y, node.z)
             self._created_node_tags.add(tag)

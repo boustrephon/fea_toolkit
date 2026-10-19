@@ -469,9 +469,11 @@ def area_local_axes(vertices) -> Optional[tuple[np.ndarray, np.ndarray, np.ndarr
     Follows the CSI (SAP2000/ETABS) default area local-axis convention:
 
     * ``l3`` is the unit normal (right-hand rule from the vertex order);
-    * ``l1`` is the projection of global +X onto the face plane, falling back
-      to the projection of global +Y when the face is normal to global X;
-    * ``l2`` = ``l3 × l1`` completes the right-handed system.
+    * ``l2`` is the projection of global +Z onto the face plane (the
+      "vertical" reference), falling back to global +Y for (near-)horizontal
+      faces where +Z is the face normal itself;
+    * ``l1`` = ``l2 × l3`` completes the right-handed frame, and is horizontal
+      for any inclined face.
 
     Args:
         vertices: Polygon vertices in order (at least 3), as a list of
@@ -483,16 +485,13 @@ def area_local_axes(vertices) -> Optional[tuple[np.ndarray, np.ndarray, np.ndarr
     l3 = polygon_unit_normal(vertices)
     if l3 is None:
         return None
-    l1: Optional[np.ndarray] = None
-    for ref in (np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0])):
-        candidate = ref - np.dot(ref, l3) * l3
-        norm = float(np.linalg.norm(candidate))
-        if norm > 1e-12:
-            l1 = candidate / norm
-            break
-    if l1 is None:  # pragma: no cover - unreachable for a valid plane
-        return None
-    l2 = np.cross(l3, l1)
+    global_z = np.array([0.0, 0.0, 1.0])
+    l2 = global_z - np.dot(global_z, l3) * l3
+    norm = float(np.linalg.norm(l2))
+    # Horizontal face: global +Z is the face normal, so use +Y as local 2
+    # (also for downward-facing faces, whose normal is -Z).
+    l2 = np.array([0.0, 1.0, 0.0]) if norm <= 1e-12 else l2 / norm
+    l1 = np.cross(l2, l3)
     return l1, l2, l3
 
 

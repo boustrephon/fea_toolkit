@@ -872,6 +872,18 @@ class Preprocessor:
         # group master, and dropping them would silently drop the body.
         for _name, _body_ids, _dof_flags in rigid_body_components:
             referenced.update(_body_ids)
+        # Opening (void) corner nodes are kept in ``nodes`` so ``net_area`` can
+        # resolve an opening against its parent, but unconnected ones (not
+        # referenced by any frame/shell/joint/constraint) carry no element and
+        # are excluded from OpenSees node creation.
+        opening_node_ids: set[str] = set()
+        for aid, ae in md.area_elements.items():
+            if not getattr(ae, "opening", False):
+                continue
+            for nid in ae.node_ids:
+                if nid in md.nodes and nid not in referenced:
+                    opening_node_ids.add(nid)
+                    referenced.add(nid)
         orphan_nodes: dict[str, Node] = {}
         for nid in list(md.nodes.keys()):
             if nid not in referenced:
@@ -915,6 +927,7 @@ class Preprocessor:
             section_tags=section_tags,
             loads_only_area_ids=loads_only_area_ids,
             orphan_nodes=orphan_nodes,
+            opening_node_ids=opening_node_ids,
             # Pass through load collections for AnalysisBuilder consumption
             joint_loads=getattr(md, "joint_loads", []),
             added_masses=getattr(md, "added_masses", {}),

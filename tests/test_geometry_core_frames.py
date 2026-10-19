@@ -1064,6 +1064,21 @@ def test_area_local_axes_and_direction_resolution():
     assert np.allclose(l2, [0.0, 0.0, 1.0])
     assert np.allclose(l3, [1.0, 0.0, 0.0])
 
+    # Inclined ramp: local 1 is horizontal (+X), local 2 follows the vertical
+    # reference (its +Z component is positive), local 3 is the face normal.
+    inclined = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 1.0, 1.0), (0.0, 1.0, 1.0)]
+    l1, l2, l3 = area_local_axes(inclined)
+    assert abs(l1[2]) < 1e-12  # local 1 horizontal
+    assert l1[0] > 0.999
+    assert l2[2] > 0.0  # local 2 points "up" along the vertical reference
+    assert np.allclose(l3, [0.0, -0.70710678, 0.70710678], atol=1e-6)
+
+    # Reversed (downward-facing) horizontal face: local 2 stays +Y, local 3 = -Z.
+    reversed_face = [(0.0, 0.0, 0.0), (0.0, 4.0, 0.0), (4.0, 4.0, 0.0), (4.0, 0.0, 0.0)]
+    l1, l2, l3 = area_local_axes(reversed_face)
+    assert np.allclose(l2, [0.0, 1.0, 0.0])
+    assert np.allclose(l3, [0.0, 0.0, -1.0])
+
     # Direction resolution maps the local-axis spellings to those vectors.
     assert np.allclose(area_load_direction("Local3", horizontal), [0.0, 0.0, 1.0])
     assert np.allclose(area_load_direction("Local1", horizontal), [1.0, 0.0, 0.0])

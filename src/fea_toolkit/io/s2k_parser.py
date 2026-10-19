@@ -1366,6 +1366,11 @@ class SAP2000Parser:
         for a in self._raw_tables.get("AREA SECTION ASSIGNMENTS", []):
             aid = str(a.get("Area", "0"))
             sec = a.get("Section", "")
+            # The raw-table parser converts the reserved ``Section="NONE"``
+            # marker (an opening/void area) to ``None``; recover it so
+            # :func:`is_opening_section` can still flag the area as a void.
+            if sec is None:
+                sec = "NONE"
             if aid != "0" and sec:
                 assign[aid] = sec
         return assign

@@ -22,6 +22,7 @@ from .geometry_core import area_local_axes, polygon_area_3d
 
 __all__ = [
     "area_vertices",
+    "conform_cell_to_openings",
     "net_area",
     "opening_overlap_area",
     "opening_polygons_2d",
@@ -142,6 +143,121 @@ def _clip_sutherland_hodgman(subject, clip):
     return output
 
 
+def _point_in_triangle_2d(p, a, b, c, tol: float = 1e-12) -> bool:
+    """Whether *p* is inside or on the CCW triangle ``(a, b, c)``."""
+
+    def _cross(o, p1, p2):
+        return (p1[0] - o[0]) * (p2[1] - o[1]) - (p1[1] - o[1]) * (p2[0] - o[0])
+
+    d1 = _cross(a, b, p)
+    d2 = _cross(b, c, p)
+    d3 = _cross(c, a, p)
+    has_neg = d1 < -tol or d2 < -tol or d3 < -tol
+    has_pos = d1 > tol or d2 > tol or d3 > tol
+    return not (has_neg and has_pos)
+
+
+def _triangulate(poly):
+    """Triangulate a simple 2-D polygon (any winding) via ear clipping.
+
+    Returns a list of counter-clockwise triangles whose union is exactly the
+    polygon.  Handles concave polygons, which Sutherland–Hodgman clipping
+    cannot (it needs a convex clip).
+    """
+    pts = [tuple(float(v) for v in p) for p in poly]
+    n = len(pts)
+    if n < 3:
+        return []
+    if _signed_area_2d(pts) < 0:
+        pts.reverse()
+    idx = list(range(n))
+    triangles = []
+    guard = 0
+    while len(idx) > 3 and guard < n * n:
+        guard += 1
+        ear_k = None
+        for k in range(len(idx)):
+            i0, i1, i2 = idx[k - 1], idx[k], idx[(k + 1) % len(idx)]
+            a, b, c = pts[i0], pts[i1], pts[i2]
+            cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+            if cross <= 0:
+                continue  # reflex / collinear vertex — not an ear
+            ear_vertices = {i0, i1, i2}
+            if any(
+                idx[j] not in ear_vertices and _point_in_triangle_2d(pts[idx[j]], a, b, c)
+                for j in range(len(idx))
+            ):
+                continue
+            ear_k = k
+            break
+        if ear_k is None:
+            break
+        k = ear_k
+        i0, i1, i2 = idx[k - 1], idx[k], idx[(k + 1) % len(idx)]
+        triangles.append([pts[i0], pts[i1], pts[i2]])
+        del idx[k]
+    if len(idx) == 3:
+        triangles.append([pts[idx[0]], pts[idx[1]], pts[idx[2]]])
+    elif len(idx) > 3:
+        # Degenerate fallback (fan) — only correct for convex, but keeps a
+        # coverage rather than returning nothing.
+        for i in range(1, len(idx) - 1):
+            triangles.append([pts[idx[0]], pts[idx[i]], pts[idx[i + 1]]])
+    return triangles
+
+
+def _polygon_union_area(polygons) -> float:
+    """Union area of a set of 2-D polygons (exact vertical scanline)."""
+    if not polygons:
+        return 0.0
+    ys: set[float] = set()
+    per_polygon: list[list[tuple[float, float, float, float]]] = []
+    for poly in polygons:
+        if len(poly) < 3:
+            continue
+        edges: list[tuple[float, float, float, float]] = []
+        n = len(poly)
+        for i in range(n):
+            x0, y0 = poly[i]
+            x1, y1 = poly[(i + 1) % n]
+            if y0 == y1:
+                continue
+            if y0 > y1:
+                x0, y0, x1, y1 = x1, y1, x0, y0
+            edges.append((y0, y1, x0, x1))
+            ys.add(y0)
+            ys.add(y1)
+        if edges:
+            per_polygon.append(edges)
+    if not per_polygon:
+        return 0.0
+    y_sorted = sorted(ys)
+    total = 0.0
+    for a, b in zip(y_sorted, y_sorted[1:]):
+        if b - a <= 1e-15:
+            continue
+        y_mid = 0.5 * (a + b)
+        intervals: list[tuple[float, float]] = []
+        for edges in per_polygon:
+            xs: list[float] = []
+            for y0, y1, x0, x1 in edges:
+                if y0 <= y_mid < y1:
+                    t = (y_mid - y0) / (y1 - y0)
+                    xs.append(x0 + t * (x1 - x0))
+            xs.sort()
+            for k in range(0, len(xs) - 1, 2):
+                intervals.append((xs[k], xs[k + 1]))
+        intervals.sort()
+        merged: list[list[float]] = []
+        for lo, hi in intervals:
+            if not merged or lo > merged[-1][1]:
+                merged.append([lo, hi])
+            elif hi > merged[-1][1]:
+                merged[-1][1] = hi
+        total += sum(hi - lo for lo, hi in merged) * (b - a)
+    return total
+
+
 def opening_polygons_2d(
     area_elements: dict[str, Any],
     nodes: dict[str, Any],
@@ -221,6 +337,10 @@ def opening_polygons_2d(
 def opening_overlap_area(model: Any, area: Any, rel_tol: float = 1e-6) -> float:
     """Total area of *area* covered by coplanar opening (void) areas.
 
+    Clips each opening against the (possibly concave) parent by triangulating
+    the parent first, then unions the clipped pieces so overlapping openings
+    contribute their union area rather than being double-counted.
+
     Args:
         model: A ``SAPModelData`` or ``MeshModel`` (exposes ``area_elements``
             and ``nodes``).
@@ -229,28 +349,65 @@ def opening_overlap_area(model: Any, area: Any, rel_tol: float = 1e-6) -> float:
             characteristic size (unit-agnostic).
 
     Returns:
-        The summed area (in the model's length unit squared) of the portions of
+        The union area (in the model's length unit squared) of the portions of
         opening polygons that lie inside *area*.
     """
     info = opening_polygons_2d(model.area_elements, model.nodes, area, rel_tol)
     if info is None:
         return 0.0
     clip, openings, _axes, _verts = info
-    total = 0.0
-    for subject in openings:
-        clipped = _clip_sutherland_hodgman(subject, clip)
-        if len(clipped) >= 3:
-            total += abs(_signed_area_2d(clipped))
-    return total
+    pieces: list[list[tuple[float, float]]] = []
+    for triangle in _triangulate(clip):
+        for subject in openings:
+            clipped = _clip_sutherland_hodgman(subject, triangle)
+            if len(clipped) >= 3:
+                pieces.append(clipped)
+    return _polygon_union_area(pieces)
 
 
 def net_area(model: Any, area: Any) -> float:
     """Net shell area of *area* after subtracting overlapping openings.
 
-    Returns ``polygon_area_3d(vertices) − opening_overlap_area(model, area)``,
+    An opening (void) area itself contributes zero area; for a shell area it
+    returns ``polygon_area_3d(vertices) − opening_overlap_area(model, area)``,
     floored at zero.
     """
+    if getattr(area, "opening", False):
+        return 0.0
     raw = polygon_area_3d(area_vertices(model, area))
     if raw <= 0.0:
         return 0.0
     return max(0.0, raw - opening_overlap_area(model, area))
+
+
+def conform_cell_to_openings(
+    cell: list[tuple[float, float]],
+    openings: list[list[tuple[float, float]]],
+) -> list[list[tuple[float, float]]]:
+    """Return whether *cell* is not fully covered by the coplanar *openings*.
+
+    Returns ``[cell]`` when the cell survives (it is not fully inside any
+    opening) and ``[]`` when it is fully covered and must be dropped.  The
+    decision uses exact polygon intersection against the cell's true boundary,
+    never the cell centroid, so a partially-covered cell is never dropped and a
+    fully-covered cell is never retained.
+
+    Args:
+        cell: The cell polygon (2-D, counter-clockwise) to test.
+        openings: Coplanar opening polygons in the same 2-D basis (any winding).
+
+    Returns:
+        ``[cell]`` (keep) or ``[]`` (drop).
+    """
+    pieces: list[list[tuple[float, float]]] = []
+    for opening in openings:
+        for triangle in _triangulate(opening):
+            clipped = _clip_sutherland_hodgman(cell, triangle)
+            if len(clipped) >= 3 and abs(_signed_area_2d(clipped)) > 1e-12:
+                pieces.append(clipped)
+    if not pieces:
+        return [list(cell)]
+    cell_area = abs(_signed_area_2d(cell))
+    if _polygon_union_area(pieces) >= cell_area - 1e-12:
+        return []  # fully covered — drop the cell
+    return [list(cell)]

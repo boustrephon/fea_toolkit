@@ -35,7 +35,7 @@ from ..model.sap_data import (
     Restraint,
     SAPModelData,
 )
-from .openings import opening_polygons_2d, point_in_polygon_2d
+from .openings import conform_cell_to_openings, opening_polygons_2d
 
 # ── Shared coordinate / node helpers ──────────────────────────────────
 # These were historically defined as inner functions inside each mesh
@@ -316,6 +316,18 @@ def _propagate_edge_restraints(
                         restraints[nid] = Restraint(dofs=list(common))
 
 
+def _cell_kept(cell_pts_3d, openings_2d, face_axes) -> bool:
+    """Whether a quad cell survives opening cutting (it is not fully covered).
+
+    The cell's corners are projected onto the face plane and tested against the
+    openings with exact polygon intersection — never the cell centroid — so a
+    partially-covered cell is kept while a fully-covered cell is dropped.
+    """
+    l1, l2, _ = face_axes
+    corners_2d = [(float(np.dot(p, l1)), float(np.dot(p, l2))) for p in cell_pts_3d]
+    return bool(conform_cell_to_openings(corners_2d, openings_2d))
+
+
 def mesh_area_elements(
     area_elements: dict[str, AreaElement],
     area_assignments: dict[str, str],
@@ -511,7 +523,16 @@ def mesh_area_elements(
         n_v = max(1, math.ceil(len_v / mesh.max_size))
 
         if n_u == 1 and n_v == 1:
-            continue  # no subdivision needed
+            # A single 1×1 cell needs no subdivision — unless a coplanar
+            # opening cuts it, in which case it is conformed in the cell loop
+            # below (an opening must still be accounted for, not left as one
+            # un-cut cell).
+            has_coplanar_opening = False
+            if has_openings:
+                _info = opening_polygons_2d(area_elements, nodes, elem)
+                has_coplanar_opening = _info is not None and bool(_info[1])
+            if not has_coplanar_opening:
+                continue
 
         # Cap subdivision to prevent memory explosion from tiny max_size.
         MAX_SUBDIVIDE = 100
@@ -692,23 +713,16 @@ def mesh_area_elements(
         for j in range(n_v):
             for i in range(n_u):
                 if openings_2d and face_axes is not None:
-                    centroid = (
-                        grid[j, i] + grid[j, i + 1] + grid[j + 1, i + 1] + grid[j + 1, i]
-                    ) / 4.0
-                    c2d = (
-                        float(np.dot(centroid, face_axes[0])),
-                        float(np.dot(centroid, face_axes[1])),
-                    )
-                    if any(point_in_polygon_2d(c2d, op) for op in openings_2d):
-                        continue  # cell lies inside an opening — drop it
-                sub_id = f"{aid}_sub_{j}_{i}"
-                sub_tag = next_tag
-                next_tag += 1
-                # Quad corners in CCW order
+                    cell_pts = [grid[j][i], grid[j][i + 1], grid[j + 1][i + 1], grid[j + 1][i]]
+                    if not _cell_kept(cell_pts, openings_2d, face_axes):
+                        continue  # cell fully covered by an opening — drop it
                 n0 = node_grid[j][i]
                 n1 = node_grid[j][i + 1]
                 n2 = node_grid[j + 1][i + 1]
                 n3 = node_grid[j + 1][i]
+                sub_id = f"{aid}_sub_{j}_{i}"
+                sub_tag = next_tag
+                next_tag += 1
                 area_elements[sub_id] = AreaElement(
                     area_id=sub_id,
                     area_tag=sub_tag,
@@ -904,22 +918,16 @@ def subdivide_area_mesh(
         for j in range(n):
             for i in range(n):
                 if openings_2d and face_axes is not None:
-                    centroid = (
-                        grid[j, i] + grid[j, i + 1] + grid[j + 1, i + 1] + grid[j + 1, i]
-                    ) / 4.0
-                    c2d = (
-                        float(np.dot(centroid, face_axes[0])),
-                        float(np.dot(centroid, face_axes[1])),
-                    )
-                    if any(point_in_polygon_2d(c2d, op) for op in openings_2d):
-                        continue  # cell lies inside an opening — drop it
-                sub_id = f"{aid}_sub_{j}_{i}"
-                sub_tag = next_tag
-                next_tag += 1
+                    cell_pts = [grid[j][i], grid[j][i + 1], grid[j + 1][i + 1], grid[j + 1][i]]
+                    if not _cell_kept(cell_pts, openings_2d, face_axes):
+                        continue  # cell fully covered by an opening — drop it
                 n0 = node_grid[j][i]
                 n1 = node_grid[j][i + 1]
                 n2 = node_grid[j + 1][i + 1]
                 n3 = node_grid[j + 1][i]
+                sub_id = f"{aid}_sub_{j}_{i}"
+                sub_tag = next_tag
+                next_tag += 1
                 area_elements[sub_id] = AreaElement(
                     area_id=sub_id,
                     area_tag=sub_tag,
