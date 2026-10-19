@@ -6,7 +6,8 @@ serve both a whole-model audit (as :func:`check_self_weight_consistency` does in
 GUI.  The math matches the self-weight *application* path in ``opensees/_loads.py``:
 
 * a frame weighs ``section.A × material.unit_weight × length``;
-* an area weighs ``polygon_area_3d(vertices) × thickness × unit_weight``.
+* an area weighs ``net_area(area) × thickness × unit_weight`` (openings
+  subtracted).
 
 ``unit_weight`` is a **weight** density (force / volume) in the model's own
 units, so no ``g`` conversion is involved in reporting weight.  (Mass would be
@@ -18,7 +19,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional, Union
 
 from .._unit_scaling import force_unit_label
-from .geometry_core import polygon_area_3d
+from .openings import net_area
 from .sap_data import ShellSection
 
 if TYPE_CHECKING:
@@ -121,8 +122,9 @@ def selection_weight(
             continue
         if sec.thickness < 1e-12:
             continue
-        # True 3-D polygon area: a shoelace on x/y alone would project a
-        # vertical panel to ~0 (see ``checks.check_self_weight_consistency``).
+        # Net 3-D polygon area: a shoelace on x/y alone would project a
+        # vertical panel to ~0 (see ``checks.check_self_weight_consistency``),
+        # and any overlapping openings are subtracted.
         verts = [
             (model.nodes[nid].x, model.nodes[nid].y, model.nodes[nid].z)
             for nid in area.node_ids
@@ -130,7 +132,7 @@ def selection_weight(
         ]
         if len(verts) < 3:
             continue
-        area_weight += polygon_area_3d(verts) * sec.thickness * mat.unit_weight
+        area_weight += net_area(model, area) * sec.thickness * mat.unit_weight
         area_count += 1
 
     return SelectionWeight(

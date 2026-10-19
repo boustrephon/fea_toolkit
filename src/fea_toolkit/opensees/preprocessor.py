@@ -633,6 +633,13 @@ class Preprocessor:
                 only_to_frame=True,
             )
 
+        # Opening (void) areas are never shells: union them into the loads-only
+        # set so the existing exclusion machinery skips their nodes and edges
+        # when building the OpenSees domain.
+        loads_only_area_ids = loads_only_area_ids | {
+            aid for aid, a in md.area_elements.items() if getattr(a, "opening", False)
+        }
+
         # ── 5. Mesh area elements ─────────────────────────────────
         if create_shells:
             self._mesh_areas(md, selection=load_shell_selection)
@@ -693,6 +700,8 @@ class Preprocessor:
             area_element_types: dict[str, str] = {}
             for aid, area in md.area_elements.items():
                 if getattr(area, "inactive", False):
+                    continue
+                if getattr(area, "opening", False):
                     continue
                 area_element_types[aid] = self._classify_element_type(
                     area, is_area=True, nodes=md.nodes
@@ -1109,12 +1118,13 @@ class Preprocessor:
         if not area_mesh:
             return
 
-        # Exclude loads-only areas
+        # Exclude loads-only areas and opening (void) areas.
+        opening_ids = {aid for aid, a in md.area_elements.items() if getattr(a, "opening", False)}
         if selection is not None:
-            loads_only = set(selection.get_area_ids(md))
+            loads_only = set(selection.get_area_ids(md)) | opening_ids
             mesh_filtered = {aid: m for aid, m in area_mesh.items() if aid not in loads_only}
         else:
-            mesh_filtered = area_mesh
+            mesh_filtered = {aid: m for aid, m in area_mesh.items() if aid not in opening_ids}
 
         if not mesh_filtered:
             return

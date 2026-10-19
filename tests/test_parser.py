@@ -260,6 +260,21 @@ TABLE:  "AREA LOADS - UNIFORM"
     assert md.area_uniform_loads[1].coord_sys == "LOCAL"
 
 
+def test_parse_area_uniform_local_direction_maps_to_local3(tmp_path):
+    """Numeric local ``Dir=3`` maps to the canonical area-local ``"Local3"``."""
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "AREA LOADS - UNIFORM"
+   Area=1   LoadPat="WIND"   CoordSys=LOCAL   Dir=3   UnifLoad=2000
+"""
+    s2k = tmp_path / "test_unif_local.s2k"
+    s2k.write_text(content)
+    parser = SAP2000Parser(s2k)
+    parser.parse()
+    md = parser.get_model_data()
+    assert len(md.area_uniform_loads) == 1
+    assert md.area_uniform_loads[0].direction == "Local3"
+
+
 def test_unknown_area_load_type_skipped(tmp_path):
     """Unknown AREA LOADS - type is silently skipped."""
     content = """File test.s2k was saved on m/d/yy at h:mm:ss
@@ -1599,6 +1614,34 @@ def test_rigid_diaphragms_false_wins_over_explicit_constraints(tmp_path):
         assert n == 0
     finally:
         ops.wipe()
+
+
+def test_opening_area_flagged_from_none_section(tmp_path):
+    """An area assigned SAP2000's built-in "NONE" section is an opening."""
+    data = {
+        "PROGRAM CONTROL": [{"CurrUnits": "kN, m, C"}],
+        "JOINT COORDINATES": [
+            {"Joint": 1, "XorR": 0.0, "Y": 0.0, "Z": 0.0},
+            {"Joint": 2, "XorR": 4.0, "Y": 0.0, "Z": 0.0},
+            {"Joint": 3, "XorR": 4.0, "Y": 4.0, "Z": 0.0},
+            {"Joint": 4, "XorR": 0.0, "Y": 4.0, "Z": 0.0},
+        ],
+        "AREA SECTION ASSIGNMENTS": [
+            {"Area": "A1", "Section": "SLAB"},
+            {"Area": "A2", "Section": "NONE"},
+        ],
+        "CONNECTIVITY - AREA": [
+            {"Area": "A1", "Joint1": 1, "Joint2": 2, "Joint3": 3, "Joint4": 4},
+            {"Area": "A2", "Joint1": 1, "Joint2": 2, "Joint3": 3, "Joint4": 4},
+        ],
+    }
+    json_path = tmp_path / "openings.json"
+    json_path.write_text(json.dumps(data))
+    md = SAP2000Parser.from_json(json_path).get_model_data()
+
+    assert md.area_elements["A1"].opening is False
+    assert md.area_elements["A2"].opening is True
+    assert md.opening_area_ids == {"A2"}
 
 
 def test_rigid_diaphragms_explicit_selection_groups(tmp_path):

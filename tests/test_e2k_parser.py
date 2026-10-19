@@ -13,6 +13,7 @@ diaphragm assignments.
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,7 @@ from fea_toolkit.io.e2k_parser import (
     _compose_id,
     _find_profile,
     _gather,
+    _get_area_uniform_loads,
     _get_diaphragm_names,
     _get_frame_distributed_loads,
     _get_frame_sections,
@@ -969,12 +971,37 @@ def test_sd_section_with_a_hole_subtracts_void_area():
         '  SDSECTION "SDHole"  SHAPE 2  POLYCORNER 3  X 1.5  Y 1.5\n'
         '  SDSECTION "SDHole"  SHAPE 2  POLYCORNER 4  X 0.5  Y 1.5\n'
     )
-    sec = _get_sd_sections(_parse_sections(snippet))["SDHole"]
+    # ``MATERIAL "VOID"`` is CSI's Section Designer hole marker, so it must
+    # subtract silently (no "nested solid materials" warning).
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        sec = _get_sd_sections(_parse_sections(snippet))["SDHole"]
     # A 2 × 2 solid square with a concentric 1 × 1 void: the void loop has odd
     # nesting depth, so its area and inertias subtract from the outer boundary.
     assert pytest.approx(2 * 2 - 1 * 1) == sec.A
     assert pytest.approx(2 * 2**3 / 12 - 1 * 1**3 / 12) == sec.I33
     assert pytest.approx(2 * 2**3 / 12 - 1 * 1**3 / 12) == sec.I22
+
+
+def test_sd_section_nested_solid_material_warns():
+    # A nested loop with a non-void, non-base material is ambiguous (an
+    # embedded solid rather than a void) and must still warn.
+    snippet = (
+        "$ SECTION DESIGNER SECTIONS\n"
+        '  SDSECTION "SDNested"  TYPE "FRAME"  DESIGNTYPE "OTHER"  BASEMATERIAL "CONC"  NUMSHAPES 2  ANGLE 90\n'
+        '  SDSECTION "SDNested"  SHAPE 1  MATERIAL "CONC"  SHAPETYPE "POLYGON"  NUMCORNERPTS 4\n'
+        '  SDSECTION "SDNested"  SHAPE 1  POLYCORNER 1  X 0  Y 0\n'
+        '  SDSECTION "SDNested"  SHAPE 1  POLYCORNER 2  X 2  Y 0\n'
+        '  SDSECTION "SDNested"  SHAPE 1  POLYCORNER 3  X 2  Y 2\n'
+        '  SDSECTION "SDNested"  SHAPE 1  POLYCORNER 4  X 0  Y 2\n'
+        '  SDSECTION "SDNested"  SHAPE 2  MATERIAL "STEEL"  SHAPETYPE "POLYGON"  NUMCORNERPTS 4\n'
+        '  SDSECTION "SDNested"  SHAPE 2  POLYCORNER 1  X 0.5  Y 0.5\n'
+        '  SDSECTION "SDNested"  SHAPE 2  POLYCORNER 2  X 1.5  Y 0.5\n'
+        '  SDSECTION "SDNested"  SHAPE 2  POLYCORNER 3  X 1.5  Y 1.5\n'
+        '  SDSECTION "SDNested"  SHAPE 2  POLYCORNER 4  X 0.5  Y 1.5\n'
+    )
+    with pytest.warns(UserWarning, match="nested solid materials are unsupported"):
+        _get_sd_sections(_parse_sections(snippet))
 
 
 def test_unifm_line_load_maps_to_moment():
@@ -992,6 +1019,16 @@ def test_unifm_line_load_maps_to_moment():
     assert load.val_a == pytest.approx(1.29)
     assert load.val_b == pytest.approx(1.29)
     assert load.direction == "LocalX"  # DIR "1" = local 1 (torsion) axis
+
+
+def test_area_uniform_load_local_direction_maps_to_local3():
+    sections = _parse_sections(
+        "$ SHELL OBJECT LOADS\n"
+        '  AREALOAD  "S1"  "ROOF"  TYPE "UNIFF"  DIR "3"  LC "WIND"  FVAL 2.5\n'
+    )
+    loads = _get_area_uniform_loads(sections)
+    assert len(loads) == 1
+    assert loads[0].direction == "Local3"  # DIR "3" = area local 3 (face normal)
 
 
 def test_null_line_and_none_section_materialised(tmp_path):
@@ -1020,6 +1057,37 @@ def test_null_line_and_none_section_materialised(tmp_path):
     assert md.frame_assignments["L1@ROOF"] == "NONE"
     assert md.sections["NONE"].shape == "NA"
     assert md.sections["NONE"].A == 0.0
+
+
+def test_opening_areas_flagged_from_none_section_and_legacy_flag(tmp_path):
+    content = (
+        "$ CONTROLS\n"
+        '  UNITS  "KN"  "M"\n'
+        "$ STORIES - IN SEQUENCE FROM TOP\n"
+        '  STORY "ROOF"  HEIGHT 3\n'
+        '  STORY "BASE"  ELEV 0\n'
+        "$ POINT COORDINATES\n"
+        '  POINT "1"  0 0\n'
+        '  POINT "2"  4 0\n'
+        '  POINT "3"  4 4\n'
+        '  POINT "4"  0 4\n'
+        "$ AREA CONNECTIVITIES\n"
+        '  AREA  "A1"  FLOOR  4  "1"  "2"  "3"  "4"  0 0 0 0\n'
+        '  AREA  "A2"  FLOOR  4  "1"  "2"  "3"  "4"  0 0 0 0\n'
+        '  AREA  "A3"  FLOOR  4  "1"  "2"  "3"  "4"  0 0 0 0\n'
+        "$ AREA ASSIGNS\n"
+        '  AREAASSIGN  "A1"  "ROOF"  SECTION "NONE"\n'
+        '  AREAASSIGN  "A2"  "ROOF"  OPENING "YES"\n'
+        '  AREAASSIGN  "A3"  "ROOF"  SECTION "SLAB1"\n'
+    )
+    p = tmp_path / "openings.e2k"
+    p.write_text(content, encoding="utf-8")
+    md = ETABSParser(p).parse().get_model_data()
+
+    assert md.area_elements["A1@ROOF"].opening is True
+    assert md.area_elements["A2@ROOF"].opening is True
+    assert md.area_elements["A3@ROOF"].opening is False
+    assert md.opening_area_ids == {"A1@ROOF", "A2@ROOF"}
 
 
 def test_missing_sd_section_gets_placeholder(tmp_path):

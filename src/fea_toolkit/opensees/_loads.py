@@ -8,22 +8,17 @@ from typing import Any, Optional
 import numpy as np
 import openseespy.opensees as ops
 
-from ..model.geometry import beam_moment_to_nodal_moments, get_local_axes, polygon_area_3d
+from ..model.geometry import (
+    area_load_direction,
+    beam_moment_to_nodal_moments,
+    get_local_axes,
+    polygon_area_3d,
+)
+from ..model.openings import net_area
 from ..model.sap_data import FrameElement
 from ..model.tree_utils import collect_descendants
 
 logger = logging.getLogger(__name__)
-
-# Global-direction unit vectors for area uniform load "Dir" values.
-_AREA_LOAD_DIR = {
-    "Gravity": (0.0, 0.0, -1.0),
-    "X": (1.0, 0.0, 0.0),
-    "Y": (0.0, 1.0, 0.0),
-    "Z": (0.0, 0.0, 1.0),
-    "-X": (-1.0, 0.0, 0.0),
-    "-Y": (0.0, -1.0, 0.0),
-    "-Z": (0.0, 0.0, -1.0),
-}
 
 
 class LoadMixin:
@@ -349,12 +344,7 @@ class LoadMixin:
             poly = [nd for nd in poly if nd is not None]
             if len(poly) < 3:
                 continue
-            area_3d = 0.0
-            v0 = np.array([poly[0].x, poly[0].y, poly[0].z])
-            for k in range(1, len(poly) - 1):
-                v1 = np.array([poly[k].x, poly[k].y, poly[k].z])
-                v2 = np.array([poly[k + 1].x, poly[k + 1].y, poly[k + 1].z])
-                area_3d += 0.5 * np.linalg.norm(np.cross(v1 - v0, v2 - v0))
+            area_3d = net_area(self.mesh_model, area)
             total_w = area_3d * t * mat.unit_weight
             n_corners = len(poly)
             for nd in poly:
@@ -835,15 +825,6 @@ class LoadMixin:
                     continue
                 if aul.area_id in loads_only:
                     continue
-                dir_unit = _AREA_LOAD_DIR.get(aul.direction)
-                if dir_unit is None:
-                    logger.warning(
-                        "Area uniform load on %s has unhandled direction %r — "
-                        "skipped (no nodal-pressure path)",
-                        aul.area_id,
-                        aul.direction,
-                    )
-                    continue
                 area_elem = self.mesh_model.area_elements.get(aul.area_id)
                 if area_elem is None:
                     continue
@@ -853,6 +834,7 @@ class LoadMixin:
                         continue
                 else:
                     leaf_ids = [aul.area_id]
+                warned = False
                 for sub_id in leaf_ids:
                     sub = self.mesh_model.area_elements[sub_id]
                     nds = [self.mesh_model.nodes.get(nid) for nid in sub.node_ids]
@@ -860,6 +842,20 @@ class LoadMixin:
                     if len(nds) < 3:
                         continue
                     pts = [(nd.x, nd.y, nd.z) for nd in nds]
+                    # Resolve the direction per face: the global axes are
+                    # static, but the area local 1/2/3 axes depend on the
+                    # face's orientation (local 3 is the face normal).
+                    dir_unit = area_load_direction(aul.direction, pts)
+                    if dir_unit is None:
+                        if not warned:
+                            logger.warning(
+                                "Area uniform load on %s has unresolved direction %r — "
+                                "skipped (no nodal-pressure path)",
+                                aul.area_id,
+                                aul.direction,
+                            )
+                            warned = True
+                        continue
                     area_mag = polygon_area_3d(pts)
                     if area_mag < 1e-12:
                         continue

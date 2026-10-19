@@ -1954,9 +1954,32 @@ class FrameElement:
     transform_stiffness: bool = True  # Transform stiffness for centroid offset
 
 
+# ── Opening / void section markers ───────────────────────────────────
+# CSI marks an area *opening* (a hole in a slab/wall/floor) by assigning
+# it the built-in ``"NONE"`` section rather than a real shell section —
+# see the CSiXRevit import mapping and ``docs/e2k_import_plan.md``.
+# Legacy ETABS 9.7 instead wrote ``OPENING "YES"`` on the assignment line;
+# the e2k parser folds both spellings into ``AreaElement.opening``.
+_VOID_SECTION_NAMES = {"NONE"}
+
+
+def is_opening_section(name: Any) -> bool:
+    """True when *name* is a void/opening section marker, not a shell section.
+
+    The built-in ``"NONE"`` section marks opening areas (and null line
+    objects) in ETABS/SAP2000 exports; case is not significant.
+    """
+    return str(name or "").strip().upper() in _VOID_SECTION_NAMES
+
+
 @dataclass
 class AreaElement:
     """2D shell/area element connectivity.
+
+    ``opening`` marks a void/opening area (assigned the built-in
+    ``"NONE"`` section, or ``OPENING "YES"`` in legacy ETABS 9.7): such
+    areas carry no shell stiffness and are cut out of the parent
+    slab/wall when its weight and mesh are computed.
 
     ``inactive`` is set to ``True`` when the super-element has been
     subdivided into mesh sub-elements.
@@ -1971,6 +1994,7 @@ class AreaElement:
     area_tag: int
     node_ids: list[str]  # ordered corner nodes
     thickness: float = 0.0
+    opening: bool = False  # True when this area is a void/opening (assigned "NONE")
     inactive: bool = False  # True when superseded by mesh sub‑elements
     parent_id: Optional[str] = None
     child_ids: list[str] = field(default_factory=list)
@@ -2166,7 +2190,7 @@ class AreaUniformLoad:
     pattern: str  # load pattern name
     area_id: str  # area element ID
     coord_sys: str = "GLOBAL"  # 'GLOBAL' or 'Local'
-    direction: str = "Gravity"  # 'Gravity', 'X', 'Y', 'Z'
+    direction: str = "Gravity"  # 'Gravity', 'X', 'Y', 'Z', 'Local1', 'Local2', 'Local3'
     value: float = 0.0  # pressure (force/area)
     # ── Uniform-to-Frame (SAP) extension ──────────────────────────
     to_frame: bool = False  # True → apply to panel edge frames
@@ -2406,6 +2430,11 @@ class SAPModelData:
     source: str = ""
     # Default units used for all coordinates and section properties
     units: dict[str, str] = field(default_factory=lambda: {"F": "N", "L": "m", "T": "C"})
+
+    @property
+    def opening_area_ids(self) -> set[str]:
+        """IDs of area elements flagged as openings (voids)."""
+        return {aid for aid, a in self.area_elements.items() if getattr(a, "opening", False)}
 
     # ── Unit conversion factors ──────────────────────────────────────────
     # These are computed from self.units and provide a consistent way to

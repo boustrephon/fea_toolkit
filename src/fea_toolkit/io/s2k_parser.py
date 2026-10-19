@@ -40,6 +40,7 @@ from ..model.sap_data import (
     Section,
     ShellSection,
     StressStrainCurve,
+    is_opening_section,
 )
 
 # from ..model.geometry import get_SAP_vecxz
@@ -362,13 +363,15 @@ class SAP2000Parser:
         load_combinations = self._get_load_combinations(load_cases)
         response_spectrum_functions = self._get_response_spectrum_functions()
 
-        # ── Populate area element thickness from assigned sections ──
+        # ── Populate area element thickness / opening flag from sections ──
         for aid, a_elem in area_elements.items():
             sec_name = area_assignments.get(aid)
             if sec_name:
                 sec = sections.get(sec_name)
                 if isinstance(sec, ShellSection):
                     a_elem.thickness = sec.thickness
+                if is_opening_section(sec_name):
+                    a_elem.opening = True
 
         # ── Apply cardinal points to frame elements ──
         frame_cardinal = self._get_frame_cardinal_points()
@@ -1383,13 +1386,17 @@ class SAP2000Parser:
             load_type = table_name[len(self._AREA_LOADS_PREFIX) :]
 
             if load_type == "UNIFORM":
+                dir_map = {1: "Local1", 2: "Local2", 3: "Local3"}
                 for rec in self._raw_tables[table_name]:
+                    direction = str(rec.get("Dir", "Gravity")).strip()
+                    if direction.isdigit():
+                        direction = dir_map.get(int(direction), direction)
                     uniform_loads.append(
                         AreaUniformLoad(
                             pattern=str(rec.get("LoadPat", "")),
                             area_id=str(rec.get("Area", "")),
                             coord_sys=str(rec.get("CoordSys", "GLOBAL")),
-                            direction=str(rec.get("Dir", "Gravity")),
+                            direction=direction,
                             value=float(rec.get("UnifLoad", 0.0)),
                         )
                     )
@@ -2200,7 +2207,16 @@ class SAP2000Parser:
                 direction = dir_map.get(int(direction), direction)
             value = 0.0
             value_key = None
-            for key in ("F", "Value", "P", "M", "Force", "Moment"):
+            # Moment rows carry their value in a moment column (``M`` /
+            # ``Moment``) and force rows in a force column (``F`` / ``Value`` /
+            # ``P`` / ``Force``); prefer the columns matching the row's Type so
+            # a force value is never read from a same-named moment column.
+            load_type = str(rec.get("Type", "Force") or "Force").strip()
+            if load_type.lower() == "moment":
+                candidates = ("M", "Moment", "F", "Value", "P", "Force")
+            else:
+                candidates = ("F", "Value", "P", "Force", "M", "Moment")
+            for key in candidates:
                 raw = rec.get(key)
                 if raw is not None and str(raw).strip() != "":
                     value = float(raw)

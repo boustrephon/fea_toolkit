@@ -41,6 +41,7 @@ except ImportError:  # pragma: no cover — pandas is optional (Rhino 8 CPython)
 
     pd = _MissingPandas()  # type: ignore[assignment]
 
+from ..model.openings import net_area
 from ..model.sap_data import ShellSection
 
 # ========================================================================
@@ -515,7 +516,7 @@ def area_section_summary(md) -> pd.DataFrame:
         if thickness < 1e-12:
             continue
 
-        # Polygon area via Newell's method
+        # Net polygon area (Newell) with overlapping openings subtracted.
         pts = []
         for nid in area_elem.node_ids:
             nd = md.nodes.get(nid)
@@ -524,14 +525,7 @@ def area_section_summary(md) -> pd.DataFrame:
             pts.append((nd.x, nd.y, nd.z))
         if len(pts) < 3:
             continue
-        nx = ny = nz = 0.0
-        for i in range(len(pts)):
-            x1, y1, z1 = pts[i]
-            x2, y2, z2 = pts[(i + 1) % len(pts)]
-            nx += (y1 - y2) * (z1 + z2)
-            ny += (z1 - z2) * (x1 + x2)
-            nz += (x1 - x2) * (y1 + y2)
-        area_mag = 0.5 * math.sqrt(nx * nx + ny * ny + nz * nz)
+        area_mag = net_area(md, area_elem)
         if area_mag < 1e-12:
             continue
 

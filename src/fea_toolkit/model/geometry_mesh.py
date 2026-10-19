@@ -35,6 +35,7 @@ from ..model.sap_data import (
     Restraint,
     SAPModelData,
 )
+from .openings import opening_polygons_2d, point_in_polygon_2d
 
 # ── Shared coordinate / node helpers ──────────────────────────────────
 # These were historically defined as inner functions inside each mesh
@@ -388,6 +389,10 @@ def mesh_area_elements(
         _cached_pos.append(np.array([nd.x, nd.y, nd.z], dtype=float))
     _cached_pos_arr = np.array(_cached_pos)  # shape (N, 3)
 
+    # Opening (void) cutting is only applied when the model actually has
+    # opening areas; the scan is otherwise skipped entirely.
+    has_openings = any(getattr(ae, "opening", False) for ae in area_elements.values())
+
     for aid, mesh in area_mesh.items():
         if not mesh.auto_mesh or mesh.max_size <= 0.0:
             continue
@@ -397,6 +402,8 @@ def mesh_area_elements(
             continue  # only quad areas are meshed
         if getattr(elem, "inactive", False):
             continue  # already subdivided in a previous build
+        if getattr(elem, "opening", False):
+            continue  # openings are voids, never meshed
 
         # Seed registry from this area's corner nodes
         for nid in elem.node_ids:
@@ -667,10 +674,33 @@ def mesh_area_elements(
                 if ref in g.objects:
                     parent_groups.append(gname)
 
+        # ── Opening (void) cutting ──
+        # Collect the coplanar opening polygons (in the parent's 2-D face
+        # basis) once per parent, then drop any sub-cell whose centroid
+        # falls inside one.  Interior grid nodes that only serve dropped
+        # cells become orphaned and are removed downstream by the
+        # preprocessor's orphan-node pass.
+        openings_2d: list[list[tuple[float, float]]] = []
+        face_axes = None
+        if has_openings:
+            info = opening_polygons_2d(area_elements, nodes, elem)
+            if info is not None:
+                _, openings_2d, face_axes, _ = info
+
         # Create sub-area elements (CCW ordering: 0→1→2→3 per sub-quad)
         sec_name = area_assignments.get(aid, "")
         for j in range(n_v):
             for i in range(n_u):
+                if openings_2d and face_axes is not None:
+                    centroid = (
+                        grid[j, i] + grid[j, i + 1] + grid[j + 1, i + 1] + grid[j + 1, i]
+                    ) / 4.0
+                    c2d = (
+                        float(np.dot(centroid, face_axes[0])),
+                        float(np.dot(centroid, face_axes[1])),
+                    )
+                    if any(point_in_polygon_2d(c2d, op) for op in openings_2d):
+                        continue  # cell lies inside an opening — drop it
                 sub_id = f"{aid}_sub_{j}_{i}"
                 sub_tag = next_tag
                 next_tag += 1
@@ -720,7 +750,9 @@ def subdivide_area_mesh(
 
     Each parent area is marked ``inactive=True`` and linked to its children
     via ``parent_id`` / ``child_ids``.  Sub-elements inherit the parent's
-    section assignment, thickness, and group membership.
+    section assignment, thickness, and group membership.  Opening (void)
+    areas (``opening=True``) are skipped — they are never subdivided into
+    shells.
 
     New interior nodes are created with coordinate-based deduplication so
     adjacent subdivided areas share edge nodes.
@@ -758,6 +790,7 @@ def subdivide_area_mesh(
     # coincident offset/release/disconnected nodes are not spuriously
     # reused during deduplication.
     _coord_to_id: dict[tuple, str] = {}
+    has_openings = any(getattr(ae, "opening", False) for ae in area_elements.values())
     for aid, elem in area_elements.items():
         if getattr(elem, "inactive", False):
             continue
@@ -773,6 +806,8 @@ def subdivide_area_mesh(
             continue
         if getattr(elem, "inactive", False):
             continue
+        if getattr(elem, "opening", False):
+            continue  # openings are voids, never meshed
         if len(elem.node_ids) != 4:
             continue
 
@@ -856,10 +891,28 @@ def subdivide_area_mesh(
         parent = replace(elem, inactive=True, child_ids=list(elem.child_ids))
         area_elements[aid] = parent
 
+        # ── Opening (void) cutting ──
+        openings_2d: list[list[tuple[float, float]]] = []
+        face_axes = None
+        if has_openings:
+            info = opening_polygons_2d(area_elements, nodes, parent)
+            if info is not None:
+                _, openings_2d, face_axes, _ = info
+
         # Create n² sub-elements
         sec_name = area_assignments.get(aid, "")
         for j in range(n):
             for i in range(n):
+                if openings_2d and face_axes is not None:
+                    centroid = (
+                        grid[j, i] + grid[j, i + 1] + grid[j + 1, i + 1] + grid[j + 1, i]
+                    ) / 4.0
+                    c2d = (
+                        float(np.dot(centroid, face_axes[0])),
+                        float(np.dot(centroid, face_axes[1])),
+                    )
+                    if any(point_in_polygon_2d(c2d, op) for op in openings_2d):
+                        continue  # cell lies inside an opening — drop it
                 sub_id = f"{aid}_sub_{j}_{i}"
                 sub_tag = next_tag
                 next_tag += 1

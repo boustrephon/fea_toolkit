@@ -475,6 +475,10 @@ class SectionMixin:
             # Skip loads-only areas — they contribute mass but not stiffness
             if aid in loads_only:
                 continue
+            # Opening (void) areas carry neither stiffness nor mass — cut out
+            # of the parent slab/wall, never a shell element.
+            if getattr(area, "opening", False):
+                continue
             if getattr(area, "inactive", False):
                 continue
 

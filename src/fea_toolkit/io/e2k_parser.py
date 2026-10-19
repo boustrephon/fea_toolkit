@@ -84,6 +84,7 @@ from ..model.sap_data import (
     ShellSection,
     ShellUniformLoadSet,
     TeeSection,
+    is_opening_section,
 )
 from ..model.section_profiles import _rotate_loops_about, _signed_loop_properties
 from ..model.section_properties import (
@@ -837,10 +838,14 @@ def _resolve_geometry(
         if len(node_ids) < 3:
             continue
         area_id = _compose_id(area_name, storey)
+        is_opening = is_opening_section(attrs.get("SECTION")) or (
+            str(attrs.get("OPENING", "")).strip().upper() == "YES"
+        )
         area_elements[area_id] = AreaElement(
             area_id=area_id,
             area_tag=next_area_tag,
             node_ids=node_ids,
+            opening=is_opening,
         )
         next_area_tag += 1
         section = attrs.get("SECTION")
@@ -1689,11 +1694,13 @@ def _get_sd_sections(sections: dict[str, list[GroupedLine]]) -> dict[str, SDSect
         # +local 1, about the composite centroid — so both the stored geometry
         # and the derived I33/I22 sit in the rotated axes ETABS reports them in.
         angle = angles.get(name, 0.0)
-        centroid = _signed_loop_properties(loops, materials, base_material)
-        if angle != 0.0:
-            loops = _rotate_loops_about(loops, centroid["cy"], centroid["cz"], angle)
-            poly_list = [(mat, loop) for (mat, _), loop in zip(poly_list, loops)]
         props = _signed_loop_properties(loops, materials, base_material)
+        if angle != 0.0:
+            loops = _rotate_loops_about(loops, props["cy"], props["cz"], angle)
+            poly_list = [(mat, loop) for (mat, _), loop in zip(poly_list, loops)]
+            # Recompute on the rotated loops.  ``materials`` is omitted here so
+            # the nested-material containment check (and its warning) runs once.
+            props = _signed_loop_properties(loops)
         area = props["A"]
         if area <= 0.0:
             continue
@@ -2069,6 +2076,12 @@ def _iter_object_loads_any(
 # ``Z`` and gravity is ``GRAV``.
 _LOCAL_DIR_MAP = {"1": "LocalX", "2": "LocalY", "3": "LocalZ"}
 
+# Area elements reuse the same numeric ``DIR`` codes for their *own* local
+# axes, but there 3 is the face normal (not the member axis), so the canonical
+# spellings are ``Local1``/``Local2``/``Local3`` rather than the frame
+# ``LocalX``/``LocalY``/``LocalZ``.
+_AREA_LOCAL_DIR_MAP = {"1": "Local1", "2": "Local2", "3": "Local3"}
+
 
 def _map_direction(direction: Any) -> str:
     """Map an ETABS ``DIR`` token to the toolkit direction vocabulary.
@@ -2081,6 +2094,20 @@ def _map_direction(direction: Any) -> str:
     if d == "GRAV":
         return "Gravity"
     return _LOCAL_DIR_MAP.get(d, str(direction))
+
+
+def _map_area_direction(direction: Any) -> str:
+    """Map an ETABS area-load ``DIR`` token to the area direction vocabulary.
+
+    ``GRAV`` maps to ``"Gravity"``; the numeric local-axis codes ``1``/``2``/
+    ``3`` map to ``"Local1"``/``"Local2"``/``"Local3"`` (the area's local 1/2/3
+    axes, where 3 is the face normal); everything else passes through
+    unchanged.
+    """
+    d = str(direction).strip().upper()
+    if d == "GRAV":
+        return "Gravity"
+    return _AREA_LOCAL_DIR_MAP.get(d, str(direction))
 
 
 def _get_joint_loads(sections: dict[str, list[GroupedLine]]) -> list[JointLoad]:
@@ -2273,7 +2300,7 @@ def _get_area_uniform_loads(
                 AreaUniformLoad(
                     pattern=str(attrs.get("LC", "")),
                     area_id=_compose_id(name, storey),
-                    direction=_map_direction(attrs.get("DIR")),
+                    direction=_map_area_direction(attrs.get("DIR")),
                     value=_as_float(attrs.get("FVAL", 0.0)),
                 )
             )

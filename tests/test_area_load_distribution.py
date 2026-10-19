@@ -218,3 +218,41 @@ def test_shell_nodal_pressure_path(shell_model):
         assert ab._dist_load_totals["WIND"]["fx"] == pytest.approx(0.0, abs=1e-9)
     finally:
         ops.wipe()
+
+
+@pytest.mark.parametrize(
+    "direction, axis, sign",
+    [
+        ("Local1", "fx", 1.0),
+        ("Local2", "fy", 1.0),
+        ("Local3", "fz", 1.0),
+        ("-Local3", "fz", -1.0),
+    ],
+)
+def test_shell_nodal_pressure_resolves_area_local_directions(shell_model, direction, axis, sign):
+    """Local 1/2/3 area pressures resolve to the face axes, not skipped."""
+    import openseespy.opensees as ops
+
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+
+    shell_model.area_uniform_loads[0].direction = direction
+    try:
+        mm = preprocess_model(
+            shell_model,
+            {"create_shells": True, "element_type": "elasticBeamColumn", "verbose": False},
+        )
+        ab = AnalysisBuilder(
+            mm, {"create_shells": True, "element_type": "elasticBeamColumn", "verbose": False}
+        )
+        ab.build_domain()
+        ab.create_loads({"WIND": 1.0})
+        expected = _P * _W * _H * sign
+        totals = ab._dist_load_totals["WIND"]
+        for comp in ("fx", "fy", "fz"):
+            if comp == axis:
+                assert totals[comp] == pytest.approx(expected, abs=1e-6)
+            else:
+                assert totals[comp] == pytest.approx(0.0, abs=1e-9)
+    finally:
+        ops.wipe()
