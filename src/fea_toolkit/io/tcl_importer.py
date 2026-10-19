@@ -235,6 +235,34 @@ def _parse_element(parts: list[str], beams: list[_ElasticBeamColumn], ndm: int) 
     )
 
 
+def _split_braces(tokens: list[str]) -> list[str]:
+    """Split ``{``/``}`` out of tokens so brace delimiters stand alone.
+
+    Compact Tcl brace bodies attach the delimiters to adjacent tokens
+    (``{load``, ``-1.0}``); the inline-pattern and block-line parsers need
+    them as standalone tokens to locate the body boundaries.  Brace-valued
+    ``set`` arguments are unaffected — this runs only on pattern/block token
+    streams, never on a ``set`` value.
+    """
+    out: list[str] = []
+    for tok in tokens:
+        if "{" in tok or "}" in tok:
+            piece: list[str] = []
+            for ch in tok:
+                if ch in "{}":
+                    if piece:
+                        out.append("".join(piece))
+                        piece = []
+                    out.append(ch)
+                else:
+                    piece.append(ch)
+            if piece:
+                out.append("".join(piece))
+        else:
+            out.append(tok)
+    return out
+
+
 def _parse_block_line(
     line: str,
     pattern_name: Optional[str],
@@ -242,7 +270,7 @@ def _parse_block_line(
     joint_loads: list[JointLoad],
     variables: Optional[dict[str, str]] = None,
 ) -> None:
-    parts = line.split()
+    parts = [p for p in _split_braces(line.split()) if p not in ("{", "}")]
     if variables is not None:
         resolved = _substitute_variables(parts, variables)
         if resolved is None:
@@ -337,6 +365,7 @@ def _parse_inline_pattern_block(
     otherwise ``True`` is returned so the line loop keeps reading the body on
     following lines.
     """
+    parts = _split_braces(parts)
     if "{" not in parts:
         return True
     open_idx = parts.index("{")

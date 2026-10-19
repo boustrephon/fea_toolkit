@@ -117,3 +117,35 @@ def test_unhandled_model_commands_warn():
     with pytest.warns(UserWarning, match="elasticBeamColumn"):
         md = parse_tcl_model(tcl)
     assert md.frame_elements == {}
+
+
+def test_compact_inline_pattern_body():
+    """A brace body on the same line (delimiters attached) still parses."""
+    tcl = (
+        "model BasicBuilder -ndm 2 -ndf 3\n"
+        "node 1 0 0\n"
+        "node 2 0 10\n"
+        "fix 1 1 1 1\n"
+        "element elasticBeamColumn 1 1 2 10.0 29000.0 100.0 1\n"
+        "pattern Plain 1 Linear {load 2 1.0 0.0 0.0}\n"
+    )
+    md = parse_tcl_model(tcl)
+    assert len(md.joint_loads) == 1
+    jl = md.joint_loads[0]
+    assert jl.node_id == "2" and jl.fx == 1.0 and jl.fz == 0.0
+
+
+def test_closing_brace_attached_to_block_command():
+    """A closing brace attached to the last block command still parses."""
+    tcl = (
+        "model BasicBuilder -ndm 2 -ndf 3\n"
+        "node 1 0 0\n"
+        "node 2 0 10\n"
+        "fix 1 1 1 1\n"
+        "element elasticBeamColumn 1 1 2 10.0 29000.0 100.0 1\n"
+        "pattern Plain 1 Linear {\n"
+        "    load 2 1.0 0.0 0.0}\n"
+    )
+    md = parse_tcl_model(tcl)
+    assert len(md.joint_loads) == 1
+    assert md.joint_loads[0].node_id == "2"

@@ -599,7 +599,7 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
             # zero node tag is the missing-connectivity placeholder written by
             # ``_collect_geometry`` and must be rejected, not accepted.
             for i, has_root in enumerate(distinct):
-                if has_root and i < len(node_arr) and int(node_arr[i]) == 0:
+                if has_root and i < len(node_arr) and node_arr[i] == 0:
                     messages.append(
                         f"{root_key} row {i} identifies a distinct root but "
                         f"{node_key} is zero (missing connectivity)"
