@@ -1831,6 +1831,11 @@ class SAP2000Parser:
                 continue  # already defined via frame section properties
             mat_name = sec.get("Material", "Unknown")
             thickness = float(sec.get("Thickness", 0))
+            # Normalise the CSI ``Type`` column to the canonical ``shell_type``
+            # string: keep ``None`` (missing) and empty strings, otherwise
+            # coerce to ``str`` and strip surrounding whitespace.
+            raw_type = sec.get("Type")
+            shell_type = None if raw_type is None else str(raw_type).strip()
 
             sections[name] = ShellSection(
                 name=name,
@@ -1841,7 +1846,7 @@ class SAP2000Parser:
                 I22=0.0,
                 J=0.0,
                 thickness=thickness,
-                shell_type=sec.get("Type") or None,
+                shell_type=shell_type,
                 rebar_material=area_rebar_mat.get(name),
             )
 
