@@ -138,6 +138,18 @@ def _root_sap_id(source: dict, kind: str, i: int, n: int) -> Optional[str]:
     Prefers the ``{kind}_root_sap_id`` array (the ultimate split root);
     archives written before that array existed fall back to the immediate
     ``{kind}_parent_sap_id``.
+
+    Args:
+        source: Flat results dict (NPZ-style keys) holding the
+            ``{kind}_root_sap_id`` and ``{kind}_parent_sap_id`` arrays.
+        kind: Element-kind prefix — ``"frame"`` or ``"shell"``.
+        i: Row index of the element within the ``{kind}`` arrays.
+        n: Number of ``{kind}`` elements, used to size the fallback parent
+            array when ``{kind}_parent_sap_id`` is absent.
+
+    Returns:
+        The root parent SAP id string, or ``None`` when the element is unsplit
+        (its root id and legacy parent id are both empty or ``"?"``).
     """
     root_arr = source.get(f"{kind}_root_sap_id")
     if root_arr is not None and i < len(root_arr):

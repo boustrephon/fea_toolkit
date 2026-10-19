@@ -805,11 +805,13 @@ class MainWindow(QMainWindow):
             "Show loads",
             self._on_show_loads,
             tip="Show or hide applied-load glyphs (flags for line loads, arrows for point loads, arrows/flags for area loads)",
+            checked=False,
         )
         a["view.show_load_colours"] = self._toggle_action(
             "Colour area loads",
             self._on_show_load_colours,
             tip="Colour each area element by its shell-face pressure (with a scale bar)",
+            checked=False,
         )
         a["view.show_forces"] = self._toggle_action(
             "Show force diagrams",
