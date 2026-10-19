@@ -705,7 +705,7 @@ into ``frame_point_loads`` and carried through the Preprocessor and
 visualised by ``extract_load_glyphs``; the only remaining gap is propagating
 it to OpenSees ``eleLoad`` point loads (display-only for now).  Temperature
 loads are closed (no current demand).  Note: the pushover
-`lateral_load_pattern='point'` is a synthetic unit point load for benchmark
+`lateral_load_type='point'` is a synthetic unit point load for benchmark
 pushes — distinct from parsing user-supplied `FRAME LOADS - POINT` data.
 
 **Outline steps.** 1) ✅ **done 2026-10-16** — `FRAME LOADS - POINT` parsing into

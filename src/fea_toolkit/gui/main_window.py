@@ -1541,6 +1541,8 @@ class MainWindow(QMainWindow):
                 selection=selection,
             )
 
+        show_loads = self._actions["view.show_loads"].isChecked()
+        show_load_colours = self._actions["view.show_load_colours"].isChecked()
         viewer.show_model(
             show_nodes=self._actions["view.show_nodes"].isChecked(),
             show_frames=self._actions["view.show_frames"].isChecked(),
@@ -1550,11 +1552,13 @@ class MainWindow(QMainWindow):
             shrink=float(self._shrink.value()),
             show_restraints=self._actions["view.show_restraints"].isChecked(),
             restraint_style=self._display.restraint_style,
-            show_loads=self._actions["view.show_loads"].isChecked(),
-            load_factors=self._load_source_factors(model),
+            show_loads=show_loads,
+            load_factors=self._load_source_factors(model)
+            if show_loads or show_load_colours
+            else None,
             load_scale=self._load_scale.value() / 100.0,
             load_area_style=self._display.load_area_style,
-            show_load_colours=self._actions["view.show_load_colours"].isChecked(),
+            show_load_colours=show_load_colours,
             show_extruded=self._actions["view.show_extruded"].isChecked(),
             extruded_detail=self._display.extruded_detail,
         )
@@ -2391,7 +2395,10 @@ class MainWindow(QMainWindow):
 
         name = self._load_source.currentData() or ""
         self._display = replace(self._display, load_source=name)
-        if self._actions["view.show_loads"].isChecked():
+        if (
+            self._actions["view.show_loads"].isChecked()
+            or self._actions["view.show_load_colours"].isChecked()
+        ):
             self._refresh_display()
 
     def _load_source_factors(self, model: Any) -> Optional[dict[str, float]]:
