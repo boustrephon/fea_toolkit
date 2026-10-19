@@ -13,6 +13,7 @@ silently; anything model-like that is not understood raises a warning so a
 dropped quantity is never silent.
 """
 
+import math
 import warnings
 from dataclasses import dataclass
 from typing import Optional
@@ -518,15 +519,28 @@ def _build_model(
             elem_id=str(b.tag), elem_tag=b.tag, node_i=str(b.i_node), node_j=str(b.j_node)
         )
         frame_assignments[str(b.tag)] = sname
-        if b.mass is not None:
-            warnings.warn(
-                f"element elasticBeamColumn {b.tag} carries a -mass value "
-                f"({b.mass}) that the model cannot represent; the distributed "
-                "mass was dropped.",
-                stacklevel=2,
-            )
 
-    added_masses = {str(tag): _lift_mass_scalar(vals, ndm) for tag, vals in masses.items()}
+    # Accumulate distributed element ``-mass`` (mass per length) into the nodal
+    # lumped masses — half to each end node — so member self-mass is never lost.
+    elem_mass: dict[int, float] = {}
+    for b in beams:
+        if b.mass is None:
+            continue
+        i_pt = nodes.get(b.i_node)
+        j_pt = nodes.get(b.j_node)
+        if i_pt is None or j_pt is None:
+            continue
+        length = math.sqrt(sum((j_pt[k] - i_pt[k]) ** 2 for k in range(3)))
+        half = b.mass * length / 2.0
+        elem_mass[b.i_node] = elem_mass.get(b.i_node, 0.0) + half
+        elem_mass[b.j_node] = elem_mass.get(b.j_node, 0.0) + half
+
+    added_masses: dict[str, float] = {}
+    for tag, vals in masses.items():
+        added_masses[str(tag)] = _lift_mass_scalar(vals, ndm) + elem_mass.get(tag, 0.0)
+    for tag, m in elem_mass.items():
+        if tag not in masses:
+            added_masses[str(tag)] = m
     mass_sources: dict[str, MassSource] = {}
     if added_masses:
         mass_sources["MSSSRC1"] = MassSource(name="MSSSRC1", masses=True)

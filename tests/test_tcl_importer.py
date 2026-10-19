@@ -149,3 +149,18 @@ def test_closing_brace_attached_to_block_command():
     md = parse_tcl_model(tcl)
     assert len(md.joint_loads) == 1
     assert md.joint_loads[0].node_id == "2"
+
+
+def test_element_mass_accumulated_to_nodes():
+    """Distributed ``-mass`` is lumped (half per end node), never dropped."""
+    tcl = (
+        "model BasicBuilder -ndm 2 -ndf 3\n"
+        "node 1 0 0\n"
+        "node 2 0 120\n"
+        "fix 1 1 1 1\n"
+        "element elasticBeamColumn 1 1 2 10.0 29000.0 100.0 1 -mass 0.1\n"
+    )
+    md = parse_tcl_model(tcl)
+    # Length 120 x mass/length 0.1 = 12.0 total, split 6.0 per end node.
+    assert md.added_masses["1"] == pytest.approx(6.0)
+    assert md.added_masses["2"] == pytest.approx(6.0)
