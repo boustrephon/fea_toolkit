@@ -35,7 +35,7 @@ from ..model.sap_data import (
     Restraint,
     SAPModelData,
 )
-from .openings import collect_opening_areas, conform_cell_to_openings, opening_polygons_2d
+from .openings import collect_opening_areas, cut_cell, opening_polygons_2d
 
 # ── Shared coordinate / node helpers ──────────────────────────────────
 # These were historically defined as inner functions inside each mesh
@@ -316,16 +316,114 @@ def _propagate_edge_restraints(
                         restraints[nid] = Restraint(dofs=list(common))
 
 
-def _cell_kept(cell_pts_3d, openings_2d, face_axes) -> bool:
-    """Whether a quad cell survives opening cutting (it is not fully covered).
+def _emit_cell_pieces(
+    cell_pts,
+    cell_node_ids,
+    openings_2d,
+    face_axes,
+    aid,
+    j,
+    i,
+    parent,
+    sec_name,
+    next_tag,
+    area_elements,
+    area_assignments,
+    nodes,
+    coord_to_id,
+    parent_groups,
+    groups,
+):
+    """Emit the opening-trimmed pieces of one grid cell as sub-area elements.
 
-    The cell's corners are projected onto the face plane and tested against the
-    openings with exact polygon intersection — never the cell centroid — so a
-    partially-covered cell is kept while a fully-covered cell is dropped.
+    A cell is cut by the coplanar openings with :func:`cut_cell`; each surviving
+    convex piece becomes one sub-element (a quad for 4 vertices, a triangle for
+    3, fan-triangulated for ≥5).  Cut vertices are reconstructed in 3-D and
+    deduplicated by coordinate through *coord_to_id*, so adjacent trimmed cells
+    — and any coincident opening corner — share one node.
+
+    Uncut cells (no openings, or fully disjoint from them) take a fast path
+    that reuses the grid node ids directly and keeps the original sub-id.
+
+    Args:
+        cell_pts: Four 3-D grid corners of the cell (counter-clockwise).
+        cell_node_ids: Node ids of the four corners (same order).
+        openings_2d: Coplanar opening polygons in the face basis (may be empty).
+        face_axes: The ``(l1, l2, l3)`` face basis (used only when cutting).
+        aid: Parent area id (node / sub-element id prefix).
+        j, i: Grid indices of the cell.
+        parent: The inactive parent AreaElement (``child_ids`` appended).
+        sec_name: Section name to assign (or ``""``).
+        next_tag: Next available numeric tag; returned incremented.
+        area_elements, area_assignments, nodes: Modified in place.
+        coord_to_id: Coordinate → node-id registry (shared across the area).
+        parent_groups: Group names the parent belongs to (propagated).
+        groups: Optional group collection.
+
+    Returns:
+        The updated ``next_tag``.
     """
-    l1, l2, _ = face_axes
-    corners_2d = [(float(np.dot(p, l1)), float(np.dot(p, l2))) for p in cell_pts_3d]
-    return bool(conform_cell_to_openings(corners_2d, openings_2d))
+    sub_id = f"{aid}_sub_{j}_{i}"
+
+    def _emit(face, suffix):
+        """Create one sub-area element for *face* (a node-id list)."""
+        nonlocal next_tag
+        sid = sub_id if suffix is None else f"{sub_id}_{suffix}"
+        tag = next_tag
+        next_tag += 1
+        area_elements[sid] = AreaElement(
+            area_id=sid,
+            area_tag=tag,
+            node_ids=face,
+            thickness=parent.thickness,
+            parent_id=aid,
+        )
+        parent.child_ids.append(sid)
+        if sec_name:
+            area_assignments[sid] = sec_name
+        if parent_groups:
+            sub_ref = f"Area:{sid}"
+            for gname in parent_groups:
+                groups[gname].objects.append(sub_ref)
+
+    if not openings_2d:
+        _emit(list(cell_node_ids), None)
+        return next_tag
+
+    l1, l2, l3 = face_axes
+    cell_2d = [(float(np.dot(p, l1)), float(np.dot(p, l2))) for p in cell_pts]
+    pieces = cut_cell(cell_2d, openings_2d)
+    if pieces == [cell_2d]:
+        # Disjoint — the cell is untouched.
+        _emit(list(cell_node_ids), None)
+        return next_tag
+
+    w = float(np.dot(cell_pts[0], l3))
+    for k, piece in enumerate(pieces):
+        node_ids = []
+        for u, v in piece:
+            p = u * l1 + v * l2 + w * l3
+            ck = _coord_key(float(p[0]), float(p[1]), float(p[2]))
+            nid = coord_to_id.get(ck)
+            if nid is None:
+                nid = f"{aid}_cut_{j}_{i}_{k}_{len(node_ids)}"
+                nodes[nid] = Node(
+                    node_id=nid,
+                    node_tag=next_tag,
+                    x=float(p[0]),
+                    y=float(p[1]),
+                    z=float(p[2]),
+                )
+                coord_to_id[ck] = nid
+                next_tag += 1
+            node_ids.append(nid)
+        m = len(node_ids)
+        if m in {3, 4}:
+            _emit(node_ids, f"{k}")
+        else:
+            for t in range(1, m - 1):
+                _emit([node_ids[0], node_ids[t], node_ids[t + 1]], f"{k}_{t}")
+    return next_tag
 
 
 def mesh_area_elements(
@@ -404,6 +502,16 @@ def mesh_area_elements(
     # Opening (void) cutting is only applied when the model actually has
     # opening areas; the scan is otherwise skipped entirely.
     has_openings = any(getattr(ae, "opening", False) for ae in area_elements.values())
+
+    # Seed opening-corner coordinates so trimmed cells reuse the opening
+    # corner nodes (boundary-node reuse — beams/loads framing the hole
+    # connect to the shell mesh).
+    if has_openings:
+        for oarea in collect_opening_areas(area_elements):
+            for nid in oarea.node_ids:
+                nd = nodes.get(nid)
+                if nd is not None:
+                    _coord_to_id.setdefault(_coord_key(nd.x, nd.y, nd.z), nid)
 
     for aid, mesh in area_mesh.items():
         if not mesh.auto_mesh or mesh.max_size <= 0.0:
@@ -708,36 +816,35 @@ def mesh_area_elements(
             if info is not None:
                 _, openings_2d, face_axes, _ = info
 
-        # Create sub-area elements (CCW ordering: 0→1→2→3 per sub-quad)
+        # Create sub-area elements (opening-trimmed where a cell straddles a hole)
         sec_name = area_assignments.get(aid, "")
         for j in range(n_v):
             for i in range(n_u):
-                if openings_2d and face_axes is not None:
-                    cell_pts = [grid[j][i], grid[j][i + 1], grid[j + 1][i + 1], grid[j + 1][i]]
-                    if not _cell_kept(cell_pts, openings_2d, face_axes):
-                        continue  # cell fully covered by an opening — drop it
-                n0 = node_grid[j][i]
-                n1 = node_grid[j][i + 1]
-                n2 = node_grid[j + 1][i + 1]
-                n3 = node_grid[j + 1][i]
-                sub_id = f"{aid}_sub_{j}_{i}"
-                sub_tag = next_tag
-                next_tag += 1
-                area_elements[sub_id] = AreaElement(
-                    area_id=sub_id,
-                    area_tag=sub_tag,
-                    node_ids=[n0, n1, n2, n3],
-                    thickness=elem.thickness,
-                    parent_id=aid,
+                cell_pts = [grid[j][i], grid[j][i + 1], grid[j + 1][i + 1], grid[j + 1][i]]
+                cell_node_ids = [
+                    node_grid[j][i],
+                    node_grid[j][i + 1],
+                    node_grid[j + 1][i + 1],
+                    node_grid[j + 1][i],
+                ]
+                next_tag = _emit_cell_pieces(
+                    cell_pts=cell_pts,
+                    cell_node_ids=cell_node_ids,
+                    openings_2d=openings_2d,
+                    face_axes=face_axes,
+                    aid=aid,
+                    j=j,
+                    i=i,
+                    parent=elem,
+                    sec_name=sec_name,
+                    next_tag=next_tag,
+                    area_elements=area_elements,
+                    area_assignments=area_assignments,
+                    nodes=nodes,
+                    coord_to_id=_coord_to_id,
+                    parent_groups=parent_groups,
+                    groups=groups,
                 )
-                elem.child_ids.append(sub_id)
-                if sec_name:
-                    area_assignments[sub_id] = sec_name
-                # Propagate group membership
-                if parent_groups:
-                    sub_ref = f"Area:{sub_id}"
-                    for gname in parent_groups:
-                        groups[gname].objects.append(sub_ref)
 
         # Propagate edge-node restraints using bitwise-AND of adjacent
         # corners (only if both corners are restrained).
@@ -821,6 +928,16 @@ def subdivide_area_mesh(
             nd = nodes.get(nid)
             if nd is not None:
                 _coord_to_id[_coord_key(nd.x, nd.y, nd.z)] = nid
+
+    # Seed opening-corner coordinates so trimmed cells reuse the opening
+    # corner nodes (boundary-node reuse — beams/loads framing the hole
+    # connect to the shell mesh).
+    if has_openings:
+        for oarea in openings:
+            for nid in oarea.node_ids:
+                nd = nodes.get(nid)
+                if nd is not None:
+                    _coord_to_id.setdefault(_coord_key(nd.x, nd.y, nd.z), nid)
 
     for aid, elem in list(area_elements.items()):
         if selection is not None and aid not in selection:
@@ -920,36 +1037,35 @@ def subdivide_area_mesh(
             if info is not None:
                 _, openings_2d, face_axes, _ = info
 
-        # Create n² sub-elements
+        # Create sub-elements (opening-trimmed where a cell straddles a hole)
         sec_name = area_assignments.get(aid, "")
         for j in range(n):
             for i in range(n):
-                if openings_2d and face_axes is not None:
-                    cell_pts = [grid[j][i], grid[j][i + 1], grid[j + 1][i + 1], grid[j + 1][i]]
-                    if not _cell_kept(cell_pts, openings_2d, face_axes):
-                        continue  # cell fully covered by an opening — drop it
-                n0 = node_grid[j][i]
-                n1 = node_grid[j][i + 1]
-                n2 = node_grid[j + 1][i + 1]
-                n3 = node_grid[j + 1][i]
-                sub_id = f"{aid}_sub_{j}_{i}"
-                sub_tag = next_tag
-                next_tag += 1
-                area_elements[sub_id] = AreaElement(
-                    area_id=sub_id,
-                    area_tag=sub_tag,
-                    node_ids=[n0, n1, n2, n3],
-                    thickness=parent.thickness,
-                    parent_id=aid,
+                cell_pts = [grid[j][i], grid[j][i + 1], grid[j + 1][i + 1], grid[j + 1][i]]
+                cell_node_ids = [
+                    node_grid[j][i],
+                    node_grid[j][i + 1],
+                    node_grid[j + 1][i + 1],
+                    node_grid[j + 1][i],
+                ]
+                next_tag = _emit_cell_pieces(
+                    cell_pts=cell_pts,
+                    cell_node_ids=cell_node_ids,
+                    openings_2d=openings_2d,
+                    face_axes=face_axes,
+                    aid=aid,
+                    j=j,
+                    i=i,
+                    parent=parent,
+                    sec_name=sec_name,
+                    next_tag=next_tag,
+                    area_elements=area_elements,
+                    area_assignments=area_assignments,
+                    nodes=nodes,
+                    coord_to_id=_coord_to_id,
+                    parent_groups=parent_groups,
+                    groups=groups,
                 )
-                parent.child_ids.append(sub_id)
-                if sec_name:
-                    area_assignments[sub_id] = sec_name
-                # Propagate group membership
-                if parent_groups:
-                    sub_ref = f"Area:{sub_id}"
-                    for gname in parent_groups:
-                        groups[gname].objects.append(sub_ref)
 
         # Propagate edge-node restraints using bitwise-AND of adjacent
         # corners (only if both corners are restrained).

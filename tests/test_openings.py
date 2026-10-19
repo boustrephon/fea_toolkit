@@ -4,6 +4,7 @@ import pytest
 
 from fea_toolkit.model.openings import (
     conform_cell_to_openings,
+    cut_cell,
     net_area,
     opening_overlap_area,
     point_in_polygon_2d,
@@ -88,6 +89,7 @@ def test_opening_dropped_from_shell_creation():
 
     assert "O1" in mm.loads_only_area_ids
     assert "O1" not in mm.area_element_types
+    assert "O1" not in mm.area_element_properties
     assert mm.area_element_types.get("S1") == "slab"
 
 
@@ -301,3 +303,143 @@ def test_opening_nodes_moved_to_orphan_nodes_and_net_area_resolves():
     # ``orphan_nodes`` (16 m² slab − 1 m² opening).
     slab = mm.area_elements["S1"]
     assert net_area(mm, slab) == pytest.approx(15.0)
+
+
+# ── Exact cut-out — convex half-plane chop (boolean) ──────────────
+
+
+def _area2d(poly):
+    """Absolute shoelace area of a 2-D polygon."""
+    s = 0.0
+    for i in range(len(poly)):
+        x0, y0 = poly[i]
+        x1, y1 = poly[(i + 1) % len(poly)]
+        s += x0 * y1 - x1 * y0
+    return abs(0.5 * s)
+
+
+def _is_convex_ccw(poly):
+    """True when every consecutive cross product is non-negative (convex CCW)."""
+    for i in range(len(poly)):
+        ax, ay = poly[i]
+        bx, by = poly[(i + 1) % len(poly)]
+        cx, cy = poly[(i + 2) % len(poly)]
+        cross = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+        if cross < -1e-9:
+            return False
+    return True
+
+
+def test_clip_by_halfplane_keeps_either_side():
+    from fea_toolkit.model.openings import _clip_by_halfplane
+
+    sq = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]  # CCW
+    inside = _clip_by_halfplane(sq, (2.0, 0.0), (2.0, 4.0), keep_inside=True)
+    outside = _clip_by_halfplane(sq, (2.0, 0.0), (2.0, 4.0), keep_inside=False)
+    assert _area2d(inside) == pytest.approx(8.0)  # left half (x ≤ 2)
+    assert _area2d(outside) == pytest.approx(8.0)  # right half (x ≥ 2)
+
+
+def test_convex_difference_square_minus_triangle():
+    from fea_toolkit.model.openings import _convex_difference
+
+    cell = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]
+    tri = [(1.0, 1.0), (3.0, 1.0), (1.0, 3.0)]  # area 2, CCW
+    pieces = _convex_difference(cell, tri)
+    assert sum(_area2d(p) for p in pieces) == pytest.approx(14.0)
+    for p in pieces:
+        assert _is_convex_ccw(p)
+
+
+def test_cut_cell_centred_opening_yields_frame():
+    cell = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]
+    opening = [(1.0, 1.0), (3.0, 1.0), (3.0, 3.0), (1.0, 3.0)]
+    pieces = cut_cell(cell, [opening])
+    assert sum(_area2d(p) for p in pieces) == pytest.approx(12.0)  # 16 − 4
+    for p in pieces:
+        assert _is_convex_ccw(p)
+
+
+def test_cut_cell_disjoint_opening_returns_cell_unchanged():
+    cell = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]
+    opening = [(5.0, 5.0), (6.0, 5.0), (6.0, 6.0), (5.0, 6.0)]
+    assert cut_cell(cell, [opening]) == [cell]
+
+
+def test_cut_cell_fully_covered_returns_empty():
+    cell = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]
+    opening = [(-1.0, -1.0), (5.0, -1.0), (5.0, 5.0), (-1.0, 5.0)]
+    assert cut_cell(cell, [opening]) == []
+
+
+def test_cut_cell_corner_overlap_conserves_area():
+    cell = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]
+    opening = [(2.0, 2.0), (6.0, 2.0), (6.0, 6.0), (2.0, 6.0)]  # covers NE corner
+    pieces = cut_cell(cell, [opening])
+    # overlap = 2×2 = 4 → cell − overlap = 12
+    assert sum(_area2d(p) for p in pieces) == pytest.approx(12.0)
+    for p in pieces:
+        assert _is_convex_ccw(p)
+
+
+def test_cut_cell_concave_opening():
+    cell = [(0.0, 0.0), (6.0, 0.0), (6.0, 6.0), (0.0, 6.0)]
+    # L-shaped (concave) opening: a 4×4 square with a 2×2 bite out of the NE corner.
+    opening = [(1.0, 1.0), (5.0, 1.0), (5.0, 3.0), (3.0, 3.0), (3.0, 5.0), (1.0, 5.0)]
+    pieces = cut_cell(cell, [opening])
+    # opening area = 16 − 4 = 12 → cell − opening = 36 − 12 = 24
+    assert sum(_area2d(p) for p in pieces) == pytest.approx(24.0)
+    for p in pieces:
+        assert _is_convex_ccw(p)
+
+
+def test_cut_cell_overlapping_openings_subtract_union():
+    cell = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]
+    a = [(1.0, 1.0), (3.0, 1.0), (3.0, 3.0), (1.0, 3.0)]  # area 4
+    b = [(2.0, 2.0), (3.5, 2.0), (3.5, 3.5), (2.0, 3.5)]  # area 2.25, overlap 1
+    pieces = cut_cell(cell, [a, b])
+    # union = 4 + 2.25 − 1 = 5.25 → cell − union = 10.75
+    assert sum(_area2d(p) for p in pieces) == pytest.approx(10.75)
+    for p in pieces:
+        assert _is_convex_ccw(p)
+
+
+def test_cut_cell_clockwise_cell_is_normalised():
+    cell = [(0.0, 0.0), (0.0, 4.0), (4.0, 4.0), (4.0, 0.0)]  # CW
+    opening = [(1.0, 1.0), (3.0, 1.0), (3.0, 3.0), (1.0, 3.0)]
+    pieces = cut_cell(cell, [opening])
+    assert sum(_area2d(p) for p in pieces) == pytest.approx(12.0)
+    for p in pieces:
+        assert _is_convex_ccw(p)
+
+
+def test_subdivide_area_mesh_trims_cells_around_opening():
+    """Partial-overlap cells are trimmed to the opening boundary (area conserved)."""
+    from fea_toolkit.model.geometry import subdivide_area_mesh
+
+    md = _slab_with_opening()
+    areas, assigns, nodes = md.area_elements, md.area_assignments, dict(md.nodes)
+    areas, assigns, nodes, _tag = subdivide_area_mesh(areas, assigns, nodes, n=4)
+
+    children = [ae for ae in areas.values() if getattr(ae, "parent_id", None) == "S1"]
+    total = sum(_area2d([(nodes[nid].x, nodes[nid].y) for nid in ae.node_ids]) for ae in children)
+    assert total == pytest.approx(15.0)  # 16 m² slab − 1 m² opening
+
+    # Boundary-node reuse: the opening corners become shared mesh nodes.
+    for nid in ("o1", "o2", "o3", "o4"):
+        assert any(nid in ae.node_ids for ae in children)
+
+
+def test_preprocess_trims_and_reuses_opening_corners():
+    """The meshed model keeps the opening corners as shared shell nodes."""
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+
+    mm = preprocess_model(
+        _slab_with_opening(), {"create_shells": True, "subdivide_shells": 4, "verbose": False}
+    )
+
+    children = [ae for ae in mm.area_elements.values() if getattr(ae, "parent_id", None) == "S1"]
+    for nid in ("o1", "o2", "o3", "o4"):
+        assert nid in mm.nodes
+        assert nid not in mm.orphan_nodes
+        assert any(nid in ae.node_ids for ae in children)

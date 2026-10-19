@@ -26,6 +26,7 @@ __all__ = [
     "area_vertices",
     "collect_opening_areas",
     "conform_cell_to_openings",
+    "cut_cell",
     "net_area",
     "opening_overlap_area",
     "opening_polygons_2d",
@@ -479,3 +480,136 @@ def conform_cell_to_openings(
     if _polygon_union_area(pieces) >= cell_area - tol:
         return []  # fully covered — drop the cell
     return [list(cell)]
+
+
+# ═══════════════════════════════════════════════════════════════
+# Exact cut-out — convex half-plane chop (boolean)
+# ═══════════════════════════════════════════════════════════════
+
+
+def _clip_by_halfplane(
+    poly: list[tuple[float, float]],
+    a: tuple[float, float],
+    b: tuple[float, float],
+    keep_inside: bool = True,
+    tol: float = 1e-12,
+) -> list[tuple[float, float]]:
+    """Clip a convex polygon against one directed half-plane.
+
+    ``a -> b`` is the directed edge; the "inside" side is where the cross
+    product ``(b−a) × (p−a) >= −tol`` (the left side of a counter-clockwise
+    polygon).  ``keep_inside=False`` keeps the outside (right) side instead —
+    the inversion a convex *difference* needs and that
+    :func:`_clip_sutherland_hodgman` does not provide.
+
+    Args:
+        poly: Convex polygon (counter-clockwise).
+        a: Start point of the directed clip edge.
+        b: End point of the directed clip edge.
+        keep_inside: True keeps the left half-plane, False the right.
+        tol: Half-plane membership tolerance (signed-area units).
+
+    Returns:
+        The surviving vertices (same winding as *poly*), or an empty list when
+        *poly* lies entirely on the excluded side.
+    """
+    if len(poly) < 3:
+        return []
+    ex, ey = b[0] - a[0], b[1] - a[1]
+
+    def _side(p: tuple[float, float]) -> float:
+        return ex * (p[1] - a[1]) - ey * (p[0] - a[0])
+
+    def _keep(p: tuple[float, float]) -> bool:
+        s = _side(p)
+        return s >= -tol if keep_inside else s <= tol
+
+    out: list[tuple[float, float]] = []
+    n = len(poly)
+    for i in range(n):
+        p, q = poly[i], poly[(i + 1) % n]
+        p_in, q_in = _keep(p), _keep(q)
+        if p_in:
+            out.append(p)
+        if p_in != q_in:
+            sp, sq = _side(p), _side(q)
+            t = sp / (sp - sq)
+            out.append((p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])))
+    return out
+
+
+def _convex_difference(
+    cell: list[tuple[float, float]],
+    tri: list[tuple[float, float]],
+) -> list[list[tuple[float, float]]]:
+    """Return ``cell − tri`` as non-overlapping convex pieces.
+
+    *cell* and *tri* must be convex and counter-clockwise.  The difference of
+    two convex polygons is computed by the sequential half-plane chop: at each
+    edge of *tri* the portion of the *remaining* cell lying *outside* that edge
+    is cut off and collected, and the *inside* portion descends to the next
+    edge.
+
+    Correctness invariant: the piece cut at edge *i* lies outside edge *i*,
+    while every piece produced later descends from the portion kept *inside*
+    edge *i*, so the pieces are pairwise disjoint and their union is
+    ``cell − tri``.  After the last edge the remaining interior is
+    ``cell ∩ tri``, which is discarded.
+
+    Args:
+        cell: Convex cell polygon (counter-clockwise).
+        tri: Convex triangle (counter-clockwise).
+
+    Returns:
+        Disjoint convex pieces (counter-clockwise) whose union is
+        ``cell − tri``; empty when *cell* is fully inside *tri*.
+    """
+    result: list[list[tuple[float, float]]] = []
+    interior = list(cell)
+    for i in range(len(tri)):
+        a, b = tri[i], tri[(i + 1) % len(tri)]
+        out_part = _clip_by_halfplane(interior, a, b, keep_inside=False)
+        in_part = _clip_by_halfplane(interior, a, b, keep_inside=True)
+        if len(out_part) >= 3:
+            result.append(out_part)
+        interior = in_part
+        if not interior:
+            break
+    return result
+
+
+def cut_cell(
+    cell: list[tuple[float, float]],
+    openings: list[list[tuple[float, float]]],
+    area_tol: float = 1e-12,
+) -> list[list[tuple[float, float]]]:
+    """Triangulation-ready pieces of ``cell − union(openings)`` (2-D).
+
+    The cell is a convex quad; each opening is triangulated first (concave
+    openings become convex triangles via :func:`_triangulate`), then subtracted
+    sequentially, triangle by triangle, via :func:`_convex_difference`.
+
+    Subtracting sequentially (rather than merging openings first) reproduces
+    the union semantics of :func:`opening_overlap_area`: overlapping openings
+    are not subtracted twice.
+
+    Args:
+        cell: Convex cell polygon (any winding; normalised to CCW).
+        openings: Coplanar opening polygons in the same 2-D basis (any winding).
+        area_tol: Relative area tolerance below which a piece is dropped.
+
+    Returns:
+        Counter-clockwise convex pieces whose union is
+        ``cell − union(openings)``.  ``[]`` when the cell is fully covered;
+        ``[cell]`` when disjoint.
+    """
+    cell = list(cell)  # copy so the caller's list is not reversed in place
+    if _signed_area_2d(cell) < 0.0:
+        cell.reverse()
+    pieces: list[list[tuple[float, float]]] = [list(cell)]
+    for opening in openings:
+        for tri in _triangulate(opening):
+            pieces = [p2 for p in pieces for p2 in _convex_difference(p, tri)]
+    cell_area = abs(_signed_area_2d(cell))
+    tol = area_tol * max(1.0, cell_area)
+    return [p for p in pieces if len(p) >= 3 and abs(_signed_area_2d(p)) > tol]

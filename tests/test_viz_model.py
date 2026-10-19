@@ -485,6 +485,41 @@ class TestResolveMeshData:
         assert sh0["sec"] == "SLAB"
         assert sh0["node_ids"] == ["N1", "N2", "N3", "N4"]
 
+    def test_opening_areas_excluded_from_shells(self):
+        """Opening (void) areas are not drawn as filled shells."""
+        from fea_toolkit.model.sap_data import AreaElement, Node, SAPModelData
+        from fea_toolkit.plotting.viz import _resolve_mesh_data
+
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 4.0, 0.0, 0.0),
+            "3": Node("3", 3, 4.0, 4.0, 0.0),
+            "4": Node("4", 4, 0.0, 4.0, 0.0),
+            "o1": Node("o1", 5, 1.5, 1.5, 0.0),
+            "o2": Node("o2", 6, 2.5, 1.5, 0.0),
+            "o3": Node("o3", 7, 2.5, 2.5, 0.0),
+            "o4": Node("o4", 8, 1.5, 2.5, 0.0),
+        }
+        areas = {
+            "S1": AreaElement("S1", 1, ["1", "2", "3", "4"]),
+            "O1": AreaElement("O1", 2, ["o1", "o2", "o3", "o4"], opening=True),
+        }
+        md = SAPModelData(
+            nodes=nodes,
+            restraints={},
+            materials={},
+            sections={},
+            frame_elements={},
+            area_elements=areas,
+            frame_assignments={},
+            area_assignments={"S1": "SLAB"},
+            groups={},
+            frame_auto_mesh={},
+        )
+
+        data = _resolve_mesh_data(md)
+        assert [s["id"] for s in data["shells"]] == ["S1"]
+
     # ── collapse_to_parents (Approach B) ─────────────────────────────
 
     def test_npz_collapse_to_parents(self):

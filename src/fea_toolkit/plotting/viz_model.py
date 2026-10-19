@@ -476,6 +476,8 @@ def _resolve_mesh_data(source, collapse_to_parents=False):
                 }
             )
         for aid, area in source.area_elements.items():
+            if getattr(area, "opening", False):
+                continue  # openings are voids, not filled shells
             data["shells"].append(
                 {
                     "id": aid,
@@ -599,6 +601,8 @@ def _resolve_mesh_data(source, collapse_to_parents=False):
             )
 
         for aid, area in model.area_elements.items():
+            if getattr(area, "opening", False):
+                continue  # openings are voids, not filled shells
             if getattr(area, "parent_id", None) is not None:
                 continue
             data["shells"].append(
@@ -626,6 +630,8 @@ def _resolve_mesh_data(source, collapse_to_parents=False):
             )
 
         for aid, area in model.area_elements.items():
+            if getattr(area, "opening", False):
+                continue  # openings are voids, not filled shells
             if getattr(area, "inactive", False):
                 continue
             data["shells"].append(
@@ -640,6 +646,8 @@ def _resolve_mesh_data(source, collapse_to_parents=False):
 
         # Also add inactive parent area elements as grey wireframe overlays
         for aid, area in model.area_elements.items():
+            if getattr(area, "opening", False):
+                continue  # openings are voids, not filled shells
             if not getattr(area, "inactive", False):
                 continue
             data["shells"].append(
