@@ -9,11 +9,14 @@ module dominates the runner layer:
 * :mod:`fea_toolkit.opensees._runner_rs` — response-spectrum analysis.
 * :mod:`fea_toolkit.opensees._runner_pushover` — pushover analysis and
   post-processing.
+* :mod:`fea_toolkit.opensees._runner_dynamic` — native Newmark transient
+  (time-history) analysis.
 
-``RunnerMixin`` combines the four so :class:`AnalysisBuilder` keeps its
+``RunnerMixin`` combines the five so :class:`AnalysisBuilder` keeps its
 single mixin import unchanged.
 """
 
+from ._runner_dynamic import TransientRunnerMixin
 from ._runner_modal import ModalRunnerMixin
 from ._runner_pushover import PushoverRunnerMixin, _record_step
 from ._runner_rs import RsRunnerMixin
@@ -31,5 +34,6 @@ class RunnerMixin(
     ModalRunnerMixin,
     RsRunnerMixin,
     PushoverRunnerMixin,
+    TransientRunnerMixin,
 ):
-    """Analysis execution mixin — static / modal / RS / pushover runners."""
+    """Analysis execution mixin — static / modal / RS / pushover / transient."""
