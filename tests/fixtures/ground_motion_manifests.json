@@ -1,0 +1,62 @@
+[
+  {
+    "record_id": "RSN953",
+    "provider": "peer_nga_west2",
+    "event": "Northridge-01",
+    "station": "Beverly Hills - 14145 Mulholland",
+    "component": "H1",
+    "source_url": "https://ngawest2.berkeley.edu/",
+    "licence": "PEER NGA-West2 user agreement (research use, no redistribution)",
+    "scale_factor": 1.0,
+    "rotation": "as_recorded",
+    "note": "FEMA P-695 far-field candidate - verify exact component/scale before use"
+  },
+  {
+    "record_id": "RSN1602",
+    "provider": "peer_nga_west2",
+    "event": "Duzce, Turkey",
+    "station": "Bolu",
+    "component": "H1",
+    "source_url": "https://ngawest2.berkeley.edu/",
+    "licence": "PEER NGA-West2 user agreement (research use, no redistribution)",
+    "scale_factor": 1.0,
+    "rotation": "as_recorded",
+    "note": "FEMA P-695 far-field candidate - verify exact component/scale before use"
+  },
+  {
+    "record_id": "RSN1787",
+    "provider": "peer_nga_west2",
+    "event": "Hector Mine",
+    "station": "Hector",
+    "component": "H1",
+    "source_url": "https://ngawest2.berkeley.edu/",
+    "licence": "PEER NGA-West2 user agreement (research use, no redistribution)",
+    "scale_factor": 1.0,
+    "rotation": "as_recorded",
+    "note": "FEMA P-695 far-field candidate - verify exact component/scale before use"
+  },
+  {
+    "record_id": "RSN169",
+    "provider": "peer_nga_west2",
+    "event": "Imperial Valley-06",
+    "station": "Delta",
+    "component": "H1",
+    "source_url": "https://ngawest2.berkeley.edu/",
+    "licence": "PEER NGA-West2 user agreement (research use, no redistribution)",
+    "scale_factor": 1.0,
+    "rotation": "as_recorded",
+    "note": "FEMA P-695 far-field candidate - verify exact component/scale before use"
+  },
+  {
+    "record_id": "RSN1111",
+    "provider": "peer_nga_west2",
+    "event": "Kobe, Japan",
+    "station": "Nishi-Akashi",
+    "component": "H1",
+    "source_url": "https://ngawest2.berkeley.edu/",
+    "licence": "PEER NGA-West2 user agreement (research use, no redistribution)",
+    "scale_factor": 1.0,
+    "rotation": "as_recorded",
+    "note": "FEMA P-695 far-field candidate - verify exact component/scale before use"
+  }
+]

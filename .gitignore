@@ -2,8 +2,12 @@
 # Project-specific ignores (fea_toolkit)
 # ============================================================================
 
-# Private section database
-data/
+# Private / local data (section database, non-redistributable ground motions).
+# The redistributable ground-motion mirror is the one exception that is tracked.
+data/*
+!data/ground_motion/
+data/ground_motion/*
+!data/ground_motion/public/
 
 # Local / private analysis scripts (not committed)
 local/

@@ -153,6 +153,8 @@ nav:
       - Linting Fix Plan: linting_fix_plan.md
       - OpenSeesPy Local Build: openseespy_local_build.md
       - Vecchio & Emara Benchmark: vecchio_emara_benchmark.md
+      - Benchmark Register: benchmark_register.md
+      - Ground-Motion Data & Sources: ground_motion_data.md
   - Tool-Specific Workflows:
       - Xara/OpenSeesRT Tcl Runtime: xara_tcl_runtime_guide.md
       - Xara Pushover Workflow: xara_pushover_workflow.md

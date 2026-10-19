@@ -9,8 +9,11 @@ import numpy as np
 import pytest
 
 from fea_toolkit.io.ground_motion import (
+    GroundMotionManifest,
+    load_manifest_registry,
     read_peer_record,
     record_summary,
+    save_manifest_registry,
 )
 from fea_toolkit.utils import DEFAULT_GRAVITY_MS2
 
@@ -62,3 +65,61 @@ class TestRecordSummaryUnits:
         times = np.array([0.0, 0.01, 0.02])
         accel = np.array([0.0, -1.5, 0.0])
         assert record_summary(times, accel)["pga"] == pytest.approx(1.5)
+
+
+class TestGroundMotionManifest:
+    """``GroundMotionManifest`` is a plain provenance record with a JSON round-trip."""
+
+    def test_to_dict_and_from_dict_round_trip(self):
+        m = GroundMotionManifest(
+            record_id="RSN6",
+            provider="peer_nga_west2",
+            event="Imperial Valley-02",
+            station="El Centro Array #9",
+            component="H1",
+            source_url="https://ngawest2.berkeley.edu/",
+            licence="PEER NGA-West2 user agreement",
+            scale_factor=2.0,
+            rotation="fault_normal",
+        )
+        assert GroundMotionManifest.from_dict(m.to_dict()) == m
+
+    def test_defaults(self):
+        m = GroundMotionManifest(
+            record_id="X",
+            provider="p",
+            event="e",
+            station="s",
+            component="c",
+            source_url="u",
+        )
+        assert m.licence == ""
+        assert m.scale_factor == 1.0
+        assert m.rotation == "as_recorded"
+        assert m.note == ""
+
+
+class TestManifestRegistry:
+    """``load_manifest_registry`` / ``save_manifest_registry`` JSON round-trip."""
+
+    def test_save_and_load_round_trip(self, tmp_path):
+        manifests = [
+            GroundMotionManifest(
+                record_id=f"RSN{i}",
+                provider="peer_nga_west2",
+                event="e",
+                station="s",
+                component="H1",
+                source_url="https://example.org/record.at2",
+            )
+            for i in range(3)
+        ]
+        p = tmp_path / "manifests.json"
+        save_manifest_registry(str(p), manifests)
+        assert load_manifest_registry(str(p)) == manifests
+
+    def test_non_list_raises(self, tmp_path):
+        p = tmp_path / "bad.json"
+        p.write_text('{"a": 1}', encoding="utf-8")
+        with pytest.raises(ValueError):
+            load_manifest_registry(str(p))

@@ -9,9 +9,89 @@ m/s².  PEER ``.AT2`` files store acceleration in g; the values are
 converted to m/s² at read time (see :func:`read_peer_record`).
 """
 
+from dataclasses import dataclass, fields
+
 import numpy as np
 
 from ..utils import DEFAULT_GRAVITY_MS2
+
+# ── Ground-motion manifest ───────────────────────────────────────
+
+
+@dataclass
+class GroundMotionManifest:
+    """Provenance and fetch metadata for a single ground-motion record.
+
+    A manifest is the repository-safe representation of a record: it records
+    *where* a record came from, how to fetch it, and how it should be
+    processed, without carrying the waveform itself.  Waveforms are fetched
+    into a local ``data/`` mirror by the fetch helpers under ``scripts/`` and
+    are never stored in the repository (see the *Ground-Motion Data & Sources*
+    document).
+
+    All fields are plain, JSON-friendly values, so a manifest list round-trips
+    through :meth:`to_dict` / :meth:`from_dict`.
+    """
+
+    record_id: str
+    provider: str
+    event: str
+    station: str
+    component: str
+    source_url: str
+    licence: str = ""
+    redistributable: bool = False
+    scale_factor: float = 1.0
+    rotation: str = "as_recorded"
+    note: str = ""
+
+    def to_dict(self) -> dict:
+        """Return the manifest as a plain ``dict`` (JSON-serialisable)."""
+        return {f.name: getattr(self, f.name) for f in fields(self)}
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> "GroundMotionManifest":
+        """Rebuild a manifest from a :meth:`to_dict` payload."""
+        return cls(**payload)
+
+
+def load_manifest_registry(path: str) -> list[GroundMotionManifest]:
+    """Load a JSON manifest registry into :class:`GroundMotionManifest` objects.
+
+    The registry is a JSON array of :meth:`GroundMotionManifest.to_dict`
+    payloads, written by :func:`save_manifest_registry`.
+
+    Args:
+        path: Path to the JSON registry file.
+
+    Returns:
+        List of manifests in file order.
+
+    Raises:
+        ValueError: If the file is not a JSON array.
+    """
+    import json
+
+    with open(path, encoding="utf-8") as f:
+        payload = json.load(f)
+    if not isinstance(payload, list):
+        raise ValueError(f"Manifest registry must be a JSON array: {path}")
+    return [GroundMotionManifest.from_dict(item) for item in payload]
+
+
+def save_manifest_registry(path: str, manifests: list[GroundMotionManifest]) -> None:
+    """Write a list of manifests to a JSON registry file.
+
+    Args:
+        path: Destination path.
+        manifests: Manifests to serialise, in order.
+    """
+    import json
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump([m.to_dict() for m in manifests], f, indent=2)
+        f.write("\n")
+
 
 # ── PEER NGA record reader ───────────────────────────────────────
 

@@ -27,6 +27,7 @@ PyVista
 
 import importlib.util
 import os
+import pathlib
 
 import pytest
 
@@ -66,6 +67,21 @@ _HAVE_GUI = (
         or importlib.util.find_spec("PyQt6") is not None
     )
 )
+
+# Ground-motion mirror: non-redistributable records fetched into
+# ``data/ground_motion/local`` by the fetch scripts under ``scripts/``.  Absent
+# on a fresh checkout (and in CI), so the ``needs_ground_motion`` marker skips
+# multi-record validation until a developer has populated the mirror.  The
+# redistributable subset lives under ``data/ground_motion/public`` and is
+# committed, so it needs no marker.
+_HAVE_GROUND_MOTION = (pathlib.Path("data") / "ground_motion" / "local").is_dir()
+
+
+@pytest.fixture(scope="session")
+def ground_motion_dir():
+    """Path to the non-redistributable ground-motion mirror, or ``None`` when absent."""
+    d = pathlib.Path("data") / "ground_motion" / "local"
+    return str(d) if d.is_dir() else None
 
 
 @pytest.fixture(autouse=True, scope="module")
@@ -110,3 +126,8 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if "needs_gui" in item.keywords:
                 item.add_marker(skip_gui)
+    if not _HAVE_GROUND_MOTION:
+        skip_gm = pytest.mark.skip(reason="ground-motion mirror not fetched (data/ground_motion)")
+        for item in items:
+            if "needs_ground_motion" in item.keywords:
+                item.add_marker(skip_gm)

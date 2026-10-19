@@ -23,10 +23,13 @@ from ._serial import collect_geometry_arrays
 from .combination_set import read_combination_set, write_combination_set
 from .e2k_parser import ETABSParser
 from .ground_motion import (
+    GroundMotionManifest,
     baseline_correct,
+    load_manifest_registry,
     read_peer_record,
     read_time_history_csv,
     record_summary,
+    save_manifest_registry,
     scale_to_pga,
     scale_to_target_sa,
 )
@@ -127,6 +130,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "SCHEMA_VERSION_LEGACY",
     "ETABSParser",
+    "GroundMotionManifest",
     "InMemoryModelStore",
     "ModelHeader",
     "ModelStore",
@@ -145,6 +149,7 @@ __all__ = [
     "flatten_stage",
     "format_linear_table",
     "get_schema_version",
+    "load_manifest_registry",
     "load_model_data",
     "load_pattern_totals",
     "make_static_key",
@@ -171,6 +176,7 @@ __all__ = [
     "read_time_history_csv",
     "record_summary",
     "results_arrays",
+    "save_manifest_registry",
     "save_results_arrays",
     "scale_to_pga",
     "scale_to_target_sa",
