@@ -595,6 +595,16 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
                 continue
             if np.ndim(node_arr) == 0:
                 continue
+            # Connectivity arrays carry integer node tags; a non-integer dtype
+            # (e.g. a string "0") would compare unequal to the integer zero
+            # placeholder below and be silently accepted as a real tag, so
+            # reject it outright instead.
+            if node_arr.dtype.kind not in ("i", "u"):
+                messages.append(
+                    f"{node_key} has non-integer dtype ({node_arr.dtype}); "
+                    "root connectivity must use integer node tags"
+                )
+                continue
             # A distinct root id is only meaningful with real connectivity; a
             # zero node tag is the missing-connectivity placeholder written by
             # ``_collect_geometry`` and must be rejected, not accepted.

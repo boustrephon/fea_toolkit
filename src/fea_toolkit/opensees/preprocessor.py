@@ -1256,6 +1256,11 @@ class Preprocessor:
             if sel is not None:
                 area_ids = set(sel.get_area_ids(md))
 
+        # Collect the opening (void) areas once, before any subdivision appends
+        # child areas, so the scan runs a single time and never re-scans the
+        # child areas later iterations add to ``md.area_elements``.
+        openings = collect_opening_areas(md.area_elements)
+
         for sid in sorted(area_ids, key=lambda x: (0, int(x)) if x.isdigit() else (1, x)):
             ae = md.area_elements.get(sid)
             if ae is None or getattr(ae, "inactive", False):
@@ -1274,7 +1279,7 @@ class Preprocessor:
                 next_tag=next_tag,
                 groups=md.groups if hasattr(md, "groups") else {},
                 restraints=getattr(md, "restraints", None),
-                openings=collect_opening_areas(md.area_elements),
+                openings=openings,
             )
             md.area_elements.update(sub_areas)
             md.area_assignments.update(sub_assigns)

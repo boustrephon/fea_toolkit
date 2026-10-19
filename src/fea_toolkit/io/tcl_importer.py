@@ -106,6 +106,13 @@ def parse_tcl_model(tcl_text: str, units: Optional[dict] = None) -> SAPModelData
 
         if in_block:
             _parse_block_line(line, current_pattern, ndm, joint_loads, variables)
+            # A compact body may attach its closing ``}`` to the final token of
+            # the last command (``load … -1.0}``); the block-line parser strips
+            # the brace, so close the block here or later model commands would
+            # be mis-parsed as pattern body.
+            if "}" in line:
+                in_block = False
+                current_pattern = None
             continue
 
         parts = line.split()
@@ -243,6 +250,15 @@ def _split_braces(tokens: list[str]) -> list[str]:
     them as standalone tokens to locate the body boundaries.  Brace-valued
     ``set`` arguments are unaffected — this runs only on pattern/block token
     streams, never on a ``set`` value.
+
+    Args:
+        tokens: The whitespace-split words of a single command (or command
+            fragment), in source order.
+
+    Returns:
+        A new token list in which every ``{`` or ``}`` character that was
+        attached to a token has been split into its own standalone token,
+        preserving the original token order.
     """
     out: list[str] = []
     for tok in tokens:

@@ -21,8 +21,8 @@ import argparse
 import contextlib
 import os
 import pathlib
+import secrets
 import sys
-import tempfile
 import urllib.request
 
 from fea_toolkit.io.ground_motion import is_direct_url, load_manifest_registry, source_extension
@@ -86,12 +86,24 @@ def main(argv=None) -> int:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 # A unique temp file beside the target, so concurrent fetches
                 # of the same record (or two records in one mirror) never
-                # collide on a deterministic ``.<name>.part`` path.
-                fd, tmp_name = tempfile.mkstemp(
-                    dir=target.parent, prefix=f".{target.name}.", suffix=".part"
-                )
-                tmp = pathlib.Path(tmp_name)
-                os.close(fd)
+                # collide on a deterministic ``.<name>.part`` path.  It is
+                # created with a requested mode of 0o666 so the process umask
+                # restricts it (e.g. 0o644 under umask 0o022) rather than
+                # ``mkstemp``'s hardcoded owner-only 0o600, keeping the
+                # downloaded record readable by other users after the atomic
+                # ``replace``.  O_CREAT | O_EXCL preserves exclusive creation.
+                flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+                for _ in range(100):
+                    candidate = str(target.parent / f".{target.name}.{secrets.token_hex(6)}.part")
+                    try:
+                        fd = os.open(candidate, flags, 0o666)
+                    except FileExistsError:
+                        continue
+                    os.close(fd)
+                    tmp = pathlib.Path(candidate)
+                    break
+                if tmp is None:
+                    raise OSError(f"could not create a unique temp file beside {target}")
                 urllib.request.urlretrieve(m.source_url, tmp)
             except Exception as exc:  # network / provider / filesystem failures
                 print(f"  !! {record_id}: {exc}", file=sys.stderr)

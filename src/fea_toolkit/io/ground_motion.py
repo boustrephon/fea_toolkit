@@ -105,27 +105,42 @@ def save_manifest_registry(path: str, manifests: list[GroundMotionManifest]) -> 
     import contextlib
     import json
     import os
-    import tempfile
+    import secrets
 
     dest = os.fspath(path)
     directory = os.path.dirname(os.path.abspath(dest)) or "."
-    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".manifests-", suffix=".json")
+
+    # Create the temp file with a requested mode of 0o666 so the process umask
+    # restricts it (e.g. 0o644 under umask 0o022) instead of ``mkstemp``'s
+    # hardcoded owner-only 0o600.  The unique name plus O_CREAT | O_EXCL keeps
+    # exclusive creation without a process-wide ``os.umask`` round-trip.
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+    tmp = None
+    for _ in range(100):
+        candidate = os.path.join(directory, f".manifests-{secrets.token_hex(6)}.json")
+        try:
+            fd = os.open(candidate, flags, 0o666)
+        except FileExistsError:
+            continue
+        tmp = candidate
+        break
+    if tmp is None:
+        raise OSError("Could not create a unique temporary registry file in " + directory)
+
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump([m.to_dict() for m in manifests], f, indent=2)
             f.write("\n")
-        # ``mkstemp`` creates the temp file owner-only (0600).  Before the
-        # atomic ``replace`` installs it as the registry, restore the mode the
-        # destination already carries, or fall back to the umask-derived default
-        # when no destination exists, so a saved registry is not left readable
-        # only by its owner.
+        # Carry the destination's existing mode across the atomic replace, so a
+        # re-save never loosens or tightens an admin-set mode.  A fresh
+        # destination keeps the umask-governed mode the temp file was created
+        # with above.
         try:
             mode = os.stat(dest).st_mode & 0o777
         except OSError:
-            umask = os.umask(0)
-            os.umask(umask)
-            mode = 0o666 & ~umask
-        os.chmod(tmp, mode)
+            pass
+        else:
+            os.chmod(tmp, mode)
         os.replace(tmp, dest)
     except BaseException:
         with contextlib.suppress(OSError):
@@ -145,6 +160,13 @@ def source_extension(url: str) -> str:
     ``.txt``, ``.csv``) keeps that suffix; any other URL — a portal page,
     a query-only link, or a path with no extension — falls back to ``.at2``
     so the fetched file always has a stable extension.
+
+    Args:
+        url: The record's source URL.
+
+    Returns:
+        The destination file extension (``".at2"``, ``".txt"``,
+        ``".csv"``, or ``".at2"`` as the fallback).
     """
     path = urllib.parse.urlparse(url).path
     suffix = pathlib.PurePosixPath(path).suffix.lower()
@@ -156,6 +178,13 @@ def is_direct_url(url: str) -> bool:
 
     The decision is made on the URL **path** only, so query parameters
     (e.g. ``?download=1``) do not defeat direct-download detection.
+
+    Args:
+        url: The record's source URL.
+
+    Returns:
+        ``True`` if the URL path ends in a supported waveform suffix,
+        ``False`` otherwise.
     """
     path = urllib.parse.urlparse(url).path
     return path.lower().endswith(_DIRECT_SUFFIXES)

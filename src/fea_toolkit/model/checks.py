@@ -412,8 +412,9 @@ def check_self_weight_consistency(
         section) and ``by_material`` (the same weight grouped by each
         section's material).
     """
-    from fea_toolkit.model.openings import collect_opening_areas, net_area
     from fea_toolkit.model.sap_data import ShellSection
+
+    from .openings import collect_opening_areas, net_area
 
     # ── Compute expected self-weight from geometry ──
     # Accumulated both by section (resolved assignment) and by material

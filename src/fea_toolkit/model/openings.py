@@ -14,6 +14,8 @@ expected weights agree on what a holed panel weighs.
 
 from __future__ import annotations
 
+from collections import ChainMap
+from collections.abc import Mapping
 from typing import Any, Optional
 
 import numpy as np
@@ -31,7 +33,7 @@ __all__ = [
 ]
 
 
-def _vertices(nodes: dict[str, Any], area: Any) -> list[tuple[float, float, float]]:
+def _vertices(nodes: Mapping[str, Any], area: Any) -> list[tuple[float, float, float]]:
     """Ordered 3-D vertices of *area* resolved from *nodes*.
 
     Returns an empty list when any corner node is missing (a dangling area
@@ -55,18 +57,26 @@ def area_vertices(model: Any, area: Any) -> list[tuple[float, float, float]]:
     return _vertices(model.nodes, area)
 
 
-def _all_nodes(model: Any) -> dict[str, Any]:
-    """Merge ``model.nodes`` with ``model.orphan_nodes``.
+def _all_nodes(model: Any) -> ChainMap[str, Any]:
+    """Merge ``model.nodes`` with ``model.orphan_nodes`` without copying.
 
     Opening (void) corner nodes may live in ``orphan_nodes`` after
     preprocessing (excluded from the OpenSees domain), so resolving an
     opening against its parent must look in both collections.
+
+    Args:
+        model: A ``SAPModelData`` or ``MeshModel`` exposing ``nodes`` (and,
+            optionally, ``orphan_nodes``).
+
+    Returns:
+        A :class:`~collections.ChainMap` that resolves a node id against
+        ``orphan_nodes`` first (so an orphaned opening corner overrides any
+        same-id node) and falls back to ``model.nodes``.
     """
-    nodes = dict(model.nodes)
     orphan = getattr(model, "orphan_nodes", None)
     if orphan:
-        nodes.update(orphan)
-    return nodes
+        return ChainMap(orphan, model.nodes)
+    return ChainMap(model.nodes)
 
 
 def _project_2d(vertices, axes) -> list[tuple[float, float]]:
@@ -279,13 +289,20 @@ def collect_opening_areas(area_elements: dict[str, Any]) -> list[Any]:
     Collected once per measurement pass so :func:`net_area` and
     :func:`opening_overlap_area` do not rescan the area collection for every
     shell.
+
+    Args:
+        area_elements: ``{area_id: AreaElement}`` mapping to filter.
+
+    Returns:
+        The list of area elements whose ``opening`` flag is truthy, in the
+        mapping's iteration order.
     """
     return [a for a in area_elements.values() if getattr(a, "opening", False)]
 
 
 def opening_polygons_2d(
     area_elements: dict[str, Any],
-    nodes: dict[str, Any],
+    nodes: Mapping[str, Any],
     area: Any,
     rel_tol: float = 1e-6,
     openings: Optional[list[Any]] = None,
