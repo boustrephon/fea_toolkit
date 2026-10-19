@@ -155,6 +155,8 @@ nav:
       - Vecchio & Emara Benchmark: vecchio_emara_benchmark.md
       - Benchmark Register: benchmark_register.md
       - Ground-Motion Data & Sources: ground_motion_data.md
+      - Cantilever Benchmark (T1): cantilever_benchmark.md
+      - Shear-Building Benchmark (T2): shear_building_benchmark.md
   - Tool-Specific Workflows:
       - Xara/OpenSeesRT Tcl Runtime: xara_tcl_runtime_guide.md
       - Xara Pushover Workflow: xara_pushover_workflow.md
