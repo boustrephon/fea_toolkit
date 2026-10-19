@@ -2382,6 +2382,7 @@ class SAPModelData:
     # combination name.
     load_combinations: dict[str, LoadCombination] = field(default_factory=dict)
     joint_loads: list[JointLoad] = field(default_factory=list)
+    added_masses: dict[str, float] = field(default_factory=dict)
     frame_dist_loads: list[FrameDistributedLoad] = field(default_factory=list)
     frame_point_loads: list[FramePointLoad] = field(default_factory=list)
     area_uniform_loads: list[AreaUniformLoad] = field(default_factory=list)

@@ -1,0 +1,303 @@
+"""OpenSees Tcl model importer → :class:`SAPModelData`.
+
+Parses the subset of OpenSees Tcl model commands used by the SAC benchmark
+frames (and similar elastic plane frames) and lifts the 2-D model
+(``-ndm 2 -ndf 3``) into the toolkit's planar-3-D convention — nodes in the
+X–Z vertical plane with out-of-plane DOFs restrained (see ``docs/tcl_import.md``
+and ``.clinerules`` §3.11).
+
+Supported model commands: ``model``, ``node``, ``fix``, ``mass``,
+``geomTransf``, ``element elasticBeamColumn`` and ``pattern … { load … }``.
+Analysis / solver commands are ignored silently; anything model-like that is
+not understood raises a warning so a dropped quantity is never silent.
+"""
+
+import warnings
+from dataclasses import dataclass
+from typing import Optional
+
+from ..model.sap_data import (
+    FrameElement,
+    JointLoad,
+    LoadPattern,
+    MassSource,
+    Material,
+    Node,
+    Restraint,
+    SAPModelData,
+    Section,
+)
+
+# Analysis / solver / setup commands that carry no model topology or load
+# information — safe to skip without a warning.
+_ANALYSIS_COMMANDS = {
+    "wipe",
+    "wipeAnalysis",
+    "system",
+    "constraints",
+    "numberer",
+    "test",
+    "algorithm",
+    "integrator",
+    "analysis",
+    "analyze",
+    "recorder",
+    "remove",
+    "timeSeries",
+    "loadConst",
+    "setTime",
+    "set",
+    "puts",
+    "source",
+    "eigen",
+    "print",
+    "logFile",
+}
+
+
+@dataclass
+class _ElasticBeamColumn:
+    """Parsed ``element elasticBeamColumn`` record (2-D or 3-D)."""
+
+    tag: int
+    i_node: int
+    j_node: int
+    area: float
+    e_mod: float
+    inertia: float
+
+
+def parse_tcl_model(tcl_text: str, units: Optional[dict] = None) -> SAPModelData:
+    """Parse an OpenSees Tcl model script into :class:`SAPModelData`.
+
+    Args:
+        tcl_text: The Tcl model source (SAC-style elastic plane frame).
+        units: Model units dict (``{"F": ..., "L": ..., "T": ...}``).  Defaults
+            to SI (``N / m``).  The SAC frames use ``{"F": "kip", "L": "in",
+            "T": "C"}``.
+
+    Returns:
+        A :class:`SAPModelData` ready for the Preprocessor → AnalysisBuilder
+        pipeline.
+    """
+    if units is None:
+        units = {"F": "N", "L": "m", "T": "C"}
+
+    ndm = 2
+    nodes: dict[int, tuple[float, float, float]] = {}
+    fixity: dict[int, list[int]] = {}
+    masses: dict[int, list[float]] = {}
+    beams: list[_ElasticBeamColumn] = []
+    load_patterns: dict[str, LoadPattern] = {}
+    joint_loads: list[JointLoad] = []
+
+    current_pattern: Optional[str] = None
+    in_block = False
+
+    for raw_line in tcl_text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        if in_block and line == "}":
+            in_block = False
+            current_pattern = None
+            continue
+
+        if in_block:
+            _parse_block_line(line, current_pattern, ndm, joint_loads)
+            continue
+
+        parts = line.split()
+        cmd = parts[0]
+
+        if cmd == "model":
+            ndm = _option_int(parts, "-ndm", ndm)
+        elif cmd == "node":
+            nodes[int(parts[1])] = _lift_coords([float(x) for x in parts[2:]], ndm)
+        elif cmd == "fix":
+            fixity[int(parts[1])] = [int(x) for x in parts[2:]]
+        elif cmd == "mass":
+            masses[int(parts[1])] = [float(x) for x in parts[2:]]
+        elif cmd == "geomTransf":
+            pass  # the builder supplies its own geometric transformation
+        elif cmd == "uniaxialMaterial":
+            _warn_if_not_elastic(line)
+        elif cmd == "element":
+            _parse_element(line, beams)
+        elif cmd == "pattern":
+            tag = int(parts[2])
+            name = f"P{tag}"
+            load_patterns[name] = LoadPattern(name=name, pattern_type="Other", self_weight_factor=0)
+            current_pattern = name
+            in_block = True
+        elif cmd in _ANALYSIS_COMMANDS:
+            pass
+        else:
+            warnings.warn(f"Tcl command not imported, skipped: {line}", stacklevel=2)
+
+    return _build_model(nodes, fixity, masses, beams, load_patterns, joint_loads, ndm, units)
+
+
+def _option_int(parts: list[str], flag: str, default: int) -> int:
+    for i, tok in enumerate(parts):
+        if tok == flag and i + 1 < len(parts):
+            return int(parts[i + 1])
+    return default
+
+
+def _lift_coords(coords: list[float], ndm: int) -> tuple[float, float, float]:
+    if ndm == 2:
+        return (coords[0], 0.0, coords[1])  # (x, y) → (X, Z), out-of-plane = 0
+    return (coords[0], coords[1], coords[2])
+
+
+def _warn_if_not_elastic(line: str) -> None:
+    parts = line.split()
+    if len(parts) < 3 or parts[1] != "Elastic":
+        warnings.warn(f"Only uniaxialMaterial Elastic is imported; skipped: {line}", stacklevel=2)
+
+
+def _parse_element(line: str, beams: list[_ElasticBeamColumn]) -> None:
+    parts = line.split()
+    if len(parts) >= 8 and parts[1] == "elasticBeamColumn":
+        beams.append(
+            _ElasticBeamColumn(
+                tag=int(parts[2]),
+                i_node=int(parts[3]),
+                j_node=int(parts[4]),
+                area=float(parts[5]),
+                e_mod=float(parts[6]),
+                inertia=float(parts[7]),
+            )
+        )
+    else:
+        warnings.warn(f"Only element elasticBeamColumn is imported; skipped: {line}", stacklevel=2)
+
+
+def _parse_block_line(
+    line: str, pattern_name: Optional[str], ndm: int, joint_loads: list[JointLoad]
+) -> None:
+    parts = line.split()
+    if not parts:
+        return
+    if parts[0] == "load":
+        node = int(parts[1])
+        vals = [float(x) for x in parts[2:]]
+        joint_loads.append(_lift_joint_load(pattern_name or "", node, vals, ndm))
+    elif parts[0] == "eleLoad":
+        warnings.warn(
+            f"eleLoad is not imported; distributed member loads dropped: {line}",
+            stacklevel=2,
+        )
+    else:
+        warnings.warn(f"Unknown pattern command skipped: {line}", stacklevel=2)
+
+
+def _lift_joint_load(pattern: str, node: int, vals: list[float], ndm: int) -> JointLoad:
+    if ndm == 2:  # [Fx, Fy, Mz] → [fx, fz, my]
+        fx, fy, mz = [*vals, 0.0, 0.0, 0.0][:3]
+        return JointLoad(pattern=pattern, node_id=str(node), fx=fx, fz=fy, my=mz)
+    fx, fy, fz, mx, my, mz = (vals + [0.0] * 6)[:6]
+    return JointLoad(pattern=pattern, node_id=str(node), fx=fx, fy=fy, fz=fz, mx=mx, my=my, mz=mz)
+
+
+def _lift_mass_scalar(vals: list[float], ndm: int) -> float:
+    if ndm == 2:
+        mx, my = [*vals, 0.0, 0.0][:2]
+        if abs(mx - my) > 1e-12:
+            warnings.warn(
+                f"Directional masses differ ({mx} vs {my}); using the X mass", stacklevel=2
+            )
+        return mx
+    return vals[0] if vals else 0.0
+
+
+def _build_model(
+    nodes: dict[int, tuple[float, float, float]],
+    fixity: dict[int, list[int]],
+    masses: dict[int, list[float]],
+    beams: list[_ElasticBeamColumn],
+    load_patterns: dict[str, LoadPattern],
+    joint_loads: list[JointLoad],
+    ndm: int,
+    units: dict,
+) -> SAPModelData:
+    model_nodes = {
+        str(tag): Node(node_id=str(tag), node_tag=tag, x=x, y=y, z=z)
+        for tag, (x, y, z) in nodes.items()
+    }
+
+    restraints: dict[str, Restraint] = {}
+    for tag in nodes:
+        if ndm == 2:
+            fx = [*fixity.get(tag, []), 0, 0, 0][:3]
+            # [UX, UY, RZ] → [UX, UZ, RY], out-of-plane always restrained.
+            restraints[str(tag)] = Restraint([fx[0], 1, fx[1], 1, fx[2], 1])
+        else:
+            f = [*fixity.get(tag, []), 0, 0, 0, 0, 0, 0][:6]
+            restraints[str(tag)] = Restraint([int(v) for v in f])
+
+    materials: dict[str, Material] = {}
+    sections: dict[str, Section] = {}
+    frame_elements: dict[str, FrameElement] = {}
+    frame_assignments: dict[str, str] = {}
+    mat_by_e: dict[float, str] = {}
+    sec_by_key: dict[tuple, str] = {}
+    for b in beams:
+        e_key = round(b.e_mod, 8)
+        mname = mat_by_e.get(e_key)
+        if mname is None:
+            mname = f"E{b.e_mod:g}"
+            materials[mname] = Material(
+                name=mname,
+                type="Steel",
+                E_mod=b.e_mod,
+                G_mod=b.e_mod / 2.6,
+                nu=0.3,
+                unit_weight=0.0,
+                Fy=1e30,  # elastic — yield is never reached
+            )
+            mat_by_e[e_key] = mname
+        s_key = (round(b.area, 8), e_key, round(b.inertia, 8))
+        sname = sec_by_key.get(s_key)
+        if sname is None:
+            sname = f"SEC{len(sections) + 1}"
+            sections[sname] = Section(
+                name=sname,
+                shape="I/Wide Flange",
+                material=mname,
+                A=b.area,
+                I33=b.inertia,
+                I22=b.inertia,
+                J=b.inertia,
+            )
+            sec_by_key[s_key] = sname
+        frame_elements[str(b.tag)] = FrameElement(
+            elem_id=str(b.tag), elem_tag=b.tag, node_i=str(b.i_node), node_j=str(b.j_node)
+        )
+        frame_assignments[str(b.tag)] = sname
+
+    added_masses = {str(tag): _lift_mass_scalar(vals, ndm) for tag, vals in masses.items()}
+    mass_sources: dict[str, MassSource] = {}
+    if added_masses:
+        mass_sources["MSSSRC1"] = MassSource(name="MSSSRC1", masses=True)
+
+    return SAPModelData(
+        nodes=model_nodes,
+        restraints=restraints,
+        materials=materials,
+        sections=sections,
+        frame_elements=frame_elements,
+        area_elements={},
+        frame_assignments=frame_assignments,
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
+        load_patterns=load_patterns,
+        frame_dist_loads=[],
+        joint_loads=joint_loads,
+        added_masses=added_masses,
+        mass_sources=mass_sources,
+        units=units,
+    )

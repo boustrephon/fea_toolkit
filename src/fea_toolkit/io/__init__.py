@@ -61,6 +61,7 @@ from .stage_reader import (
     read_stage_arrays,
 )
 from .stage_writer import write_model_stages
+from .tcl_importer import parse_tcl_model
 from .unified_writer import (
     collect_modal_arrays,
     collect_rs_arrays,
@@ -165,6 +166,7 @@ __all__ = [
     "npz_to_pyvista_modal_mesh",
     "npz_to_pyvista_shell_mesh",
     "npz_to_rhino_colour_data",
+    "parse_tcl_model",
     "read_combination_set",
     "read_dictionary_arrays",
     "read_metadata",
