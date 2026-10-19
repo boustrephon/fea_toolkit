@@ -17,7 +17,10 @@ read it without loading OpenSees.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from ..model.sap_data import ShellSection
 
 #: Sentinel ``AreaElementProperties.element_type`` value meaning "no explicit
 #: override — resolve the family from the section's ``shell_type`` (and the
@@ -34,7 +37,7 @@ SHELL_FAMILIES: dict[str, dict[str, Optional[str]]] = {
 }
 
 
-def default_shell_element(sec) -> str:
+def default_shell_element(sec: ShellSection) -> str:
     """Return the default linear quad shell element for a section.
 
     The family is chosen from the section's CSI ``shell_type``: any type
