@@ -331,7 +331,9 @@ class MeshModel:
             "Material tags": len(self.material_tags),
             "Constraint pairs": len(self.detected_edge_pairs),
             "Diaphragm levels": len(self.diaphragm_levels),
-            "Distributed loads": len(self.frame_dist_loads),
+            "Distributed loads": sum(
+                1 for ld in self.frame_dist_loads if not getattr(ld, "inactive", False)
+            ),
             "Units": str(self.units),
         }
 

@@ -1037,10 +1037,16 @@ class StaticRunnerMixin:
             # Check for any loads associated with this pattern
             has_loads = (
                 lp.self_weight_factor > 0
-                or any(ld.pattern == pname for ld in self.mesh_model.frame_dist_loads)
+                or any(
+                    ld.pattern == pname and not getattr(ld, "inactive", False)
+                    for ld in self.mesh_model.frame_dist_loads
+                )
                 or any(ld.pattern == pname for ld in self.mesh_model.joint_loads)
                 or any(ld.pattern == pname for ld in self.mesh_model.area_gravity_loads)
-                or any(ld.pattern == pname for ld in self.mesh_model.edge_loads_from_areas)
+                or any(
+                    ld.pattern == pname and not getattr(ld, "inactive", False)
+                    for ld in self.mesh_model.edge_loads_from_areas
+                )
             )
             if has_loads:
                 _patterns.add(pname)

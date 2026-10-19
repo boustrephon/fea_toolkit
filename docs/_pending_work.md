@@ -700,11 +700,13 @@ offsets.
 #### P14 — FRAME LOADS - POINT point loads + temperature loads
 Source: repo-root `README.md` §7 (Medium) "Improved Load Handling".
 
-**What.** The parser handles frame distributed and gravity loads but not
-the `FRAME LOADS - POINT` table (point loads on frames) or temperature
-loads.  Note: the pushover `lateral_load_pattern='point'` is a synthetic
-unit point load for benchmark pushes — distinct from parsing user-supplied
-`FRAME LOADS - POINT` data.
+**What.** `FRAME LOADS - POINT` (point loads on frames) is now **parsed**
+into ``frame_point_loads`` and carried through the Preprocessor and
+visualised by ``extract_load_glyphs``; the only remaining gap is propagating
+it to OpenSees ``eleLoad`` point loads (display-only for now).  Temperature
+loads are closed (no current demand).  Note: the pushover
+`lateral_load_pattern='point'` is a synthetic unit point load for benchmark
+pushes — distinct from parsing user-supplied `FRAME LOADS - POINT` data.
 
 **Outline steps.** 1) ✅ **done 2026-10-16** — `FRAME LOADS - POINT` parsing into
 a new `frame_point_loads` field (carried through the Preprocessor and

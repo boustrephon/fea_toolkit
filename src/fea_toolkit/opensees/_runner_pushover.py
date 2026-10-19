@@ -479,7 +479,7 @@ class PushoverRunnerMixin:
                 n = sum(
                     1
                     for ld in self.mesh_model.frame_dist_loads
-                    if ld.pattern == lateral_pattern_name
+                    if ld.pattern == lateral_pattern_name and not getattr(ld, "inactive", False)
                 )
                 print(
                     f"  Applied lateral loads from pattern '{lateral_pattern_name}' ({n} load(s))"

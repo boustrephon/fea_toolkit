@@ -110,9 +110,26 @@ def load_rows(
     if isinstance(obj, FrameElement):
         eid = obj.elem_id
         family = _family_ids(model, "Frame", eid, elem=obj)
+        # The retained (inactive) authored loads on the *selected* element are
+        # shown in their place; their redistributed children carry
+        # ``parent_load_id`` back to those sources and must not be listed
+        # alongside them (that would double-count the load).
+        inactive_authored_ids = {
+            getattr(ld, "load_id", "") or ""
+            for ld in getattr(model, "frame_dist_loads", None) or []
+            if getattr(ld, "inactive", False) and str(getattr(ld, "frame_id", "")) == eid
+        }
+        inactive_authored_ids.update(
+            getattr(pl, "load_id", "") or ""
+            for pl in getattr(model, "frame_point_loads", None) or []
+            if getattr(pl, "inactive", False) and str(getattr(pl, "frame_id", "")) == eid
+        )
         rows = []
         for dl in getattr(model, "frame_dist_loads", None) or []:
             if str(getattr(dl, "frame_id", "")) not in family:
+                continue
+            parent_id = getattr(dl, "parent_load_id", "") or ""
+            if parent_id and parent_id in inactive_authored_ids:
                 continue
             if getattr(dl, "inactive", False) and str(getattr(dl, "frame_id", "")) != eid:
                 continue
@@ -127,6 +144,9 @@ def load_rows(
             )
         for pl in getattr(model, "frame_point_loads", None) or []:
             if str(getattr(pl, "frame_id", "")) not in family:
+                continue
+            parent_id = getattr(pl, "parent_load_id", "") or ""
+            if parent_id and parent_id in inactive_authored_ids:
                 continue
             if getattr(pl, "inactive", False) and str(getattr(pl, "frame_id", "")) != eid:
                 continue
