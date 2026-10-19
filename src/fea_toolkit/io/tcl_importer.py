@@ -111,6 +111,13 @@ def parse_tcl_model(tcl_text: str, units: Optional[dict] = None) -> SAPModelData
         parts = line.split()
         cmd = parts[0]
 
+        # Analysis / solver commands carry no model topology or load
+        # information; skip them before variable substitution so a ``$var``
+        # they contain (e.g. ``analyze $nSteps``) is never flagged as an
+        # undefined reference.
+        if cmd in _ANALYSIS_COMMANDS:
+            continue
+
         # ``set`` defines a variable consumed later (``set E 29000`` then
         # ``element elasticBeamColumn … $E …``); store it before dispatch.
         if cmd == "set":
@@ -153,8 +160,6 @@ def parse_tcl_model(tcl_text: str, units: Optional[dict] = None) -> SAPModelData
             load_patterns[name] = LoadPattern(name=name, pattern_type="Other", self_weight_factor=0)
             current_pattern = name
             in_block = _parse_inline_pattern_block(parts, name, ndm, joint_loads, variables)
-        elif cmd in _ANALYSIS_COMMANDS:
-            pass
         else:
             warnings.warn(f"Tcl command not imported, skipped: {line}", stacklevel=2)
 
@@ -337,6 +342,9 @@ def _parse_inline_pattern_block(
     open_idx = parts.index("{")
     rest = parts[open_idx + 1 :]
     if "}" not in rest:
+        # The brace body continues on following lines, but any commands on the
+        # opening line after ``{`` must still be parsed rather than dropped.
+        _parse_block_commands(rest, pattern_name, ndm, joint_loads, variables)
         return True
     body = rest[: rest.index("}")]
     _parse_block_commands(body, pattern_name, ndm, joint_loads, variables)

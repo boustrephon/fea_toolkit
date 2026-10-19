@@ -227,7 +227,11 @@ def _collect_geometry(
                 for nid in root_area.node_ids[:4]:
                     nd = _nodes.get(nid)
                     if nd is None:
-                        break
+                        # Missing-node marker preserves the corner position so
+                        # later root corners are still collected (no fabricated
+                        # corner tag is substituted for the gap).
+                        rtags.append(0)
+                        continue
                     rtags.append(nd.node_tag)
             while len(rtags) < 4:
                 rtags.append(rtags[-1] if rtags else 0)

@@ -580,11 +580,30 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
         root_arr = data.get(root_key)
         if root_arr is None:
             continue
-        if not any(str(v) not in ("", "?") for v in root_arr):
+        # A scalar root-id value is a shape error that ``_check_shape`` has
+        # already reported; iterating it here would raise TypeError instead of
+        # letting ``validate_arrays`` return its shape-error messages.
+        if np.ndim(root_arr) == 0:
+            continue
+        distinct = [str(v) not in ("", "?") for v in root_arr]
+        if not any(distinct):
             continue
         for node_key in node_keys:
-            if data.get(node_key) is None:
+            node_arr = data.get(node_key)
+            if node_arr is None:
                 messages.append(f"{root_key} identifies a distinct root but {node_key} is missing")
+                continue
+            if np.ndim(node_arr) == 0:
+                continue
+            # A distinct root id is only meaningful with real connectivity; a
+            # zero node tag is the missing-connectivity placeholder written by
+            # ``_collect_geometry`` and must be rejected, not accepted.
+            for i, has_root in enumerate(distinct):
+                if has_root and i < len(node_arr) and int(node_arr[i]) == 0:
+                    messages.append(
+                        f"{root_key} row {i} identifies a distinct root but "
+                        f"{node_key} is zero (missing connectivity)"
+                    )
 
     # ── Check analysis types discriminator ─────────────────────────
     analysis_types = data.get("analysis_types")
