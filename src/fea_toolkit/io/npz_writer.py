@@ -226,7 +226,9 @@ def _collect_geometry(
             if root_area is not None:
                 for nid in root_area.node_ids[:4]:
                     nd = _nodes.get(nid)
-                    rtags.append(nd.node_tag if nd is not None else 0)
+                    if nd is None:
+                        break
+                    rtags.append(nd.node_tag)
             while len(rtags) < 4:
                 rtags.append(rtags[-1] if rtags else 0)
             sr1.append(rtags[0])

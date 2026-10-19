@@ -565,6 +565,27 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
             continue
         _check_shape(key, arr, shape_desc, dtype_str)
 
+    # ── Root connectivity must accompany a distinct ultimate root ──
+    # ``frame_root_sap_id`` / ``shell_root_sap_id`` name the ultimate split
+    # root; a distinct root id (anything other than "" / "?") is only
+    # meaningful together with its root-node connectivity arrays, so an
+    # archive that supplies a distinct root without those arrays is rejected.
+    for root_key, node_keys in (
+        ("frame_root_sap_id", ("frame_root_node_i", "frame_root_node_j")),
+        (
+            "shell_root_sap_id",
+            ("shell_root_node_1", "shell_root_node_2", "shell_root_node_3", "shell_root_node_4"),
+        ),
+    ):
+        root_arr = data.get(root_key)
+        if root_arr is None:
+            continue
+        if not any(str(v) not in ("", "?") for v in root_arr):
+            continue
+        for node_key in node_keys:
+            if data.get(node_key) is None:
+                messages.append(f"{root_key} identifies a distinct root but {node_key} is missing")
+
     # ── Check analysis types discriminator ─────────────────────────
     analysis_types = data.get("analysis_types")
     if analysis_types is None:
