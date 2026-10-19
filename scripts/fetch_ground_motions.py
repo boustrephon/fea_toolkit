@@ -22,6 +22,7 @@ import contextlib
 import os
 import pathlib
 import sys
+import tempfile
 import urllib.parse
 import urllib.request
 
@@ -97,7 +98,14 @@ def main(argv=None) -> int:
             continue
         if _is_direct_file(m.source_url):
             print(f"fetch  {record_id} <- {m.source_url}")
-            tmp = target.with_name(f".{target.name}.part")
+            # A unique temp file beside the target, so concurrent fetches of
+            # the same record (or two records in one mirror) never collide on a
+            # deterministic ``.<name>.part`` path.
+            fd, tmp_name = tempfile.mkstemp(
+                dir=target.parent, prefix=f".{target.name}.", suffix=".part"
+            )
+            os.close(fd)
+            tmp = pathlib.Path(tmp_name)
             try:
                 urllib.request.urlretrieve(m.source_url, tmp)
             except Exception as exc:  # network / provider failures are expected

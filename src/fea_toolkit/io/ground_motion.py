@@ -46,12 +46,26 @@ class GroundMotionManifest:
     note: str = ""
 
     def to_dict(self) -> dict:
-        """Return the manifest as a plain ``dict`` (JSON-serialisable)."""
+        """Return the manifest as a plain ``dict`` (JSON-serialisable).
+
+        Returns:
+            A ``dict`` mapping each field name to its value, suitable for
+            ``json.dump`` and for :meth:`from_dict`.
+        """
         return {f.name: getattr(self, f.name) for f in fields(self)}
 
     @classmethod
     def from_dict(cls, payload: dict) -> "GroundMotionManifest":
-        """Rebuild a manifest from a :meth:`to_dict` payload."""
+        """Rebuild a manifest from a :meth:`to_dict` payload.
+
+        Args:
+            payload: A ``dict`` whose keys are the manifest's field names,
+                as produced by :meth:`to_dict`.
+
+        Returns:
+            A new :class:`GroundMotionManifest` carrying the values from
+            *payload*.
+        """
         return cls(**payload)
 
 

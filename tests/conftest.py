@@ -69,15 +69,16 @@ _HAVE_GUI = (
 )
 
 
-# Ground-motion mirror: non-redistributable records fetched into
-# ``data/ground_motion/local`` by the fetch scripts under ``scripts/``.  Absent
-# on a fresh checkout (and in CI), so the ``needs_ground_motion`` marker skips
-# multi-record validation until a developer has populated the mirror.  The gate
-# is *record-based* — every ``<record_id>.at2`` the committed manifest registry
-# lists must exist in ``data/ground_motion/local/`` — not directory-based, so an
-# empty ``local/`` does not enable the gated tests.
+# Ground-motion mirror: records fetched into ``data/ground_motion/<public|local>``
+# by the fetch scripts under ``scripts/``.  Absent on a fresh checkout (and in
+# CI), so the ``needs_ground_motion`` marker skips multi-record validation until
+# a developer has populated the mirror.  The gate is *record-based* — every
+# record the committed manifest registry lists must exist at the path its
+# ``redistributable`` flag and ``source_url`` extension imply — not
+# directory-based, so an empty mirror does not enable the gated tests.
 def _ground_motion_records_present() -> bool:
     import json
+    import urllib.parse
 
     registry = pathlib.Path("tests") / "fixtures" / "ground_motion_manifests.json"
     try:
@@ -86,10 +87,22 @@ def _ground_motion_records_present() -> bool:
         return False
     if not isinstance(payload, list) or not payload:
         return False
-    local = pathlib.Path("data") / "ground_motion" / "local"
+    root = pathlib.Path("data") / "ground_motion"
+    _direct_suffixes = (".at2", ".txt", ".csv")
     for item in payload:
         record_id = str(item.get("record_id", "") or "")
-        if not record_id or not (local / f"{record_id}.at2").exists():
+        if not record_id:
+            return False
+        sub = "public" if item.get("redistributable") else "local"
+        url = str(item.get("source_url", "") or "")
+        path = urllib.parse.urlparse(url).path
+        ext = (
+            pathlib.PurePosixPath(path).suffix.lower()
+            if path.lower().endswith(_direct_suffixes)
+            else ""
+        )
+        ext = ext or ".at2"
+        if not (root / sub / f"{record_id}{ext}").exists():
             return False
     return True
 
