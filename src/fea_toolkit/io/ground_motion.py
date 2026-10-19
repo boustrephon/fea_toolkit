@@ -110,41 +110,54 @@ def save_manifest_registry(path: str, manifests: list[GroundMotionManifest]) -> 
     dest = os.fspath(path)
     directory = os.path.dirname(os.path.abspath(dest)) or "."
 
+    # Read the destination's existing mode *before* creating or writing the
+    # temp file, so a re-save never loosens or tightens an admin-set mode.  A
+    # fresh destination (no existing file) keeps the umask-governed mode the
+    # temp file is created with below.
+    dest_mode = None
+    with contextlib.suppress(OSError):
+        dest_mode = os.stat(dest).st_mode & 0o777
+
     # Create the temp file with a requested mode of 0o666 so the process umask
     # restricts it (e.g. 0o644 under umask 0o022) instead of ``mkstemp``'s
     # hardcoded owner-only 0o600.  The unique name plus O_CREAT | O_EXCL keeps
     # exclusive creation without a process-wide ``os.umask`` round-trip.
     flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
     tmp = None
-    for _ in range(100):
-        candidate = os.path.join(directory, f".manifests-{secrets.token_hex(6)}.json")
-        try:
-            fd = os.open(candidate, flags, 0o666)
-        except FileExistsError:
-            continue
-        tmp = candidate
-        break
-    if tmp is None:
-        raise OSError("Could not create a unique temporary registry file in " + directory)
-
+    fd = None
     try:
+        for _ in range(100):
+            candidate = os.path.join(directory, f".manifests-{secrets.token_hex(6)}.json")
+            try:
+                fd = os.open(candidate, flags, 0o666)
+            except FileExistsError:
+                continue
+            tmp = candidate
+            break
+        if tmp is None:
+            raise OSError("Could not create a unique temporary registry file in " + directory)
+
+        if dest_mode is not None:
+            # Apply the destination's mode to the open descriptor *before* any
+            # content is written, so the file never briefly exists with a
+            # looser mode.  ``os.fchmod`` is unavailable on Windows — fall back
+            # to a path-based chmod there.
+            if hasattr(os, "fchmod"):
+                os.fchmod(fd, dest_mode)
+            else:
+                os.chmod(tmp, dest_mode)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
+            fd = None  # the file object now owns (and will close) the descriptor
             json.dump([m.to_dict() for m in manifests], f, indent=2)
             f.write("\n")
-        # Carry the destination's existing mode across the atomic replace, so a
-        # re-save never loosens or tightens an admin-set mode.  A fresh
-        # destination keeps the umask-governed mode the temp file was created
-        # with above.
-        try:
-            mode = os.stat(dest).st_mode & 0o777
-        except OSError:
-            pass
-        else:
-            os.chmod(tmp, mode)
         os.replace(tmp, dest)
     except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp)
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        if tmp is not None:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
         raise
 
 
