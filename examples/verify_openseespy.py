@@ -20,6 +20,10 @@ used elsewhere in ``fea_toolkit``:
   8. **Hysteretic material** — pinching steel for brace-truss modelling.
   9. **Truss element** — truss with Hysteretic material for brace buckling.
   10. **Rigid diaphragm** — rigidDiaphragm constraint at a storey level.
+  11. **Shell element families** — the thin (``ShellDKGQ``/``ShellDKGT`` +
+      nonlinear ``ShellNLDKGQ``/``ShellNLDKGT``) and thick
+      (``ASDShellQ4``/``ASDShellT3``) quad + triangle elements with
+      ``ElasticMembranePlateSection``.
 
 Usage:
     python examples/verify_openseespy.py              # All checks
@@ -318,6 +322,37 @@ def _check_rigid_diaphragm():
     ops.rigidDiaphragm(3, 5, 6, 7, 8)
 
 
+# ── Check 11: shell element families (thin / thick / nonlinear) ─────
+
+
+def _check_shell_families():
+    """Create one element from each shell family the toolkit emits.
+
+    Verifies the full quad + triangle family: thin (``ShellDKGQ`` /
+    ``ShellDKGT`` + nonlinear ``ShellNLDKGQ`` / ``ShellNLDKGT``) and thick
+    (``ASDShellQ4`` / ``ASDShellT3``).  All accept the same
+    ``ElasticMembranePlateSection``.
+    """
+    _wipe_model()
+    ops.model("basic", "-ndm", 3, "-ndf", 6)
+    ops.node(1, 0.0, 0.0, 0.0)
+    ops.node(2, 1000.0, 0.0, 0.0)
+    ops.node(3, 1000.0, 1000.0, 0.0)
+    ops.node(4, 0.0, 1000.0, 0.0)
+    # ElasticMembranePlateSection: tag, E, nu, thickness
+    ops.section("ElasticMembranePlateSection", 1, 30000.0, 0.2, 100.0)
+
+    quads = ["ShellDKGQ", "ShellNLDKGQ", "ASDShellQ4"]
+    tris = ["ShellDKGT", "ShellNLDKGT", "ASDShellT3"]
+    tag = 1
+    for name in quads:
+        ops.element(name, tag, 1, 2, 3, 4, 1)
+        tag += 1
+    for name in tris:
+        ops.element(name, tag, 1, 2, 3, 1)
+        tag += 1
+
+
 # ── Main ───────────────────────────────────────────────────────────────
 
 
@@ -443,6 +478,15 @@ def main():
         check(c, "rigidDiaphragm(perpDirn=3, master=5, slaves=6,7,8)", True)
     except Exception as exc:
         check(c, "Rigid diaphragm constraint", False, str(exc))
+    c += 1
+
+    # ── Check 11: shell element families ─────────────────────────────
+    print(f"{c}. Shell element families (thin/thick/nonlinear)...", end=" ")
+    try:
+        _check_shell_families()
+        check(c, "ShellDKGQ/DKGT, ShellNLDKGQ/NLDKGT, ASDShellQ4/T3", True)
+    except Exception as exc:
+        check(c, "Shell element families", False, str(exc))
     c += 1
 
     # ── Xara-specific extensions (informational) ──────────────────────

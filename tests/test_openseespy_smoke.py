@@ -51,4 +51,4 @@ def test_openseespy_smoke_full():
     if result.returncode != 0:
         print(result.stderr)
     assert result.returncode == 0, f"verify_openseespy.py failed with exit code {result.returncode}"
-    assert "All 14 checks passed" in result.stdout
+    assert "All 15 checks passed" in result.stdout
