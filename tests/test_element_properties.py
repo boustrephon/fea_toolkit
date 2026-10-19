@@ -79,7 +79,7 @@ class TestAreaElementProperties:
 
     def test_defaults(self):
         props = AreaElementProperties()
-        assert props.element_type == "ShellMITC4"
+        assert props.element_type == "auto"  # resolve family from section shell_type
         assert props.material_strategy == "elastic"
         assert props.thickness is None
         assert props.nd_material_names == []

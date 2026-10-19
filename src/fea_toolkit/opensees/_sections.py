@@ -8,6 +8,7 @@ import openseespy.opensees as ops
 from ..model.sap_data import ShellSection
 from ..utils import stress_scale_factor
 from ._fiber_role_materials import resolve_fiber_role_material
+from .shell_families import SHELL_FAMILY_AUTO, default_shell_element, quad_to_tri
 
 logger = logging.getLogger(__name__)
 
@@ -436,7 +437,13 @@ class SectionMixin:
             return None
 
     def _create_shell_elements(self) -> None:
-        """Create ShellMITC4 elements from MeshModel area elements."""
+        """Create shell elements from MeshModel area elements.
+
+        The element family (thin ``ShellDKGQ``/``ShellDKGT``, thick
+        ``ASDShellQ4``/``ASDShellT3``, or nonlinear ``ShellNLDKGQ``/
+        ``ShellNLDKGT``) is resolved from ``area_element_properties`` and the
+        section's ``shell_type`` — see :mod:`opensees.shell_families`.
+        """
         # The preprocessor decides whether areas become shells; the builder just
         # mirrors the frozen mesh.  An explicit ``create_shells`` config wins; a
         # meshed run populates ``area_element_types`` and a layered-shell run
@@ -546,23 +553,23 @@ class SectionMixin:
             next_shell_tag = max(max_frame_tag, max_rigid_tag) + 1 + shell_count
             elem_tag = next_shell_tag
 
-            # Use ShellNLDKGQ for areas with a LayeredShell section,
-            # ShellMITC4 for all others (linear elastic).
+            # ── Element-family selection ──
+            # Precedence: explicit element_type → LayeredShell (nonlinear) →
+            # section shell_type (thin/thick) → thin default.
+            props = self.mesh_model.area_element_properties.get(aid)
+            explicit = props.element_type if props is not None else SHELL_FAMILY_AUTO
+            if explicit is None:
+                continue  # loads-only (no stiffness; mass handled elsewhere)
             is_layered = sec_name in self.mesh_model.layered_shell_sections
-            shell_type = "ShellNLDKGQ" if is_layered else "ShellMITC4"
-            if len(node_tags) == 3:
-                # Repeat last node tag for the 4th corner (Collapsed quad)
-                ops.element(
-                    shell_type,
-                    elem_tag,
-                    node_tags[0],
-                    node_tags[1],
-                    node_tags[2],
-                    node_tags[2],
-                    sec_tag,
-                )
+            if explicit == SHELL_FAMILY_AUTO:
+                quad = "ShellNLDKGQ" if is_layered else default_shell_element(sec)
             else:
-                ops.element(shell_type, elem_tag, *node_tags[:4], sec_tag)
+                quad = explicit
+
+            if len(node_tags) == 3:
+                ops.element(quad_to_tri(quad) or "ASDShellT3", elem_tag, *node_tags[:3], sec_tag)
+            else:
+                ops.element(quad, elem_tag, *node_tags[:4], sec_tag)
             self._shell_tag_map[aid] = elem_tag
             # A stiffness-factored variant of a layered shell is an
             # ElasticMembranePlateSection (created by

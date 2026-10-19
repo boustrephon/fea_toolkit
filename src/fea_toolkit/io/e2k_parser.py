@@ -1721,6 +1721,17 @@ def _get_sd_sections(sections: dict[str, list[GroupedLine]]) -> dict[str, SDSect
 # ── Shell sections ──
 
 
+# ETABS ``SHELLPROP`` ``TYPE`` keyword → the CSI canonical "Modeling Type".
+# ETABS does not distinguish thin/thick in ``TYPE`` (it is ``"SHELL"``,
+# ``"MEMBRANE"`` or ``"PLATE"``); ``"SHELL"`` is therefore normalised to the
+# thin default.  See docs/shell_openings.md.
+_E2K_SHELL_TYPE = {
+    "SHELL": "Shell-Thin",
+    "MEMBRANE": "Membrane",
+    "PLATE": "Plate-Thin",
+}
+
+
 def _get_shell_sections(
     sections: dict[str, list[GroupedLine]],
 ) -> dict[str, Section]:
@@ -1736,11 +1747,13 @@ def _get_shell_sections(
     ).items():
         material = str(props.get("MATERIAL") or props.get("CONCMATERIAL") or "")
         thickness = _as_float(props.get("TM") or props.get("TB") or props.get("SLABDEPTH") or 0.0)
+        raw_type = str(props.get("TYPE") or "").strip().upper()
         shells[name] = ShellSection(
             name=name,
             shape="Shell",
             material=material,
             thickness=thickness,
+            shell_type=_E2K_SHELL_TYPE.get(raw_type),
         )
     return shells
 

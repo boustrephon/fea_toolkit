@@ -232,12 +232,36 @@ TABLE:  "CONNECTIVITY - AREA"
     assert isinstance(slab, ShellSection)
     assert slab.thickness == 0.2
     assert slab.material == "C30/37"
+    assert slab.shell_type == "Shell-Thin"
     wall = md.sections["Wall150"]
     assert wall.thickness == 0.15
+    assert wall.shell_type == "Shell-Thin"
     # Check area element thickness populated from section
     assert md.area_elements["1"].thickness == 0.2
     assert md.area_elements["2"].thickness == 0.2
     assert md.area_elements["3"].thickness == 0.15
+
+
+def test_parse_area_section_type_variants(tmp_path):
+    """The AREA SECTION PROPERTIES ``Type`` is preserved on ``shell_type``."""
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "AREA SECTION PROPERTIES"
+   Section=SlabThin   Material=C30   Type=Shell-Thin   Thickness=0.2
+   Section=MatThick   Material=C30   Type=Shell-Thick   Thickness=0.5
+   Section=MemOnly    Material=C30   Type=Membrane      Thickness=0.1
+   Section=PltThin    Material=C30   Type=Plate-Thin    Thickness=0.1
+   Section=PltThick   Material=C30   Type=Plate-Thick   Thickness=0.1
+"""
+    s2k = tmp_path / "test_area_sec_type.s2k"
+    s2k.write_text(content)
+    parser = SAP2000Parser(s2k)
+    parser.parse()
+    md = parser.get_model_data()
+    assert md.sections["SlabThin"].shell_type == "Shell-Thin"
+    assert md.sections["MatThick"].shell_type == "Shell-Thick"
+    assert md.sections["MemOnly"].shell_type == "Membrane"
+    assert md.sections["PltThin"].shell_type == "Plate-Thin"
+    assert md.sections["PltThick"].shell_type == "Plate-Thick"
 
 
 def test_parse_area_uniform_generic_dispatch(tmp_path):

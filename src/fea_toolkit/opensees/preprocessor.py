@@ -48,6 +48,7 @@ from ..utils import (
     scale_material_dict,
     stress_scale_factor,
 )
+from .shell_families import SHELL_FAMILY_AUTO
 
 
 def _remap_frame_releases(
@@ -2306,7 +2307,7 @@ class Preprocessor:
                     element_ids=sel_dict.get("element_ids"),
                 )
                 layer_stack = _layer_stacks.get(group_key, [])
-                elem_type = group_dict.get("element", "ShellMITC4")
+                elem_type = group_dict.get("element", SHELL_FAMILY_AUTO)
                 props = AreaElementProperties(
                     element_type=elem_type if elem_type != "None" else None,
                     material_strategy=group_dict.get(
@@ -2329,12 +2330,14 @@ class Preprocessor:
         for aid, area in mesh_model.area_elements.items():
             if getattr(area, "inactive", False):
                 continue
+            if getattr(area, "opening", False):
+                continue  # openings are voids — never resolved to a shell element
 
             # Level 1: per-ID override
             if aid in area_overrides:
                 od = area_overrides[aid]
                 layer_stack = _layer_stacks.get(aid, [])
-                elem_type = od.get("element", "ShellMITC4")
+                elem_type = od.get("element", SHELL_FAMILY_AUTO)
                 props = AreaElementProperties(
                     element_type=elem_type if elem_type != "None" else None,
                     material_strategy=od.get(
@@ -2360,7 +2363,7 @@ class Preprocessor:
                 etype = mesh_model.area_element_types.get(aid, "")
                 if etype in role_defaults:
                     rd = role_defaults[etype]
-                    elem_type = rd.get("element", "ShellMITC4")
+                    elem_type = rd.get("element", SHELL_FAMILY_AUTO)
                     props = AreaElementProperties(
                         element_type=elem_type if elem_type != "None" else None,
                         material_strategy=rd.get("material", "elastic"),

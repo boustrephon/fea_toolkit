@@ -1564,6 +1564,12 @@ class ShellSection(Section):
     # "AREA SECTION PROPERTY DESIGN PARAMETERS" (``RebarMat``).  None →
     # framework defaults apply for nonlinear wall/slab analysis.
     rebar_material: Optional[str] = None
+    # CSI "Modeling Type" / ``Type`` field — the shell formulation as authored
+    # in the source model: ``"Shell-Thin"``, ``"Shell-Thick"``, ``"Membrane"``,
+    # ``"Plate-Thin"``, ``"Plate-Thick"`` (ETABS ``"SHELL"`` is normalised to
+    # ``"Shell-Thin"``).  ``None`` = unspecified → thin default.  Selects the
+    # shell element family; see ``opensees/shell_families.py``.
+    shell_type: Optional[str] = None
 
     def fiber_roles(self) -> list[str]:
         return []
@@ -1624,10 +1630,12 @@ class AreaElementProperties:
     AnalysisBuilder when creating OpenSees shell elements.
 
     Args:
-        element_type: OpenSees shell element command, or ``None`` for
-            loads-only (no element created, mass still added).
-            ``"ShellMITC4"``, ``"ShellDKGQ"``, ``"ShellNLDKGQ"``,
-            ``None``.
+        element_type: OpenSees shell element command, the ``"auto"`` sentinel
+            (resolve the family from the section's ``shell_type``), or
+            ``None`` for loads-only (no element created, mass still added).
+            Explicit names: ``"ShellDKGQ"``, ``"ShellNLDKGQ"``,
+            ``"ASDShellQ4"``, ``"ShellMITC4"`` (legacy quad-only).  See
+            ``opensees/shell_families.py``.
         material_strategy: Controls section/material creation.
             ``"elastic"``, ``"layered_rc"``, ``"layered_steel"``.
         thickness: Override shell thickness (model units).
@@ -1644,7 +1652,7 @@ class AreaElementProperties:
             ``"layered_rc"`` / ``"layered_steel"``.
     """
 
-    element_type: Optional[str] = "ShellMITC4"
+    element_type: Optional[str] = "auto"  # == opensees.shell_families.SHELL_FAMILY_AUTO
     material_strategy: str = "elastic"
     thickness: Optional[float] = None
     nd_material_names: list[str] = field(default_factory=list)

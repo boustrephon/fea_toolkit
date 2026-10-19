@@ -273,6 +273,8 @@ def test_shell_section_and_area_thickness(model):
     slab = model.sections["Slab"]
     assert isinstance(slab, ShellSection)
     assert slab.thickness == pytest.approx(0.2)
+    # ETABS ``TYPE "SHELL"`` is normalised to the thin CSI modeling type.
+    assert slab.shell_type == "Shell-Thin"
     # Area thickness is populated from the assigned shell section.
     assert model.area_elements["S1@ROOF"].thickness == pytest.approx(0.2)
 

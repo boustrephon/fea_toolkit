@@ -68,7 +68,7 @@ unchanged.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `element_type` | `Optional[str]` | `"ShellMITC4"` | Shell element: `ShellMITC4`, `ShellDKGQ`, `ShellNLDKGQ`, or `None` for loads-only |
+| `element_type` | `Optional[str]` | `"auto"` | Shell element: `"auto"` (resolve the thin/thick family from the section's `shell_type`), `ShellDKGQ`, `ShellNLDKGQ`, `ASDShellQ4`, `ShellMITC4` (legacy quad-only), or `None` for loads-only |
 | `material_strategy` | `str` | `"elastic"` | `elastic`, `layered_rc`, `layered_steel` |
 | `thickness` | `Optional[float]` | `None` | Thickness override (`None` = use SAP section property) |
 | `nd_material_names` | `List[str]` | `[]` | References to nD materials for layered sections |

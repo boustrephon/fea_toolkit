@@ -1841,6 +1841,7 @@ class SAP2000Parser:
                 I22=0.0,
                 J=0.0,
                 thickness=thickness,
+                shell_type=sec.get("Type") or None,
                 rebar_material=area_rebar_mat.get(name),
             )
 
