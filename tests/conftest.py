@@ -78,7 +78,8 @@ _HAVE_GUI = (
 # directory-based, so an empty mirror does not enable the gated tests.
 def _ground_motion_records_present() -> bool:
     import json
-    import urllib.parse
+
+    from fea_toolkit.io.ground_motion import source_extension
 
     registry = pathlib.Path("tests") / "fixtures" / "ground_motion_manifests.json"
     try:
@@ -88,20 +89,14 @@ def _ground_motion_records_present() -> bool:
     if not isinstance(payload, list) or not payload:
         return False
     root = pathlib.Path("data") / "ground_motion"
-    _direct_suffixes = (".at2", ".txt", ".csv")
     for item in payload:
+        if not isinstance(item, dict):
+            return False
         record_id = str(item.get("record_id", "") or "")
         if not record_id:
             return False
         sub = "public" if item.get("redistributable") else "local"
-        url = str(item.get("source_url", "") or "")
-        path = urllib.parse.urlparse(url).path
-        ext = (
-            pathlib.PurePosixPath(path).suffix.lower()
-            if path.lower().endswith(_direct_suffixes)
-            else ""
-        )
-        ext = ext or ".at2"
+        ext = source_extension(str(item.get("source_url", "") or ""))
         if not (root / sub / f"{record_id}{ext}").exists():
             return False
     return True

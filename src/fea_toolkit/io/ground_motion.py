@@ -9,6 +9,8 @@ m/s².  PEER ``.AT2`` files store acceleration in g; the values are
 converted to m/s² at read time (see :func:`read_peer_record`).
 """
 
+import pathlib
+import urllib.parse
 from dataclasses import dataclass, fields
 
 import numpy as np
@@ -112,11 +114,51 @@ def save_manifest_registry(path: str, manifests: list[GroundMotionManifest]) -> 
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump([m.to_dict() for m in manifests], f, indent=2)
             f.write("\n")
+        # ``mkstemp`` creates the temp file owner-only (0600).  Before the
+        # atomic ``replace`` installs it as the registry, restore the mode the
+        # destination already carries, or fall back to the umask-derived default
+        # when no destination exists, so a saved registry is not left readable
+        # only by its owner.
+        try:
+            mode = os.stat(dest).st_mode & 0o777
+        except OSError:
+            umask = os.umask(0)
+            os.umask(umask)
+            mode = 0o666 & ~umask
+        os.chmod(tmp, mode)
         os.replace(tmp, dest)
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
         raise
+
+
+# ── Fetch URL helpers ───────────────────────────────────────────
+
+_DIRECT_SUFFIXES = (".at2", ".txt", ".csv")
+
+
+def source_extension(url: str) -> str:
+    """Return the destination file extension for a record's source URL.
+
+    A URL whose path ends in a supported waveform suffix (``.at2``,
+    ``.txt``, ``.csv``) keeps that suffix; any other URL — a portal page,
+    a query-only link, or a path with no extension — falls back to ``.at2``
+    so the fetched file always has a stable extension.
+    """
+    path = urllib.parse.urlparse(url).path
+    suffix = pathlib.PurePosixPath(path).suffix.lower()
+    return suffix if path.lower().endswith(_DIRECT_SUFFIXES) else ".at2"
+
+
+def is_direct_url(url: str) -> bool:
+    """Whether *url* points directly at a supported waveform file.
+
+    The decision is made on the URL **path** only, so query parameters
+    (e.g. ``?download=1``) do not defeat direct-download detection.
+    """
+    path = urllib.parse.urlparse(url).path
+    return path.lower().endswith(_DIRECT_SUFFIXES)
 
 
 # ── PEER NGA record reader ───────────────────────────────────────

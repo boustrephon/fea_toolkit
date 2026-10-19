@@ -23,38 +23,18 @@ import os
 import pathlib
 import sys
 import tempfile
-import urllib.parse
 import urllib.request
 
-from fea_toolkit.io.ground_motion import load_manifest_registry
+from fea_toolkit.io.ground_motion import is_direct_url, load_manifest_registry, source_extension
 
 DEFAULT_MANIFEST = pathlib.Path("tests") / "fixtures" / "ground_motion_manifests.json"
 ROOT = pathlib.Path("data") / "ground_motion"
-
-_DIRECT_SUFFIXES = (".at2", ".txt", ".csv")
 
 
 def _dest_for(m) -> pathlib.Path:
     """Route a manifest to the public (redistributable) or local mirror."""
     sub = "public" if m.redistributable else "local"
     return ROOT / sub
-
-
-def _is_direct_file(url: str) -> bool:
-    """Whether *url* points directly at a supported waveform file.
-
-    The decision is made on the URL **path** only, so query parameters
-    (e.g. ``?download=1``) do not defeat direct-download detection.
-    """
-    path = urllib.parse.urlparse(url).path
-    return path.lower().endswith(_DIRECT_SUFFIXES)
-
-
-def _extension_for(url: str) -> str:
-    """The lowercase file extension of a direct-download URL (``.at2`` default)."""
-    path = urllib.parse.urlparse(url).path
-    suffix = pathlib.PurePosixPath(path).suffix.lower()
-    return suffix or ".at2"
 
 
 def _validate_record_id(record_id: str) -> str:
@@ -91,28 +71,34 @@ def main(argv=None) -> int:
             failed = True
             continue
 
-        ext = _extension_for(m.source_url) if _is_direct_file(m.source_url) else ".at2"
+        ext = source_extension(m.source_url)
         target = _dest_for(m) / f"{record_id}{ext}"
         if target.exists():
             print(f"skip   {record_id} (already present)")
             continue
-        if _is_direct_file(m.source_url):
+        if is_direct_url(m.source_url):
             print(f"fetch  {record_id} <- {m.source_url}")
-            # A unique temp file beside the target, so concurrent fetches of
-            # the same record (or two records in one mirror) never collide on a
-            # deterministic ``.<name>.part`` path.
-            fd, tmp_name = tempfile.mkstemp(
-                dir=target.parent, prefix=f".{target.name}.", suffix=".part"
-            )
-            os.close(fd)
-            tmp = pathlib.Path(tmp_name)
+            tmp = None
             try:
+                # Ensure the mirror directory exists right before the temp
+                # file is created, so a missing/read-only directory surfaces
+                # as a per-manifest failure rather than aborting the run.
+                target.parent.mkdir(parents=True, exist_ok=True)
+                # A unique temp file beside the target, so concurrent fetches
+                # of the same record (or two records in one mirror) never
+                # collide on a deterministic ``.<name>.part`` path.
+                fd, tmp_name = tempfile.mkstemp(
+                    dir=target.parent, prefix=f".{target.name}.", suffix=".part"
+                )
+                tmp = pathlib.Path(tmp_name)
+                os.close(fd)
                 urllib.request.urlretrieve(m.source_url, tmp)
-            except Exception as exc:  # network / provider failures are expected
+            except Exception as exc:  # network / provider / filesystem failures
                 print(f"  !! {record_id}: {exc}", file=sys.stderr)
                 failed = True
-                with contextlib.suppress(OSError):
-                    tmp.unlink(missing_ok=True)
+                if tmp is not None:
+                    with contextlib.suppress(OSError):
+                        tmp.unlink(missing_ok=True)
             else:
                 tmp.replace(target)
         else:

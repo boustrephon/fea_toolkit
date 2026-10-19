@@ -14,6 +14,7 @@ from fea_toolkit.io.ground_motion import (
     read_peer_record,
     record_summary,
     save_manifest_registry,
+    source_extension,
 )
 from fea_toolkit.utils import DEFAULT_GRAVITY_MS2
 
@@ -123,3 +124,36 @@ class TestManifestRegistry:
         p.write_text('{"a": 1}', encoding="utf-8")
         with pytest.raises(ValueError):
             load_manifest_registry(str(p))
+
+    def test_save_preserves_existing_mode(self, tmp_path):
+        """An existing registry's mode survives an atomic re-save."""
+        import os
+
+        p = tmp_path / "manifests.json"
+        p.write_text("[]", encoding="utf-8")
+        os.chmod(p, 0o640)
+        save_manifest_registry(str(p), [])
+        assert os.stat(p).st_mode & 0o777 == 0o640
+
+    def test_save_fresh_file_uses_umask_default_mode(self, tmp_path):
+        """A new registry gets the umask-derived mode, not ``mkstemp``'s 0600."""
+        import os
+
+        p = tmp_path / "manifests.json"
+        save_manifest_registry(str(p), [])
+        umask = os.umask(0)
+        os.umask(umask)
+        assert os.stat(p).st_mode & 0o777 == 0o666 & ~umask
+
+
+class TestSourceExtension:
+    """``source_extension`` — the shared fetch-URL extension selector."""
+
+    def test_direct_url_keeps_source_suffix(self):
+        assert source_extension("https://example.org/record.at2") == ".at2"
+        assert source_extension("https://example.org/record.txt?download=1") == ".txt"
+        assert source_extension("https://example.org/record.CSV") == ".csv"
+
+    def test_non_direct_url_falls_back_to_at2(self):
+        assert source_extension("https://example.org/portal") == ".at2"
+        assert source_extension("https://example.org/record.zip") == ".at2"
