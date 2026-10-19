@@ -15,7 +15,11 @@ Green's-theorem area, centroid and second moments, with loops at odd nesting
 depth subtracted as holes), with `X` mapped to the local 2-axis and `Y` to the
 local 3-axis (the ETABS **frame-section** default), and the `ANGLE` rotation
 applied.  `REF LINE`
-shapes are skipped.  Multi-polygon composites combine about the shared centroid
+shapes are skipped.  A nested polygon whose `MATERIAL` is a CSI void marker
+(`"VOID"` in Section Designer, or the built-in `"None"`/`"NONE"`) is treated
+as a hole and subtracted silently; a nested polygon with a different, non-void
+material is ambiguous (an embedded solid) and is subtracted with a warning.
+Multi-polygon composites combine about the shared centroid
 via the parallel-axis theorem.
 
 The same polygon loops also drive the extruded representation:

@@ -197,6 +197,20 @@ def _loop_inside(inner: list[tuple[float, float]], outer: list[tuple[float, floa
     return all(_point_in_loop(pt, outer) for pt in inner)
 
 
+# ── Void / opening material markers ──
+# CSI marks openings with a reserved material name rather than a physical
+# material: Section Designer sections export a hole's polygon with
+# ``MATERIAL "VOID"``, and null LINE/AREA objects use the built-in ``"None"``
+# (``"NONE"``) section (see the CSiXRevit import mapping and
+# ``docs/e2k_import_plan.md``).  Case is not significant.
+_VOID_MATERIAL_NAMES = {"VOID", "NONE"}
+
+
+def _is_void_material(name: str) -> bool:
+    """True when *name* is a CSI void/opening marker rather than a material."""
+    return str(name or "").strip().upper() in _VOID_MATERIAL_NAMES
+
+
 def _signed_loop_properties(
     loops: list[list[tuple[float, float]]],
     materials: Optional[list[str]] = None,
@@ -210,12 +224,13 @@ def _signed_loop_properties(
     depth, negative), so the composite area, centroid and second moments treat
     holes as voids.
 
-    ETABS openings are not yet parsed as a distinct marker, so a nested loop is
-    treated as a hole on containment depth alone.  When *materials* and
-    *base_material* are supplied, a nested loop whose material differs from the
-    base material is ambiguous — it may be a nested *solid* (an embedded
-    material) rather than a void, and nested solid materials are unsupported —
-    so a warning is emitted and the loop is still subtracted as a hole.
+    CSI void markers (``"VOID"`` in Section Designer sections; ``"None"`` /
+    ``"NONE"`` for null objects) are recognised when *materials* is supplied,
+    so a nested loop marked as a void is subtracted silently.  A nested loop
+    whose material differs from the *base_material* and is *not* a void marker
+    is ambiguous — it may be a nested *solid* (an embedded material) rather
+    than a void, and nested solid materials are unsupported — so a warning is
+    emitted and the loop is still subtracted as a hole.
 
     Returns ``{"A", "cy", "cz", "I33", "I22"}``; a non-positive signed area
     returns all zeros.
@@ -230,7 +245,7 @@ def _signed_loop_properties(
         if is_hole and materials is not None and i < len(materials) and base_material:
             mat = str(materials[i] or "").strip()
             base = str(base_material or "").strip()
-            if mat and base and mat.upper() != base.upper():
+            if mat and base and mat.upper() != base.upper() and not _is_void_material(mat):
                 warnings.warn(
                     f"Nested loop {i} has material {mat!r} differing from the "
                     f"base material {base!r}; nested solid materials are "
