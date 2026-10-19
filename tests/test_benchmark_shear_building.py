@@ -1,4 +1,4 @@
-"""T2 shear-building benchmark: modal periods + CQC response-spectrum base shear.
+"""T1 shear-building benchmark: modal periods + CQC response-spectrum base shear.
 
 A three-storey shear building (equal story stiffness ``k``, equal floor mass
 ``m``) is the textbook three-DOF system solved by Przemieniecki (1968) / Paz
@@ -147,7 +147,9 @@ def builder():
 def test_modal_periods_match_shear_building(builder):
     periods_ref, _ = _reference_eigensolution()
     builder.build_domain()
-    result = builder.run_modal_analysis(num_modes=3, print_results=False)
+    result = builder.run_modal_analysis(
+        num_modes=3, print_results=False, eigen_solver="fullGenLapack"
+    )
     got = result["periods"][:3]
     for g, r in zip(got, periods_ref):
         assert g == pytest.approx(r, rel=1e-3)
@@ -156,7 +158,9 @@ def test_modal_periods_match_shear_building(builder):
 def test_cqc_base_shear_matches_reference(builder):
     ref = _reference_cqc_base_shear()
     builder.build_domain()
-    modal = builder.run_modal_analysis(num_modes=3, print_results=False)
+    modal = builder.run_modal_analysis(
+        num_modes=3, print_results=False, eigen_solver="fullGenLapack"
+    )
     rs = builder.run_response_spectrum_analysis(
         num_modes=3,
         modal_periods=modal["periods"][:3],

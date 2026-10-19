@@ -1,5 +1,5 @@
 ---
-title: "Three-Storey Shear-Building Benchmark (T2)"
+title: "Three-Storey Shear-Building Benchmark (T1)"
 description: "Przemieniecki/Paz three-DOF shear-building benchmark: modal periods and CQC response-spectrum base shear against the closed-form generalised eigenproblem."
 status: "complete"
 tags: [validation, benchmark, shear-building, modal, response-spectrum, cqc, closed-form]
@@ -7,7 +7,7 @@ category: [planning]
 related: [benchmark_register.md, modal_analysis.md]
 ---
 
-# Three-Storey Shear-Building Benchmark (T2)
+# Three-Storey Shear-Building Benchmark (T1)
 
 ## Purpose
 
@@ -37,8 +37,11 @@ whose eigenvalues are `λᵢ = 2 − 2 cos((2i−1)π/7)`.
 - **Periods**: the three generalised eigenvalues `T = 2π/ω` of `(K, M)`,
   solved in the test with `numpy.linalg.eigh` (no hardcoded digits).
 - **CQC base shear**: under a flat spectrum `Sa = 1 m/s²` and `ζ = 0.05`, the
-  modal base shear is `Vᵢ = Sa·Γᵢ²` and the CQC combination
-  `√(Σᵢⱼ ρᵢⱼ Vᵢ Vⱼ)` uses Der Kiureghian's `ρᵢⱼ`, evaluated in the test.
+  participation factor is `Γᵢ = φᵢᵀ·r` for the L2-normalised eigenvector
+  `φᵢ` (``numpy.linalg.eigh``) and `r = [1, 1, 1]ᵀ`, so the modal base shear is
+  `Vᵢ = Sa·m·Γᵢ²` (floor mass `m`, the effective modal mass `m·Γᵢ²`), and the
+  CQC combination `√(Σᵢⱼ ρᵢⱼ Vᵢ Vⱼ)` uses Der Kiureghian's `ρᵢⱼ`, evaluated
+  in the test.
 
 ## Acceptance
 
