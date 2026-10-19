@@ -44,25 +44,28 @@ related: [shell_support.md, constraint_detection.md, element_splitting.md, eleme
 ## 1. Background and current state
 
 An *opening* is an `AreaElement` with `opening=True` (the `"NONE"` section or
-`OPENING "YES"` in the source model).  Today:
+`OPENING "YES"` in the source model).  Current behaviour:
 
 - **Self-weight** — `net_area()` subtracts the exact opening overlap
   (`model/openings.py`), so weights are correct.
 - **Structured meshing** — `mesh_area_elements` and `subdivide_area_mesh`
-  (`model/geometry_mesh.py`) drop any grid cell *fully* inside an opening
-  (`_cell_kept` → `conform_cell_to_openings`).  Cells that *straddle* the
-  boundary are kept whole, so the hole edge is a staircase of grid lines.
+  (`model/geometry_mesh.py`) trim every grid cell against the coplanar
+  openings with `cut_cell`: cells fully inside an opening are dropped, and
+  straddling cells are split into convex pieces, so the shell mesh traces the
+  opening boundary (a conforming hole, not a staircase of whole cells).
+- **Boundary-node reuse** — the opening corner nodes (`o1..o4`) are seeded
+  into the mesher's coordinate registry, so the trimmed cells reuse them as
+  shared mesh nodes and a beam framing into the opening edge connects to the
+  slab.
 - **OpenSees** — `_sections.py` skips opening areas (`opening=True`), so no
-  shell element spans the void; the opening corner nodes are orphaned
-  (`preprocessor.py`) because nothing references them.
-- **GUI** — no opening awareness: the unprocessed view draws openings as
-  solid shells; the processed view drops them only by accident (their corner
-  nodes are orphaned).
+  shell element spans the void; the conforming mesh keeps the opening corners
+  referenced, so the preprocessor no longer orphans them.
+- **GUI** — `viz_model.py` filters `opening=True` out of the filled-shell
+  collection, so openings are drawn as voids rather than solid shells.
 
-The consequence of the staircase + orphaning is a **connectivity gap**: a
-beam framing into an opening edge references `o1..o4`, but those nodes are not
-shared by any shell in the staircase mesh, so the beam endpoint floats
-disconnected from the slab.
+Before `cut_cell` landed, straddling cells were kept whole (the hole edge was
+a staircase of grid lines) and the opening corners were orphaned, leaving a
+beam framing an opening edge floating disconnected from the slab.
 
 ## 2. Goal and scope
 
@@ -166,6 +169,9 @@ cell ∩ tri`, which is discarded.
 ```python
 def cut_cell(cell, openings, area_tol=1e-12):
     """Triangulation-ready pieces of ``cell − union(openings)`` (2-D)."""
+    cell = list(cell)  # copy so the caller's list is not reversed in place
+    if _signed_area_2d(cell) < 0.0:
+        cell.reverse()
     pieces = [list(cell)]
     for opening in openings:
         for tri in _triangulate(opening):           # concave → convex tris
@@ -288,11 +294,14 @@ Mapping to OpenSees:
 | `Membrane` | full shell (approximation; in-plane-only not represented) |
 | `Plate-Thin` / `Plate-Thick` | full shell (approximation; bending-only not represented) |
 
-**Today neither parser reads the `Type` column** — `s2k_parser.py` and
-`e2k_parser.py` both hardcode `shape="Shell"` and read only material +
-thickness, so the CSI thin/thick/membrane intent is silently dropped.  The
-work is: add a `shell_type` field to `ShellSection`, parse the `Type` column,
-and keep the raw value so `Membrane`/`Plate-*` can be specialised later.
+**Both parsers now read the `Type` column into `ShellSection.shell_type`:**
+`s2k_parser.py` stores the raw `Type` value (`sec.get("Type")`), and
+`e2k_parser.py` maps the ETABS `TYPE` keyword through `_E2K_SHELL_TYPE`
+(`"SHELL"` → `"Shell-Thin"`, `"MEMBRANE"` → `"Membrane"`,
+`"PLATE"` → `"Plate-Thin"`).  The raw value is preserved so
+`Membrane`/`Plate-*` can be specialised later, and
+`opensees/shell_families.py` (`default_shell_element`) selects the thin
+(`ShellDKGQ`/`ShellDKGT`) or thick (`ASDShellQ4`/`ASDShellT3`) family from it.
 
 ## Element selection and per-selection override
 

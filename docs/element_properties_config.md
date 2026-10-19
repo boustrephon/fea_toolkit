@@ -88,7 +88,7 @@ config = {
                          "integration": "Lobatto", "num_int_pts": 5},
         "BRACE":        {"element": "truss", "material": "steel02"},
         "WALL":         {"element": "ShellNLDKGQ", "material": "layered_rc"},
-        "SLAB":         {"element": "ShellMITC4", "material": "elastic"},
+        "SLAB":         {"element": "auto", "material": "elastic"},
     },
     # ── Selection-based groups (Level 2) ──
     "frame_groups": {
@@ -155,7 +155,7 @@ For each area element:
 1. Check `shell_layers` for an area ID key → use that
 2. Check `shell_layers` for a selection key whose `selector` matches → first match wins
 3. Check `element_strategies` for the element's role (`WALL`, `SLAB`)
-4. Fall back to `ShellMITC4` + `elastic`
+4. Fall back to `"auto"` (resolve the thin/thick family from the section's `shell_type`) + `elastic`
 
 ## OpenSees nD Material Types
 
