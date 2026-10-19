@@ -35,7 +35,7 @@ from ..model.sap_data import (
     Restraint,
     SAPModelData,
 )
-from .openings import collect_opening_areas, cut_cell, opening_polygons_2d
+from .openings import _signed_area_2d, collect_opening_areas, cut_cell, opening_polygons_2d
 
 # ── Shared coordinate / node helpers ──────────────────────────────────
 # These were historically defined as inner functions inside each mesh
@@ -392,11 +392,23 @@ def _emit_cell_pieces(
 
     l1, l2, l3 = face_axes
     cell_2d = [(float(np.dot(p, l1)), float(np.dot(p, l2))) for p in cell_pts]
+    cell_signed = _signed_area_2d(cell_2d)
+    cell_area = abs(cell_signed)
     pieces = cut_cell(cell_2d, openings_2d)
-    if pieces == [cell_2d]:
-        # Disjoint — the cell is untouched.
+    # ``cut_cell`` normalises the cell to counter-clockwise; a single piece
+    # with the cell's area means the cell is disjoint from every opening and
+    # stays untouched (fast path reuses the original node ids).
+    if len(pieces) == 1 and abs(_signed_area_2d(pieces[0])) >= cell_area - 1e-12 * max(
+        1.0, cell_area
+    ):
         _emit(list(cell_node_ids), None)
         return next_tag
+
+    # ``cut_cell`` returns counter-clockwise pieces; when the grid cell is
+    # clockwise, reverse each piece so the emitted faces keep the grid's
+    # winding (shell normals stay consistent with the untouched cells).
+    if cell_signed < 0.0:
+        pieces = [list(reversed(piece)) for piece in pieces]
 
     w = float(np.dot(cell_pts[0], l3))
     for k, piece in enumerate(pieces):

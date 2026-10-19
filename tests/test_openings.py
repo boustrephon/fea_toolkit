@@ -366,6 +366,29 @@ def test_cut_cell_disjoint_opening_returns_cell_unchanged():
     assert cut_cell(cell, [opening]) == [cell]
 
 
+def test_cut_cell_disjoint_opening_crossing_extended_edge_returns_cell():
+    """A disjoint triangle whose *extended* edge line crosses the cell is not
+    a subtraction — the cell is returned unchanged, not spuriously split."""
+    cell = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]
+    # Triangle entirely to the right of the cell; its edge (4.5,1)→(6,1) has an
+    # extended line y=1 that crosses the cell, but the triangle itself is disjoint.
+    opening = [(4.5, 0.0), (4.5, 1.0), (6.0, 1.0)]
+    assert cut_cell(cell, [opening]) == [cell]
+
+
+def test_cut_cell_cell_vertex_on_opening_edge_has_no_repeated_vertices():
+    """Cell vertices on an opening edge must not produce repeated vertices."""
+    cell = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]
+    # Lower-left half triangle: cell vertices (4,0) and (0,4) lie on the
+    # diagonal opening edge (4,0)→(0,4).
+    opening = [(0.0, 0.0), (4.0, 0.0), (0.0, 4.0)]
+    pieces = cut_cell(cell, [opening])
+    assert sum(_area2d(p) for p in pieces) == pytest.approx(8.0)  # cell − tri
+    for piece in pieces:
+        for i in range(len(piece)):
+            assert piece[i] != piece[(i + 1) % len(piece)]
+
+
 def test_cut_cell_fully_covered_returns_empty():
     cell = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]
     opening = [(-1.0, -1.0), (5.0, -1.0), (5.0, 5.0), (-1.0, 5.0)]

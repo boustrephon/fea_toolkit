@@ -486,6 +486,39 @@ def conform_cell_to_openings(
 # Exact cut-out — convex half-plane chop (boolean)
 # ═══════════════════════════════════════════════════════════════
 
+#: Distance below which two consecutive polygon vertices are treated as the
+#: same point — a clip crossing can land, up to floating-point noise, exactly
+#: on an existing vertex.  Small enough never to collapse distinct mesh nodes.
+_DEDUPE_DIST_EPS = 1e-9
+
+
+def _dedupe_vertices(poly: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Drop consecutive and wrap-around near-duplicate vertices from *poly*.
+
+    A clip intersection computed at an on-line vertex can land (up to
+    floating-point noise) exactly on that vertex, leaving a degenerate
+    zero-length edge.  Vertices within :data:`_DEDUPE_DIST_EPS` of their
+    predecessor — and the wrap-around first/last pair — are removed.
+    """
+    if not poly:
+        return []
+    eps2 = _DEDUPE_DIST_EPS * _DEDUPE_DIST_EPS
+    out: list[tuple[float, float]] = []
+    for p in poly:
+        if out:
+            dx = p[0] - out[-1][0]
+            dy = p[1] - out[-1][1]
+            if dx * dx + dy * dy <= eps2:
+                continue
+        out.append(p)
+    while len(out) > 1:
+        dx = out[0][0] - out[-1][0]
+        dy = out[0][1] - out[-1][1]
+        if dx * dx + dy * dy > eps2:
+            break
+        out.pop()
+    return out
+
 
 def _clip_by_halfplane(
     poly: list[tuple[float, float]],
@@ -528,14 +561,17 @@ def _clip_by_halfplane(
     n = len(poly)
     for i in range(n):
         p, q = poly[i], poly[(i + 1) % n]
-        p_in, q_in = _keep(p), _keep(q)
-        if p_in:
+        if _keep(p):
             out.append(p)
-        if p_in != q_in:
-            sp, sq = _side(p), _side(q)
+        sp, sq = _side(p), _side(q)
+        # Compute the crossing only when the segment's endpoints are strictly
+        # on opposite sides of the clip line.  An endpoint on the line
+        # (``|s| <= tol``) is already emitted above and must not produce a
+        # duplicate crossing point.
+        if (sp > tol and sq < -tol) or (sp < -tol and sq > tol):
             t = sp / (sp - sq)
             out.append((p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])))
-    return out
+    return _dedupe_vertices(out)
 
 
 def _convex_difference(
@@ -575,6 +611,13 @@ def _convex_difference(
         interior = in_part
         if not interior:
             break
+    # The surviving interior is ``cell ∩ tri``.  When it is empty (or a
+    # negligible sliver) the triangle does not actually overlap the cell — an
+    # edge's *extended* line may still have crossed it, leaving spurious
+    # fragments above — so return the whole cell untouched.
+    cell_area = abs(_signed_area_2d(cell))
+    if abs(_signed_area_2d(interior)) <= 1e-12 * max(1.0, cell_area):
+        return [list(cell)]
     return result
 
 
