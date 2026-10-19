@@ -110,7 +110,7 @@ def parse_tcl_model(tcl_text: str, units: Optional[dict] = None) -> SAPModelData
             # the last command (``load … -1.0}``); the block-line parser strips
             # the brace, so close the block here or later model commands would
             # be mis-parsed as pattern body.
-            if "}" in line:
+            if _has_unescaped_closing_brace(line):
                 in_block = False
                 current_pattern = None
             continue
@@ -277,6 +277,26 @@ def _split_braces(tokens: list[str]) -> list[str]:
         else:
             out.append(tok)
     return out
+
+
+def _has_unescaped_closing_brace(line: str) -> bool:
+    """True when *line* contains a ``}`` not escaped by a backslash.
+
+    A closing brace preceded by an odd number of backslashes is escaped
+    (``\\}``) and does not close a pattern block; an even number (including
+    zero) is a real delimiter.
+    """
+    for i, ch in enumerate(line):
+        if ch != "}":
+            continue
+        backslashes = 0
+        j = i - 1
+        while j >= 0 and line[j] == "\\":
+            backslashes += 1
+            j -= 1
+        if backslashes % 2 == 0:
+            return True
+    return False
 
 
 def _parse_block_line(
