@@ -420,6 +420,123 @@ def polygon_area_3d(pts):
     return 0.5 * float(np.linalg.norm(area_vec))
 
 
+# ── Area local axes and area-load direction resolution ──────────────────
+
+# Global direction unit vectors for area uniform loads.  ``"Gravity"`` is the
+# downward vertical.  The local 1/2/3 axes depend on the face geometry, so they
+# are resolved by :func:`area_load_direction` rather than this table.
+_AREA_GLOBAL_DIR = {
+    "Gravity": np.array([0.0, 0.0, -1.0]),
+    "X": np.array([1.0, 0.0, 0.0]),
+    "Y": np.array([0.0, 1.0, 0.0]),
+    "Z": np.array([0.0, 0.0, 1.0]),
+}
+
+
+def polygon_unit_normal(vertices) -> Optional[np.ndarray]:
+    """Unit normal of a 3D polygon, or ``None`` when degenerate.
+
+    Uses Newell's method so a slightly non-planar face still resolves to a
+    stable normal rather than depending only on its first three corners.
+
+    Args:
+        vertices: Polygon vertices in order (at least 3), as a list of
+            ``(x, y, z)`` tuples/arrays or an ``(N, 3)`` array.
+
+    Returns:
+        Unit normal ``(3,)`` array, or ``None`` for fewer than 3 vertices or a
+        zero-area (degenerate) polygon.
+    """
+    pts = np.asarray(vertices, dtype=float)
+    if pts.ndim != 2 or pts.shape[0] < 3 or pts.shape[1] < 3:
+        return None
+    normal = np.zeros(3, dtype=float)
+    for i in range(len(pts)):
+        a = pts[i]
+        b = pts[(i + 1) % len(pts)]
+        normal[0] += (a[1] - b[1]) * (a[2] + b[2])
+        normal[1] += (a[2] - b[2]) * (a[0] + b[0])
+        normal[2] += (a[0] - b[0]) * (a[1] + b[1])
+    length = float(np.linalg.norm(normal))
+    if length < 1e-12:
+        return None
+    return normal / length
+
+
+def area_local_axes(vertices) -> Optional[tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    """Orthonormal area local axes ``(l1, l2, l3)`` for a polygon face.
+
+    Follows the CSI (SAP2000/ETABS) default area local-axis convention:
+
+    * ``l3`` is the unit normal (right-hand rule from the vertex order);
+    * ``l1`` is the projection of global +X onto the face plane, falling back
+      to the projection of global +Y when the face is normal to global X;
+    * ``l2`` = ``l3 × l1`` completes the right-handed system.
+
+    Args:
+        vertices: Polygon vertices in order (at least 3), as a list of
+            ``(x, y, z)`` tuples/arrays or an ``(N, 3)`` array.
+
+    Returns:
+        ``(l1, l2, l3)`` unit vectors, or ``None`` when the face is degenerate.
+    """
+    l3 = polygon_unit_normal(vertices)
+    if l3 is None:
+        return None
+    l1: Optional[np.ndarray] = None
+    for ref in (np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0])):
+        candidate = ref - np.dot(ref, l3) * l3
+        norm = float(np.linalg.norm(candidate))
+        if norm > 1e-12:
+            l1 = candidate / norm
+            break
+    if l1 is None:  # pragma: no cover - unreachable for a valid plane
+        return None
+    l2 = np.cross(l3, l1)
+    return l1, l2, l3
+
+
+def area_load_direction(direction, vertices) -> Optional[np.ndarray]:
+    """Resolve an area uniform load direction to a global unit vector.
+
+    Handles the global axes (``"Gravity"``/``"X"``/``"Y"``/``"Z"``) and the
+    area-local axes (``"1"``/``"2"``/``"3"`` or ``"Local1"``/``"Local2"``/
+    ``"Local3"``, where 3 is the face normal).  A leading ``-`` negates the
+    axis.  Anything else — or a degenerate face — returns ``None`` so callers
+    can skip the load instead of silently substituting gravity.
+
+    Args:
+        direction: Load direction token (global or area-local).
+        vertices: Polygon vertices of the loaded face (at least 3), as a list
+            of ``(x, y, z)`` tuples/arrays or an ``(N, 3)`` array.
+
+    Returns:
+        Global unit vector ``(3,)``, or ``None`` when unresolvable.
+    """
+    key = str(direction or "").strip()
+    negate = key.startswith("-")
+    if negate:
+        key = key[1:]
+    if key in _AREA_GLOBAL_DIR:
+        vec = _AREA_GLOBAL_DIR[key].copy()
+        return -vec if negate else vec
+    if key in ("1", "Local1", "2", "Local2", "3", "Local3"):
+        axes = area_local_axes(vertices)
+        if axes is None:
+            return None
+        l1, l2, l3 = axes
+        vec = {
+            "1": l1,
+            "Local1": l1,
+            "2": l2,
+            "Local2": l2,
+            "3": l3,
+            "Local3": l3,
+        }[key]
+        return -vec if negate else vec
+    return None
+
+
 def _segment_intersection_3d(a, b, c, d, tol=1e-6):
     """Find intersection point of line segments AB and CD in 3D.
 

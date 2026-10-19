@@ -9,6 +9,8 @@ so ``from fea_toolkit.model.geometry import ...`` keeps working.
 from .geometry_core import (
     SpatialGrid,
     _segment_intersection_3d,
+    area_load_direction,
+    area_local_axes,
     compute_t_location,
     frame_end_offsets_global,
     get_local_axes,
@@ -19,6 +21,7 @@ from .geometry_core import (
     local_to_global,
     point_on_segment,
     polygon_area_3d,
+    polygon_unit_normal,
     rotate_about_axis,
 )
 from .geometry_frames import (
@@ -53,6 +56,8 @@ __all__ = [
     "_propagate_edge_restraints",
     "_segment_intersection_3d",
     "apply_frame_end_offsets",
+    "area_load_direction",
+    "area_local_axes",
     "beam_load_to_nodal_loads",
     "beam_moment_to_nodal_moments",
     "child_length",
@@ -71,6 +76,7 @@ __all__ = [
     "mesh_area_elements",
     "point_on_segment",
     "polygon_area_3d",
+    "polygon_unit_normal",
     "print_wall_inside_slab_report",
     "remove_floating_nodes",
     "rotate_about_axis",

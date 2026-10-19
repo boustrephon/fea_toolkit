@@ -21,18 +21,23 @@ renderer — no physical-constant hardcoding; gravity is implied through
 ``g_from_units(units)`` when it lands.
 """
 
+import logging
 from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
 
-from .geometry_core import get_local_axes
+from .geometry_core import area_load_direction, get_local_axes
 from .load_combinations import combination_pattern_factors, merge_combination_sets
 from .sap_data import patterns_from_case
 from .tree_utils import collect_descendants
 
-# ── Global direction vocabulary (shared with opensees/_loads.py) ──────────
-# Kept local so the model layer never imports OpenSees.
+logger = logging.getLogger(__name__)
+
+# ── Global direction vocabulary (frame/joint loads) ───────────────────────
+# Kept local so the model layer never imports OpenSees.  Area uniform loads
+# resolve their direction (global or local axes) through ``area_load_direction``
+# in ``geometry_core`` instead.
 _DIR = {
     "Gravity": np.array([0.0, 0.0, -1.0]),
     "X": np.array([1.0, 0.0, 0.0]),
@@ -459,10 +464,7 @@ def extract_load_glyphs(
         magnitude = float(getattr(al, "value", 0.0) or 0.0) * scale
         if magnitude == 0.0:
             continue
-        direction = _DIR.get(
-            str(getattr(al, "direction", "Gravity") or "Gravity").strip(),
-            _DIR["Gravity"],
-        ).copy()
+        raw_direction = str(getattr(al, "direction", "Gravity") or "Gravity").strip()
         aid = str(getattr(al, "area_id", ""))
         loads_only = getattr(source, "loads_only_area_ids", None) or set()
         if collapse:
@@ -472,6 +474,14 @@ def extract_load_glyphs(
         for face in faces:
             vertices = _area_polygon(source, face)
             if vertices is None:
+                continue
+            direction = area_load_direction(raw_direction, vertices)
+            if direction is None:
+                logger.warning(
+                    "Area uniform load on %r has unresolved direction %r — glyph skipped.",
+                    aid,
+                    raw_direction,
+                )
                 continue
             glyphs.append(
                 LoadGeom(

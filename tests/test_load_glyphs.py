@@ -313,6 +313,19 @@ def test_area_gravity_pressure_points_down():
     assert np.allclose(g.direction, [0.0, 0.0, -1.0])
 
 
+def test_area_local_directions_resolve_to_face_axes():
+    cases = {
+        "Local1": [1.0, 0.0, 0.0],
+        "Local2": [0.0, 1.0, 0.0],
+        "Local3": [0.0, 0.0, 1.0],
+        "-Local3": [0.0, 0.0, -1.0],
+    }
+    for direction, expected in cases.items():
+        md = _area_model(area_uniform_loads=[_area_uniform(direction=direction)])
+        g = next(g for g in extract_load_glyphs(md) if g.kind == "area")
+        assert np.allclose(g.direction, expected), direction
+
+
 def test_to_frame_area_load_is_not_drawn_on_the_face():
     md = _area_model(area_uniform_loads=[_area_uniform(to_frame=True)])
     assert [g for g in extract_load_glyphs(md) if g.kind == "area"] == []

@@ -12,6 +12,8 @@ import numpy as np
 import pytest
 
 from fea_toolkit.model.geometry import (
+    area_load_direction,
+    area_local_axes,
     frame_end_offsets_global,
     get_local_axes,
     get_SAP_vecxz,
@@ -1043,3 +1045,30 @@ class TestSubdivideElements:
             for nid in offset_ids:
                 n = result_nodes[nid]
                 assert 0.0 <= n.z <= 5.0
+
+
+def test_area_local_axes_and_direction_resolution():
+    """Area local axes follow the CSI convention, incl. the vertical-face fallback."""
+    # Horizontal quad in the X-Y plane (CCW → normal +Z): l1=+X, l2=+Y, l3=+Z.
+    horizontal = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 4.0, 0.0), (0.0, 4.0, 0.0)]
+    l1, l2, l3 = area_local_axes(horizontal)
+    assert np.allclose(l1, [1.0, 0.0, 0.0])
+    assert np.allclose(l2, [0.0, 1.0, 0.0])
+    assert np.allclose(l3, [0.0, 0.0, 1.0])
+
+    # Vertical face in the Y-Z plane (normal +X): global X is normal to the
+    # face, so l1 falls back to the projection of global +Y.
+    vertical = [(0.0, 0.0, 0.0), (0.0, 4.0, 0.0), (0.0, 4.0, 3.0), (0.0, 0.0, 3.0)]
+    l1, l2, l3 = area_local_axes(vertical)
+    assert np.allclose(l1, [0.0, 1.0, 0.0])
+    assert np.allclose(l2, [0.0, 0.0, 1.0])
+    assert np.allclose(l3, [1.0, 0.0, 0.0])
+
+    # Direction resolution maps the local-axis spellings to those vectors.
+    assert np.allclose(area_load_direction("Local3", horizontal), [0.0, 0.0, 1.0])
+    assert np.allclose(area_load_direction("Local1", horizontal), [1.0, 0.0, 0.0])
+    assert np.allclose(area_load_direction("2", horizontal), [0.0, 1.0, 0.0])
+    assert np.allclose(area_load_direction("-Local3", horizontal), [0.0, 0.0, -1.0])
+    assert np.allclose(area_load_direction("Gravity", horizontal), [0.0, 0.0, -1.0])
+    assert area_load_direction("Bogus", horizontal) is None
+    assert area_load_direction("Local3", [(0.0, 0.0, 0.0)]) is None
