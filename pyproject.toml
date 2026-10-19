@@ -74,7 +74,7 @@ markers = [
     "slow: long-running multi-pushover benchmark; exclude with `-m 'not slow'`",
     "needs_pyvista: skip when pyvista is unavailable (e.g. Rhino 8 embedded interpreter)",
     "needs_gui: skip when the [gui] extra (PySide6/pyvistaqt) is unavailable",
-    "needs_ground_motion: skip when the fetched ground-motion mirror (data/ground_motion) is absent",
+    "needs_ground_motion: skip when the needed ground-motion record(s) are absent (optionally record-scoped)",
 ]
 filterwarnings = [
     "ignore::UserWarning:pyvista.jupyter.notebook",

@@ -58,5 +58,18 @@
     "scale_factor": 1.0,
     "rotation": "as_recorded",
     "note": "FEMA P-695 far-field candidate - verify exact component/scale before use"
+  },
+  {
+    "record_id": "LA21",
+    "provider": "sac_la",
+    "event": "Imperial Valley 1940 (El Centro) - SAC LA set",
+    "station": "El Centro Array #9",
+    "component": "N-S",
+    "source_url": "https://nisee.berkeley.edu/data/strong_motion/sacsteel/",
+    "licence": "SAC Steel Project ground-motion set (derivative of a historical record; research use)",
+    "redistributable": false,
+    "scale_factor": 1.0,
+    "rotation": "as_recorded",
+    "note": "SAC LA ground motion. Ohtori et al. (2004) 3-story uncontrolled peak roof displacement ~0.151 m at intensity 1.0 (nonlinear model). Verify exact component/scale before use."
   }
 ]

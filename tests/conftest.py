@@ -71,46 +71,75 @@ _HAVE_GUI = (
 
 # Ground-motion mirror: records fetched into ``data/ground_motion/<public|local>``
 # by the fetch scripts under ``scripts/``.  Absent on a fresh checkout (and in
-# CI), so the ``needs_ground_motion`` marker skips multi-record validation until
-# a developer has populated the mirror.  The gate is *record-based* — every
-# record the committed manifest registry lists must exist at the path its
-# ``redistributable`` flag and ``source_url`` extension imply — not
+# CI).  The ``needs_ground_motion`` marker is *record-scoped*: a test marks the
+# specific record(s) it needs (``@pytest.mark.needs_ground_motion("LA21")``) and
+# is skipped only when those records are absent; a bare marker
+# (``@pytest.mark.needs_ground_motion``) requires the whole committed registry
+# to be present.  The gate is *record-based* — a record must exist at the path
+# its ``redistributable`` flag and ``source_url`` extension imply — not
 # directory-based, so an empty mirror does not enable the gated tests.
-def _ground_motion_records_present() -> bool:
+def _manifest_registry() -> list[dict]:
     import json
-
-    from fea_toolkit.io.ground_motion import source_extension
 
     registry = pathlib.Path("tests") / "fixtures" / "ground_motion_manifests.json"
     try:
         payload = json.loads(registry.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return False
-    if not isinstance(payload, list) or not payload:
-        return False
-    root = pathlib.Path("data") / "ground_motion"
-    for item in payload:
+        return []
+    return payload if isinstance(payload, list) else []
+
+
+def _record_path(record_id: str) -> pathlib.Path | None:
+    """Resolve the expected mirror path for one manifest record, or ``None``."""
+    from fea_toolkit.io.ground_motion import source_extension
+
+    for item in _manifest_registry():
         if not isinstance(item, dict):
-            return False
-        record_id = str(item.get("record_id", "") or "")
-        if not record_id:
-            return False
-        sub = "public" if item.get("redistributable") else "local"
-        ext = source_extension(str(item.get("source_url", "") or ""))
-        if not (root / sub / f"{record_id}{ext}").exists():
-            return False
-    return True
+            continue
+        if str(item.get("record_id", "")) == record_id:
+            sub = "public" if item.get("redistributable") else "local"
+            ext = source_extension(str(item.get("source_url", "") or ""))
+            return pathlib.Path("data") / "ground_motion" / sub / f"{record_id}{ext}"
+    return None
 
 
-_HAVE_GROUND_MOTION = _ground_motion_records_present()
+def _record_present(record_id: str) -> bool:
+    p = _record_path(record_id)
+    return p is not None and p.exists()
+
+
+def _all_record_ids() -> list[str]:
+    return [
+        str(item["record_id"])
+        for item in _manifest_registry()
+        if isinstance(item, dict) and item.get("record_id")
+    ]
 
 
 @pytest.fixture(scope="session")
 def ground_motion_dir():
-    """Path to the non-redistributable ground-motion mirror, or ``None`` when the
-    required records are absent."""
+    """Path to the non-redistributable ground-motion mirror, or ``None`` when
+    the mirror directory is absent."""
     d = pathlib.Path("data") / "ground_motion" / "local"
-    return str(d) if _HAVE_GROUND_MOTION else None
+    return str(d) if d.exists() else None
+
+
+@pytest.fixture(scope="session")
+def resolve_ground_motion_record():
+    """Return a callable mapping a ``record_id`` to its on-disk path.
+
+    Raises ``FileNotFoundError`` when the record is absent; pair it with
+    ``@pytest.mark.needs_ground_motion("<record_id>")`` so the test is skipped
+    before the fixture runs.
+    """
+
+    def _resolve(record_id: str) -> str:
+        p = _record_path(record_id)
+        if p is None or not p.exists():
+            raise FileNotFoundError(f"ground-motion record {record_id!r} not in the mirror")
+        return str(p)
+
+    return _resolve
 
 
 @pytest.fixture(autouse=True, scope="module")
@@ -155,8 +184,23 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if "needs_gui" in item.keywords:
                 item.add_marker(skip_gui)
-    if not _HAVE_GROUND_MOTION:
-        skip_gm = pytest.mark.skip(reason="ground-motion mirror not fetched (data/ground_motion)")
-        for item in items:
-            if "needs_ground_motion" in item.keywords:
-                item.add_marker(skip_gm)
+    for item in items:
+        marker = item.get_closest_marker("needs_ground_motion")
+        if marker is None:
+            continue
+        record_ids = [str(a) for a in marker.args if a]
+        if record_ids:
+            missing = [r for r in record_ids if not _record_present(r)]
+            if missing:
+                item.add_marker(
+                    pytest.mark.skip(
+                        reason=f"ground-motion record(s) not fetched: {', '.join(missing)}"
+                    )
+                )
+        else:
+            ids = _all_record_ids()
+            missing = [r for r in ids if not _record_present(r)]
+            if not ids or missing:
+                item.add_marker(
+                    pytest.mark.skip(reason="ground-motion mirror not fetched (data/ground_motion)")
+                )
