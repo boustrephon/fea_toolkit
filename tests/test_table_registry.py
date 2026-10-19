@@ -600,13 +600,15 @@ def test_parser_table_coverage_requires_parse():
 # Drift guard B — fixtures stay within the registry
 # ══════════════════════════════════════════════════════════════════════
 
-# ``sample.split.json`` is deliberately excluded: it is a toolkit-internal
-# split-model dump (``nodes`` / ``split_elements`` / ...), not an SAP2000
-# table export, so table coverage does not apply to it.
+# ``sample.split.json`` and ``ground_motion_manifests.json`` are deliberately
+# excluded: neither is an SAP2000 table export, so table coverage does not
+# apply.  The former is a toolkit-internal split-model dump (``nodes`` /
+# ``split_elements`` / ...); the latter is a ground-motion manifest registry
+# (a top-level JSON array of PEER NGA-West2 manifests, not ``{table: rows}``).
 _FIXTURE_MODELS = sorted(
     p
     for p in list(FIXTURES.glob("*.json")) + list(FIXTURES.glob("*.s2k"))
-    if p.name != "sample.split.json"
+    if p.name not in {"sample.split.json", "ground_motion_manifests.json"}
 )
 
 

@@ -86,11 +86,23 @@ def save_manifest_registry(path: str, manifests: list[GroundMotionManifest]) -> 
         path: Destination path.
         manifests: Manifests to serialise, in order.
     """
+    import contextlib
     import json
+    import os
+    import tempfile
 
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump([m.to_dict() for m in manifests], f, indent=2)
-        f.write("\n")
+    dest = os.fspath(path)
+    directory = os.path.dirname(os.path.abspath(dest)) or "."
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".manifests-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump([m.to_dict() for m in manifests], f, indent=2)
+            f.write("\n")
+        os.replace(tmp, dest)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
 
 
 # ── PEER NGA record reader ───────────────────────────────────────

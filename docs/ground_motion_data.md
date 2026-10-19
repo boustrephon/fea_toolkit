@@ -20,7 +20,7 @@ and are converted at read time (`read_peer_record`).  Analysis-domain scaling
 
 | Region | Source | Access | Notes |
 |---|---|---|---|
-| USA (public domain) | FEMA P-695 far-field (USGS / ATC-63) | Public domain | Committed CI baseline |
+| USA (public domain) | FEMA P-695 far-field (USGS / ATC-63) | Public domain | No committed waveform subset (see §6) |
 | USA | PEER NGA-West2 (ngawest2.berkeley.edu) | Registration; see §3 | Shallow-crustal, active regimes |
 | Japan | K-NET / KiK-net (NIED, kyoshin.bosai.go.jp) | Free for research; registration | ~1,700 stations; KiK-net downhole + surface |
 | EU / Med / Middle-East | ESM v3.0 (ORFEUS–INGV), DOI 10.13127/esm.3 | Open access | FDSN + Obspy; includes Turkey + Greece |
@@ -60,17 +60,28 @@ for a JSON manifest registry, and carries no waveform data.
 
 ## 5. Fetch workflow
 
-- **Manifests** (small, JSON) are committed — one per record, with provenance.
-- **`scripts/`** holds the fetch/ingest helpers (e.g.
-  `scripts/fetch_ground_motions.py`) that read a manifest list and pull the
-  waveforms into the local **`data/`** mirror, applying the user's own
-  credentials where the provider requires registration.
-- **Waveforms** live in `data/` and are never stored in the repository.
+- **Manifests** (small, JSON) are committed — one per record, with provenance,
+  including a `redistributable` flag and a `source_url`.
+- **Automatic downloads** — when a manifest's `source_url` points directly at a
+  waveform file (`.at2` / `.txt` / `.csv`), `scripts/fetch_ground_motions.py`
+  downloads it straight into the mirror, keeping the source file's extension.
+  Redistributable records land in `data/ground_motion/public/` (committed);
+  the rest land in `data/ground_motion/local/` (never committed).
+- **Gated providers** — where the provider requires an interactive login (e.g.
+  PEER NGA-West2), the script prints the metadata and portal URL and the user
+  downloads the waveform manually to `data/ground_motion/local/<record_id>.at2`.
+- **Storage** — waveforms live under `data/ground_motion/`: the `public/`
+  subtree (redistributable records) is committed, while the `local/` subtree
+  is gitignored and never stored in the repository.
 
 ## 6. Committed vs fetched
 
-- **Committed**: a small **5-record public-domain subset** (FEMA P-695
-  far-field) under `tests/fixtures/` for fast, network-free CI.
+- **Committed**: the manifest registry
+  `tests/fixtures/ground_motion_manifests.json` — five PEER NGA-West2
+  *manifests* (metadata only, **no waveforms**) under the PEER user-agreement
+  licence, which is restricted (research use, no redistribution) and **not**
+  public domain.  The `data/ground_motion/public/` mirror currently holds only
+  its README — no waveforms are committed.
 - **Fetched**: the full NGA / K-NET / ESM / AFAD / BHRC / CSMNC sets, pulled
   locally when deeper multi-record validation is wanted.
 
@@ -80,14 +91,16 @@ The existing CI runs `pytest -q -m "not slow"` on Python 3.10/3.12.  Ground
 motion and benchmarks slot in as two classes of test:
 
 - **Always-on**: pure-computation anchors (Euler, Przemieniecki/Paz, V&E) and
-  NLTHA/RS runs on the committed 5-record subset — no network, no external
-  files, fast.
-- **Opt-in**: multi-record validation gated on the presence of the fetched
-  `data/` mirror, via a `needs_ground_motion` marker (same pattern as
-  `needs_pyvista` in `tests/conftest.py`).  These skip cleanly when records are
-  absent, so CI stays green and a developer who has fetched records locally
-  gets the deep validation.  A separate `workflow_dispatch` job can run the
-  heavy suite on demand.
+  NLTHA/RS runs on synthetic records generated in-test — no network, no
+  external files, fast.  There is no committed public-domain waveform subset;
+  the committed manifest registry exercises the manifest/registry round-trip
+  only.
+- **Opt-in**: multi-record validation gated on the presence of the records the
+  registry lists under `data/ground_motion/local/`, via a `needs_ground_motion`
+  marker (same pattern as `needs_pyvista` in `tests/conftest.py`).  These skip
+  cleanly when the records are absent, so CI stays green and a developer who
+  has fetched records locally gets the deep validation.  A separate
+  `workflow_dispatch` job can run the heavy suite on demand.
 
 ## 8. Processing pipeline
 

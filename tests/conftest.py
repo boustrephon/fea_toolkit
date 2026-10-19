@@ -68,20 +68,41 @@ _HAVE_GUI = (
     )
 )
 
+
 # Ground-motion mirror: non-redistributable records fetched into
 # ``data/ground_motion/local`` by the fetch scripts under ``scripts/``.  Absent
 # on a fresh checkout (and in CI), so the ``needs_ground_motion`` marker skips
-# multi-record validation until a developer has populated the mirror.  The
-# redistributable subset lives under ``data/ground_motion/public`` and is
-# committed, so it needs no marker.
-_HAVE_GROUND_MOTION = (pathlib.Path("data") / "ground_motion" / "local").is_dir()
+# multi-record validation until a developer has populated the mirror.  The gate
+# is *record-based* — every ``<record_id>.at2`` the committed manifest registry
+# lists must exist in ``data/ground_motion/local/`` — not directory-based, so an
+# empty ``local/`` does not enable the gated tests.
+def _ground_motion_records_present() -> bool:
+    import json
+
+    registry = pathlib.Path("tests") / "fixtures" / "ground_motion_manifests.json"
+    try:
+        payload = json.loads(registry.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(payload, list) or not payload:
+        return False
+    local = pathlib.Path("data") / "ground_motion" / "local"
+    for item in payload:
+        record_id = str(item.get("record_id", "") or "")
+        if not record_id or not (local / f"{record_id}.at2").exists():
+            return False
+    return True
+
+
+_HAVE_GROUND_MOTION = _ground_motion_records_present()
 
 
 @pytest.fixture(scope="session")
 def ground_motion_dir():
-    """Path to the non-redistributable ground-motion mirror, or ``None`` when absent."""
+    """Path to the non-redistributable ground-motion mirror, or ``None`` when the
+    required records are absent."""
     d = pathlib.Path("data") / "ground_motion" / "local"
-    return str(d) if d.is_dir() else None
+    return str(d) if _HAVE_GROUND_MOTION else None
 
 
 @pytest.fixture(autouse=True, scope="module")
