@@ -61,6 +61,28 @@ skips when the mirror is empty.
 
 Ohtori et al. (2004) Table 3 reports a peak roof displacement of ~0.151 m for
 the *nonlinear* 3-story evaluation model under the El Centro record at
-intensity 1.0.  The elastic frame is a smoke anchor only — it never yields, so
-its peak response overestimates the nonlinear reference and is not asserted
-against it.
+intensity 1.0.
+
+## Nonlinear evaluation model (T4)
+
+`tests/test_benchmark_sac3_nltha.py` also builds the **nonlinear** evaluation
+model: concentrated-plasticity **bilinear steel hinges** (Steel01, `My = Zx·fy`,
+2 % hardening) at the member ends, with an optional **Krawinkler & Gupta panel
+zone** at each beam-column joint.
+
+- **Bilinear hinge** (`hinge_model='lumped'`, `hinge_backbone='bilinear'`):
+  yield moment `My = Zx·fy` from AISC plastic section moduli (W24×68
+  Zx = 2.524e-3 m³ → ≈ 870 kN·m at 345 MPa; W30×116 Zx = 6.194e-3 m³ →
+  ≈ 1540 kN·m at 248 MPa).  The benchmark's exact hinge data are not
+  redistributable, so these are computed from AISC tables.
+- **Panel zone** (`panel_zone_model='krawinkler_gupta'`): a zero-length
+  bilinear shear-rotation spring at each joint with the K&G backbone
+  `My = 0.55·fy·dc·tp·db` and `Kθ = 0.95·G·tp·dc·db`.
+
+The gated LA21 test asserts the **M1** (centreline joint, bilinear hinges only)
+peak roof displacement within **±20 %** of 0.151 m — M1 lands at ≈ 0.159 m.
+The **M2** (panel zone) run is a smoke check only: the K&G panel zone combined
+with the bilinear hinge in the full 3-story frame currently produces a
+degenerate (over-stiff) modal response, a known limitation.  Panel-zone
+softening is verified independently in `test_analysis_csm.py::TestPanelZone`
+and by the elastic-model period shift (1.09 → 1.31 s).

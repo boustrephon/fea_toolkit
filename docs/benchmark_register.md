@@ -34,7 +34,7 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
 |---|---|---|---|---|---|---|---|
 | Vertical cantilever | ◐ | ◐ | ◐ | ◐ | ◐ | ◐ | ○ |
 | Beam-column joint | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
-| Moment frame | ◐ | ◐ | ● SAC | ◐ | ● V&E, Duong | ◐ | ○ |
+| Moment frame | ◐ | ◐ | ● SAC | ◐ | ● V&E, Duong | ● SAC | ○ |
 | Shear wall | ◐ | ◐ | ○ | ○ | ◐ | ○ | ○ |
 
 ## 3. Candidate sources by structural type

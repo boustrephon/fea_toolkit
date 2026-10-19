@@ -953,42 +953,55 @@ class ElementMixin:
 
             # Axial material (elastic)
             ops.uniaxialMaterial("Elastic", hinge_mat_tag, max(A_val, 1e-6) * E / L)
-            # Strong-axis moment (Hysteretic backbone)
-            ops.uniaxialMaterial(
-                "Hysteretic",
-                hinge_mat_tag + 1,
-                My,
-                theta_y,
-                My * 1.1,
-                theta_cap,
-                -My,
-                -theta_y,
-                -My * 1.1,
-                -theta_cap,
-                1.0,
-                1.0,
-                0.0,
-                0.0,
-                0.0,
-            )
-            # Weak-axis moment
-            ops.uniaxialMaterial(
-                "Hysteretic",
-                hinge_mat_tag + 2,
-                My_weak,
-                theta_y_weak,
-                My_weak * 1.1,
-                theta_cap_weak,
-                -My_weak,
-                -theta_y_weak,
-                -My_weak * 1.1,
-                -theta_cap_weak,
-                1.0,
-                1.0,
-                0.0,
-                0.0,
-                0.0,
-            )
+            if self.config.get("hinge_backbone") == "bilinear":
+                # Bilinear steel hinge (Steel01) — concentrated plasticity for
+                # steel moment frames (e.g. the SAC benchmark).  The elastic
+                # rotational stiffness reuses the yield rotation theta_y
+                # (My/theta_y = 6EI/Lp), so the hinge is nearly rigid in the
+                # elastic range and the interior member carries the elastic
+                # deformation; past My it hardens at hardening_ratio.
+                b = float(self.config.get("hardening_ratio", 0.02))
+                e0_strong = My / max(theta_y, 1e-12)
+                e0_weak = My_weak / max(theta_y_weak, 1e-12)
+                ops.uniaxialMaterial("Steel01", hinge_mat_tag + 1, My, e0_strong, b)
+                ops.uniaxialMaterial("Steel01", hinge_mat_tag + 2, My_weak, e0_weak, b)
+            else:
+                # Strong-axis moment (ASCE 41 Hysteretic backbone)
+                ops.uniaxialMaterial(
+                    "Hysteretic",
+                    hinge_mat_tag + 1,
+                    My,
+                    theta_y,
+                    My * 1.1,
+                    theta_cap,
+                    -My,
+                    -theta_y,
+                    -My * 1.1,
+                    -theta_cap,
+                    1.0,
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                )
+                # Weak-axis moment
+                ops.uniaxialMaterial(
+                    "Hysteretic",
+                    hinge_mat_tag + 2,
+                    My_weak,
+                    theta_y_weak,
+                    My_weak * 1.1,
+                    theta_cap_weak,
+                    -My_weak,
+                    -theta_y_weak,
+                    -My_weak * 1.1,
+                    -theta_cap_weak,
+                    1.0,
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                )
             # Torsion (elastic — no inelastic torsion expected)
             ops.uniaxialMaterial(
                 "Elastic", hinge_mat_tag + 3, G * max(J_val, 1e-6) / L if J_val else G * 1e-6 / L
@@ -1247,6 +1260,137 @@ class ElementMixin:
             if elem is not None:
                 elem.node_i = node_i
                 elem.node_j = node_j
+
+    def _create_panel_zones(self) -> None:
+        """Insert Krawinkler & Gupta panel-zone rotational springs at joints.
+
+        Activated via ``config['panel_zone_model'] = 'krawinkler_gupta'``.
+
+        Each beam-column joint (a node shared by at least one column and one
+        beam) is split into a column node (the original node) and a coincident
+        beam node; the beams are re-pointed to the beam node, and the two are
+        coupled by a zero-length rotational spring acting on the in-plane
+        rotation DOF (5 = RY in a planar X-Z frame) with the K&G bilinear
+        backbone:
+
+            M_y      = 0.55 · Fy · d_c · t_p · d_b
+            K_theta  = 0.95 ·  G · t_p · d_c · d_b
+
+        where ``d_c`` / ``d_b`` are the column / beam depths and ``t_p`` is the
+        panel thickness (the column web thickness).  Post-yield hardening is
+        ``config['panel_zone_hardening']`` (default 0.03).
+        """
+        if self.config.get("panel_zone_model") != "krawinkler_gupta":
+            return
+
+        elements = self.mesh_model.frame_elements
+        assignments = self.mesh_model.frame_assignments
+        nodes = self.mesh_model.nodes
+
+        # ── Classify each active element as column (vertical) or beam ──
+        is_vertical: dict[str, bool] = {}
+        for eid, elem in elements.items():
+            if getattr(elem, "inactive", False):
+                continue
+            ni = nodes.get(elem.node_i)
+            nj = nodes.get(elem.node_j)
+            if ni is None or nj is None:
+                continue
+            dx, dy, dz = nj.x - ni.x, nj.y - ni.y, nj.z - ni.z
+            is_vertical[eid] = abs(dz) >= abs(dx) and abs(dz) >= abs(dy)
+
+        # ── Joints: nodes shared by ≥1 column and ≥1 beam ──
+        cols_at: dict[str, list[str]] = {}
+        beams_at: dict[str, list[str]] = {}
+        for eid, vert in is_vertical.items():
+            elem = elements[eid]
+            for nid in (elem.node_i, elem.node_j):
+                (cols_at if vert else beams_at).setdefault(nid, []).append(eid)
+        joints = sorted(set(cols_at) & set(beams_at))
+        if not joints:
+            return
+
+        next_node_tag = max((nd.node_tag for nd in nodes.values()), default=0) + 1
+        try:
+            max_ops_tag = max(ops.getEleTags(), default=0)
+        except Exception:
+            max_ops_tag = 0
+        next_tag = (
+            max(
+                max(
+                    (e.elem_tag for e in elements.values() if not getattr(e, "inactive", False)),
+                    default=0,
+                ),
+                max_ops_tag,
+            )
+            + 1
+        )
+        mat_tag = 900001  # high, distinct base — avoids load/hinge tag collisions
+
+        for nid in joints:
+            col_eid = cols_at[nid][0]
+            beam_eid = beams_at[nid][0]
+            col_sec = self.mesh_model.sections.get(assignments.get(col_eid))
+            beam_sec = self.mesh_model.sections.get(assignments.get(beam_eid))
+            if col_sec is None or beam_sec is None:
+                continue
+            mat = self.mesh_model.materials.get(col_sec.material)
+            Fy = mat.Fy if mat and mat.Fy and mat.Fy > 0 else 2.5e8
+            E = mat.E_mod if mat and mat.E_mod and mat.E_mod > 0 else 2.0e11
+            G = mat.G_mod if mat and mat.G_mod and mat.G_mod > 0 else 0.4 * E
+            A_c = getattr(col_sec, "A", 0.0) or 0.0
+            I_c = getattr(col_sec, "I33", 0.0) or 0.0
+            I_b = getattr(beam_sec, "I33", 0.0) or 0.0
+            A_b = getattr(beam_sec, "A", 0.0) or 0.0
+            d_c = getattr(col_sec, "depth", None) or 2.0 * math.sqrt(I_c / max(A_c, 1e-12))
+            d_b = getattr(beam_sec, "depth", None) or 2.0 * math.sqrt(I_b / max(A_b, 1e-12))
+            t_p = getattr(col_sec, "tw", None) or (A_c / max(d_c, 1e-12))
+
+            my = 0.55 * Fy * d_c * t_p * d_b
+            k_theta = 0.95 * G * t_p * d_c * d_b
+            b = float(self.config.get("panel_zone_hardening", 0.03))
+
+            # ── Split the joint: a coincident beam node + re-point beams ──
+            beam_node_id = f"{nid}_pz"
+            beam_node_tag = next_node_tag
+            next_node_tag += 1
+            joint = nodes[nid]
+            nodes[beam_node_id] = Node(
+                node_id=beam_node_id,
+                node_tag=beam_node_tag,
+                x=joint.x,
+                y=joint.y,
+                z=joint.z,
+            )
+            ops.node(beam_node_tag, joint.x, joint.y, joint.z)
+            self._created_node_tags.add(beam_node_tag)
+            for eid in beams_at[nid]:
+                elem = elements[eid]
+                if elem.node_i == nid:
+                    elem.node_i = beam_node_id
+                if elem.node_j == nid:
+                    elem.node_j = beam_node_id
+
+            # ── Panel-zone spring (in-plane rotation DOF 5 = RY) ──
+            # Tie the in-plane translations across the panel zone and fix the
+            # beam node's out-of-plane DOFs (UY / RX / RZ) exactly; the only
+            # relative DOF is the in-plane rotation (RY), carried by the K&G
+            # bilinear spring.
+            ops.equalDOF(joint.node_tag, beam_node_tag, 1, 3)
+            ops.fix(beam_node_tag, 0, 1, 0, 1, 0, 1)
+            ops.uniaxialMaterial("Steel01", mat_tag, my, k_theta, b)
+            ops.element(
+                "zeroLength",
+                next_tag,
+                joint.node_tag,
+                beam_node_tag,
+                "-mat",
+                mat_tag,
+                "-dir",
+                5,
+            )
+            next_tag += 1
+            mat_tag += 1
 
     def _create_bond_slip_springs(self) -> None:
         """Insert zero-length ``Bond_SP01`` slip-rotation springs at member ends.

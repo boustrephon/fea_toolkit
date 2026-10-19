@@ -1082,6 +1082,193 @@ class TestBuilderHingeModel:
         finally:
             ops.wipe()
 
+    def test_bilinear_hinge_defaults(self):
+        """hinge_backbone defaults to 'asce41'; hardening_ratio to 0.02."""
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+        b = AnalysisBuilder.__new__(AnalysisBuilder)
+        b.config = {}
+        b._set_defaults()
+        assert b.config["hinge_backbone"] == "asce41"
+        assert b.config["hardening_ratio"] == 0.02
+
+    def test_bilinear_hinge_yields_past_my(self):
+        """A cantilever with hinge_backbone='bilinear' yields past My = Fy·Z33."""
+        import openseespy.opensees as ops
+
+        from fea_toolkit.model.sap_data import (
+            FrameElement,
+            ISection,
+            JointLoad,
+            LoadPattern,
+            Material,
+            Node,
+            Restraint,
+            SAPModelData,
+        )
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
+        L = 3.0
+        Fy = 2.5e8
+        Z33 = 1.0e-3
+        My = Fy * Z33  # 2.5e5 N·m
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 0.0, 0.0, L),
+        }
+        restraints = {"1": Restraint([1, 1, 1, 1, 1, 1]), "2": Restraint([0, 1, 1, 1, 1, 1])}
+        mats = {"Steel": Material("Steel", "Steel", E_mod=2.0e11, Fy=Fy)}
+        secs = {
+            "COL": ISection(
+                name="COL",
+                shape="I/Wide Flange",
+                material="Steel",
+                depth=0.3,
+                bf=0.15,
+                tf=0.01,
+                tw=0.006,
+                A=8e-3,
+                I33=1.2e-4,
+                I22=4e-5,
+                J=2e-6,
+                Z33=Z33,
+                Z22=Z33,
+            ),
+        }
+        md = SAPModelData(
+            nodes=nodes,
+            restraints=restraints,
+            materials=mats,
+            sections=secs,
+            frame_elements={"1": FrameElement(elem_id="1", elem_tag=1, node_i="1", node_j="2")},
+            area_elements={},
+            frame_assignments={"1": "COL"},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+            load_patterns={"P1": LoadPattern(name="P1", pattern_type="Other")},
+            frame_dist_loads=[],
+            joint_loads=[JointLoad(pattern="P1", node_id="2", fx=1.0)],
+            units={"F": "N", "L": "m", "T": "C"},
+        )
+        try:
+            mm = preprocess_model(md, {"split_elements": False})
+            b = AnalysisBuilder(
+                mm,
+                {
+                    "element_type": "elasticBeamColumn",
+                    "hinge_model": "lumped",
+                    "hinge_backbone": "bilinear",
+                    "verbose": False,
+                },
+            )
+            b.build_domain()
+            p_yield = My / L
+            result = b.run_static_analysis(pattern_scales={"P1": 1.5 * p_yield})
+            disp = result["nodal_displacements"]["2"][0]
+            # Elastic fixed-fixed sway column (tip RY restrained): k = 12EI/L³.
+            elastic = 1.5 * p_yield * L**3 / (12.0 * 2.0e11 * 1.2e-4)
+            assert disp > elastic * 1.3, f"expected yield: disp={disp:.5f} elastic={elastic:.5f}"
+        finally:
+            ops.wipe()
+
+
+class TestPanelZone:
+    """Krawinkler & Gupta panel-zone springs (register §5 Track 1)."""
+
+    def _subassemblage(self, panel_zone):
+        from fea_toolkit.model.sap_data import (
+            FrameElement,
+            ISection,
+            JointLoad,
+            LoadPattern,
+            Material,
+            Node,
+            Restraint,
+            SAPModelData,
+        )
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, 0.0),  # column base
+            "2": Node("2", 2, 0.0, 0.0, 3.0),  # joint
+            "3": Node("3", 3, 0.0, 0.0, 6.0),  # column top
+            "4": Node("4", 4, 4.0, 0.0, 3.0),  # beam tip
+        }
+        restraints = {
+            "1": Restraint([1, 1, 1, 1, 1, 1]),
+            "2": Restraint([0, 1, 0, 1, 0, 1]),
+            "3": Restraint([1, 1, 1, 1, 1, 1]),
+            "4": Restraint([1, 1, 1, 1, 1, 1]),
+        }
+        mats = {"Steel": Material("Steel", "Steel", E_mod=2.0e11, Fy=2.5e8)}
+        sec = {
+            "COL": ISection(
+                name="COL",
+                shape="I/Wide Flange",
+                material="Steel",
+                depth=0.3,
+                bf=0.15,
+                tf=0.01,
+                tw=0.006,
+                A=8e-3,
+                I33=1.2e-4,
+                I22=4e-5,
+                J=2e-6,
+            ),
+        }
+        md = SAPModelData(
+            nodes=nodes,
+            restraints=restraints,
+            materials=mats,
+            sections=sec,
+            frame_elements={
+                "c1": FrameElement(elem_id="c1", elem_tag=1, node_i="1", node_j="2"),
+                "c2": FrameElement(elem_id="c2", elem_tag=2, node_i="2", node_j="3"),
+                "b1": FrameElement(elem_id="b1", elem_tag=3, node_i="2", node_j="4"),
+            },
+            area_elements={},
+            frame_assignments={"c1": "COL", "c2": "COL", "b1": "COL"},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+            load_patterns={"P1": LoadPattern(name="P1", pattern_type="Other")},
+            frame_dist_loads=[],
+            joint_loads=[JointLoad(pattern="P1", node_id="2", fx=1.0)],
+            units={"F": "N", "L": "m", "T": "C"},
+        )
+        mm = preprocess_model(md, {"split_elements": False})
+        cfg = {"element_type": "elasticBeamColumn", "verbose": False}
+        if panel_zone:
+            cfg["panel_zone_model"] = "krawinkler_gupta"
+        return AnalysisBuilder(mm, cfg)
+
+    def test_panel_zone_softens_joint(self):
+        """The K&G panel-zone spring adds shear flexibility at the joint."""
+        from openseespy.opensees import wipe
+
+        wipe()
+        try:
+            b_ref = self._subassemblage(panel_zone=False)
+            b_ref.build_domain()
+            d_ref = b_ref.run_static_analysis(pattern_scales={"P1": 5.0e4})["nodal_displacements"][
+                "2"
+            ][0]
+        finally:
+            wipe()
+        wipe()
+        try:
+            b_pz = self._subassemblage(panel_zone=True)
+            b_pz.build_domain()
+            d_pz = b_pz.run_static_analysis(pattern_scales={"P1": 5.0e4})["nodal_displacements"][
+                "2"
+            ][0]
+        finally:
+            wipe()
+        assert d_pz > d_ref, f"expected softer panel zone: {d_pz:.5f} vs {d_ref:.5f}"
+
 
 # ═══════════════════════════════════════════════════════════════════
 # CQC combination engine

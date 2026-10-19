@@ -269,6 +269,19 @@ class AnalysisBuilder(
             "simplify_distributed_loads": False,
             "constraint_method": "spring",
             "hinge_model": "fiber",  # Distributed plasticity by default
+            # ── Lumped-hinge backbone (hinge_model='lumped') ──
+            # "asce41" (default): Hysteretic backbone matched to ASCE 41
+            # rotation limits.  "bilinear": Steel01 bilinear hinge (yield
+            # moment My = Z·fy, hardening_ratio) for concentrated-plasticity
+            # steel moment frames (e.g. the SAC benchmark).
+            "hinge_backbone": "asce41",
+            "hardening_ratio": 0.02,
+            # ── Panel zone (Krawinkler & Gupta, register §5 Track 1) ──
+            # None (default): centreline joint, no explicit panel zone.
+            # "krawinkler_gupta": a zero-length bilinear shear-rotation spring
+            # at each beam-column joint (the SAC M2 model).
+            "panel_zone_model": None,
+            "panel_zone_hardening": 0.03,
             # ── Member end releases / partial fixity ──
             # Honour SAP2000 frame end releases (and partial-fixity springs)
             # by inserting zero-length release elements at member ends.  On by
@@ -570,6 +583,7 @@ class AnalysisBuilder(
             self._create_layered_shell_sections()
             self._create_sections()
             self._create_shell_elements()
+            self._create_panel_zones()
             self._create_lumped_hinges()
             self._create_bond_slip_springs()
             self._create_member_releases()
