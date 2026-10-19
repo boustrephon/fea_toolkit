@@ -31,7 +31,8 @@ planar-3-D convention (`.clinerules` §3.11):
 - node `(x, y)` → `(x, 0, y)` (the vertical axis becomes `Z`);
 - fixity `[UX, UY, RZ]` → `[UX, UZ, RY]`, with the out-of-plane
   (`UY`, `RX`, `RZ`) DOFs always restrained;
-- `mass` / `load` components map `Y → Z` and `Mz → My`;
+- `mass` / `load` components map `Y → Z` and `Mz → -My` (a positive Tcl
+  `Mz` is a moment about the lifted out-of-plane axis `-Y`);
 - section bending is isotropic (`I33 = I22 = I`), so the in-plane stiffness is
   exact and independent of the element's local-axis orientation.
 
