@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional, Union
 
 from .._unit_scaling import force_unit_label
-from .openings import net_area
+from .openings import collect_opening_areas, net_area
 from .sap_data import ShellSection
 
 if TYPE_CHECKING:
@@ -109,6 +109,7 @@ def selection_weight(
 
     area_weight = 0.0
     area_count = 0
+    openings = collect_opening_areas(model.area_elements)
     for aid in area_ids:
         area = model.area_elements.get(aid)
         if area is None or getattr(area, "inactive", False):
@@ -132,7 +133,7 @@ def selection_weight(
         ]
         if len(verts) < 3:
             continue
-        area_weight += net_area(model, area) * sec.thickness * mat.unit_weight
+        area_weight += net_area(model, area, openings=openings) * sec.thickness * mat.unit_weight
         area_count += 1
 
     return SelectionWeight(

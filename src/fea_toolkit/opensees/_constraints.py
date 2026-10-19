@@ -744,8 +744,10 @@ class ConstraintMixin:
     def _create_nodes(self) -> None:
         """Create OpenSees nodes from MeshModel nodes.
 
-        Unconnected opening (void) corner nodes are kept in ``nodes`` for
-        ``net_area`` resolution but carry no element, so they are skipped.
+        Unconnected opening (void) corner nodes now live in ``orphan_nodes``
+        (not ``nodes``), so they are never created here.  The
+        ``opening_node_ids`` skip is retained defensively for any opening
+        corner that is also referenced by a real element.
         """
         self._created_node_tags = set()
         skip = getattr(self.mesh_model, "opening_node_ids", set()) or set()

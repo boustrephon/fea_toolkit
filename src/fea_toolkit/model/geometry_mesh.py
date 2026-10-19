@@ -35,7 +35,7 @@ from ..model.sap_data import (
     Restraint,
     SAPModelData,
 )
-from .openings import conform_cell_to_openings, opening_polygons_2d
+from .openings import collect_opening_areas, conform_cell_to_openings, opening_polygons_2d
 
 # ── Shared coordinate / node helpers ──────────────────────────────────
 # These were historically defined as inner functions inside each mesh
@@ -756,6 +756,7 @@ def subdivide_area_mesh(
     next_tag: int = 1,
     groups: Optional[dict[str, Group]] = None,
     restraints: Optional[dict[str, Restraint]] = None,
+    openings: Optional[list[Any]] = None,
 ) -> tuple[dict[str, AreaElement], dict[str, str], dict[str, Node], int]:
     """Subdivide each coarse shell quad into an N×N grid of sub-elements.
 
@@ -788,6 +789,10 @@ def subdivide_area_mesh(
         restraints: Optional ``{node_id: Restraint}`` — model restraints
             dict.  Edge-node restraints are propagated here (modified in
             place).
+        openings: Optional precomputed list of opening areas (from
+            :func:`~fea_toolkit.model.openings.collect_opening_areas`) used for
+            both detecting and collecting coplanar openings; defaults to
+            scanning *area_elements*.
 
     Returns:
         ``(area_elements, area_assignments, nodes, next_tag)``.
@@ -804,7 +809,9 @@ def subdivide_area_mesh(
     # coincident offset/release/disconnected nodes are not spuriously
     # reused during deduplication.
     _coord_to_id: dict[tuple, str] = {}
-    has_openings = any(getattr(ae, "opening", False) for ae in area_elements.values())
+    if openings is None:
+        openings = collect_opening_areas(area_elements)
+    has_openings = bool(openings)
     for aid, elem in area_elements.items():
         if getattr(elem, "inactive", False):
             continue
@@ -909,7 +916,7 @@ def subdivide_area_mesh(
         openings_2d: list[list[tuple[float, float]]] = []
         face_axes = None
         if has_openings:
-            info = opening_polygons_2d(area_elements, nodes, parent)
+            info = opening_polygons_2d(area_elements, nodes, parent, openings=openings)
             if info is not None:
                 _, openings_2d, face_axes, _ = info
 

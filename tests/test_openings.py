@@ -154,6 +154,44 @@ def test_subdivide_area_mesh_drops_cells_inside_opening():
     assert areas["O1"].inactive is False
 
 
+def test_preprocess_subdivision_drops_cells_inside_opening():
+    """The production ``subdivide_shells`` path also drops opening cells."""
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+
+    areas, assigns, nodes = _meshed_slab_with_opening()
+    md = SAPModelData(
+        nodes=nodes,
+        restraints={},
+        materials={"Concrete": Material(name="Concrete", type="Concrete", unit_weight=2500.0)},
+        sections={
+            "SLAB": ShellSection(name="SLAB", shape="Shell", material="Concrete", thickness=0.2)
+        },
+        frame_elements={},
+        area_elements=areas,
+        frame_assignments={},
+        area_assignments=assigns,
+        groups={},
+        frame_auto_mesh={},
+    )
+
+    mm = preprocess_model(
+        md,
+        {"create_shells": True, "subdivide_shells": 4, "verbose": False},
+    )
+
+    children = [ae for ae in mm.area_elements.values() if getattr(ae, "parent_id", None) == "S1"]
+    # 4×4 grid = 16 cells, minus the 4 cells covering the centred 2×2 opening.
+    assert len(children) == 12
+
+    # None of the surviving subdivided cells may lie inside the opening.
+    opening = [(1.0, 1.0), (3.0, 1.0), (3.0, 3.0), (1.0, 3.0)]
+    for ae in children:
+        xs = [mm.nodes[nid].x for nid in ae.node_ids]
+        ys = [mm.nodes[nid].y for nid in ae.node_ids]
+        centroid = (sum(xs) / len(xs), sum(ys) / len(ys))
+        assert point_in_polygon_2d(centroid, opening) is False
+
+
 def test_net_area_of_opening_area_is_zero():
     """An opening (void) area itself contributes zero net area."""
     md = _slab_with_opening()
@@ -246,14 +284,20 @@ def test_conform_cell_to_openings_uses_boundary_not_centroid():
     ]
 
 
-def test_opening_nodes_kept_in_mesh_model_nodes():
-    """Unconnected opening corners stay in ``MeshModel.nodes`` for net_area."""
+def test_opening_nodes_moved_to_orphan_nodes_and_net_area_resolves():
+    """Unconnected opening corners move to ``orphan_nodes``; net_area resolves them."""
     from fea_toolkit.opensees.preprocessor import preprocess_model
 
     mm = preprocess_model(_slab_with_opening(), {"create_shells": True, "verbose": False})
 
-    # The opening's corner nodes survive in ``nodes`` (for net_area resolution)…
+    # The opening's corner nodes are moved to ``orphan_nodes`` (not ``nodes``)…
     for nid in ("o1", "o2", "o3", "o4"):
-        assert nid in mm.nodes
-    # …and are recorded as excluded from OpenSees node creation.
+        assert nid in mm.orphan_nodes
+        assert nid not in mm.nodes
+    # …and are recorded as opening corners.
     assert mm.opening_node_ids == {"o1", "o2", "o3", "o4"}
+
+    # net_area still subtracts the opening by resolving its vertices from
+    # ``orphan_nodes`` (16 m² slab − 1 m² opening).
+    slab = mm.area_elements["S1"]
+    assert net_area(mm, slab) == pytest.approx(15.0)

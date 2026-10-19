@@ -26,6 +26,7 @@ from ..model.geometry import (
     subdivide_area_mesh,
 )
 from ..model.mesh_model import MeshModel, WallElement
+from ..model.openings import collect_opening_areas
 from ..model.sap_data import (
     AreaElementProperties,
     FrameDistributedLoad,
@@ -872,10 +873,11 @@ class Preprocessor:
         # group master, and dropping them would silently drop the body.
         for _name, _body_ids, _dof_flags in rigid_body_components:
             referenced.update(_body_ids)
-        # Opening (void) corner nodes are kept in ``nodes`` so ``net_area`` can
-        # resolve an opening against its parent, but unconnected ones (not
-        # referenced by any frame/shell/joint/constraint) carry no element and
-        # are excluded from OpenSees node creation.
+        # Opening (void) corner nodes are moved to ``orphan_nodes`` rather than
+        # kept in ``nodes``, so no OpenSees-domain consumer can accidentally
+        # create them; ``net_area`` resolves opening vertices from both
+        # collections.  ``opening_node_ids`` records which orphans are opening
+        # corners for tracing.
         opening_node_ids: set[str] = set()
         for aid, ae in md.area_elements.items():
             if not getattr(ae, "opening", False):
@@ -883,7 +885,6 @@ class Preprocessor:
             for nid in ae.node_ids:
                 if nid in md.nodes and nid not in referenced:
                     opening_node_ids.add(nid)
-                    referenced.add(nid)
         orphan_nodes: dict[str, Node] = {}
         for nid in list(md.nodes.keys()):
             if nid not in referenced:
@@ -1273,6 +1274,7 @@ class Preprocessor:
                 next_tag=next_tag,
                 groups=md.groups if hasattr(md, "groups") else {},
                 restraints=getattr(md, "restraints", None),
+                openings=collect_opening_areas(md.area_elements),
             )
             md.area_elements.update(sub_areas)
             md.area_assignments.update(sub_assigns)

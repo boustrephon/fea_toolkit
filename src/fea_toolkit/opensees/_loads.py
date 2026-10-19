@@ -14,7 +14,7 @@ from ..model.geometry import (
     get_local_axes,
     polygon_area_3d,
 )
-from ..model.openings import net_area
+from ..model.openings import collect_opening_areas, net_area
 from ..model.sap_data import FrameElement
 from ..model.tree_utils import collect_descendants
 
@@ -268,6 +268,7 @@ class LoadMixin:
         assignments = self.mesh_model.frame_assignments
         dist_loads = self.mesh_model.frame_dist_loads
         edge_loads = self.edge_loads_from_areas
+        openings = collect_opening_areas(self.mesh_model.area_elements)
 
         # Frame point loads (FRAME LOADS - POINT) are parsed and visualised but
         # not yet propagated to OpenSees ``eleLoad`` — warn once per builder so
@@ -344,7 +345,7 @@ class LoadMixin:
             poly = [nd for nd in poly if nd is not None]
             if len(poly) < 3:
                 continue
-            area_3d = net_area(self.mesh_model, area)
+            area_3d = net_area(self.mesh_model, area, openings=openings)
             total_w = area_3d * t * mat.unit_weight
             n_corners = len(poly)
             for nd in poly:
@@ -737,7 +738,7 @@ class LoadMixin:
                         corner_pts.append((nd.x, nd.y, nd.z))
                     if len(corner_pts) < 3:
                         continue
-                    area_mag = polygon_area_3d(corner_pts)
+                    area_mag = net_area(self.mesh_model, sub_elem, openings=openings)
                     if area_mag < 1e-12:
                         continue
                     sw_per_area = thickness * mat.unit_weight
@@ -779,7 +780,7 @@ class LoadMixin:
                 corner_pts.append((nd.x, nd.y, nd.z))
             if len(corner_pts) < 3:
                 continue
-            area_mag = polygon_area_3d(corner_pts)
+            area_mag = net_area(self.mesh_model, area_elem, openings=openings)
             if area_mag < 1e-12:
                 continue
             sw_per_area = thickness * mat.unit_weight

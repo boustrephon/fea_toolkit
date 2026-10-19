@@ -308,10 +308,11 @@ class MeshModel:
     # rendering / visualisation and are NOT created in OpenSees.
     orphan_nodes: dict[str, Node] = field(default_factory=dict)
 
-    # ── Opening (void) corner nodes kept in ``nodes`` for net_area ──
-    # Unconnected opening-corner nodes stay in ``nodes`` so ``net_area``
-    # can resolve an opening against its parent, but they carry no element
-    # and are NOT created in OpenSees.
+    # ── Opening (void) corner node ids moved to ``orphan_nodes`` ──
+    # Unconnected opening-corner nodes are moved to ``orphan_nodes`` so no
+    # OpenSees-domain consumer can accidentally create them; ``net_area``
+    # resolves opening vertices from ``nodes`` + ``orphan_nodes``.  This set
+    # records which orphan nodes are opening corners for tracing.
     opening_node_ids: set[str] = field(default_factory=set)
 
     @property

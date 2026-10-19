@@ -412,7 +412,7 @@ def check_self_weight_consistency(
         section) and ``by_material`` (the same weight grouped by each
         section's material).
     """
-    from fea_toolkit.model.openings import net_area
+    from fea_toolkit.model.openings import collect_opening_areas, net_area
     from fea_toolkit.model.sap_data import ShellSection
 
     # ── Compute expected self-weight from geometry ──
@@ -442,6 +442,7 @@ def check_self_weight_consistency(
         by_section[sec_name] = by_section.get(sec_name, 0.0) + w
         by_material[sec.material] = by_material.get(sec.material, 0.0) + w
 
+    openings = collect_opening_areas(md.area_elements)
     for aid, area in md.area_elements.items():
         if getattr(area, "inactive", False):
             continue
@@ -470,7 +471,7 @@ def check_self_weight_consistency(
         ]
         if len(verts) < 3:
             continue
-        area_val = net_area(md, area)
+        area_val = net_area(md, area, openings=openings)
         w = area_val * thickness * mat.unit_weight
         expected += w
         by_section[sec_name] = by_section.get(sec_name, 0.0) + w

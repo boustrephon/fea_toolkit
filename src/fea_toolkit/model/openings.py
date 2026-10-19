@@ -22,6 +22,7 @@ from .geometry_core import area_local_axes, polygon_area_3d
 
 __all__ = [
     "area_vertices",
+    "collect_opening_areas",
     "conform_cell_to_openings",
     "net_area",
     "opening_overlap_area",
@@ -52,6 +53,20 @@ def area_vertices(model: Any, area: Any) -> list[tuple[float, float, float]]:
     resolves to zero area).
     """
     return _vertices(model.nodes, area)
+
+
+def _all_nodes(model: Any) -> dict[str, Any]:
+    """Merge ``model.nodes`` with ``model.orphan_nodes``.
+
+    Opening (void) corner nodes may live in ``orphan_nodes`` after
+    preprocessing (excluded from the OpenSees domain), so resolving an
+    opening against its parent must look in both collections.
+    """
+    nodes = dict(model.nodes)
+    orphan = getattr(model, "orphan_nodes", None)
+    if orphan:
+        nodes.update(orphan)
+    return nodes
 
 
 def _project_2d(vertices, axes) -> list[tuple[float, float]]:
@@ -258,11 +273,22 @@ def _polygon_union_area(polygons) -> float:
     return total
 
 
+def collect_opening_areas(area_elements: dict[str, Any]) -> list[Any]:
+    """Return the opening (void) areas among *area_elements*, in iteration order.
+
+    Collected once per measurement pass so :func:`net_area` and
+    :func:`opening_overlap_area` do not rescan the area collection for every
+    shell.
+    """
+    return [a for a in area_elements.values() if getattr(a, "opening", False)]
+
+
 def opening_polygons_2d(
     area_elements: dict[str, Any],
     nodes: dict[str, Any],
     area: Any,
     rel_tol: float = 1e-6,
+    openings: Optional[list[Any]] = None,
 ) -> Optional[
     tuple[
         list[tuple[float, float]],
@@ -284,6 +310,9 @@ def opening_polygons_2d(
         area: The parent area whose openings are collected.
         rel_tol: Coplanarity tolerance, a fraction of the parent's
             characteristic size (unit-agnostic).
+        openings: Optional precomputed list of opening areas (from
+            :func:`collect_opening_areas`); collected from *area_elements*
+            when omitted.
 
     Returns:
         ``(clip_2d, openings_2d, axes, verts_3d)``:
@@ -313,9 +342,12 @@ def opening_polygons_2d(
     scale = float(np.linalg.norm(pts - pts[0], axis=1).max()) if len(pts) > 1 else 0.0
     tol = rel_tol * max(1.0, scale)
 
-    openings: list[list[tuple[float, float]]] = []
-    for oarea in area_elements.values():
-        if not getattr(oarea, "opening", False) or oarea is area:
+    if openings is None:
+        openings = collect_opening_areas(area_elements)
+
+    openings_2d: list[list[tuple[float, float]]] = []
+    for oarea in openings:
+        if oarea is area:
             continue
         overts = _vertices(nodes, oarea)
         if len(overts) < 3:
@@ -330,11 +362,13 @@ def opening_polygons_2d(
         dist = abs(float(np.dot(np.asarray(overts[0]) - pts[0], axes[2])))
         if dist > tol:
             continue
-        openings.append(_project_2d(overts, axes))
-    return clip, openings, axes, verts
+        openings_2d.append(_project_2d(overts, axes))
+    return clip, openings_2d, axes, verts
 
 
-def opening_overlap_area(model: Any, area: Any, rel_tol: float = 1e-6) -> float:
+def opening_overlap_area(
+    model: Any, area: Any, rel_tol: float = 1e-6, openings: Optional[list[Any]] = None
+) -> float:
     """Total area of *area* covered by coplanar opening (void) areas.
 
     Clips each opening against the (possibly concave) parent by triangulating
@@ -347,37 +381,53 @@ def opening_overlap_area(model: Any, area: Any, rel_tol: float = 1e-6) -> float:
         area: The parent shell area whose opening overlap is to be measured.
         rel_tol: Relative coplanarity tolerance, as a fraction of the parent's
             characteristic size (unit-agnostic).
+        openings: Optional precomputed list of opening areas (from
+            :func:`collect_opening_areas`); collected from *model* when
+            omitted.
 
     Returns:
         The union area (in the model's length unit squared) of the portions of
         opening polygons that lie inside *area*.
     """
-    info = opening_polygons_2d(model.area_elements, model.nodes, area, rel_tol)
+    if openings is None:
+        openings = collect_opening_areas(model.area_elements)
+    if not openings:
+        return 0.0
+    info = opening_polygons_2d(
+        model.area_elements, _all_nodes(model), area, rel_tol, openings=openings
+    )
     if info is None:
         return 0.0
-    clip, openings, _axes, _verts = info
+    clip, openings_2d, _axes, _verts = info
     pieces: list[list[tuple[float, float]]] = []
     for triangle in _triangulate(clip):
-        for subject in openings:
+        for subject in openings_2d:
             clipped = _clip_sutherland_hodgman(subject, triangle)
             if len(clipped) >= 3:
                 pieces.append(clipped)
     return _polygon_union_area(pieces)
 
 
-def net_area(model: Any, area: Any) -> float:
+def net_area(model: Any, area: Any, openings: Optional[list[Any]] = None) -> float:
     """Net shell area of *area* after subtracting overlapping openings.
 
     An opening (void) area itself contributes zero area; for a shell area it
     returns ``polygon_area_3d(vertices) − opening_overlap_area(model, area)``,
-    floored at zero.
+    floored at zero.  *openings* is an optional precomputed list of opening
+    areas (see :func:`collect_opening_areas`) so a caller measuring many areas
+    can collect them once; when the list is empty the raw area is returned
+    without overlap processing.
     """
     if getattr(area, "opening", False):
         return 0.0
     raw = polygon_area_3d(area_vertices(model, area))
     if raw <= 0.0:
         return 0.0
-    return max(0.0, raw - opening_overlap_area(model, area))
+    if openings is None:
+        openings = collect_opening_areas(model.area_elements)
+    if not openings:
+        return raw
+    return max(0.0, raw - opening_overlap_area(model, area, openings=openings))
 
 
 def conform_cell_to_openings(
@@ -399,15 +449,16 @@ def conform_cell_to_openings(
     Returns:
         ``[cell]`` (keep) or ``[]`` (drop).
     """
+    cell_area = abs(_signed_area_2d(cell))
+    tol = 1e-12 * max(1.0, cell_area)
     pieces: list[list[tuple[float, float]]] = []
     for opening in openings:
         for triangle in _triangulate(opening):
             clipped = _clip_sutherland_hodgman(cell, triangle)
-            if len(clipped) >= 3 and abs(_signed_area_2d(clipped)) > 1e-12:
+            if len(clipped) >= 3 and abs(_signed_area_2d(clipped)) > tol:
                 pieces.append(clipped)
     if not pieces:
         return [list(cell)]
-    cell_area = abs(_signed_area_2d(cell))
-    if _polygon_union_area(pieces) >= cell_area - 1e-12:
+    if _polygon_union_area(pieces) >= cell_area - tol:
         return []  # fully covered — drop the cell
     return [list(cell)]

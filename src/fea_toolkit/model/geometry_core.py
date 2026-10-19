@@ -458,7 +458,7 @@ def polygon_unit_normal(vertices) -> Optional[np.ndarray]:
         normal[1] += (a[2] - b[2]) * (a[0] + b[0])
         normal[2] += (a[0] - b[0]) * (a[1] + b[1])
     length = float(np.linalg.norm(normal))
-    if length < 1e-12:
+    if not math.isfinite(length) or length < 1e-12:
         return None
     return normal / length
 

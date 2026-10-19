@@ -41,7 +41,7 @@ except ImportError:  # pragma: no cover — pandas is optional (Rhino 8 CPython)
 
     pd = _MissingPandas()  # type: ignore[assignment]
 
-from ..model.openings import net_area
+from ..model.openings import collect_opening_areas, net_area
 from ..model.sap_data import ShellSection
 
 # ========================================================================
@@ -504,6 +504,7 @@ def area_section_summary(md) -> pd.DataFrame:
     length_unit = md.units.get("L", "m")
 
     rows = []
+    openings = collect_opening_areas(md.area_elements)
     for aid, area_elem in md.area_elements.items():
         sec_name = md.area_assignments.get(aid, "")
         if not sec_name or sec_name not in md.sections:
@@ -525,7 +526,7 @@ def area_section_summary(md) -> pd.DataFrame:
             pts.append((nd.x, nd.y, nd.z))
         if len(pts) < 3:
             continue
-        area_mag = net_area(md, area_elem)
+        area_mag = net_area(md, area_elem, openings=openings)
         if area_mag < 1e-12:
             continue
 
