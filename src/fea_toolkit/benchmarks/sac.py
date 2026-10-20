@@ -84,18 +84,29 @@ def load_model(nonlinear: bool = True) -> SAPModelData:
     return md
 
 
-def builder_config(panel_zone: bool = False) -> dict[str, Any]:
+def builder_config() -> dict[str, Any]:
     """The ``AnalysisBuilder`` config for the nonlinear evaluation model.
+
+    Purely build-level choices (element type, hinge model).  The panel-zone
+    choice is a *preprocessing* choice and lives in
+    :func:`preprocess_config` — the builder keys off the frozen
+    ``mesh_model.panel_zones`` spec instead.
+    """
+    return {
+        "element_type": "elasticBeamColumn",
+        "hinge_model": "lumped",
+        "hinge_backbone": "bilinear",
+    }
+
+
+def preprocess_config(panel_zone: bool = False) -> dict[str, Any]:
+    """The ``Preprocessor`` config for the nonlinear evaluation model.
 
     Args:
         panel_zone: ``True`` for the M2 model (adds the Krawinkler & Gupta panel
             zone); ``False`` for M1 (centreline joint, bilinear hinges only).
     """
-    cfg: dict[str, Any] = {
-        "element_type": "elasticBeamColumn",
-        "hinge_model": "lumped",
-        "hinge_backbone": "bilinear",
-    }
+    cfg: dict[str, Any] = {"element_type": "elasticBeamColumn"}
     if panel_zone:
         cfg["panel_zone_model"] = "krawinkler_gupta"
     return cfg
@@ -105,11 +116,13 @@ def build_builder(panel_zone: bool = False, *, nonlinear: bool = True) -> Analys
     """Build the SAC model (elastic, or nonlinear M1/M2) into an ``AnalysisBuilder``.
 
     The returned builder has already had :meth:`AnalysisBuilder.build_domain`
-    called, so it is ready to run an analysis.
+    called, so it is ready to run an analysis.  The M2 variant preprocesses with
+    ``panel_zone_model='krawinkler_gupta'`` (a separate ``MeshModel``), keeping
+    the builder read-only.
     """
     md = load_model(nonlinear=nonlinear)
-    mesh = preprocess_model(md, {"element_type": "elasticBeamColumn"})
-    cfg = builder_config(panel_zone=panel_zone) if nonlinear else {}
+    mesh = preprocess_model(md, preprocess_config(panel_zone=panel_zone))
+    cfg = builder_config() if nonlinear else {}
     b = AnalysisBuilder(mesh, cfg)
     b.build_domain()
     return b
@@ -134,4 +147,5 @@ __all__ = [
     "enrich_nonlinear",
     "load_model",
     "peak_x",
+    "preprocess_config",
 ]

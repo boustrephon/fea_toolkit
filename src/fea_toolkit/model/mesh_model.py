@@ -146,11 +146,47 @@ class WallElement:
 
 
 @dataclass
+class PanelZoneSpec:
+    """The Krawinkler & Gupta panel-zone spring at one beam-column joint.
+
+    Computed once by the
+    :class:`~fea_toolkit.opensees.preprocessor.Preprocessor` and carried on
+    the :class:`MeshModel` so the
+    :class:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder` only has
+    to emit the OpenSees commands.  The joint is split into a column node
+    (the original joint, which the column passes through) and a coincident
+    beam node (``*_pz``), with the beams re-pointed to the beam node and the
+    two coupled by a zero-length bilinear rotational spring.
+
+    Attributes:
+        column_node_id: The original joint node (column passes through).
+        beam_node_id: The generated coincident ``*_pz`` node.
+        my: Krawinkler & Gupta yield moment (``0.55 · Fy · d_c · t_p · d_b``).
+        k_theta: Krawinkler & Gupta rotational stiffness
+            (``0.95 · G · t_p · d_c · d_b``).
+        b: Post-yield hardening ratio of the bilinear ``Steel01`` spring.
+    """
+
+    column_node_id: str
+    beam_node_id: str
+    my: float
+    k_theta: float
+    b: float
+
+
+@dataclass
 class MeshModel:
     """Prepared model topology — the bridge between preprocessor and analysis.
 
     All geometry mutations (splitting, meshing, subdividing, constraint
-    detection) have been applied.  No OpenSees domain objects exist.
+    detection, panel-zone splitting) have been applied.  No OpenSees domain
+    objects exist.
+
+    ``MeshModel`` is immutable after construction: the ``AnalysisBuilder``
+    reads it and must not mutate it.  Topology-changing modelling decisions
+    are made here by the preprocessor and carried as declarative data fields
+    (e.g. :attr:`panel_zones`, :attr:`wall_elements`,
+    :attr:`frame_element_types`).
     """
 
     # ── Nodes ────────────────────────────────────────────────────
@@ -173,6 +209,14 @@ class MeshModel:
     # wall macro-element types (SFI_MVLEM_3D, E_SFI_MVLEM_3D, MVLEM_3D).
     wall_elements: dict[str, WallElement] = field(default_factory=dict)
     #   elem_id → WallElement
+    # ── Panel zones (Krawinkler & Gupta joint springs) ───────────
+    # Populated by the Preprocessor when ``panel_zone_model`` is
+    # ``"krawinkler_gupta"``; keyed by the column (original joint) node ID.
+    # The ``*_pz`` beam nodes and the re-pointed beams are already in
+    # ``nodes`` / ``frame_elements`` — this dict only records the spring
+    # parameters and the column↔beam node pairing for the builder to emit.
+    panel_zones: dict[str, PanelZoneSpec] = field(default_factory=dict)
+    #   column_node_id → PanelZoneSpec
     # (list of tuples — exact format matches builder's edge_loads_from_areas)
     joint_loads: list[JointLoad] = field(default_factory=list)
     added_masses: dict[str, float] = field(default_factory=dict)

@@ -133,8 +133,16 @@ New analysis code must follow this pattern. Do NOT add analysis methods to the p
 
 ### 3.2 MeshModel is the stable intermediate
 - After the Preprocessor produces a `MeshModel`, that object is considered **"frozen topology"**.
-- The `AnalysisBuilder` reads from it but never mutates it.
-- All topology work (splitting, meshing, load redistribution) happens in preprocessing.
+- The `AnalysisBuilder` is a **one-way function** `MeshModel → OpenSees domain`:
+  it reads the frozen topology and its declarative modelling specs (element
+  roles `frame_element_types`, rigid links `offset_rigid_links`, constraint
+  groups, wall macro-elements `wall_elements`, panel-zone springs
+  `panel_zones`) and emits the OpenSees domain.  It **never writes back** — no
+  adding nodes, no re-pointing elements, no `_restore_*` undo.
+- All topology work (splitting, meshing, load redistribution, panel-zone
+  splitting) happens in preprocessing.  A modelling choice that changes
+  topology must be computed in the Preprocessor and stored as a `MeshModel`
+  field; the builder only selects and emits.
 - This separation is strict.
 
 ### 3.3 Dataclass-first data model

@@ -686,31 +686,6 @@ class ElementMixin:
                 elem.node_j = nj
         self.mesh_model.frame_assignments = dict(self._hinge_canonical_assignments)
 
-    def _restore_panel_zone_canonical_state(self) -> None:
-        """Restore canonical frame element endpoints and remove stale panel-zone nodes.
-
-        Called at the start of :meth:`build_domain` (before
-        :meth:`_restore_hinge_canonical_state`) to prevent stale panel-zone
-        nodes from a previous build cycle from being recreated, and to re-point
-        beams to their original endpoints before ``_create_panel_zones``
-        re-instruments them.  Only node IDs recorded by ``_create_panel_zones``
-        are removed — ownership is never inferred from a ``_pz`` suffix, so a
-        source node that happens to end in ``_pz`` and its connected members
-        remain intact.
-        """
-        if not hasattr(self, "_panel_zone_canonical_elements"):
-            return
-        # Remove only the panel-zone nodes this builder created in a previous
-        # build — tracked by ID, never inferred from a "_pz" suffix.
-        for nid in getattr(self, "_panel_zone_node_ids", ()):
-            self.mesh_model.nodes.pop(nid, None)
-        # Restore canonical element endpoints
-        for eid, elem in self.mesh_model.frame_elements.items():
-            if eid in self._panel_zone_canonical_elements:
-                ni, nj = self._panel_zone_canonical_elements[eid]
-                elem.node_i = ni
-                elem.node_j = nj
-
     def _restore_bond_canonical_state(self) -> None:
         """Restore canonical frame element endpoints and remove stale bond nodes.
 
@@ -807,18 +782,15 @@ class ElementMixin:
         # Save canonical endpoints on first call; restoration is handled
         # by _restore_hinge_canonical_state() in build_domain().
         if not hasattr(self, "_hinge_canonical_elements"):
-            # When panel zones ran first (the SAC M2 model), the beams are
-            # already re-pointed to their *_pz nodes; capture the true
-            # pre-instrumentation endpoints from the panel-zone canonical map
-            # instead of the current (re-pointed) node ids.
-            if hasattr(self, "_panel_zone_canonical_elements"):
-                self._hinge_canonical_elements = dict(self._panel_zone_canonical_elements)
-            else:
-                self._hinge_canonical_elements = {
-                    eid: (elem.node_i, elem.node_j)
-                    for eid, elem in self.mesh_model.frame_elements.items()
-                    if not getattr(elem, "inactive", False)
-                }
+            # Capture the frozen beam endpoints directly from the mesh — panel
+            # zones are now resolved by the Preprocessor, so a beam already
+            # points at its *_pz node here, and that is the correct
+            # pre-instrumentation state to restore on a rebuild.
+            self._hinge_canonical_elements = {
+                eid: (elem.node_i, elem.node_j)
+                for eid, elem in self.mesh_model.frame_elements.items()
+                if not getattr(elem, "inactive", False)
+            }
             self._hinge_canonical_assignments = dict(self.mesh_model.frame_assignments)
 
         elements = self.mesh_model.frame_elements
@@ -1211,11 +1183,6 @@ class ElementMixin:
         if not hasattr(self, "_release_canonical_elements"):
             if hasattr(self, "_bond_canonical_elements"):
                 self._release_canonical_elements = dict(self._bond_canonical_elements)
-            elif hasattr(self, "_panel_zone_canonical_elements"):
-                # When panel zones ran first (and no bond-slip springs ran),
-                # capture the true pre-instrumentation endpoints from the
-                # panel-zone canonical map instead of the current *_pz ids.
-                self._release_canonical_elements = dict(self._panel_zone_canonical_elements)
             else:
                 self._release_canonical_elements = {
                     eid: (elem.node_i, elem.node_j)
@@ -1305,68 +1272,25 @@ class ElementMixin:
                 elem.node_j = node_j
 
     def _create_panel_zones(self) -> None:
-        """Insert Krawinkler & Gupta panel-zone rotational springs at joints.
+        """Emit the panel-zone zero-length springs from ``MeshModel.panel_zones``.
 
-        Activated via ``config['panel_zone_model'] = 'krawinkler_gupta'``.
-
-        Each beam-column joint (a node shared by at least one column and one
-        beam) is split into a column node (the original node) and a coincident
-        beam node; the beams are re-pointed to the beam node, and the two are
-        coupled by a zero-length rotational spring acting on the in-plane
-        rotation DOF (5 = RY in a planar X-Z frame) with the K&G bilinear
-        backbone:
-
-            M_y      = 0.55 · Fy · d_c · t_p · d_b
-            K_theta  = 0.95 ·  G · t_p · d_c · d_b
-
-        where ``d_c`` / ``d_b`` are the column / beam depths and ``t_p`` is the
-        panel thickness (the column web thickness).  Post-yield hardening is
-        ``config['panel_zone_hardening']`` (default 0.03).
+        The Preprocessor has already split each beam-column joint (a column
+        node plus a coincident ``*_pz`` beam node, with the beams re-pointed)
+        and recorded the Krawinkler & Gupta spring parameters on the mesh.
+        This method is read-only with respect to the ``MeshModel``: it only
+        writes OpenSees objects — the in-plane translation tie, the out-of-plane
+        beam-node fix, the bilinear ``Steel01`` material, and the zero-length
+        rotational spring (DOF 5 = RY in a planar X-Z frame).
         """
-        if self.config.get("panel_zone_model") != "krawinkler_gupta":
+        panel_zones = self.mesh_model.panel_zones
+        if not panel_zones:
             return
 
         elements = self.mesh_model.frame_elements
-        assignments = self.mesh_model.frame_assignments
-        nodes = self.mesh_model.nodes
-
-        # ── Classify each active element as column (vertical) or beam ──
-        is_vertical: dict[str, bool] = {}
-        for eid, elem in elements.items():
-            if getattr(elem, "inactive", False):
-                continue
-            ni = nodes.get(elem.node_i)
-            nj = nodes.get(elem.node_j)
-            if ni is None or nj is None:
-                continue
-            dx, dy, dz = nj.x - ni.x, nj.y - ni.y, nj.z - ni.z
-            is_vertical[eid] = abs(dz) >= abs(dx) and abs(dz) >= abs(dy)
-
-        # ── Joints: nodes shared by ≥1 column and ≥1 beam ──
-        cols_at: dict[str, list[str]] = {}
-        beams_at: dict[str, list[str]] = {}
-        for eid, vert in is_vertical.items():
-            elem = elements[eid]
-            for nid in (elem.node_i, elem.node_j):
-                (cols_at if vert else beams_at).setdefault(nid, []).append(eid)
-        joints = sorted(set(cols_at) & set(beams_at))
-        if not joints:
-            return
-
-        # ── Idempotency: preserve canonical endpoints on first call ──
-        # Restoration is handled by _restore_panel_zone_canonical_state() in
-        # build_domain(); capture the true beam endpoints before re-pointing so
-        # repeated builds and shared MeshModel instances retain the original
-        # topology.
-        if not hasattr(self, "_panel_zone_canonical_elements"):
-            self._panel_zone_canonical_elements = {
-                eid: (elem.node_i, elem.node_j)
-                for eid, elem in elements.items()
-                if not getattr(elem, "inactive", False)
-            }
-            self._panel_zone_node_ids = set()
-
-        next_node_tag = max((nd.node_tag for nd in nodes.values()), default=0) + 1
+        # Compute the next free element tag, avoiding every tag already claimed
+        # by the mesh (active frame tags, the frame-tag map) and the live
+        # OpenSees domain (shells, walls, rigid links created earlier in
+        # build_domain).
         try:
             max_ops_tag = max(ops.getEleTags(), default=0)
         except Exception:
@@ -1388,76 +1312,23 @@ class ElementMixin:
         )
         mat_tag = 900001  # high, distinct base — avoids load/hinge tag collisions
 
-        for nid in joints:
-            col_eid = cols_at[nid][0]
-            beam_eid = beams_at[nid][0]
-            col_sec = self.mesh_model.sections.get(assignments.get(col_eid))
-            beam_sec = self.mesh_model.sections.get(assignments.get(beam_eid))
-            if col_sec is None or beam_sec is None:
-                continue
-            mat = self.mesh_model.materials.get(col_sec.material)
-            Fy = getattr(mat, "Fy", 0.0) or 0.0
-            E = getattr(mat, "E_mod", 0.0) or 0.0
-            if mat is None or Fy <= 0.0 or E <= 0.0:
-                self._log.warning(
-                    "elements",
-                    f"  ⚠ Panel-zone joint '{nid}': column material "
-                    f"'{col_sec.material}' is missing or has non-positive "
-                    "Fy/E_mod — skipping joint.",
-                )
-                continue
-            # Shear modulus falls back to 0.4·E (≈ ν=0.25 steel) when the
-            # material carries no explicit G_mod — never a hardcoded SI literal.
-            G = getattr(mat, "G_mod", 0.0) or 0.0
-            if G <= 0.0:
-                G = 0.4 * E
-            A_c = getattr(col_sec, "A", 0.0) or 0.0
-            I_c = getattr(col_sec, "I33", 0.0) or 0.0
-            I_b = getattr(beam_sec, "I33", 0.0) or 0.0
-            A_b = getattr(beam_sec, "A", 0.0) or 0.0
-            d_c = getattr(col_sec, "depth", None) or 2.0 * math.sqrt(I_c / max(A_c, 1e-12))
-            d_b = getattr(beam_sec, "depth", None) or 2.0 * math.sqrt(I_b / max(A_b, 1e-12))
-            t_p = getattr(col_sec, "tw", None) or (A_c / max(d_c, 1e-12))
-
-            my = 0.55 * Fy * d_c * t_p * d_b
-            k_theta = 0.95 * G * t_p * d_c * d_b
-            b = float(self.config.get("panel_zone_hardening", 0.03))
-
-            # ── Split the joint: a coincident beam node + re-point beams ──
-            beam_node_id = f"{nid}_pz"
-            beam_node_tag = next_node_tag
-            next_node_tag += 1
-            joint = nodes[nid]
-            nodes[beam_node_id] = Node(
-                node_id=beam_node_id,
-                node_tag=beam_node_tag,
-                x=joint.x,
-                y=joint.y,
-                z=joint.z,
-            )
-            self._panel_zone_node_ids.add(beam_node_id)
-            ops.node(beam_node_tag, joint.x, joint.y, joint.z)
-            self._created_node_tags.add(beam_node_tag)
-            for eid in beams_at[nid]:
-                elem = elements[eid]
-                if elem.node_i == nid:
-                    elem.node_i = beam_node_id
-                if elem.node_j == nid:
-                    elem.node_j = beam_node_id
+        for column_node_id, spec in panel_zones.items():
+            col_tag = self.mesh_model.nodes[column_node_id].node_tag
+            beam_tag = self.mesh_model.nodes[spec.beam_node_id].node_tag
 
             # ── Panel-zone spring (in-plane rotation DOF 5 = RY) ──
             # Tie the in-plane translations across the panel zone and fix the
             # beam node's out-of-plane DOFs (UY / RX / RZ) exactly; the only
             # relative DOF is the in-plane rotation (RY), carried by the K&G
             # bilinear spring.
-            ops.equalDOF(joint.node_tag, beam_node_tag, 1, 3)
-            ops.fix(beam_node_tag, 0, 1, 0, 1, 0, 1)
-            ops.uniaxialMaterial("Steel01", mat_tag, my, k_theta, b)
+            ops.equalDOF(col_tag, beam_tag, 1, 3)
+            ops.fix(beam_tag, 0, 1, 0, 1, 0, 1)
+            ops.uniaxialMaterial("Steel01", mat_tag, spec.my, spec.k_theta, spec.b)
             ops.element(
                 "zeroLength",
                 next_tag,
-                joint.node_tag,
-                beam_node_tag,
+                col_tag,
+                beam_tag,
                 "-mat",
                 mat_tag,
                 "-dir",
@@ -1514,18 +1385,14 @@ class ElementMixin:
         # Restoration is handled by _restore_bond_canonical_state() in
         # build_domain().
         if not hasattr(self, "_bond_canonical_elements"):
-            # When panel zones ran first, the beams are already re-pointed to
-            # their *_pz nodes; capture the true pre-instrumentation endpoints
-            # from the panel-zone canonical map instead of the current
-            # (re-pointed) node ids — mirroring _create_lumped_hinges.
-            if hasattr(self, "_panel_zone_canonical_elements"):
-                self._bond_canonical_elements = dict(self._panel_zone_canonical_elements)
-            else:
-                self._bond_canonical_elements = {
-                    eid: (elem.node_i, elem.node_j)
-                    for eid, elem in self.mesh_model.frame_elements.items()
-                    if not getattr(elem, "inactive", False)
-                }
+            # Capture the frozen beam endpoints directly from the mesh — panel
+            # zones are resolved by the Preprocessor, so a beam already points
+            # at its *_pz node here (the correct pre-instrumentation state).
+            self._bond_canonical_elements = {
+                eid: (elem.node_i, elem.node_j)
+                for eid, elem in self.mesh_model.frame_elements.items()
+                if not getattr(elem, "inactive", False)
+            }
 
         elements = self.mesh_model.frame_elements
         assignments = self.mesh_model.frame_assignments or {}

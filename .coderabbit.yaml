@@ -31,6 +31,13 @@ reviews:
           execution belong only in `opensees/analysis_builder.py`. Flag any new
           analysis logic added to `opensees/builder.py` (Tcl export only) or to
           the preprocessor.
+        - The `AnalysisBuilder` must not mutate the `MeshModel` — flag any
+          write-back in `opensees/analysis_builder.py` or `opensees/_*.py` such
+          as `self.mesh_model.nodes[...] = ...` or `elem.node_i/node_j = ...`.
+          Modelling choices that change topology (panel zones, hinges, bond-slip
+          springs, member releases) belong in the Preprocessor and must be
+          stored as declarative `MeshModel` fields, not re-instrumented at build
+          time.
         - `opensees/` code may `import ops` (OpenSeesPy); `model/` code must NOT —
           the model subpackage must stay OpenSees-free.
         - Data models are `@dataclass` classes in `model/sap_data.py`, with

@@ -37,8 +37,10 @@ plastic section moduli and yield strengths.
 | **M1** | centreline | bilinear steel hinges |
 | **M2** | Krawinkler & Gupta panel zone | bilinear steel hinges |
 
-The two variants differ **only in the builder config** (`panel_zone_model`);
-the underlying `SAPModelData` is the same enriched model.
+The two variants share the same enriched `SAPModelData` but differ in the
+**preprocessor config** (`panel_zone_model`): M2 is preprocessed into a
+separate `MeshModel` whose beam-column joints are split, and the builder then
+emits the panel-zone springs from the frozen `MeshModel.panel_zones` spec.
 
 ## Member nonlinearity — bilinear steel hinge (D1)
 
@@ -59,9 +61,9 @@ data are not redistributable):
 
 ## Joint modelling — Krawinkler & Gupta panel zone (D2)
 
-`panel_zone_model='krawinkler_gupta'` splits each beam-column joint into a
-column node and a coincident beam node, coupled by a zero-length bilinear
-shear-rotation spring with the K&G backbone:
+`panel_zone_model='krawinkler_gupta'` (a **preprocessor** option) splits each
+beam-column joint into a column node and a coincident beam node, coupled by a
+zero-length bilinear shear-rotation spring with the K&G backbone:
 
 ```
 My  = 0.55 · fy · dc · tp · db
@@ -115,8 +117,8 @@ Track 1).
 The benchmark is a **loadable artifact**, not a private test helper:
 
 - **Model** — :mod:`fea_toolkit.benchmarks.sac` exposes `load_model()`
-  (enriched `SAPModelData`), `builder_config(panel_zone=…)` and
-  `build_builder(panel_zone=…)`.
+  (enriched `SAPModelData`), `preprocess_config(panel_zone=…)`,
+  `builder_config()` and `build_builder(panel_zone=…)`.
 - **Committed model-codec snapshot** — `docs/assets/sac3_model.json` (written by
   `docs/_generate_sac_figures.py`), openable in the viewer:
 

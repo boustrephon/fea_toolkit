@@ -74,7 +74,7 @@ import fea_toolkit
 - Never hardcode ``9.81`` — use ``g_from_units(units)`` from ``fea_toolkit.utils``.
 - Never use 8-arg trapezoidal ``eleLoad`` — broken in OpenSeesPy 3.8.0.0.
 - ``Corotational`` geomTransf + ``eleLoad`` does not work in 3D.
-- Preprocessor mutates topology. AnalysisBuilder reads frozen ``MeshModel`` — no mutation.
+- Preprocessor mutates topology. AnalysisBuilder reads the frozen ``MeshModel`` one-way (topology + modelling specs) and never writes back — panel zones, hinges and releases are preprocessed, not re-instrumented at build time.
 
 ---
 

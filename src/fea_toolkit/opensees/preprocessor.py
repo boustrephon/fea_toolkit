@@ -2,11 +2,16 @@
 
 The :class:`Preprocessor` consumes a ``SAPModelData`` instance and produces a
 :class:`~fea_toolkit.model.mesh_model.MeshModel` — a frozen, serialisable
-topology with all splitting, meshing, subdividing, and constraint detection
-already applied.  No OpenSees domain objects are created.
+topology with all splitting, meshing, subdividing, constraint detection and
+panel-zone splitting already applied.  No OpenSees domain objects are created.
+
+The Preprocessor is the only place that mutates topology: the ``MeshModel`` it
+returns is frozen and carries the declarative modelling specs the builder
+consumes (element roles, wall elements, panel-zone springs).
 """
 
 import copy
+import math
 import warnings
 from dataclasses import fields, replace
 from typing import Any, Optional
@@ -25,7 +30,7 @@ from ..model.geometry import (
     split_slabs_at_wall_intersections,
     subdivide_area_mesh,
 )
-from ..model.mesh_model import MeshModel, WallElement
+from ..model.mesh_model import MeshModel, PanelZoneSpec, WallElement
 from ..model.openings import collect_opening_areas
 from ..model.sap_data import (
     AreaElementProperties,
@@ -843,6 +848,16 @@ class Preprocessor:
                     section_tags[variant_sec_name] = next_sec_tag
                     next_sec_tag += 1
 
+        # ── 8b. Panel zones (Krawinkler & Gupta joint springs) ──────
+        # Splits each beam-column joint into a column node (pass-through) and a
+        # coincident ``*_pz`` beam node, re-points the beams, and records the
+        # spring parameters for the builder.  Runs after every frame-splitting
+        # pass and after material defaults, but before orphan removal so the
+        # ``*_pz`` nodes are retained as element-referenced.
+        panel_zones: dict[str, PanelZoneSpec] = self._prepare_panel_zones(
+            md, new_elems, new_assigns
+        )
+
         # ── 9. Remove orphan nodes (not referenced by any element) ──
         # Nodes that carry joint loads are retained even when they are not
         # referenced by any frame/area element — the MASS SOURCE → JOINT
@@ -917,6 +932,7 @@ class Preprocessor:
             frame_end_offsets=carried_offsets,
             frame_element_types=frame_element_types,
             area_element_types=area_element_types,
+            panel_zones=panel_zones,
             diaphragm_z_tolerance=float(self.config.get("diaphragm_z_tolerance", 0.01)),
             materials=md.materials,
             sections=md.sections,
@@ -954,6 +970,161 @@ class Preprocessor:
         return mesh_model
 
     # ── Internal helpers ──────────────────────────────────────────
+
+    def _prepare_panel_zones(
+        self,
+        md: SAPModelData,
+        frame_elements: dict[str, FrameElement],
+        frame_assignments: dict[str, str],
+    ) -> dict[str, PanelZoneSpec]:
+        """Split beam-column joints into Krawinkler & Gupta panel-zone springs.
+
+        Activated via ``config['panel_zone_model'] = 'krawinkler_gupta'``.  Each
+        node shared by at least one column (vertical) and one beam is kept as
+        the column node; a coincident ``*_pz`` beam node is added and the beams
+        are re-pointed to it.  The spring parameters (``my``, ``k_theta``,
+        ``b``) are computed from the column/beam section and material
+        properties already normalised into model units, and returned keyed by
+        the column node ID for the builder to emit.
+
+        This replicates the joint-classification logic of the former
+        ``AnalysisBuilder._create_panel_zones`` verbatim (vertical columns vs.
+        beams at a shared end node), so the set of joints that get a panel zone
+        is unchanged by the move from build time to preprocessing.
+
+        Args:
+            md: The (copied) model data; ``md.nodes`` is mutated in place to add
+                the ``*_pz`` nodes.
+            frame_elements: The final split-frame elements; beams at panel-zone
+                joints are re-pointed in place.
+            frame_assignments: elem_id → section name.
+
+        Returns:
+            A ``{column_node_id: PanelZoneSpec}`` mapping (empty when the
+            panel-zone model is off or no joints qualify).
+        """
+        if self.config.get("panel_zone_model") != "krawinkler_gupta":
+            return {}
+
+        nodes = md.nodes
+        sections = md.sections
+        materials = md.materials
+        elements = frame_elements
+        assignments = frame_assignments
+
+        # ── Classify each active element as column (vertical) or beam ──
+        is_vertical: dict[str, bool] = {}
+        for eid, elem in elements.items():
+            if getattr(elem, "inactive", False):
+                continue
+            ni = nodes.get(elem.node_i)
+            nj = nodes.get(elem.node_j)
+            if ni is None or nj is None:
+                continue
+            dx, dy, dz = nj.x - ni.x, nj.y - ni.y, nj.z - ni.z
+            is_vertical[eid] = abs(dz) >= abs(dx) and abs(dz) >= abs(dy)
+
+        # ── Joints: nodes shared by ≥1 column and ≥1 beam ──
+        cols_at: dict[str, list[str]] = {}
+        beams_at: dict[str, list[str]] = {}
+        for eid, vert in is_vertical.items():
+            elem = elements[eid]
+            for nid in (elem.node_i, elem.node_j):
+                (cols_at if vert else beams_at).setdefault(nid, []).append(eid)
+        joints = sorted(set(cols_at) & set(beams_at))
+        if not joints:
+            return {}
+
+        next_node_tag = max((nd.node_tag for nd in nodes.values()), default=0) + 1
+        hardening = float(self.config.get("panel_zone_hardening", 0.03))
+
+        panel_zones: dict[str, PanelZoneSpec] = {}
+        for nid in joints:
+            col_eid = cols_at[nid][0]
+            beam_eid = beams_at[nid][0]
+            col_sec = sections.get(assignments.get(col_eid))
+            beam_sec = sections.get(assignments.get(beam_eid))
+            if col_sec is None or beam_sec is None:
+                continue
+            mat = materials.get(col_sec.material)
+            if mat is None:
+                continue
+            Fy = getattr(mat, "Fy", 0.0) or 0.0
+            E = getattr(mat, "E_mod", 0.0) or 0.0
+            if Fy <= 0.0 or E <= 0.0:
+                self._log.warning(
+                    "elements",
+                    f"  ⚠ Panel-zone joint '{nid}': column material "
+                    f"'{col_sec.material}' is missing or has non-positive "
+                    "Fy/E_mod — skipping joint.",
+                )
+                continue
+            # Shear modulus falls back to 0.4·E (≈ ν=0.25 steel) when the
+            # material carries no explicit G_mod — never a hardcoded SI literal.
+            G = getattr(mat, "G_mod", 0.0) or 0.0
+            if G <= 0.0:
+                G = 0.4 * E
+            A_c = getattr(col_sec, "A", 0.0) or 0.0
+            I_c = getattr(col_sec, "I33", 0.0) or 0.0
+            I_b = getattr(beam_sec, "I33", 0.0) or 0.0
+            A_b = getattr(beam_sec, "A", 0.0) or 0.0
+            d_c = getattr(col_sec, "depth", None) or 2.0 * math.sqrt(I_c / max(A_c, 1e-12))
+            d_b = getattr(beam_sec, "depth", None) or 2.0 * math.sqrt(I_b / max(A_b, 1e-12))
+            t_p = getattr(col_sec, "tw", None) or (A_c / max(d_c, 1e-12))
+
+            my = 0.55 * Fy * d_c * t_p * d_b
+            k_theta = 0.95 * G * t_p * d_c * d_b
+
+            # ── Split the joint: a coincident beam node + re-point beams ──
+            beam_node_id = self._next_panel_zone_node_id(nid, nodes)
+            joint = nodes[nid]
+            nodes[beam_node_id] = Node(
+                node_id=beam_node_id,
+                node_tag=next_node_tag,
+                x=joint.x,
+                y=joint.y,
+                z=joint.z,
+            )
+            next_node_tag += 1
+            for eid in beams_at[nid]:
+                elem = elements[eid]
+                if elem.node_i == nid:
+                    elem.node_i = beam_node_id
+                if elem.node_j == nid:
+                    elem.node_j = beam_node_id
+
+            panel_zones[nid] = PanelZoneSpec(
+                column_node_id=nid,
+                beam_node_id=beam_node_id,
+                my=my,
+                k_theta=k_theta,
+                b=hardening,
+            )
+
+        return panel_zones
+
+    @staticmethod
+    def _next_panel_zone_node_id(column_node_id: str, nodes: dict[str, Node]) -> str:
+        """Return a non-clobbering ``*_pz`` node ID for a column node.
+
+        Prefers ``f"{column_node_id}_pz"``; if that name is already taken (e.g.
+        a source node happens to end in ``_pz``), appends an ordinal
+        (``_pz_1``, ``_pz_2``, …) until a free ID is found.
+
+        Args:
+            column_node_id: The original joint node ID.
+            nodes: The node dict to check against.
+
+        Returns:
+            A node ID that is not already a key of *nodes*.
+        """
+        base = f"{column_node_id}_pz"
+        if base not in nodes:
+            return base
+        ordinal = 1
+        while f"{column_node_id}_pz_{ordinal}" in nodes:
+            ordinal += 1
+        return f"{column_node_id}_pz_{ordinal}"
 
     def _classify_element_type(
         self, elem, is_area: bool = False, nodes: Optional[dict[str, Node]] = None

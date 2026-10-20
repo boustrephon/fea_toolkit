@@ -1264,10 +1264,11 @@ class TestPanelZone:
             joint_loads=[JointLoad(pattern="P1", node_id="2", my=1.0)],
             units={"F": "N", "L": "m", "T": "C"},
         )
-        mm = preprocess_model(md, {"split_elements": False})
-        cfg = {"element_type": "elasticBeamColumn", "verbose": False}
+        pre_cfg = {"split_elements": False}
         if panel_zone:
-            cfg["panel_zone_model"] = "krawinkler_gupta"
+            pre_cfg["panel_zone_model"] = "krawinkler_gupta"
+        mm = preprocess_model(md, pre_cfg)
+        cfg = {"element_type": "elasticBeamColumn", "verbose": False}
         return AnalysisBuilder(mm, cfg)
 
     def test_panel_zone_softens_joint(self):
@@ -1299,8 +1300,14 @@ class TestPanelZone:
             wipe()
         assert ry_pz > ry_ref, f"expected softer panel zone: {ry_pz:.6e} vs {ry_ref:.6e}"
 
-    def test_panel_zone_rebuild_is_reversible(self):
-        """Repeated builds reuse (not duplicate) the panel-zone spring and ``*_pz`` nodes."""
+    def test_panel_zone_rebuild_is_deterministic(self):
+        """Two ``build_domain()`` calls emit identical panel-zone spring tags.
+
+        The panel-zone topology (``*_pz`` nodes and re-pointed beams) is frozen
+        on the ``MeshModel`` by the Preprocessor, so rebuilding the same builder
+        reproduces the same ``*_pz`` node tags and the same zero-length spring
+        element tags — no restore bookkeeping is involved.
+        """
         import openseespy.opensees as ops
         from openseespy.opensees import wipe
 
@@ -1318,18 +1325,17 @@ class TestPanelZone:
             spring_1 = [t for t in ops.getEleTags() if set(ops.eleNodes(t)) == {joint_tag, pz_tag}]
             assert spring_1, "panel-zone zero-length spring missing after first build"
 
-            # Rebuild on the same (shared) MeshModel.
+            # Rebuild on the same (frozen) MeshModel.
             b.build_domain()
             pz_nodes_2 = [nid for nid in b.mesh_model.nodes if nid.endswith("_pz")]
             assert pz_nodes_2 == pz_nodes_1, (
                 f"panel-zone nodes changed across rebuilds: {pz_nodes_1} vs {pz_nodes_2}"
             )
-            # The beam is re-pointed to the panel-zone node again.
+            # The beam still points at its panel-zone node (frozen on the mesh).
             beam = b.mesh_model.frame_elements["b1"]
             assert beam.node_i.endswith("_pz") or beam.node_j.endswith("_pz")
 
-            # The zero-length spring is recreated (not merely the *_pz node and
-            # beam endpoint) — the joint and panel-zone nodes are coupled again.
+            # The zero-length spring is recreated with the same tag.
             spring_2 = [t for t in ops.getEleTags() if set(ops.eleNodes(t)) == {joint_tag, pz_tag}]
             assert spring_2, "panel-zone zero-length spring missing after rebuild"
             assert spring_2 == spring_1, (
@@ -1337,6 +1343,81 @@ class TestPanelZone:
             )
         finally:
             wipe()
+
+    def test_panel_zone_node_id_does_not_clobber_existing(self):
+        """A source node already named ``*_pz`` gets a non-clobbering beam-node ID."""
+        from fea_toolkit.model.sap_data import (
+            FrameElement,
+            ISection,
+            JointLoad,
+            LoadPattern,
+            Material,
+            Node,
+            Restraint,
+            SAPModelData,
+        )
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 0.0, 0.0, 3.0),
+            "3": Node("3", 3, 0.0, 0.0, 6.0),
+            "4": Node("4", 4, 4.0, 0.0, 3.0),
+            "2_pz": Node("2_pz", 99, 9.0, 9.0, 9.0),  # pre-existing clashing node
+        }
+        restraints = {
+            "1": Restraint([1, 1, 1, 1, 1, 1]),
+            "2": Restraint([0, 1, 0, 1, 0, 1]),
+            "3": Restraint([1, 1, 1, 1, 1, 1]),
+            "4": Restraint([1, 1, 1, 1, 1, 1]),
+        }
+        mats = {"Steel": Material("Steel", "Steel", E_mod=2.0e11, Fy=2.5e8)}
+        sec = {
+            "COL": ISection(
+                name="COL",
+                shape="I/Wide Flange",
+                material="Steel",
+                depth=0.3,
+                bf=0.15,
+                tf=0.01,
+                tw=0.006,
+                A=8e-3,
+                I33=1.2e-4,
+                I22=4e-5,
+                J=2e-6,
+            ),
+        }
+        md = SAPModelData(
+            nodes=nodes,
+            restraints=restraints,
+            materials=mats,
+            sections=sec,
+            frame_elements={
+                "c1": FrameElement(elem_id="c1", elem_tag=1, node_i="1", node_j="2"),
+                "c2": FrameElement(elem_id="c2", elem_tag=2, node_i="2", node_j="3"),
+                "b1": FrameElement(elem_id="b1", elem_tag=3, node_i="2", node_j="4"),
+            },
+            area_elements={},
+            frame_assignments={"c1": "COL", "c2": "COL", "b1": "COL"},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+            load_patterns={"P1": LoadPattern(name="P1", pattern_type="Other")},
+            frame_dist_loads=[],
+            joint_loads=[JointLoad(pattern="P1", node_id="2", my=1.0)],
+            units={"F": "N", "L": "m", "T": "C"},
+        )
+        mm = preprocess_model(md, {"split_elements": False, "panel_zone_model": "krawinkler_gupta"})
+
+        # The split appends an ordinal rather than clobbering the existing node.
+        spec = mm.panel_zones["2"]
+        assert spec.beam_node_id == "2_pz_1"
+        assert "2_pz_1" in mm.nodes
+        assert mm.frame_elements["b1"].node_i == "2_pz_1"
+        # The pre-existing "2_pz" node is not overwritten — it was orphaned
+        # (unreferenced) but its tag is intact.
+        orphan = mm.orphan_nodes.get("2_pz")
+        assert orphan is not None and orphan.node_tag == 99
 
 
 # ═══════════════════════════════════════════════════════════════════

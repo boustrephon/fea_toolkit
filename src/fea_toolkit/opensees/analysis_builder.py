@@ -48,6 +48,11 @@ class AnalysisBuilder(
 ):
     """Create and analyse an OpenSees model from a prepared MeshModel.
 
+    The builder is read-only with respect to ``mesh_model``: it never mutates
+    it, and modelling choices that change topology are resolved by the
+    Preprocessor and stored as declarative ``MeshModel`` fields (e.g.
+    ``panel_zones``).
+
     Usage::
 
         builder = AnalysisBuilder(mesh_model, config)
@@ -283,12 +288,6 @@ class AnalysisBuilder(
             # Elastic rotational stiffness of the bilinear (Steel01) hinge, as
             # a multiple of the member's own flexural stiffness 6EI/L.
             "hinge_stiffness_factor": 10.0,
-            # ── Panel zone (Krawinkler & Gupta, register §5 Track 1) ──
-            # None (default): centreline joint, no explicit panel zone.
-            # "krawinkler_gupta": a zero-length bilinear shear-rotation spring
-            # at each beam-column joint (the SAC M2 model).
-            "panel_zone_model": None,
-            "panel_zone_hardening": 0.03,
             # ── Member end releases / partial fixity ──
             # Honour SAP2000 frame end releases (and partial-fixity springs)
             # by inserting zero-length release elements at member ends.  On by
@@ -561,10 +560,6 @@ class AnalysisBuilder(
             # Pre-compute frame tag map so shell elements can avoid clashing
             self._build_frame_tag_map()
 
-            # Restore canonical panel-zone state (endpoints + *_pz_* nodes)
-            # before the hinge restore, so rebuilds re-instrument the original
-            # beams rather than previously-split ones.
-            self._restore_panel_zone_canonical_state()
             # Restore canonical hinge state before any nodes are created,
             # preventing stale *_hinge_* nodes from being recreated.
             self._restore_hinge_canonical_state()

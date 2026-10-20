@@ -474,7 +474,7 @@ subset = sel.filter_model(model)
 | Rule | Why |
 |------|-----|
 | Never import `ops` in `model/` subpackage | Model code must be OpenSees-free |
-| Never mutate `MeshModel` from `AnalysisBuilder` | Builder reads frozen topology only |
+| Never mutate `MeshModel` from `AnalysisBuilder` | Builder is one-way: reads frozen topology + modelling specs, emits the OpenSees domain, writes nothing back (no adding nodes / re-pointing elements) |
 | Never put analysis logic in `builder.py` (Tcl export only) | Legacy; use `analysis_builder.py` |
 | Never use 8-arg trapezoidal `eleLoad` | Broken in OpenSeesPy |
 | Never hardcode `9.81` for gravity | Must derive from model units |

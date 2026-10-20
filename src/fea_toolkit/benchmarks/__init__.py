@@ -16,6 +16,7 @@ from .sac import (
     enrich_nonlinear,
     load_model,
     peak_x,
+    preprocess_config,
 )
 
 __all__ = [
@@ -28,4 +29,5 @@ __all__ = [
     "enrich_nonlinear",
     "load_model",
     "peak_x",
+    "preprocess_config",
 ]

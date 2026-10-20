@@ -48,6 +48,21 @@ MESH_PARAMS: dict[str, ParamSpec] = {
             "slab meshes are independent, so the two are not tied at the interface."
         ),
     ),
+    "panel_zone_model": ParamSpec(
+        default=None,
+        type=str,
+        choices=("krawinkler_gupta",),
+        allow_none=True,
+        help=(
+            "Split beam-column joints with a Krawinkler & Gupta panel-zone spring "
+            "(otherwise centreline joints)."
+        ),
+    ),
+    "panel_zone_hardening": ParamSpec(
+        default=0.03,
+        type=float,
+        help="Post-yield hardening ratio of the panel-zone Steel01 spring.",
+    ),
 }
 
 

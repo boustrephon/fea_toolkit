@@ -772,9 +772,40 @@ source model rather than duplicated.
 *   **Consequence: the `MeshModel` shares element objects with the source
     `SAPModelData`.**  Both are read-only to their consumers, which is what
     makes the sharing safe — the `AnalysisBuilder` never mutates the
-    `MeshModel` (frozen-topology rule), and views are lenses.  The one builder
-    path that *does* need to mutate (`subdivide_elements` for brace buckling)
-    already deep-copies the dicts it works on into `_brace_canonical`.
+    `MeshModel` (frozen-topology rule), and views are lenses.  Modelling
+    choices that *do* change topology (panel zones, hinges, bond-slip springs,
+    member releases, brace subdivision, limit-state columns) belong in the
+    `Preprocessor` and are carried as declarative `MeshModel` fields.  Panel
+    zones were migrated there in the 2026-10 panel-zone work (see the
+    "Builder must not mutate the MeshModel" note below); the remaining
+    build-time instrumentation methods still mutate and restore
+    (`_restore_hinge_canonical_state`, `_restore_bond_canonical_state`,
+    `_restore_release_canonical_state`, `_restore_brace_canonical_state`,
+    `_restore_limit_state_canonical_state`) and are known debt that should
+    follow the same extraction.
+
+### Builder must not mutate the MeshModel
+
+The `AnalysisBuilder` is the OpenSees projector: it writes to the OpenSees
+domain, never to the `MeshModel`.  Split the Preprocessor's topology
+preparation from the builder's domain emission:
+
+*   A modelling choice that changes topology (panel-zone splitting, hinge
+    insertion, bond-slip nodes, member releases, brace subdivision,
+    limit-state columns) is computed once in the `Preprocessor` and stored as a
+    declarative `MeshModel` field.  The builder reads that spec and emits the
+    OpenSees commands — it never adds, removes, renames or re-points a
+    node/element, and never mutates the `MeshModel`.
+*   The panel-zone work (2026-10) moved the Krawinkler & Gupta joint split out
+    of `AnalysisBuilder._create_panel_zones` into
+    `Preprocessor._prepare_panel_zones`; the builder now only emits the
+    ``equalDOF`` / ``fix`` / ``Steel01`` / ``zeroLength`` commands from the
+    frozen `MeshModel.panel_zones` spec.
+*   **Review checklist for future builder changes:**
+    -   Does the new code write to `mesh_model`?  Reject.
+    -   Does it need to remember how to "undo" a mesh change across rebuilds
+        (a `_restore_*` method)?  If yes, that change belongs in the
+        Preprocessor.
 
 ### What it buys — and what it does not
 
