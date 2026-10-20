@@ -69,6 +69,20 @@ _BEAMS_BY_I = {
 COLUMN = {"Z33": 7.34e-3, "depth": 0.417, "tw": 0.0435, "fy": COLUMN_FY}  # W14x257
 BEAM = {"Z33": 6.194e-3, "depth": 0.762, "tw": 0.0144, "fy": BEAM_FY}  # W30x116
 
+#: The three explicit rigid floor diaphragms from ``struct3.m``'s master-slave
+#: table (``slv_tbl``): each floor ties its five nodes' horizontal DOF.
+_FAITHFUL_DIAPHRAGMS = [
+    {"name": "floor2", "nodes": ["6", "7", "8", "9", "10"]},
+    {"name": "floor3", "nodes": ["11", "12", "13", "14", "15"]},
+    {"name": "roof", "nodes": ["16", "17", "18", "19", "20"]},
+]
+
+# NOTE: ``struct3.m`` models the fourth bay as an axial-only brace (element type
+# 3).  The faithful variant keeps it as a flexural beam instead — the far end of
+# the bay connects to the leaning column (flexural inertia ~28× smaller than a
+# moment column), so the bay's bending contribution is immaterial; the rigid
+# floor diaphragm is the material difference (see ``preprocess_config``).
+
 
 def _match_props(catalog: dict, value: float, tol: float) -> Optional[dict]:
     """Return the catalog entry whose key is within *tol* of *value*."""
@@ -164,7 +178,38 @@ def preprocess_config(panel_zone: bool = False) -> dict[str, Any]:
     return cfg
 
 
-def build_builder(panel_zone: bool = False, *, nonlinear: bool = True) -> AnalysisBuilder:
+def _add_faithful_diaphragms(mesh: Any) -> None:
+    """Emit the ``struct3.m`` master-slave rigid floor diaphragms.
+
+    ``struct3.m``'s ``slv_tbl`` ties each floor's five nodes' horizontal (X) DOF
+    to the line-1 node (an ``equalDOF`` master-slave, not a full rigid
+    diaphragm).  Called after :meth:`AnalysisBuilder.build_domain`, before any
+    analysis runs.
+
+    Elastic-only: in the nonlinear (hinged) model the diaphragm's ``equalDOF``
+    chains with each lumped hinge's translation tie (``hinge.X → floor.X →
+    master.X``), which the ``Transformation`` handler mis-resolves — the same
+    failure class as the M2 panel-zone degeneracy.  The effect is small anyway:
+    the rigid-axial beams already approximate the diaphragm (faithful elastic T1
+    ≈ simplified T1 ≈ 0.99 s).
+    """
+    import openseespy.opensees as ops
+
+    for group in _FAITHFUL_DIAPHRAGMS:
+        node_ids = group["nodes"]
+        master = mesh.nodes.get(node_ids[0])
+        if master is None:
+            continue
+        for nid in node_ids[1:]:
+            nd = mesh.nodes.get(nid)
+            if nd is None:
+                continue
+            ops.equalDOF(master.node_tag, nd.node_tag, 1)
+
+
+def build_builder(
+    panel_zone: bool = False, *, nonlinear: bool = True, fidelity: str = "simplified"
+) -> AnalysisBuilder:
     """Build the SAC model (elastic, or nonlinear M1/M2) into an ``AnalysisBuilder``.
 
     The returned builder has already had :meth:`AnalysisBuilder.build_domain`
@@ -177,12 +222,17 @@ def build_builder(panel_zone: bool = False, *, nonlinear: bool = True) -> Analys
             zone); ``False`` for M1.
         nonlinear: ``True`` for the nonlinear evaluation models (bilinear
             hinges); ``False`` for the elastic (T2) anchor.
+        fidelity: ``"simplified"`` (default) — the floor diaphragm is implicit
+            (rigid-axial beams); or ``"faithful"`` — the rigid floor diaphragms
+            are explicit, matching ``struct3.m``'s master-slave table.
     """
     md = load_model(nonlinear=nonlinear)
     mesh = preprocess_model(md, preprocess_config(panel_zone=panel_zone))
     cfg = builder_config() if nonlinear else {}
     b = AnalysisBuilder(mesh, cfg)
     b.build_domain()
+    if fidelity == "faithful":
+        _add_faithful_diaphragms(mesh)
     return b
 
 

@@ -50,3 +50,25 @@ def test_modal_periods_match_otori(builder):
     got = result["periods"][:2]
     for g, r in zip(got, REF_PERIODS):
         assert g == pytest.approx(r, rel=REF_TOL), f"period {g:.4f} vs reference {r}"
+
+
+def test_faithful_modal_periods_match_otori():
+    """The faithful (explicit-diaphragm) elastic model also matches Ohtori.
+
+    ``fidelity="faithful"`` adds the ``struct3.m`` master-slave floor
+    diaphragms; the rigid-axial beams already approximate them, so the periods
+    barely move.
+    """
+    from openseespy.opensees import wipe
+
+    from fea_toolkit.benchmarks.sac import build_builder
+
+    wipe()
+    try:
+        b = build_builder(nonlinear=False, fidelity="faithful")
+        m = b.run_modal_analysis(num_modes=2, print_results=False, eigen_solver="fullGenLapack")
+        got = m["periods"][:2]
+        for g, r in zip(got, REF_PERIODS):
+            assert g == pytest.approx(r, rel=0.05), f"period {g:.4f} vs reference {r}"
+    finally:
+        wipe()
