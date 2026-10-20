@@ -224,6 +224,13 @@ def _parse_element(parts: list[str], beams: list[_ElasticBeamColumn], ndm: int) 
         idx = parts.index("-mass")
         if idx + 1 < len(parts):
             mass = float(parts[idx + 1])
+            if mass < 0.0 or not math.isfinite(mass):
+                warnings.warn(
+                    "element elasticBeamColumn has a negative '-mass' "
+                    f"({mass}); mass dropped: " + " ".join(parts),
+                    stacklevel=2,
+                )
+                mass = None
         else:
             warnings.warn(
                 "element elasticBeamColumn has '-mass' without a value; mass "
@@ -280,23 +287,70 @@ def _split_braces(tokens: list[str]) -> list[str]:
     return out
 
 
-def _has_unescaped_closing_brace(line: str) -> bool:
-    """True when *line* contains a ``}`` not escaped by a backslash.
+def _strip_tcl_comment(line: str) -> str:
+    """Strip a trailing Tcl comment from *line*.
 
-    A closing brace preceded by an odd number of backslashes is escaped
-    (``\\}``) and does not close a pattern block; an even number (including
-    zero) is a real delimiter.
+    A ``#`` begins a comment when it is the first character of a word — i.e.
+    at the start of the line or immediately after whitespace or ``;`` — and is
+    **not** inside a double-quoted string or a ``{…}`` brace group.  The
+    comment, and a ``;`` separator that introduced it, run to the end of the
+    line and are dropped.
     """
-    for i, ch in enumerate(line):
-        if ch != "}":
+    in_quote = False
+    brace_depth = 0
+    i = 0
+    n = len(line)
+    while i < n:
+        ch = line[i]
+        if ch == "\\":
+            # Skip an escaped character (``\"`` inside a quote, ``\{``/``\}``
+            # inside a brace group, ``\#`` outside both).
+            i += 2
             continue
-        backslashes = 0
-        j = i - 1
-        while j >= 0 and line[j] == "\\":
-            backslashes += 1
-            j -= 1
-        if backslashes % 2 == 0:
-            return True
+        if in_quote:
+            if ch == '"':
+                in_quote = False
+        elif ch == '"':
+            in_quote = True
+        elif ch == "{":
+            brace_depth += 1
+        elif ch == "}":
+            if brace_depth > 0:
+                brace_depth -= 1
+        elif ch == "#" and brace_depth == 0 and (i == 0 or line[i - 1] in " \t;"):
+            line = line[:i]
+            break
+        i += 1
+    stripped = line.rstrip()
+    if stripped.endswith(";"):
+        stripped = stripped[:-1].rstrip()
+    return stripped
+
+
+def _has_unescaped_closing_brace(line: str) -> bool:
+    """True when *line* contains the ``}`` that closes the pattern block.
+
+    Comments are ignored so a trailing ``;# }`` does not terminate the block.
+    Backslash-escaped braces (``\\}``) are skipped, and nested ``{ … }`` pairs
+    (brace-quoted values) are tracked so only a brace at depth zero — the
+    pattern block's own closing brace — closes it.
+    """
+    line = _strip_tcl_comment(line)
+    depth = 0
+    i = 0
+    n = len(line)
+    while i < n:
+        ch = line[i]
+        if ch == "\\":
+            i += 2  # skip an escaped character (including ``\}``)
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            if depth == 0:
+                return True
+            depth -= 1
+        i += 1
     return False
 
 
@@ -307,7 +361,7 @@ def _parse_block_line(
     joint_loads: list[JointLoad],
     variables: Optional[dict[str, str]] = None,
 ) -> None:
-    parts = [p for p in _split_braces(line.split()) if p not in ("{", "}")]
+    parts = [p for p in _split_braces(_strip_tcl_comment(line).split()) if p not in ("{", "}")]
     if variables is not None:
         resolved = _substitute_variables(parts, variables)
         if resolved is None:
@@ -445,6 +499,13 @@ def _lift_joint_load(pattern: str, node: int, vals: list[float], ndm: int) -> Jo
 
 
 def _lift_mass_scalar(vals: list[float], ndm: int) -> float:
+    """Return the joint's translational mass as a single scalar.
+
+    The importer stores joint mass as one scalar; the builder applies it to
+    **all three** translational DOFs via ``ops.mass(tag, m, m, m, 0, 0, 0)``
+    (see :meth:`AnalysisBuilder.compute_seismic_masses`).  A 2-D model lifts
+    the in-plane mass ``mx`` and warns when the X/Y masses differ.
+    """
     if ndm == 2:
         mx, my = [*vals, 0.0, 0.0][:2]
         if abs(mx - my) > 1e-12:
@@ -529,6 +590,12 @@ def _build_model(
         i_pt = nodes.get(b.i_node)
         j_pt = nodes.get(b.j_node)
         if i_pt is None or j_pt is None:
+            warnings.warn(
+                f"element elasticBeamColumn {b.tag} references a missing node "
+                f"(i={b.i_node}, j={b.j_node}); its -mass contribution is "
+                "dropped.",
+                stacklevel=2,
+            )
             continue
         length = math.sqrt(sum((j_pt[k] - i_pt[k]) ** 2 for k in range(3)))
         half = b.mass * length / 2.0

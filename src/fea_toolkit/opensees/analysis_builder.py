@@ -276,6 +276,9 @@ class AnalysisBuilder(
             # steel moment frames (e.g. the SAC benchmark).
             "hinge_backbone": "asce41",
             "hardening_ratio": 0.02,
+            # Elastic rotational stiffness of the bilinear (Steel01) hinge, as
+            # a multiple of the member's own flexural stiffness 6EI/L.
+            "hinge_stiffness_factor": 10.0,
             # ── Panel zone (Krawinkler & Gupta, register §5 Track 1) ──
             # None (default): centreline joint, no explicit panel zone.
             # "krawinkler_gupta": a zero-length bilinear shear-rotation spring
@@ -549,6 +552,10 @@ class AnalysisBuilder(
             # Pre-compute frame tag map so shell elements can avoid clashing
             self._build_frame_tag_map()
 
+            # Restore canonical panel-zone state (endpoints + *_pz_* nodes)
+            # before the hinge restore, so rebuilds re-instrument the original
+            # beams rather than previously-split ones.
+            self._restore_panel_zone_canonical_state()
             # Restore canonical hinge state before any nodes are created,
             # preventing stale *_hinge_* nodes from being recreated.
             self._restore_hinge_canonical_state()

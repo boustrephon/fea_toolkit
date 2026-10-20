@@ -1,5 +1,6 @@
 """Analysis-builder mixin: native Newmark transient (time-history) analysis."""
 
+import contextlib
 import logging
 import math
 from typing import Any, Optional
@@ -94,6 +95,13 @@ class TransientRunnerMixin:
         # use low sequential tags).
         ts_tag = 900001
         pattern_tag = 900002
+        # Repeated runs on the same domain reuse these high tags; remove any
+        # previous pattern / series first so a new record or dt does not
+        # collide with (and fail to recreate over) the old objects.
+        with contextlib.suppress(Exception):
+            ops.remove("loadPattern", pattern_tag)
+        with contextlib.suppress(Exception):
+            ops.remove("timeSeries", ts_tag)
         ops.rayleigh(a0, 0.0, a1, 0.0)
         ops.timeSeries("Path", ts_tag, "-dt", dt, "-values", *accel)
         ops.pattern("UniformExcitation", pattern_tag, dof, "-accel", ts_tag)

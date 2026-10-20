@@ -1,18 +1,21 @@
 ---
 title: "Shell openings — exact cut-out and shell element-family selection"
 description: "Plan for cutting exact holes in structured shell meshes without Gmsh, selecting thin/thick/nonlinear shell element families from the parsed CSI section type with a per-selection override, and boundary-node reuse."
-status: "complete"
+status: "partial"
 tags: [openings, shell, meshing, area-elements, geometry, boolean, element-type, csi]
 category: [model-features]
 related: [shell_support.md, constraint_detection.md, element_splitting.md, element_classification.md, element_properties_config.md]
 ---
 # Shell openings — exact cut-out and shell element-family selection
 
-> **Status: ✅ Complete.**  Implemented and tested: the `cut_cell` boolean, the
+> **Status: ⚠️ Partial.**  Implemented and tested: the `cut_cell` boolean, the
 > thin/thick/nonlinear shell element-family selection, the CSI `Type` parsing,
 > the mesher trimming with boundary-node reuse, the GUI void filtering, and
-> the smoke guards.  The "Decisions and consequences" section records the
-> agreed design; §8 is the implementation plan that landed.
+> the smoke guards.  The cut-out applies only to host areas with an enabled
+> mesh assignment (`auto_mesh=True`) and a positive `max_size`; no other build
+> stage trims host areas, so areas without such an assignment are not cut out.
+> The "Decisions and consequences" section records the agreed design; §8 is
+> the implementation plan that landed.
 
 ## Decisions and consequences
 
@@ -52,7 +55,10 @@ An *opening* is an `AreaElement` with `opening=True` (the `"NONE"` section or
   (`model/geometry_mesh.py`) trim every grid cell against the coplanar
   openings with `cut_cell`: cells fully inside an opening are dropped, and
   straddling cells are split into convex pieces, so the shell mesh traces the
-  opening boundary (a conforming hole, not a staircase of whole cells).
+  opening boundary (a conforming hole, not a staircase of whole cells).  This
+  cut-out happens only for a host area that carries an **enabled mesh
+  assignment** — `AreaMesh.auto_mesh=True` with a **positive `max_size`** —
+  because `mesh_area_elements` only meshes (and therefore trims) such areas.
 - **Boundary-node reuse** — the opening corner nodes (`o1..o4`) are seeded
   into the mesher's coordinate registry, so the trimmed cells reuse them as
   shared mesh nodes and a beam framing into the opening edge connects to the

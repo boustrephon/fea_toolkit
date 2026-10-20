@@ -7,7 +7,11 @@ through the full Preprocessor → AnalysisBuilder pipeline.
 
 import pytest
 
-from fea_toolkit.io.tcl_importer import parse_tcl_model
+from fea_toolkit.io.tcl_importer import (
+    _has_unescaped_closing_brace,
+    _strip_tcl_comment,
+    parse_tcl_model,
+)
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 from fea_toolkit.opensees.preprocessor import preprocess_model
 
@@ -151,16 +155,156 @@ def test_closing_brace_attached_to_block_command():
     assert md.joint_loads[0].node_id == "2"
 
 
-def test_element_mass_accumulated_to_nodes():
+@pytest.mark.parametrize(
+    ("tcl", "expected"),
+    [
+        # Single beam: length 120 x mass/length 0.1 = 12.0, split 6.0 per node.
+        (
+            (
+                "model BasicBuilder -ndm 2 -ndf 3\n"
+                "node 1 0 0\n"
+                "node 2 0 120\n"
+                "fix 1 1 1 1\n"
+                "element elasticBeamColumn 1 1 2 10.0 29000.0 100.0 1 -mass 0.1\n"
+            ),
+            {"1": 6.0, "2": 6.0},
+        ),
+        # Element mass adds to an explicit node mass on the shared end node.
+        (
+            (
+                "model BasicBuilder -ndm 2 -ndf 3\n"
+                "node 1 0 0\n"
+                "node 2 0 120\n"
+                "fix 1 1 1 1\n"
+                "mass 2 2.0 2.0 0.0\n"
+                "element elasticBeamColumn 1 1 2 10.0 29000.0 100.0 1 -mass 0.1\n"
+            ),
+            {"1": 6.0, "2": 8.0},
+        ),
+        # A node shared by two beams accumulates half of each beam's mass.
+        (
+            (
+                "model BasicBuilder -ndm 2 -ndf 3\n"
+                "node 1 0 0\n"
+                "node 2 0 120\n"
+                "node 3 0 240\n"
+                "fix 1 1 1 1\n"
+                "element elasticBeamColumn 1 1 2 10.0 29000.0 100.0 1 -mass 0.1\n"
+                "element elasticBeamColumn 2 2 3 10.0 29000.0 100.0 1 -mass 0.1\n"
+            ),
+            {"1": 6.0, "2": 12.0, "3": 6.0},
+        ),
+    ],
+    ids=["single-beam", "combined-with-node-mass", "shared-node-two-beams"],
+)
+def test_element_mass_accumulated_to_nodes(tcl, expected):
     """Distributed ``-mass`` is lumped (half per end node), never dropped."""
+    md = parse_tcl_model(tcl)
+    assert md.added_masses == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    ("line", "closes"),
+    [
+        ("    load 2 1.0 0.0 0.0}", True),
+        ("    load 2 1.0 0.0 0.0\\}", False),
+    ],
+    ids=["unescaped", "escaped"],
+)
+def test_has_unescaped_closing_brace(line, closes):
+    """A backslash-escaped closing brace does not terminate the pattern block."""
+    assert _has_unescaped_closing_brace(line) == closes
+
+
+def test_added_mass_applied_to_all_translational_dofs():
+    """The lifted scalar mass is applied to all three translational DOFs."""
+    import openseespy.opensees as ops
+    from openseespy.opensees import wipe
+
+    wipe()
+    try:
+        md = _parse()
+        mesh = preprocess_model(md, {"element_type": "elasticBeamColumn"})
+        builder = AnalysisBuilder(mesh, {})
+        builder.build_domain()
+        builder.compute_seismic_masses()
+        # Node 2 carries an added mass of 1.0 → applied to UX, UY, UZ (m, m, m).
+        assert list(ops.nodeMass(2)) == pytest.approx([1.0, 1.0, 1.0, 0.0, 0.0, 0.0])
+    finally:
+        wipe()
+
+
+def test_negative_element_mass_rejected():
+    """A negative ``-mass`` is rejected (warned + dropped), not accumulated."""
     tcl = (
         "model BasicBuilder -ndm 2 -ndf 3\n"
         "node 1 0 0\n"
         "node 2 0 120\n"
         "fix 1 1 1 1\n"
-        "element elasticBeamColumn 1 1 2 10.0 29000.0 100.0 1 -mass 0.1\n"
+        "element elasticBeamColumn 1 1 2 10.0 29000.0 100.0 1 -mass -0.1\n"
+    )
+    with pytest.warns(UserWarning, match="negative '-mass'"):
+        md = parse_tcl_model(tcl)
+    assert md.added_masses == {}
+
+
+def test_element_mass_with_missing_node_warns():
+    """A beam whose end node is missing warns and drops its ``-mass``."""
+    tcl = (
+        "model BasicBuilder -ndm 2 -ndf 3\n"
+        "node 1 0 0\n"
+        "fix 1 1 1 1\n"
+        "element elasticBeamColumn 1 1 99 10.0 29000.0 100.0 1 -mass 0.1\n"
+    )
+    with pytest.warns(UserWarning, match="missing node"):
+        md = parse_tcl_model(tcl)
+    assert md.added_masses == {}
+
+
+def test_comment_brace_does_not_close_block():
+    """A ``;# }`` trailing comment inside a block does not terminate it."""
+    tcl = (
+        "model BasicBuilder -ndm 2 -ndf 3\n"
+        "node 1 0 0\n"
+        "node 2 0 10\n"
+        "fix 1 1 1 1\n"
+        "element elasticBeamColumn 1 1 2 10.0 29000.0 100.0 1\n"
+        "pattern Plain 1 Linear {\n"
+        "    load 2 1.0 0.0 0.0 ;# }\n"
+        "    load 1 0.5 0.0 0.0\n"
+        "}\n"
     )
     md = parse_tcl_model(tcl)
-    # Length 120 x mass/length 0.1 = 12.0 total, split 6.0 per end node.
-    assert md.added_masses["1"] == pytest.approx(6.0)
-    assert md.added_masses["2"] == pytest.approx(6.0)
+    assert len(md.joint_loads) == 2
+    assert md.joint_loads[0].node_id == "2"
+    assert md.joint_loads[1].node_id == "1"
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("set x 1 # comment", "set x 1"),
+        ("set x {1 #2}", "set x {1 #2}"),
+        ('set x "a # b" # comment', 'set x "a # b"'),
+        ("load 1 2 ;# comment", "load 1 2"),
+    ],
+    ids=["plain", "brace", "quote", "semicolon"],
+)
+def test_strip_tcl_comment_ignores_quotes_and_braces(line, expected):
+    """``#`` is only a comment outside double-quoted strings and brace groups."""
+    assert _strip_tcl_comment(line) == expected
+
+
+@pytest.mark.parametrize("bad_mass", ["nan", "inf", "-inf"])
+def test_non_finite_element_mass_rejected(bad_mass):
+    """A non-finite ``-mass`` is rejected (warned + dropped), not accumulated."""
+    tcl = (
+        "model BasicBuilder -ndm 2 -ndf 3\n"
+        "node 1 0 0\n"
+        "node 2 0 120\n"
+        "fix 1 1 1 1\n"
+        f"element elasticBeamColumn 1 1 2 10.0 29000.0 100.0 1 -mass {bad_mass}\n"
+    )
+    with pytest.warns(UserWarning, match="negative '-mass'"):
+        md = parse_tcl_model(tcl)
+    assert md.added_masses == {}

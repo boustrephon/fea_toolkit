@@ -27,14 +27,15 @@ def run_nonlinear_dynamic_analysis(
     damping_ratio: float = 0.05,
     name: str = "NonlinearDynamic",
     config: Optional[dict] = None,
+    gravity_patterns: Optional[dict[str, float]] = None,
 ) -> AnalysisResult:
     """Run a nonlinear dynamic (time-history) analysis.
 
     Builds the OpenSees domain from *mesh_model* and integrates a ground motion
-    with the native Newmark runner (no Tcl/Xara export).  The domain is built
-    as the config's ``element_type`` specifies; for genuinely nonlinear
-    (fiber / plastic-hinge) response the caller rebuilds with fiber sections
-    first, exactly as :func:`run_pushover_analysis` does.
+    with the native Newmark runner (no Tcl/Xara export).  Because the analysis
+    is nonlinear, the domain is built with fiber sections (``dispBeamColumn``)
+    directly — exactly as :func:`run_pushover_analysis` does — so member
+    yielding is preserved rather than the elastic defaults.
 
     Args:
         mesh_model: Pre-processed topology.
@@ -49,6 +50,11 @@ def run_nonlinear_dynamic_analysis(
         damping_ratio: Rayleigh damping ratio (default 0.05).
         name: Result label (default "NonlinearDynamic").
         config: Builder config overrides.
+        gravity_patterns: Load-pattern scale dict for the gravity stage
+            (e.g. ``{"DEAD": 1.0}``), forwarded to
+            :meth:`AnalysisBuilder.run_transient_analysis` so gravity-dependent
+            P-Delta and yield state are retained.  ``None`` skips the gravity
+            hand-off.
 
     Returns:
         :class:`AnalysisResult` with ``times``, ``displacements``
@@ -59,13 +65,19 @@ def run_nonlinear_dynamic_analysis(
 
     # ── Ground motion (one acceleration value per line) ──
     try:
-        accel = np.loadtxt(ground_motion_file)
+        accel = np.loadtxt(ground_motion_file, ndmin=1)
     except Exception as e:
         raise ValueError(
             f"Cannot read ground motion file: {ground_motion_file}. "
             "Each line should be one acceleration value in model "
             "acceleration units."
         ) from e
+    if accel.ndim != 1:
+        raise ValueError(
+            f"Ground motion file {ground_motion_file!r} must contain a single "
+            f"column of acceleration values (one per line); got {accel.ndim} "
+            "dimension(s)."
+        )
 
     # ── Rayleigh damping periods from modal result ──
     modal_data = modal_result.data
@@ -86,7 +98,12 @@ def run_nonlinear_dynamic_analysis(
 
     # ── Build + run the native transient ──
     builder = AnalysisBuilder(mesh_model, config or {})
-    builder.build_domain()
+    # Nonlinear dynamic analysis must model yielding: build the domain with
+    # fiber sections (dispBeamColumn) instead of the elastic defaults, exactly
+    # as run_pushover_analysis does.  rebuild_with_fiber_sections() performs
+    # the build_domain() itself (using the config passed to the constructor),
+    # so there is no separate elastic build to discard.
+    builder.rebuild_with_fiber_sections()
     res = builder.run_transient_analysis(
         accel,
         dt,
@@ -94,6 +111,7 @@ def run_nonlinear_dynamic_analysis(
         damping_ratio=damping_ratio,
         period_1=period_1,
         period_2=period_2,
+        gravity_patterns=gravity_patterns,
         num_steps=num_steps,
     )
 

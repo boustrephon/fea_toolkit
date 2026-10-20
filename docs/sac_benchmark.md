@@ -41,8 +41,9 @@ against the reference within **±10 %**.
 ### Composite-action caveat
 
 Ohtori's frequencies are for the *composite* beam-and-slab evaluation model;
-the fixture models the beams as bare steel, whose effective inertia is ~50-60 %
-lower, so the centreline model overestimates the periods by ~8 %
+the fixture models the beams as bare steel, whose effective inertia is ~33-38 %
+lower (the composite model's effective inertia is ~50-60 % higher), so the
+centreline model overestimates the periods by ~8 %
 (1.09 s / 0.35 s vs 1.01 s / 0.327 s).  The ±10 % band brackets this documented
 gap rather than claiming a T2-tight ±3 %; the closed-form cantilever and
 shear-building anchors cover the tight solver-accuracy tier.

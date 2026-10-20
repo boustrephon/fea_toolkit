@@ -28,6 +28,7 @@ PyVista
 import importlib.util
 import os
 import pathlib
+from typing import Optional
 
 import pytest
 
@@ -78,10 +79,17 @@ _HAVE_GUI = (
 # to be present.  The gate is *record-based* — a record must exist at the path
 # its ``redistributable`` flag and ``source_url`` extension imply — not
 # directory-based, so an empty mirror does not enable the gated tests.
+#
+# Registry and mirror paths are anchored to the repository root (derived from
+# this file's location), never the process working directory, so the gating is
+# correct regardless of where pytest is launched from.
+_REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+
 def _manifest_registry() -> list[dict]:
     import json
 
-    registry = pathlib.Path("tests") / "fixtures" / "ground_motion_manifests.json"
+    registry = _REPO_ROOT / "tests" / "fixtures" / "ground_motion_manifests.json"
     try:
         payload = json.loads(registry.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -89,7 +97,7 @@ def _manifest_registry() -> list[dict]:
     return payload if isinstance(payload, list) else []
 
 
-def _record_path(record_id: str) -> pathlib.Path | None:
+def _record_path(record_id: str) -> Optional[pathlib.Path]:
     """Resolve the expected mirror path for one manifest record, or ``None``."""
     from fea_toolkit.io.ground_motion import source_extension
 
@@ -99,7 +107,7 @@ def _record_path(record_id: str) -> pathlib.Path | None:
         if str(item.get("record_id", "")) == record_id:
             sub = "public" if item.get("redistributable") else "local"
             ext = source_extension(str(item.get("source_url", "") or ""))
-            return pathlib.Path("data") / "ground_motion" / sub / f"{record_id}{ext}"
+            return _REPO_ROOT / "data" / "ground_motion" / sub / f"{record_id}{ext}"
     return None
 
 
@@ -120,7 +128,7 @@ def _all_record_ids() -> list[str]:
 def ground_motion_dir():
     """Path to the non-redistributable ground-motion mirror, or ``None`` when
     the mirror directory is absent."""
-    d = pathlib.Path("data") / "ground_motion" / "local"
+    d = _REPO_ROOT / "data" / "ground_motion" / "local"
     return str(d) if d.exists() else None
 
 

@@ -103,12 +103,11 @@ def test_sac3_nonlinear_nltha_synthetic():
 def test_sac3_nonlinear_nltha_la21(resolve_ground_motion_record):
     """Nonlinear SAC frame (bilinear hinges, M1 vs M2) under LA21 (gated).
 
-    Ohtori et al. (2004) Table 3 gives a peak roof displacement of ~0.151 m for
-    the 3-story nonlinear evaluation model under the El Centro record at
-    intensity 1.0.  The acceptance band is ±20 % (0.121–0.181 m): the hinge
-    yield moments and panel-zone properties are computed from AISC tables (the
-    benchmark data are not redistributable) and the bare-steel model omits
-    composite slab action, so an exact match is not expected.
+    LA21 is the SAC 1995 Kobe (Takatori) record, *not* the El Centro record
+    for which Ohtori et al. (2004) Table 3 reports the ~0.151 m peak roof
+    displacement, so the Ohtori M1 acceptance band does not apply here.  This
+    test is therefore a smoke anchor only: it checks that both the M1 (hinges)
+    and M2 (hinges + panel zone) models converge and return a finite peak.
 
     The M2 (panel-zone) run is a smoke check only: the Krawinkler & Gupta panel
     zone combined with the bilinear hinge in the full 3-story frame currently
@@ -130,10 +129,7 @@ def test_sac3_nonlinear_nltha_la21(resolve_ground_motion_record):
         b = build_builder(panel_zone=False)
         res = b.run_transient_analysis(accel, dt, direction="X", damping_ratio=0.05)
         assert res["converged_steps"] > 0
-        peak_m1 = peak_x(res)
-        assert 0.121 <= peak_m1 <= 0.181, (
-            f"M1 peak roof disp {peak_m1:.4f} m outside Ohtori band 0.121–0.181 m"
-        )
+        assert np.isfinite(peak_x(res))
 
         b = build_builder(panel_zone=True)
         res = b.run_transient_analysis(accel, dt, direction="X", damping_ratio=0.05)

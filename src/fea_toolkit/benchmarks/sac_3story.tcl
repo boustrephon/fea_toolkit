@@ -78,7 +78,7 @@ element elasticBeamColumn 13 13 18 $Acol $E $Icol 1
 element elasticBeamColumn 14 14 19 $Acol $E $Icol 1
 element elasticBeamColumn 15 15 20 $Acol $E $Icol 1
 
-# Beams (W21x44) — L1.
+# Beams (W30x116) — L1.
 element elasticBeamColumn 16 6 7 $Abeam $E $Ibeam 1
 element elasticBeamColumn 17 7 8 $Abeam $E $Ibeam 1
 element elasticBeamColumn 18 8 9 $Abeam $E $Ibeam 1

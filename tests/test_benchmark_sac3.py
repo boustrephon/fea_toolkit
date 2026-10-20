@@ -14,7 +14,8 @@ frequencies of the 3-story evaluation model are 0.99 Hz and 3.06 Hz (periods
 
 Caveat (composite action): Ohtori's frequencies are for the *composite*
 beam-and-slab model; the fixture models the W30x116 beams as bare steel, whose
-effective inertia is ~50-60 % lower, so this centreline model overestimates the
+effective inertia is ~33-38 % lower (the composite model's inertia is ~50-60 %
+higher), so this centreline model overestimates the
 periods by ~8 % (1.09 s / 0.35 s vs 1.01 s / 0.327 s).  The acceptance band
 therefore brackets the published values at ±10 % rather than claiming a T2-tight
 ±3 %; the closed-form cantilever and shear-building anchors already cover the

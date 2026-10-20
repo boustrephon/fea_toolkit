@@ -1093,7 +1093,14 @@ class TestBuilderHingeModel:
         assert b.config["hardening_ratio"] == 0.02
 
     def test_bilinear_hinge_yields_past_my(self):
-        """A cantilever with hinge_backbone='bilinear' yields past My = Fy·Z33."""
+        """A sway column with hinge_backbone='bilinear' yields past 2·My/L.
+
+        A fixed-fixed sway column (tip translation free, rotation fixed) forms
+        plastic hinges at both ends, so its collapse load is ``2·My/L``.  The
+        test measures the tip displacement below and above yield and asserts a
+        super-linear (post-yield) increase rather than comparing against
+        elastic theory.
+        """
         import openseespy.opensees as ops
 
         from fea_toolkit.model.sap_data import (
@@ -1164,12 +1171,30 @@ class TestBuilderHingeModel:
                 },
             )
             b.build_domain()
-            p_yield = My / L
-            result = b.run_static_analysis(pattern_scales={"P1": 1.5 * p_yield})
-            disp = result["nodal_displacements"]["2"][0]
-            # Elastic fixed-fixed sway column (tip RY restrained): k = 12EI/L³.
-            elastic = 1.5 * p_yield * L**3 / (12.0 * 2.0e11 * 1.2e-4)
-            assert disp > elastic * 1.3, f"expected yield: disp={disp:.5f} elastic={elastic:.5f}"
+            p_yield = 2.0 * My / L  # fixed-fixed sway collapse load
+
+            # Below yield (0.5·p_yield = My/L): elastic response.
+            result_low = b.run_static_analysis(pattern_scales={"P1": 0.5 * p_yield})
+            disp_low = result_low["nodal_displacements"]["2"][0]
+
+            # Above yield (1.5·p_yield): run_static_analysis must rebuild the
+            # domain by default (rebuild=True) so the high-load run starts from
+            # a fresh hinge state rather than a pre-yielded one.
+            import inspect
+
+            assert inspect.signature(b.run_static_analysis).parameters["rebuild"].default is True, (
+                "run_static_analysis must default to rebuild=True for a fresh domain"
+            )
+            result_high = b.run_static_analysis(pattern_scales={"P1": 1.5 * p_yield})
+            disp_high = result_high["nodal_displacements"]["2"][0]
+
+            # 1.5 / 0.5 = 3× the load.  A yielding response must exceed the
+            # elastic 3× prediction by a clear margin (post-yield stiffness
+            # falls off), so require at least a 20 % excess over linear scaling.
+            assert disp_high > 1.2 * 3.0 * disp_low, (
+                f"expected post-yield increase: disp_high={disp_high:.5f} "
+                f"vs 3×disp_low={3.0 * disp_low:.5f}"
+            )
         finally:
             ops.wipe()
 
@@ -1236,7 +1261,7 @@ class TestPanelZone:
             frame_auto_mesh={},
             load_patterns={"P1": LoadPattern(name="P1", pattern_type="Other")},
             frame_dist_loads=[],
-            joint_loads=[JointLoad(pattern="P1", node_id="2", fx=1.0)],
+            joint_loads=[JointLoad(pattern="P1", node_id="2", my=1.0)],
             units={"F": "N", "L": "m", "T": "C"},
         )
         mm = preprocess_model(md, {"split_elements": False})
@@ -1246,28 +1271,56 @@ class TestPanelZone:
         return AnalysisBuilder(mm, cfg)
 
     def test_panel_zone_softens_joint(self):
-        """The K&G panel-zone spring adds shear flexibility at the joint."""
+        """The K&G panel-zone spring adds rotational flexibility at the joint.
+
+        A unit moment applied at the joint rotates it; the panel-zone spring is
+        in series with the beam's flexural stiffness, so the joint rotation is
+        larger with the panel zone than with a rigid centreline joint.
+        """
         from openseespy.opensees import wipe
 
         wipe()
         try:
             b_ref = self._subassemblage(panel_zone=False)
             b_ref.build_domain()
-            d_ref = b_ref.run_static_analysis(pattern_scales={"P1": 5.0e4})["nodal_displacements"][
+            ry_ref = b_ref.run_static_analysis(pattern_scales={"P1": 1.0})["nodal_displacements"][
                 "2"
-            ][0]
+            ][4]
         finally:
             wipe()
         wipe()
         try:
             b_pz = self._subassemblage(panel_zone=True)
             b_pz.build_domain()
-            d_pz = b_pz.run_static_analysis(pattern_scales={"P1": 5.0e4})["nodal_displacements"][
+            ry_pz = b_pz.run_static_analysis(pattern_scales={"P1": 1.0})["nodal_displacements"][
                 "2"
-            ][0]
+            ][4]
         finally:
             wipe()
-        assert d_pz > d_ref, f"expected softer panel zone: {d_pz:.5f} vs {d_ref:.5f}"
+        assert ry_pz > ry_ref, f"expected softer panel zone: {ry_pz:.6e} vs {ry_ref:.6e}"
+
+    def test_panel_zone_rebuild_is_reversible(self):
+        """Repeated builds reuse (not duplicate) the panel-zone ``*_pz`` nodes."""
+        from openseespy.opensees import wipe
+
+        wipe()
+        try:
+            b = self._subassemblage(panel_zone=True)
+            b.build_domain()
+            pz_nodes_1 = [nid for nid in b.mesh_model.nodes if nid.endswith("_pz")]
+            assert pz_nodes_1, "expected at least one *_pz node"
+
+            # Rebuild on the same (shared) MeshModel.
+            b.build_domain()
+            pz_nodes_2 = [nid for nid in b.mesh_model.nodes if nid.endswith("_pz")]
+            assert pz_nodes_2 == pz_nodes_1, (
+                f"panel-zone nodes changed across rebuilds: {pz_nodes_1} vs {pz_nodes_2}"
+            )
+            # The beam is re-pointed to the panel-zone node again.
+            beam = b.mesh_model.frame_elements["b1"]
+            assert beam.node_i.endswith("_pz") or beam.node_j.endswith("_pz")
+        finally:
+            wipe()
 
 
 # ═══════════════════════════════════════════════════════════════════

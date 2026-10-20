@@ -35,8 +35,8 @@ planar-3-D convention (`.clinerules` §3.11):
   moment about the lifted out-of-plane axis `-Y`); `mass` is imported as a
   single translational scalar from the X component, with a warning when the
   X and Y masses differ — the rotational mass term is not imported; element
-  ``-mass`` (mass per length) is lumped half to each end node rather than
-  dropped;
+  `-mass` (mass per length) is lumped half to each end node, and skipped when
+  a beam references an undefined node;
 - section bending is isotropic (`I33 = I22 = I`), so the in-plane stiffness is
   exact and independent of the element's local-axis orientation.
 
