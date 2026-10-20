@@ -25,8 +25,10 @@ Geometry, members and masses are identical to the T2 anchor (4 bays × 9.144 m,
 3 stories × 3.9624 m, fixed bases; W24×68 columns / W30×116 beams; seismic mass
 per level L1 = L2 = 4.785e5 kg, L3 = 5.20e5 kg, half per frame).  The model is
 built and enriched by :mod:`fea_toolkit.benchmarks.sac` (single source of
-truth), which bundles the Tcl transcription (`sac_3story.tcl`) and adds the
-plastic section moduli and yield strengths.
+truth), which bundles the Tcl transcription (`sac_3story.tcl`), applies
+**composite action** to the beams (strong-axis inertia × 1.6, matching the
+published 1.01 s period), and adds the plastic section moduli and yield
+strengths.
 
 ![SAC 3-story frame](assets/sac3_model.png)
 
@@ -76,7 +78,7 @@ where `dc` / `db` are the column / beam depths and `tp` the panel thickness
 ![Panel-zone backbone](assets/sac3_panel_zone.png)
 
 Panel-zone softening is verified independently by the elastic-model period
-shift (T1 1.09 → 1.31 s) and the subassemblage test
+shift (T1 1.01 → 1.13 s) and the subassemblage test
 `test_analysis_csm.py::TestPanelZone`.
 
 ## NLTHA benchmark (T4)
@@ -86,11 +88,11 @@ Reference — Ohtori, Christenson, Spencer & Dyke (2004),
 Table 3: the 3-story nonlinear evaluation model reaches a peak roof
 displacement of **~0.151 m** under the El Centro record at intensity 1.0.
 
-The gated `@pytest.mark.needs_ground_motion("LA21")` test
-(`tests/test_benchmark_sac3_nltha.py`) asserts the **M1** peak within **±20 %**
-(0.121–0.181 m); the derived AISC yield moments and the bare-steel composite
-caveat warrant the wider band rather than a T4-tight ±5 %.  **M1 lands at
-≈ 0.159 m** (~5 % of reference).
+The always-on synthetic-pulse test drives M1 and M2 end-to-end; the composite M1
+model peaks at **≈ 0.152 m** under that 1 Hz pulse.  The gated
+`@pytest.mark.needs_ground_motion("LA21")` test is a smoke check only — LA21 is
+the 1995 Kobe (Takatori) record, not El Centro, so Ohtori's El Centro band does
+not apply to that run directly.
 
 ![Roof displacement time history (synthetic pulse)](assets/sac3_nltha_synthetic.png)
 
@@ -112,8 +114,8 @@ a slave-of-a-slave that the `Transformation` constraint handler mis-resolved —
 locking the frame's lateral DOFs.  The fix ties the hinge node **directly to the
 column node** (star topology — `equalDOF(col, hinge, 1, 3)` + out-of-plane fix),
 leaving the panel-zone spring and the hinge in series.  M2 now has
-**T1 ≈ 1.35 s**, correctly softer than both the elastic model (1.09 s) and M1
-(1.14 s).  Regression-guarded by `test_sac3_m2_panel_zone_modal_period`.
+**T1 ≈ 1.29 s**, correctly softer than both the elastic model (1.01 s) and M1
+(1.06 s).  Regression-guarded by `test_sac3_m2_panel_zone_modal_period`.
 
 ## Loadable artifact
 

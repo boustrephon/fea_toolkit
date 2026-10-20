@@ -108,7 +108,7 @@ def test_sac3_m2_panel_zone_modal_period():
 
     The combination once produced an over-stiff T1 ≈ 0.20 s (the sway modes were
     locked by a chained equalDOF through the ``*_pz`` beam node).  The fixed
-    model softens to T1 ≈ 1.35 s (vs 1.09 s elastic, 1.14 s M1 hinge-only).
+    model softens to T1 ≈ 1.29 s (vs 1.01 s elastic, 1.06 s M1 hinge-only).
     """
     from openseespy.opensees import wipe
 
@@ -116,7 +116,7 @@ def test_sac3_m2_panel_zone_modal_period():
     try:
         b = build_builder(panel_zone=True)
         modal = b.run_modal_analysis(num_modes=1, print_results=False)
-        assert 1.2 < float(modal["periods"][0]) < 1.5
+        assert 1.2 < float(modal["periods"][0]) < 1.4
     finally:
         wipe()
 

@@ -6,9 +6,9 @@
 #   - 4 bays x 9.144 m (30 ft), 3 stories x 3.9624 m (13 ft), fixed bases.
 #   - Columns W24x68 (A = 1.290e-2 m2, Ix = 7.617e-4 m4), 345 MPa steel.
 #   - Beams   W30x116 (A = 2.206e-2 m2, Ix = 2.052e-3 m4), 248 MPa steel,
-#     modelled bare (no composite slab).  Ohtori's published frequencies are
-#     for the *composite* beam model, whose effective inertia is ~50-60 %
-#     higher, so this centreline model overestimates the periods by ~8 %.
+#     transcribed bare (no composite slab); composite action is applied at
+#     enrich time in benchmarks/sac.py (apply_composite_action), which boosts
+#     the beam strong-axis inertia to match Ohtori's composite model (T1 1.01 s).
 #   - E = 2.0e11 Pa (29000 ksi).
 #   - Seismic mass per level, one frame (half the whole building):
 #       L1 = L2 = 4.785e5 kg,  L3 (roof) = 5.20e5 kg.

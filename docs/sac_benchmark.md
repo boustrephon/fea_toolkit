@@ -21,7 +21,8 @@ Transcribed from Ohtori et al. (2004), Figure 1 / benchmark data:
 
 - N-S perimeter MRF, **4 bays × 9.144 m**, **3 stories × 3.9624 m**, fixed bases.
 - **Columns W24×68** (A = 1.290e-2 m², I = 7.617e-4 m⁴), 345 MPa steel.
-- **Beams W30×116** (A = 2.206e-2 m², I = 2.052e-3 m⁴), 248 MPa steel, modelled **bare**.
+- **Beams W30×116** (A = 2.206e-2 m², I = 2.052e-3 m⁴), 248 MPa steel, modelled
+  **compositely** with the slab (strong-axis inertia × 1.6 via `apply_composite_action`).
 - E = 2.0e11 Pa.  Seismic mass per level, one frame (half the building):
   L1 = L2 = 4.785e5 kg, L3 (roof) = 5.20e5 kg, lumped at the floor nodes by
   tributary bay width.
@@ -36,17 +37,15 @@ the 3-story evaluation model: **0.99 Hz and 3.06 Hz** (periods **1.01 s** and
 ## Acceptance
 
 T2 — published code verification.  The test asserts the first two periods
-against the reference within **±10 %**.
+against the reference within **±3 %**.
 
-### Composite-action caveat
+### Composite action
 
-Ohtori's frequencies are for the *composite* beam-and-slab evaluation model;
-the fixture models the beams as bare steel, whose effective inertia is ~33-38 %
-lower (the composite model's effective inertia is ~50-60 % higher), so the
-centreline model overestimates the periods by ~8 %
-(1.09 s / 0.35 s vs 1.01 s / 0.327 s).  The ±10 % band brackets this documented
-gap rather than claiming a T2-tight ±3 %; the closed-form cantilever and
-shear-building anchors cover the tight solver-accuracy tier.
+Ohtori's frequencies are for the *composite* beam-and-slab evaluation model, so
+the fixture applies :func:`fea_toolkit.benchmarks.sac.apply_composite_action`
+(strong-axis inertia × 1.6) to the transcribed bare-steel beams before solving;
+this lands the first two periods on the published values (1.01 s / 0.327 s) to
+within ±3 %.
 
 ## Implementation
 

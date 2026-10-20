@@ -14,6 +14,10 @@ nonlinear evaluation-model variants:
 * **M2** — M1 plus an explicit Krawinkler & Gupta panel zone at each
   beam-column joint (``panel_zone_model='krawinkler_gupta'``).
 
+Both variants model the 248 MPa beams acting **compositely with the slab**
+(beam strong-axis inertia × ``COMPOSITE_I_FACTOR``), matching the benchmark's
+published 1.01 s period; pass ``composite=False`` for the bare-steel reference.
+
 The benchmark's exact hinge / panel-zone parameters are not redistributable, so
 the plastic moduli and yield strengths below are computed from AISC tables
 (see ``docs/sac_nonlinear_benchmark.md``).
@@ -45,6 +49,13 @@ SAC3_UNITS: dict[str, str] = {"F": "N", "L": "m", "T": "C"}
 COLUMN = {"Z33": 2.524e-3, "depth": 0.602, "tw": 0.0105, "fy": 345e6}
 BEAM = {"Z33": 6.194e-3, "depth": 0.762, "tw": 0.0144, "fy": 248e6}
 
+#: Composite slab → beam strong-axis inertia boost.
+#: Ohtori et al. (2004) model the 248 MPa beams "acting compositely with the
+#: floor slab"; the composite section raises the beam's effective strong-axis
+#: inertia by ~60%, which brings the elastic T1 from 1.09 s (bare steel) to the
+#: published 1.01 s.
+COMPOSITE_I_FACTOR = 1.6
+
 
 def enrich_nonlinear(md: SAPModelData) -> SAPModelData:
     """Enrich the elastic SAC model with plastic moduli and yield strengths.
@@ -70,15 +81,39 @@ def enrich_nonlinear(md: SAPModelData) -> SAPModelData:
     return md
 
 
-def load_model(nonlinear: bool = True) -> SAPModelData:
+def apply_composite_action(md: SAPModelData, factor: float = COMPOSITE_I_FACTOR) -> SAPModelData:
+    """Boost the beam strong-axis inertia to capture composite (slab) action.
+
+    Ohtori et al. (2004) model the floor beams as acting compositely with the
+    slab, so the beam's in-plane bending stiffness is higher than the bare steel
+    section alone — the composite section's effective strong-axis inertia is
+    ~60% higher.  The plastic modulus ``Z33`` is left at the bare-steel value
+    because the end hinges form in the bare steel (the slab cracks in the
+    negative-moment region), so the yield moment is unchanged.
+
+    Mutates and returns *md*.
+    """
+    for sec in md.sections.values():
+        if abs(sec.A - 2.206e-2) < 1e-6:  # W30x116 beam
+            sec.I33 *= factor
+    return md
+
+
+def load_model(nonlinear: bool = True, *, composite: bool = True) -> SAPModelData:
     """Load the SAC model from the bundled Tcl; enrich for nonlinear use.
 
     Args:
         nonlinear: When True, call :func:`enrich_nonlinear` so the model carries
             plastic moduli and yield strengths.  When False, return the bare
             elastic model (the T2 modal anchor's input).
+        composite: When True (default), apply :func:`apply_composite_action` so
+            the beams act compositely with the slab — matching the benchmark's
+            published 1.01 s fundamental period.  When False, the beams keep
+            their bare-steel inertia (T1 ≈ 1.09 s).
     """
     md = parse_tcl_model(SAC3_TCL.read_text(encoding="utf-8"), SAC3_UNITS)
+    if composite:
+        apply_composite_action(md)
     if nonlinear:
         enrich_nonlinear(md)
     return md
@@ -112,15 +147,25 @@ def preprocess_config(panel_zone: bool = False) -> dict[str, Any]:
     return cfg
 
 
-def build_builder(panel_zone: bool = False, *, nonlinear: bool = True) -> AnalysisBuilder:
+def build_builder(
+    panel_zone: bool = False, *, nonlinear: bool = True, composite: bool = True
+) -> AnalysisBuilder:
     """Build the SAC model (elastic, or nonlinear M1/M2) into an ``AnalysisBuilder``.
 
     The returned builder has already had :meth:`AnalysisBuilder.build_domain`
     called, so it is ready to run an analysis.  The M2 variant preprocesses with
     ``panel_zone_model='krawinkler_gupta'`` (a separate ``MeshModel``), keeping
     the builder read-only.
+
+    Args:
+        panel_zone: ``True`` for the M2 model (adds the Krawinkler & Gupta panel
+            zone); ``False`` for M1.
+        nonlinear: ``True`` for the nonlinear evaluation models (bilinear
+            hinges); ``False`` for the elastic (T2) anchor.
+        composite: ``True`` (default) models the beams acting compositely with
+            the slab, matching the benchmark's published 1.01 s period.
     """
-    md = load_model(nonlinear=nonlinear)
+    md = load_model(nonlinear=nonlinear, composite=composite)
     mesh = preprocess_model(md, preprocess_config(panel_zone=panel_zone))
     cfg = builder_config() if nonlinear else {}
     b = AnalysisBuilder(mesh, cfg)
@@ -140,8 +185,10 @@ def peak_x(res: dict[str, Any]) -> float:
 __all__ = [
     "BEAM",
     "COLUMN",
+    "COMPOSITE_I_FACTOR",
     "SAC3_TCL",
     "SAC3_UNITS",
+    "apply_composite_action",
     "build_builder",
     "builder_config",
     "enrich_nonlinear",
