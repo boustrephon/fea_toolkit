@@ -21,14 +21,14 @@ roof displacement.
 
 ## Model
 
-Geometry, members and masses are identical to the T2 anchor (4 bays × 9.144 m,
-3 stories × 3.9624 m, fixed bases; W24×68 columns / W30×116 beams; seismic mass
-per level L1 = L2 = 4.785e5 kg, L3 = 5.20e5 kg, half per frame).  The model is
-built and enriched by :mod:`fea_toolkit.benchmarks.sac` (single source of
-truth), which bundles the Tcl transcription (`sac_3story.tcl`), applies
-**composite action** to the beams (strong-axis inertia × 1.6, matching the
-published 1.01 s period), and adds the plastic section moduli and yield
-strengths.
+Geometry, members and masses follow the official benchmark model data
+(`struct3.m`): 4 bays × 9.144 m, 3 stories × 3.9624 m, fixed bases; W14×257 /
+W14×311 columns (plus a leaning column), per-level beams (W33×118 / W30×116 /
+W24×68 with a W21×44 fourth bay); seismic mass L1 = L2 = 4.7835e5 kg,
+L3 = 5.1779e5 kg, half per frame.  The model is built and enriched by
+:mod:`fea_toolkit.benchmarks.sac` (single source of truth), which bundles the
+Tcl transcription (`sac_3story.tcl`) and adds the plastic section moduli and
+yield strengths.
 
 ![SAC 3-story frame](assets/sac3_model.png)
 
@@ -56,8 +56,14 @@ data are not redistributable):
 
 | Member | Zx (in³ → m³) | fy (MPa) | My = Zx·fy |
 |---|---|---|---|
-| W24×68 column | 154 → 2.524e-3 | 345 | ≈ 870 kN·m |
+| W14×257 column | 448 → 7.34e-3 | 345 | ≈ 2530 kN·m |
+| W14×311 column | 603 → 9.88e-3 | 345 | ≈ 3410 kN·m |
+| W33×118 beam | 415 → 6.80e-3 | 248 | ≈ 1690 kN·m |
 | W30×116 beam | 378 → 6.194e-3 | 248 | ≈ 1540 kN·m |
+| W24×68 beam | 154 → 2.524e-3 | 248 | ≈ 626 kN·m |
+| W21×44 beam | 95.4 → 1.563e-3 | 248 | ≈ 388 kN·m |
+
+The leaning column stays elastic (no plastic hinge).
 
 ![Bilinear hinge backbone](assets/sac3_hinge_backbone.png)
 
@@ -78,7 +84,7 @@ where `dc` / `db` are the column / beam depths and `tp` the panel thickness
 ![Panel-zone backbone](assets/sac3_panel_zone.png)
 
 Panel-zone softening is verified independently by the elastic-model period
-shift (T1 1.01 → 1.13 s) and the subassemblage test
+shift (T1 0.99 → 1.13 s) and the subassemblage test
 `test_analysis_csm.py::TestPanelZone`.
 
 ## NLTHA benchmark (T4)
@@ -88,11 +94,11 @@ Reference — Ohtori, Christenson, Spencer & Dyke (2004),
 Table 3: the 3-story nonlinear evaluation model reaches a peak roof
 displacement of **~0.151 m** under the El Centro record at intensity 1.0.
 
-The always-on synthetic-pulse test drives M1 and M2 end-to-end; the composite M1
-model peaks at **≈ 0.152 m** under that 1 Hz pulse.  The gated
+The gated `@pytest.mark.needs_ground_motion("ELCENTRO")` test drives M1 and M2
+under the El Centro record (from the benchmark archive, 2 % damping); **M1 lands
+at ≈ 0.145 m** — within ~4 % of the reference.  A second gated
 `@pytest.mark.needs_ground_motion("LA21")` test is a smoke check only — LA21 is
-the 1995 Kobe (Takatori) record, not El Centro, so Ohtori's El Centro band does
-not apply to that run directly.
+the 1995 Kobe (Takatori) record, not El Centro.
 
 ![Roof displacement time history (synthetic pulse)](assets/sac3_nltha_synthetic.png)
 
@@ -114,8 +120,8 @@ a slave-of-a-slave that the `Transformation` constraint handler mis-resolved —
 locking the frame's lateral DOFs.  The fix ties the hinge node **directly to the
 column node** (star topology — `equalDOF(col, hinge, 1, 3)` + out-of-plane fix),
 leaving the panel-zone spring and the hinge in series.  M2 now has
-**T1 ≈ 1.29 s**, correctly softer than both the elastic model (1.01 s) and M1
-(1.06 s).  Regression-guarded by `test_sac3_m2_panel_zone_modal_period`.
+**T1 ≈ 1.13 s**, correctly softer than both the elastic model (0.99 s) and M1
+(1.04 s).  Regression-guarded by `test_sac3_m2_panel_zone_modal_period`.
 
 ## Loadable artifact
 

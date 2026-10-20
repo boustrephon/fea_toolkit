@@ -70,6 +70,18 @@
     "redistributable": false,
     "scale_factor": 1.0,
     "rotation": "as_recorded",
-    "note": "SAC LA ground motion — 1995 Kobe, 2%-in-50-years set. Verify exact component/scale before use."
+    "note": "SAC LA ground motion \u2014 1995 Kobe, 2%-in-50-years set. Verify exact component/scale before use."
+  },
+  {
+    "record_id": "ELCENTRO",
+    "provider": "sac_benchmark",
+    "event": "Imperial Valley-02 (1940)",
+    "station": "El Centro Array #9",
+    "component": "N-S (I-ELC180)",
+    "source_url": "https://datacenterhub.org/resources/257/ELCENTRO.csv",
+    "licence": "public domain (USGS 1940 Imperial Valley record)",
+    "scale_factor": 1.0,
+    "rotation": "as_recorded",
+    "note": "El Centro 1940, extracted from the SAC benchmark archive (elcentro.mat), dt=0.02 s, m/s^2"
   }
 ]

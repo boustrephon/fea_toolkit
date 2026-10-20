@@ -108,7 +108,7 @@ def test_sac3_m2_panel_zone_modal_period():
 
     The combination once produced an over-stiff T1 ≈ 0.20 s (the sway modes were
     locked by a chained equalDOF through the ``*_pz`` beam node).  The fixed
-    model softens to T1 ≈ 1.29 s (vs 1.01 s elastic, 1.06 s M1 hinge-only).
+    model softens to T1 ≈ 1.13 s (vs 0.99 s elastic, 1.04 s M1 hinge-only).
     """
     from openseespy.opensees import wipe
 
@@ -116,7 +116,7 @@ def test_sac3_m2_panel_zone_modal_period():
     try:
         b = build_builder(panel_zone=True)
         modal = b.run_modal_analysis(num_modes=1, print_results=False)
-        assert 1.2 < float(modal["periods"][0]) < 1.4
+        assert 1.0 < float(modal["periods"][0]) < 1.3
     finally:
         wipe()
 
@@ -152,6 +152,40 @@ def test_sac3_nonlinear_nltha_la21(resolve_ground_motion_record):
 
         b = build_builder(panel_zone=True)
         res = b.run_transient_analysis(accel, dt, direction="X", damping_ratio=0.05)
+        assert res["converged_steps"] > 0
+        assert np.isfinite(peak_x(res))
+    finally:
+        wipe()
+
+
+@pytest.mark.needs_ground_motion("ELCENTRO")
+def test_sac3_nonlinear_nltha_elcentro(resolve_ground_motion_record):
+    """Nonlinear SAC frame (M1 vs M2) under the El Centro record (gated).
+
+    El Centro 1940 is the record for which Ohtori et al. (2004) Table 3 reports
+    the ~0.151 m peak roof displacement at intensity 1.0; the benchmark runs it
+    at 2 % damping.  The M1 model should land close to that reference.
+    """
+    from openseespy.opensees import wipe
+
+    from fea_toolkit.io.ground_motion import read_time_history_csv
+
+    wipe()
+    try:
+        record_path = resolve_ground_motion_record("ELCENTRO")
+        times, accel = read_time_history_csv(record_path)
+        dt = float(times[1] - times[0])
+
+        b = build_builder(panel_zone=False)
+        res = b.run_transient_analysis(accel, dt, direction="X", damping_ratio=0.02)
+        peak = peak_x(res)
+        assert res["converged_steps"] > 0
+        assert np.isfinite(peak)
+        # Ohtori Table 3: ~0.151 m under El Centro at intensity 1.0.
+        assert 0.10 < peak < 0.25, f"M1 El Centro peak {peak:.3f} m out of band"
+
+        b = build_builder(panel_zone=True)
+        res = b.run_transient_analysis(accel, dt, direction="X", damping_ratio=0.02)
         assert res["converged_steps"] > 0
         assert np.isfinite(peak_x(res))
     finally:

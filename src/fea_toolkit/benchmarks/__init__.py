@@ -8,11 +8,11 @@ benchmark model is needed (tests, the figure generator, a viewer example).
 
 from .sac import (
     BEAM,
+    BEAM_FY,
     COLUMN,
-    COMPOSITE_I_FACTOR,
+    COLUMN_FY,
     SAC3_TCL,
     SAC3_UNITS,
-    apply_composite_action,
     build_builder,
     builder_config,
     enrich_nonlinear,
@@ -23,11 +23,11 @@ from .sac import (
 
 __all__ = [
     "BEAM",
+    "BEAM_FY",
     "COLUMN",
-    "COMPOSITE_I_FACTOR",
+    "COLUMN_FY",
     "SAC3_TCL",
     "SAC3_UNITS",
-    "apply_composite_action",
     "build_builder",
     "builder_config",
     "enrich_nonlinear",

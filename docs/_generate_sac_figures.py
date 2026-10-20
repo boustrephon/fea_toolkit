@@ -81,14 +81,14 @@ def _hinge_backbone() -> None:
         return th, m
 
     E = 2.0e11
-    col_e0 = 6.0 * E * 7.617e-4 / 3.9624
-    beam_e0 = 6.0 * E * 2.052e-3 / 9.144
+    col_e0 = 6.0 * E * 1.41475e-3 / 3.9624  # W14x257
+    beam_e0 = 6.0 * E * 2.0514e-3 / 9.144  # W30x116
     col_my = COLUMN["Z33"] * COLUMN["fy"]
     beam_my = BEAM["Z33"] * BEAM["fy"]
 
     fig, ax = plt.subplots(figsize=(6.0, 4.2))
     for my, e0, label, c in (
-        (col_my, col_e0, "W24x68 column (345 MPa)", "#1f77b4"),
+        (col_my, col_e0, "W14x257 column (345 MPa)", "#1f77b4"),
         (beam_my, beam_e0, "W30x116 beam (248 MPa)", "#d62728"),
     ):
         th, m = steel01(my, e0, 0.02)

@@ -12,23 +12,20 @@ Problems for Seismically Excited Nonlinear Buildings", *ASCE J. Eng. Mech.*
 frequencies of the 3-story evaluation model are 0.99 Hz and 3.06 Hz (periods
 1.01 s and 0.327 s).
 
-The reference frequencies are for the *composite* beam-and-slab model, so the
-transcribed bare-steel beam inertia is boosted by
-:func:`fea_toolkit.benchmarks.sac.apply_composite_action` (strong-axis inertia ×
-1.6) before solving; this lands the periods on the published values to within
-±3 %.
+The transcription follows the official benchmark model data (``struct3.m``):
+W14x257 / W14x311 columns, per-level beams, and a leaning column.  The lateral
+model uses bare-steel beam inertia (the composite slab is gravity-only), so the
+periods land on the published values to within ±3 %.
 """
 
 import pytest
 
-from fea_toolkit.benchmarks.sac import SAC3_TCL, apply_composite_action
+from fea_toolkit.benchmarks.sac import SAC3_TCL
 from fea_toolkit.io.tcl_importer import parse_tcl_model
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 from fea_toolkit.opensees.preprocessor import preprocess_model
 
-# First two natural periods (s), Ohtori et al. (2004).  The beams are modelled
-# compositely (apply_composite_action), matching the reference model, so the
-# band is T2-tight.
+# First two natural periods (s), Ohtori et al. (2004).
 REF_PERIODS = (1.01, 0.327)
 REF_TOL = 0.03
 
@@ -39,7 +36,6 @@ def builder():
 
     wipe()
     md = parse_tcl_model(SAC3_TCL.read_text(encoding="utf-8"), {"F": "N", "L": "m", "T": "C"})
-    apply_composite_action(md)
     mesh = preprocess_model(md, {"element_type": "elasticBeamColumn"})
     b = AnalysisBuilder(mesh, {})
     b.build_domain()

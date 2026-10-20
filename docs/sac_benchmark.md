@@ -20,11 +20,13 @@ against a published, independently-computed result, and exercises the Tcl →
 Transcribed from Ohtori et al. (2004), Figure 1 / benchmark data:
 
 - N-S perimeter MRF, **4 bays × 9.144 m**, **3 stories × 3.9624 m**, fixed bases.
-- **Columns W24×68** (A = 1.290e-2 m², I = 7.617e-4 m⁴), 345 MPa steel.
-- **Beams W30×116** (A = 2.206e-2 m², I = 2.052e-3 m⁴), 248 MPa steel, modelled
-  **compositely** with the slab (strong-axis inertia × 1.6 via `apply_composite_action`).
+- **Columns** (345 MPa): W14×257 (exterior lines), W14×311 (interior lines), plus a
+  leaning column at the far line (models the interior gravity framing for P-delta).
+- **Beams** (248 MPa), per the benchmark schedule — W33×118 (level 1), W30×116
+  (level 2), W24×68 (roof), W21×44 (fourth bay); bare-steel inertia, rigid axial
+  (EA = 1e10) for the floor diaphragm.
 - E = 2.0e11 Pa.  Seismic mass per level, one frame (half the building):
-  L1 = L2 = 4.785e5 kg, L3 (roof) = 5.20e5 kg, lumped at the floor nodes by
+  L1 = L2 = 4.7835e5 kg, L3 (roof) = 5.1779e5 kg, lumped at the floor nodes by
   tributary bay width.
 
 ## Reference
@@ -39,13 +41,14 @@ the 3-story evaluation model: **0.99 Hz and 3.06 Hz** (periods **1.01 s** and
 T2 — published code verification.  The test asserts the first two periods
 against the reference within **±3 %**.
 
-### Composite action
+### Member schedule
 
-Ohtori's frequencies are for the *composite* beam-and-slab evaluation model, so
-the fixture applies :func:`fea_toolkit.benchmarks.sac.apply_composite_action`
-(strong-axis inertia × 1.6) to the transcribed bare-steel beams before solving;
-this lands the first two periods on the published values (1.01 s / 0.327 s) to
-within ±3 %.
+Transcribed from the official benchmark model data (`struct3.m`): the beams are
+per-level (W33×118 / W30×116 / W24×68) with a lighter W21×44 fourth bay, the
+columns are W14×257 (exterior) / W14×311 (interior) with a leaning column, and
+the lateral model uses bare-steel beam inertia (the composite slab is a
+gravity-only effect).  This lands the first two periods on the published values
+(1.01 s / 0.327 s) to within ±3 %.
 
 ## Implementation
 

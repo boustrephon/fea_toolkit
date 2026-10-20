@@ -14,9 +14,10 @@ nonlinear evaluation-model variants:
 * **M2** — M1 plus an explicit Krawinkler & Gupta panel zone at each
   beam-column joint (``panel_zone_model='krawinkler_gupta'``).
 
-Both variants model the 248 MPa beams acting **compositely with the slab**
-(beam strong-axis inertia × ``COMPOSITE_I_FACTOR``), matching the benchmark's
-published 1.01 s period; pass ``composite=False`` for the bare-steel reference.
+Both variants use the member schedule from the official benchmark data
+(``struct3.m``): W14x257 / W14x311 columns, per-level beams (W33x118 / W30x116 /
+W24x68) with a W21x44 fourth bay, and a leaning column.  The lateral model uses
+bare-steel beam inertia (the composite slab is a gravity-only effect).
 
 The benchmark's exact hinge / panel-zone parameters are not redistributable, so
 the plastic moduli and yield strengths below are computed from AISC tables
@@ -26,7 +27,7 @@ the plastic moduli and yield strengths below are computed from AISC tables
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 
@@ -41,79 +42,95 @@ SAC3_TCL = Path(__file__).with_name("sac_3story.tcl")
 #: SI unit system of the bundled model (N, m, kg).
 SAC3_UNITS: dict[str, str] = {"F": "N", "L": "m", "T": "C"}
 
-# ── AISC member properties (SI) ──
-# W24x68  (columns): Zx = 154 in^3 = 2.524e-3 m^3, d = 23.7 in = 0.602 m,
-#                    tw = 0.415 in = 0.0105 m,  fy = 345 MPa.
-# W30x116 (beams):   Zx = 378 in^3 = 6.194e-3 m^3, d = 30.0 in = 0.762 m,
-#                    tw = 0.565 in = 0.0144 m,  fy = 248 MPa.
-COLUMN = {"Z33": 2.524e-3, "depth": 0.602, "tw": 0.0105, "fy": 345e6}
-BEAM = {"Z33": 6.194e-3, "depth": 0.762, "tw": 0.0144, "fy": 248e6}
+# ── SAC member schedule (SI) ──
+# From the official benchmark model data (Ohtori et al. 2004, NEES archive
+# resource 257, `struct3.m`).  Columns are 345 MPa (50 ksi); beams 248 MPa
+# (36 ksi).  The lateral model uses bare-steel beam inertia and a rigid axial
+# (EA = 1e10) for the floor diaphragm — the composite slab is gravity-only.
+COLUMN_FY = 345e6
+BEAM_FY = 248e6
 
-#: Composite slab → beam strong-axis inertia boost.
-#: Ohtori et al. (2004) model the 248 MPa beams "acting compositely with the
-#: floor slab"; the composite section raises the beam's effective strong-axis
-#: inertia by ~60%, which brings the elastic T1 from 1.09 s (bare steel) to the
-#: published 1.01 s.
-COMPOSITE_I_FACTOR = 1.6
+#: Moment-frame columns keyed by area (m²).  The far-line *leaning* column
+#: (models the interior gravity framing) is absent — it stays elastic.
+_COLUMNS_BY_AREA = {
+    0.048759: {"Z33": 7.34e-3, "depth": 0.417, "tw": 0.0435},  # W14x257
+    0.05895: {"Z33": 9.88e-3, "depth": 0.437, "tw": 0.0488},  # W14x311
+}
+
+#: Beams keyed by strong-axis inertia (m⁴) — rigid axial A = 0.05 m².
+_BEAMS_BY_I = {
+    2.455e-3: {"Z33": 6.80e-3, "depth": 0.836, "tw": 0.0140},  # W33x118
+    2.0514e-3: {"Z33": 6.194e-3, "depth": 0.762, "tw": 0.0144},  # W30x116
+    7.6145e-4: {"Z33": 2.524e-3, "depth": 0.602, "tw": 0.0105},  # W24x68
+    3.50775e-4: {"Z33": 1.563e-3, "depth": 0.526, "tw": 0.0089},  # W21x44
+}
+
+#: Representative members for the figure generator / docs.
+COLUMN = {"Z33": 7.34e-3, "depth": 0.417, "tw": 0.0435, "fy": COLUMN_FY}  # W14x257
+BEAM = {"Z33": 6.194e-3, "depth": 0.762, "tw": 0.0144, "fy": BEAM_FY}  # W30x116
+
+
+def _match_props(catalog: dict, value: float, tol: float) -> Optional[dict]:
+    """Return the catalog entry whose key is within *tol* of *value*."""
+    for key, props in catalog.items():
+        if abs(key - value) < tol:
+            return props
+    return None
+
+
+def _frame_element_roles(md: SAPModelData) -> dict[str, str]:
+    """Map frame element id → ``'col'`` | ``'beam'`` by orientation."""
+    roles: dict[str, str] = {}
+    for eid, elem in md.frame_elements.items():
+        ni = md.nodes.get(elem.node_i)
+        nj = md.nodes.get(elem.node_j)
+        if ni is None or nj is None:
+            continue
+        roles[eid] = "col" if abs(nj.z - ni.z) > abs(nj.x - ni.x) else "beam"
+    return roles
 
 
 def enrich_nonlinear(md: SAPModelData) -> SAPModelData:
     """Enrich the elastic SAC model with plastic moduli and yield strengths.
 
-    Mutates and returns *md*: the two ``I/Wide Flange`` sections are matched by
-    area (W24x68 column vs W30x116 beam) and given their AISC plastic modulus
-    ``Z33``, depth, web thickness and a dedicated steel material whose ``Fy``
-    sets the bilinear-hinge yield moment ``My = Zx·fy``.
+    Mutates and returns *md*: the moment-frame columns (W14x257 / W14x311) and
+    the beams (W33x118 / W30x116 / W24x68 / W21x44) are given their AISC plastic
+    modulus ``Z33``, depth, web thickness and a dedicated steel material whose
+    ``Fy`` sets the bilinear-hinge yield moment ``My = Zx·fy``.  The leaning
+    column stays elastic (no ``Z33``, elastic material).
     """
-    md.materials["SteelCol"] = Material("SteelCol", "Steel", E_mod=2.0e11, Fy=COLUMN["fy"])
-    md.materials["SteelBeam"] = Material("SteelBeam", "Steel", E_mod=2.0e11, Fy=BEAM["fy"])
-    for sec in md.sections.values():
-        if abs(sec.A - 1.290e-2) < 1e-6:  # W24x68 column
-            sec.Z33 = COLUMN["Z33"]
-            sec.depth = COLUMN["depth"]
-            sec.tw = COLUMN["tw"]
+    md.materials["SteelCol"] = Material("SteelCol", "Steel", E_mod=2.0e11, Fy=COLUMN_FY)
+    md.materials["SteelBeam"] = Material("SteelBeam", "Steel", E_mod=2.0e11, Fy=BEAM_FY)
+    roles = _frame_element_roles(md)
+    for eid, sname in md.frame_assignments.items():
+        sec = md.sections.get(sname)
+        if sec is None:
+            continue
+        if roles.get(eid) == "col":
+            props = _match_props(_COLUMNS_BY_AREA, sec.A, 1e-6)
+            if props is None:
+                continue  # leaning column — stays elastic
             sec.material = "SteelCol"
-        elif abs(sec.A - 2.206e-2) < 1e-6:  # W30x116 beam
-            sec.Z33 = BEAM["Z33"]
-            sec.depth = BEAM["depth"]
-            sec.tw = BEAM["tw"]
+        else:
+            props = _match_props(_BEAMS_BY_I, sec.I33, 1e-8)
+            if props is None:
+                continue
             sec.material = "SteelBeam"
+        sec.Z33 = props["Z33"]
+        sec.depth = props["depth"]
+        sec.tw = props["tw"]
     return md
 
 
-def apply_composite_action(md: SAPModelData, factor: float = COMPOSITE_I_FACTOR) -> SAPModelData:
-    """Boost the beam strong-axis inertia to capture composite (slab) action.
-
-    Ohtori et al. (2004) model the floor beams as acting compositely with the
-    slab, so the beam's in-plane bending stiffness is higher than the bare steel
-    section alone — the composite section's effective strong-axis inertia is
-    ~60% higher.  The plastic modulus ``Z33`` is left at the bare-steel value
-    because the end hinges form in the bare steel (the slab cracks in the
-    negative-moment region), so the yield moment is unchanged.
-
-    Mutates and returns *md*.
-    """
-    for sec in md.sections.values():
-        if abs(sec.A - 2.206e-2) < 1e-6:  # W30x116 beam
-            sec.I33 *= factor
-    return md
-
-
-def load_model(nonlinear: bool = True, *, composite: bool = True) -> SAPModelData:
+def load_model(nonlinear: bool = True) -> SAPModelData:
     """Load the SAC model from the bundled Tcl; enrich for nonlinear use.
 
     Args:
         nonlinear: When True, call :func:`enrich_nonlinear` so the model carries
             plastic moduli and yield strengths.  When False, return the bare
             elastic model (the T2 modal anchor's input).
-        composite: When True (default), apply :func:`apply_composite_action` so
-            the beams act compositely with the slab — matching the benchmark's
-            published 1.01 s fundamental period.  When False, the beams keep
-            their bare-steel inertia (T1 ≈ 1.09 s).
     """
     md = parse_tcl_model(SAC3_TCL.read_text(encoding="utf-8"), SAC3_UNITS)
-    if composite:
-        apply_composite_action(md)
     if nonlinear:
         enrich_nonlinear(md)
     return md
@@ -147,9 +164,7 @@ def preprocess_config(panel_zone: bool = False) -> dict[str, Any]:
     return cfg
 
 
-def build_builder(
-    panel_zone: bool = False, *, nonlinear: bool = True, composite: bool = True
-) -> AnalysisBuilder:
+def build_builder(panel_zone: bool = False, *, nonlinear: bool = True) -> AnalysisBuilder:
     """Build the SAC model (elastic, or nonlinear M1/M2) into an ``AnalysisBuilder``.
 
     The returned builder has already had :meth:`AnalysisBuilder.build_domain`
@@ -162,10 +177,8 @@ def build_builder(
             zone); ``False`` for M1.
         nonlinear: ``True`` for the nonlinear evaluation models (bilinear
             hinges); ``False`` for the elastic (T2) anchor.
-        composite: ``True`` (default) models the beams acting compositely with
-            the slab, matching the benchmark's published 1.01 s period.
     """
-    md = load_model(nonlinear=nonlinear, composite=composite)
+    md = load_model(nonlinear=nonlinear)
     mesh = preprocess_model(md, preprocess_config(panel_zone=panel_zone))
     cfg = builder_config() if nonlinear else {}
     b = AnalysisBuilder(mesh, cfg)
@@ -184,11 +197,11 @@ def peak_x(res: dict[str, Any]) -> float:
 
 __all__ = [
     "BEAM",
+    "BEAM_FY",
     "COLUMN",
-    "COMPOSITE_I_FACTOR",
+    "COLUMN_FY",
     "SAC3_TCL",
     "SAC3_UNITS",
-    "apply_composite_action",
     "build_builder",
     "builder_config",
     "enrich_nonlinear",
