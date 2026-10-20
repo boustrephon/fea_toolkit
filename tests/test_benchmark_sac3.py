@@ -2,7 +2,7 @@
 
 The three-story SAC steel moment frame is the canonical published-code
 verification anchor for the elastic modal path.  The N-S perimeter frame is
-transcribed into Tcl (``tests/fixtures/sac_3story.tcl``) and imported through
+transcribed into Tcl (``fea_toolkit/benchmarks/sac_3story.tcl``) and imported through
 :func:`fea_toolkit.io.tcl_importer.parse_tcl_model`, exercising the Tcl importer
 end-to-end, then solved with the native modal runner.
 
@@ -21,15 +21,12 @@ therefore brackets the published values at ±10 % rather than claiming a T2-tigh
 tight solver-accuracy tier.
 """
 
-import pathlib
-
 import pytest
 
+from fea_toolkit.benchmarks.sac import SAC3_TCL
 from fea_toolkit.io.tcl_importer import parse_tcl_model
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 from fea_toolkit.opensees.preprocessor import preprocess_model
-
-FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "sac_3story.tcl"
 
 # First two natural periods (s), Ohtori et al. (2004).  The bare-steel model
 # lands ~8 % high, so the band is ±10 % (see the composite-action caveat above).
@@ -42,7 +39,7 @@ def builder():
     from openseespy.opensees import wipe
 
     wipe()
-    md = parse_tcl_model(FIXTURE.read_text(encoding="utf-8"), {"F": "N", "L": "m", "T": "C"})
+    md = parse_tcl_model(SAC3_TCL.read_text(encoding="utf-8"), {"F": "N", "L": "m", "T": "C"})
     mesh = preprocess_model(md, {"element_type": "elasticBeamColumn"})
     b = AnalysisBuilder(mesh, {})
     b.build_domain()

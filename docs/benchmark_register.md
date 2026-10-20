@@ -61,6 +61,9 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
 - **SAC steel frames (3/9/20-story)** — Ohtori et al. (2004), ASCE J. Eng. Mech.
   130(4):366, DOI 10.1061/(ASCE)0733-9399(2004)130:4(366); design by Krawinkler &
   Gupta (1998).  Publishes natural frequencies (modal T2 anchor) + NLTHA + pushover.
+  Implemented as the elastic [SAC modal anchor](sac_benchmark.md) and the
+  nonlinear [SAC NLTHA benchmark](sac_nonlinear_benchmark.md) (bilinear hinges +
+  K&G panel zone, M1 vs M2).
 - **Haselton & Deierlein (2007) / SP3 Risk** — sp3risk.com — 30+ RC SMF OpenSees
   models (1–20 stories) with pushover / NLTHA / IDA.
 - **SPEAR project RC frame** (Eurocode 8) — alternative RC NLTHA benchmark.

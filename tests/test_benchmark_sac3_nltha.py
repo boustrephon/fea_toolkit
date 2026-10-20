@@ -18,25 +18,16 @@ peak because it never yields.
 """
 
 import math
-import pathlib
 
 import numpy as np
 import pytest
 
-from fea_toolkit.io.tcl_importer import parse_tcl_model
-from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
-from fea_toolkit.opensees.preprocessor import preprocess_model
-
-FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "sac_3story.tcl"
-UNITS = {"F": "N", "L": "m", "T": "C"}
+from fea_toolkit.benchmarks.sac import build_builder, peak_x
 
 
-def _build() -> AnalysisBuilder:
-    md = parse_tcl_model(FIXTURE.read_text(encoding="utf-8"), UNITS)
-    mesh = preprocess_model(md, {"element_type": "elasticBeamColumn"})
-    b = AnalysisBuilder(mesh, {})
-    b.build_domain()
-    return b
+def _build():
+    """Build the elastic SAC frame (smoke anchor)."""
+    return build_builder(nonlinear=False)
 
 
 def test_sac3_elastic_nltha_synthetic():
@@ -81,66 +72,10 @@ def test_sac3_elastic_nltha_la21(resolve_ground_motion_record):
         wipe()
 
 
-# ═══════════════════════════════════════════════════════════════════
-# Nonlinear evaluation model — bilinear hinges (+ optional panel zones)
-# ═══════════════════════════════════════════════════════════════════
-#
-# AISC plastic section moduli and section depths for the SAC members (SI):
-#   W24x68  (columns): Zx = 154 in^3 = 2.524e-3 m^3, d = 23.7 in = 0.602 m,
-#                      tw = 0.415 in = 0.0105 m,  fy = 345 MPa.
-#   W30x116 (beams):   Zx = 378 in^3 = 6.194e-3 m^3, d = 30.0 in = 0.762 m,
-#                      tw = 0.565 in = 0.0144 m,  fy = 248 MPa.
-#
-# Yield moment My = Zx · fy (≈ 870 kN·m columns, ≈ 1540 kN·m beams).  The
-# benchmark's exact hinge/panel-zone data are not redistributable, so these are
-# computed from AISC tables as documented in docs/sac_benchmark.md.
-
-_COLUMN = {"Z33": 2.524e-3, "depth": 0.602, "tw": 0.0105, "fy": 345e6}
-_BEAM = {"Z33": 6.194e-3, "depth": 0.762, "tw": 0.0144, "fy": 248e6}
-
-
-def _enrich_nonlinear(md):
-    """Enrich the Tcl-parsed elastic model with plastic moduli + yield strengths."""
-    from fea_toolkit.model.sap_data import Material
-
-    md.materials["SteelCol"] = Material("SteelCol", "Steel", E_mod=2.0e11, Fy=_COLUMN["fy"])
-    md.materials["SteelBeam"] = Material("SteelBeam", "Steel", E_mod=2.0e11, Fy=_BEAM["fy"])
-    for sec in md.sections.values():
-        if abs(sec.A - 1.290e-2) < 1e-6:  # W24x68 column
-            sec.Z33 = _COLUMN["Z33"]
-            sec.depth = _COLUMN["depth"]
-            sec.tw = _COLUMN["tw"]
-            sec.material = "SteelCol"
-        elif abs(sec.A - 2.206e-2) < 1e-6:  # W30x116 beam
-            sec.Z33 = _BEAM["Z33"]
-            sec.depth = _BEAM["depth"]
-            sec.tw = _BEAM["tw"]
-            sec.material = "SteelBeam"
-
-
-def _build_nonlinear(panel_zone: bool = False) -> AnalysisBuilder:
-    md = parse_tcl_model(FIXTURE.read_text(encoding="utf-8"), UNITS)
-    _enrich_nonlinear(md)
-    mesh = preprocess_model(md, {"element_type": "elasticBeamColumn"})
-    cfg = {
-        "element_type": "elasticBeamColumn",
-        "hinge_model": "lumped",
-        "hinge_backbone": "bilinear",
-    }
-    if panel_zone:
-        cfg["panel_zone_model"] = "krawinkler_gupta"
-    b = AnalysisBuilder(mesh, cfg)
-    b.build_domain()
-    return b
-
-
-def _peak_x(res) -> float:
-    """Peak |X| displacement over all nodes (≈ roof peak for a shear frame)."""
-    peak = 0.0
-    for arr in res["displacements"].values():
-        if arr.size:
-            peak = max(peak, float(np.max(np.abs(arr[:, 0]))))
-    return peak
+# ── Nonlinear evaluation model (M1/M2) ──
+# Built by `fea_toolkit.benchmarks.sac.build_builder` — bilinear steel hinges
+# (hinge_model='lumped', hinge_backbone='bilinear') plus, for M2, the Krawinkler
+# & Gupta panel zone.  See docs/sac_nonlinear_benchmark.md.
 
 
 def test_sac3_nonlinear_nltha_synthetic():
@@ -150,7 +85,7 @@ def test_sac3_nonlinear_nltha_synthetic():
 
     wipe()
     try:
-        b = _build_nonlinear(panel_zone=False)
+        b = build_builder(panel_zone=False)
         dt = 0.005
         n = 200
         t = np.arange(n) * dt
@@ -192,17 +127,17 @@ def test_sac3_nonlinear_nltha_la21(resolve_ground_motion_record):
         times, accel = read_peer_record(record_path)
         dt = float(times[1] - times[0])
 
-        b = _build_nonlinear(panel_zone=False)
+        b = build_builder(panel_zone=False)
         res = b.run_transient_analysis(accel, dt, direction="X", damping_ratio=0.05)
         assert res["converged_steps"] > 0
-        peak_m1 = _peak_x(res)
+        peak_m1 = peak_x(res)
         assert 0.121 <= peak_m1 <= 0.181, (
             f"M1 peak roof disp {peak_m1:.4f} m outside Ohtori band 0.121–0.181 m"
         )
 
-        b = _build_nonlinear(panel_zone=True)
+        b = build_builder(panel_zone=True)
         res = b.run_transient_analysis(accel, dt, direction="X", damping_ratio=0.05)
         assert res["converged_steps"] > 0
-        assert np.isfinite(_peak_x(res))
+        assert np.isfinite(peak_x(res))
     finally:
         wipe()
