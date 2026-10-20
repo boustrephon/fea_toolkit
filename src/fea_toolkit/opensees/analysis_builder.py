@@ -3,7 +3,13 @@
 The :class:`AnalysisBuilder` takes a :class:`~fea_toolkit.model.mesh_model.MeshModel`
 (fully prepared topology from the :class:`~fea_toolkit.opensees.preprocessor.Preprocessor`)
 and creates the OpenSees domain objects.  It handles all analysis execution
-and result extraction — no topology mutations occur here.
+and result extraction.
+
+Panel-zone splitting is resolved by the Preprocessor, so the builder reads
+``mesh_model.panel_zones`` read-only.  Remaining instrumentation (lumped
+hinges, member releases, bond-slip springs, brace subdivision and limit-state
+columns) still writes back to the mesh at build time and is restored by the
+``_restore_*`` helpers — known debt, see ``docs/dev_notes.md``.
 """
 
 import contextlib
@@ -48,10 +54,12 @@ class AnalysisBuilder(
 ):
     """Create and analyse an OpenSees model from a prepared MeshModel.
 
-    The builder is read-only with respect to ``mesh_model``: it never mutates
-    it, and modelling choices that change topology are resolved by the
-    Preprocessor and stored as declarative ``MeshModel`` fields (e.g.
-    ``panel_zones``).
+    ``mesh_model.panel_zones`` is read-only: panel-zone splitting is resolved
+    by the Preprocessor and stored as a declarative ``MeshModel`` field, which
+    the builder emits without writing back.  Other instrumentation (lumped
+    hinges, member releases, bond-slip springs, brace subdivision and
+    limit-state columns) still mutates the mesh at build time and is restored
+    by the ``_restore_*`` helpers — known debt, see ``docs/dev_notes.md``.
 
     Usage::
 

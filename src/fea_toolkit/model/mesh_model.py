@@ -182,11 +182,13 @@ class MeshModel:
     detection, panel-zone splitting) have been applied.  No OpenSees domain
     objects exist.
 
-    ``MeshModel`` is immutable after construction: the ``AnalysisBuilder``
-    reads it and must not mutate it.  Topology-changing modelling decisions
-    are made here by the preprocessor and carried as declarative data fields
-    (e.g. :attr:`panel_zones`, :attr:`wall_elements`,
-    :attr:`frame_element_types`).
+    ``MeshModel`` is frozen with respect to its preprocessed topology —
+    :attr:`panel_zones`, :attr:`wall_elements` and
+    :attr:`frame_element_types` are read-only to the ``AnalysisBuilder``.
+    Remaining instrumentation (lumped hinges, member releases, bond-slip
+    springs, brace subdivision and limit-state columns) is applied by the
+    builder at build time and restored via its ``_restore_*`` helpers — known
+    debt, see ``docs/dev_notes.md``.
     """
 
     # ── Nodes ────────────────────────────────────────────────────

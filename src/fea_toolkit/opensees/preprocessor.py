@@ -996,7 +996,8 @@ class Preprocessor:
             md: The (copied) model data; ``md.nodes`` is mutated in place to add
                 the ``*_pz`` nodes.
             frame_elements: The final split-frame elements; beams at panel-zone
-                joints are re-pointed in place.
+                joints are re-pointed via copy-on-write (``dataclasses.replace``),
+                leaving the source frame objects untouched.
             frame_assignments: elem_id → section name.
 
         Returns:
@@ -1088,10 +1089,12 @@ class Preprocessor:
             next_node_tag += 1
             for eid in beams_at[nid]:
                 elem = elements[eid]
-                if elem.node_i == nid:
-                    elem.node_i = beam_node_id
-                if elem.node_j == nid:
-                    elem.node_j = beam_node_id
+                # Copy-on-write: replace the element only when an endpoint
+                # changes, so the source FrameElement object is never mutated.
+                new_node_i = beam_node_id if elem.node_i == nid else elem.node_i
+                new_node_j = beam_node_id if elem.node_j == nid else elem.node_j
+                if new_node_i != elem.node_i or new_node_j != elem.node_j:
+                    elements[eid] = replace(elem, node_i=new_node_i, node_j=new_node_j)
 
             panel_zones[nid] = PanelZoneSpec(
                 column_node_id=nid,

@@ -1419,6 +1419,76 @@ class TestPanelZone:
         orphan = mm.orphan_nodes.get("2_pz")
         assert orphan is not None and orphan.node_tag == 99
 
+    def test_panel_zone_repoints_beams_without_mutating_source(self):
+        """Copy-on-write re-pointing leaves the source ``b1`` beam endpoint intact."""
+        from fea_toolkit.model.sap_data import (
+            FrameElement,
+            ISection,
+            JointLoad,
+            LoadPattern,
+            Material,
+            Node,
+            Restraint,
+            SAPModelData,
+        )
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 0.0, 0.0, 3.0),
+            "3": Node("3", 3, 0.0, 0.0, 6.0),
+            "4": Node("4", 4, 4.0, 0.0, 3.0),
+        }
+        restraints = {
+            "1": Restraint([1, 1, 1, 1, 1, 1]),
+            "2": Restraint([0, 1, 0, 1, 0, 1]),
+            "3": Restraint([1, 1, 1, 1, 1, 1]),
+            "4": Restraint([1, 1, 1, 1, 1, 1]),
+        }
+        mats = {"Steel": Material("Steel", "Steel", E_mod=2.0e11, Fy=2.5e8)}
+        sec = {
+            "COL": ISection(
+                name="COL",
+                shape="I/Wide Flange",
+                material="Steel",
+                depth=0.3,
+                bf=0.15,
+                tf=0.01,
+                tw=0.006,
+                A=8e-3,
+                I33=1.2e-4,
+                I22=4e-5,
+                J=2e-6,
+            ),
+        }
+        md = SAPModelData(
+            nodes=nodes,
+            restraints=restraints,
+            materials=mats,
+            sections=sec,
+            frame_elements={
+                "c1": FrameElement(elem_id="c1", elem_tag=1, node_i="1", node_j="2"),
+                "c2": FrameElement(elem_id="c2", elem_tag=2, node_i="2", node_j="3"),
+                "b1": FrameElement(elem_id="b1", elem_tag=3, node_i="2", node_j="4"),
+            },
+            area_elements={},
+            frame_assignments={"c1": "COL", "c2": "COL", "b1": "COL"},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+            load_patterns={"P1": LoadPattern(name="P1", pattern_type="Other")},
+            frame_dist_loads=[],
+            joint_loads=[JointLoad(pattern="P1", node_id="2", my=1.0)],
+            units={"F": "N", "L": "m", "T": "C"},
+        )
+        mm = preprocess_model(md, {"split_elements": False, "panel_zone_model": "krawinkler_gupta"})
+
+        # The prepared mesh re-points the beam onto the new *_pz node…
+        assert mm.frame_elements["b1"].node_i == "2_pz"
+        # …while the source frame element is untouched (copy-on-write).
+        assert md.frame_elements["b1"].node_i == "2"
+        assert md.frame_elements["b1"].node_j == "4"
+
 
 # ═══════════════════════════════════════════════════════════════════
 # CQC combination engine
