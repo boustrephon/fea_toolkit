@@ -756,6 +756,14 @@ class TestStepDialog:
         assert value == 3
         assert type(value) is int
 
+    def test_a_noneable_choice_defaults_to_none_not_the_first_choice(self, qapp):
+        """A ``choices`` + ``allow_none`` param reads ``None`` at its default."""
+        dialog = self._dialog("mesh")
+        widget = dialog._widgets["panel_zone_model"]
+        assert dialog._param_value("panel_zone_model") is None
+        widget.setCurrentIndex(1)
+        assert dialog._param_value("panel_zone_model") == "krawinkler_gupta"
+
     def test_run_static_cases_uses_the_structured_editor_when_a_model_is_open(self, qapp):
         """With a model, the ``cases`` param is a structured editor, not a literal."""
         from fea_toolkit.gui.views.cases_editor import CasesEditor

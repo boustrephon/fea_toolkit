@@ -198,8 +198,16 @@ class StepDialog(QDialog):
             widget.setChecked(bool(value))
         elif spec.choices:
             widget = QComboBox(self)
+            if spec.allow_none:
+                # A None-valued choice parameter needs an explicit "no value"
+                # option, else its default (None) cannot be represented and the
+                # first choice is silently emitted.  The sentinel sits at index 0.
+                widget.addItem("(none)")
             widget.addItems([str(choice) for choice in spec.choices])
-            widget.setCurrentText(str(value))
+            if value is None:
+                widget.setCurrentIndex(0)
+            else:
+                widget.setCurrentText(str(value))
         elif kind is int:
             widget = QSpinBox(self)
             if spec.allow_none:
@@ -249,6 +257,10 @@ class StepDialog(QDialog):
         if spec.type is bool:
             return bool(widget.isChecked())
         if spec.choices:
+            if spec.allow_none:
+                return (
+                    None if widget.currentIndex() == 0 else spec.choices[widget.currentIndex() - 1]
+                )
             return spec.choices[widget.currentIndex()]
         if spec.type is int:
             if spec.allow_none and widget.value() == 0:
