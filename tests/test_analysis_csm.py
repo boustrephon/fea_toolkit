@@ -1300,7 +1300,8 @@ class TestPanelZone:
         assert ry_pz > ry_ref, f"expected softer panel zone: {ry_pz:.6e} vs {ry_ref:.6e}"
 
     def test_panel_zone_rebuild_is_reversible(self):
-        """Repeated builds reuse (not duplicate) the panel-zone ``*_pz`` nodes."""
+        """Repeated builds reuse (not duplicate) the panel-zone spring and ``*_pz`` nodes."""
+        import openseespy.opensees as ops
         from openseespy.opensees import wipe
 
         wipe()
@@ -1309,6 +1310,13 @@ class TestPanelZone:
             b.build_domain()
             pz_nodes_1 = [nid for nid in b.mesh_model.nodes if nid.endswith("_pz")]
             assert pz_nodes_1, "expected at least one *_pz node"
+
+            # The panel-zone zero-length spring couples the joint node and its
+            # *_pz node; record its OpenSees element tag before rebuilding.
+            joint_tag = b.mesh_model.nodes["2"].node_tag
+            pz_tag = b.mesh_model.nodes[pz_nodes_1[0]].node_tag
+            spring_1 = [t for t in ops.getEleTags() if set(ops.eleNodes(t)) == {joint_tag, pz_tag}]
+            assert spring_1, "panel-zone zero-length spring missing after first build"
 
             # Rebuild on the same (shared) MeshModel.
             b.build_domain()
@@ -1319,6 +1327,14 @@ class TestPanelZone:
             # The beam is re-pointed to the panel-zone node again.
             beam = b.mesh_model.frame_elements["b1"]
             assert beam.node_i.endswith("_pz") or beam.node_j.endswith("_pz")
+
+            # The zero-length spring is recreated (not merely the *_pz node and
+            # beam endpoint) — the joint and panel-zone nodes are coupled again.
+            spring_2 = [t for t in ops.getEleTags() if set(ops.eleNodes(t)) == {joint_tag, pz_tag}]
+            assert spring_2, "panel-zone zero-length spring missing after rebuild"
+            assert spring_2 == spring_1, (
+                f"panel-zone spring tags changed across rebuilds: {spring_1} vs {spring_2}"
+            )
         finally:
             wipe()
 

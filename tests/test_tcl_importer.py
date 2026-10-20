@@ -243,7 +243,7 @@ def test_negative_element_mass_rejected():
         "fix 1 1 1 1\n"
         "element elasticBeamColumn 1 1 2 10.0 29000.0 100.0 1 -mass -0.1\n"
     )
-    with pytest.warns(UserWarning, match="negative '-mass'"):
+    with pytest.warns(UserWarning, match="negative or non-finite '-mass'"):
         md = parse_tcl_model(tcl)
     assert md.added_masses == {}
 
@@ -305,6 +305,6 @@ def test_non_finite_element_mass_rejected(bad_mass):
         "fix 1 1 1 1\n"
         f"element elasticBeamColumn 1 1 2 10.0 29000.0 100.0 1 -mass {bad_mass}\n"
     )
-    with pytest.warns(UserWarning, match="negative '-mass'"):
+    with pytest.warns(UserWarning, match="non-finite '-mass'"):
         md = parse_tcl_model(tcl)
     assert md.added_masses == {}

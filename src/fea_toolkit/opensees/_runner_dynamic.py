@@ -59,6 +59,18 @@ class TransientRunnerMixin:
             num_steps = len(accel)
         dof = {"X": 1, "Y": 2, "Z": 3}[direction.upper()]
 
+        # ── Rebuild for an independent record ──
+        # Each ground-motion record must start from a fresh domain: a previous
+        # record leaves committed material/response state and its excitation
+        # pattern behind, so reusing the domain would make the new record depend
+        # on the old one.  Rebuild — reproducing the last build's config
+        # overrides (e.g. the fiber sections from ``rebuild_with_fiber_sections``)
+        # rather than the elastic defaults — re-apply any saved edge constraints,
+        # and re-apply masses (``build_domain`` does not apply them).
+        self.build_domain(config_overrides=self._last_build_overrides)
+        self._reapply_edge_constraints()
+        self.compute_seismic_masses()
+
         # ── Rayleigh periods (from a modal solve when not supplied) ──
         if period_1 is None or period_2 is None:
             modal = self.run_modal_analysis(
@@ -73,12 +85,6 @@ class TransientRunnerMixin:
         # Rayleigh coefficients — C = a0 * M + a1 * K (exact two-period formula).
         a0 = 4.0 * math.pi * damping_ratio / (period_1 + period_2)
         a1 = damping_ratio * period_1 * period_2 / (math.pi * (period_1 + period_2))
-
-        # ── Ensure seismic masses are in the domain ──
-        # ``build_domain`` does not apply masses; the modal solve above does,
-        # but only when the periods were auto-computed.  Apply them explicitly
-        # so the transient mass matrix is always populated.
-        self.compute_seismic_masses()
 
         # ── Gravity hand-off ──
         if gravity_patterns:

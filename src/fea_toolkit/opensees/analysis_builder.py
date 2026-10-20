@@ -205,6 +205,10 @@ class AnalysisBuilder(
             max(self.section_tags.values(), default=0) + 1 if self.section_tags else 1
         )
         self._rigid_link_elems: dict[str, int] = {}
+        # Config overrides used by the most recent build_domain(), so a later
+        # rebuild can reproduce the same domain (e.g. the transient runner
+        # rebuilding before each ground-motion record).
+        self._last_build_overrides: dict[str, Any] = {}
         self._shell_tag_map: dict[
             str, int
         ] = {}  # area SAP ID → OpenSees element tag (reset at each build_domain())
@@ -522,6 +526,11 @@ class AnalysisBuilder(
             for k, v in config_overrides.items():
                 _saved_overrides[k] = self.config.get(k)
                 self.config[k] = v
+
+        # Remember the overrides used for this build so a later rebuild can
+        # reproduce the same domain (e.g. the transient runner rebuilding
+        # before each ground-motion record instead of reusing a damaged one).
+        self._last_build_overrides = dict(config_overrides or {})
 
         try:
             ops.wipe()

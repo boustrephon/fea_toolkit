@@ -690,17 +690,20 @@ class ElementMixin:
         """Restore canonical frame element endpoints and remove stale panel-zone nodes.
 
         Called at the start of :meth:`build_domain` (before
-        :meth:`_restore_hinge_canonical_state`) to prevent stale ``*_pz``
+        :meth:`_restore_hinge_canonical_state`) to prevent stale panel-zone
         nodes from a previous build cycle from being recreated, and to re-point
         beams to their original endpoints before ``_create_panel_zones``
-        re-instruments them.
+        re-instruments them.  Only node IDs recorded by ``_create_panel_zones``
+        are removed — ownership is never inferred from a ``_pz`` suffix, so a
+        source node that happens to end in ``_pz`` and its connected members
+        remain intact.
         """
         if not hasattr(self, "_panel_zone_canonical_elements"):
             return
-        # Remove any *_pz nodes left from a previous build
-        for nid in list(self.mesh_model.nodes.keys()):
-            if nid.endswith("_pz"):
-                del self.mesh_model.nodes[nid]
+        # Remove only the panel-zone nodes this builder created in a previous
+        # build — tracked by ID, never inferred from a "_pz" suffix.
+        for nid in getattr(self, "_panel_zone_node_ids", ()):
+            self.mesh_model.nodes.pop(nid, None)
         # Restore canonical element endpoints
         for eid, elem in self.mesh_model.frame_elements.items():
             if eid in self._panel_zone_canonical_elements:
@@ -992,8 +995,10 @@ class ElementMixin:
                 # hardening_ratio.
                 b = float(self.config.get("hardening_ratio", 0.02))
                 stiff_factor = float(self.config.get("hinge_stiffness_factor", 10.0))
-                if stiff_factor <= 0.0:
-                    raise ValueError(f"hinge_stiffness_factor must be positive, got {stiff_factor}")
+                if stiff_factor <= 0.0 or not math.isfinite(stiff_factor):
+                    raise ValueError(
+                        f"hinge_stiffness_factor must be positive and finite, got {stiff_factor}"
+                    )
                 e0_strong = stiff_factor * 6.0 * E * max(I33, 1e-12) / max(L, 1e-12)
                 e0_weak = stiff_factor * 6.0 * E * max(I22, 1e-12) / max(L, 1e-12)
                 ops.uniaxialMaterial("Steel01", hinge_mat_tag + 1, My, e0_strong, b)
@@ -1206,6 +1211,11 @@ class ElementMixin:
         if not hasattr(self, "_release_canonical_elements"):
             if hasattr(self, "_bond_canonical_elements"):
                 self._release_canonical_elements = dict(self._bond_canonical_elements)
+            elif hasattr(self, "_panel_zone_canonical_elements"):
+                # When panel zones ran first (and no bond-slip springs ran),
+                # capture the true pre-instrumentation endpoints from the
+                # panel-zone canonical map instead of the current *_pz ids.
+                self._release_canonical_elements = dict(self._panel_zone_canonical_elements)
             else:
                 self._release_canonical_elements = {
                     eid: (elem.node_i, elem.node_j)
@@ -1354,6 +1364,7 @@ class ElementMixin:
                 for eid, elem in elements.items()
                 if not getattr(elem, "inactive", False)
             }
+            self._panel_zone_node_ids = set()
 
         next_node_tag = max((nd.node_tag for nd in nodes.values()), default=0) + 1
         try:
@@ -1424,6 +1435,7 @@ class ElementMixin:
                 y=joint.y,
                 z=joint.z,
             )
+            self._panel_zone_node_ids.add(beam_node_id)
             ops.node(beam_node_tag, joint.x, joint.y, joint.z)
             self._created_node_tags.add(beam_node_tag)
             for eid in beams_at[nid]:
@@ -1502,11 +1514,18 @@ class ElementMixin:
         # Restoration is handled by _restore_bond_canonical_state() in
         # build_domain().
         if not hasattr(self, "_bond_canonical_elements"):
-            self._bond_canonical_elements = {
-                eid: (elem.node_i, elem.node_j)
-                for eid, elem in self.mesh_model.frame_elements.items()
-                if not getattr(elem, "inactive", False)
-            }
+            # When panel zones ran first, the beams are already re-pointed to
+            # their *_pz nodes; capture the true pre-instrumentation endpoints
+            # from the panel-zone canonical map instead of the current
+            # (re-pointed) node ids — mirroring _create_lumped_hinges.
+            if hasattr(self, "_panel_zone_canonical_elements"):
+                self._bond_canonical_elements = dict(self._panel_zone_canonical_elements)
+            else:
+                self._bond_canonical_elements = {
+                    eid: (elem.node_i, elem.node_j)
+                    for eid, elem in self.mesh_model.frame_elements.items()
+                    if not getattr(elem, "inactive", False)
+                }
 
         elements = self.mesh_model.frame_elements
         assignments = self.mesh_model.frame_assignments or {}

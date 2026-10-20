@@ -226,7 +226,7 @@ def _parse_element(parts: list[str], beams: list[_ElasticBeamColumn], ndm: int) 
             mass = float(parts[idx + 1])
             if mass < 0.0 or not math.isfinite(mass):
                 warnings.warn(
-                    "element elasticBeamColumn has a negative '-mass' "
+                    "element elasticBeamColumn has a negative or non-finite '-mass' "
                     f"({mass}); mass dropped: " + " ".join(parts),
                     stacklevel=2,
                 )
