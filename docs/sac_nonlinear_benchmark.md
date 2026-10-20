@@ -95,22 +95,25 @@ caveat warrant the wider band rather than a T4-tight ±5 %.  **M1 lands at
 ![Roof displacement time history (synthetic pulse)](assets/sac3_nltha_synthetic.png)
 
 The always-on figure above uses a synthetic 1 Hz pulse (the real LA21 history
-is generated only when the record mirror is populated); the modal comparison
-below documents the current M2 state.
+is generated only when the record mirror is populated).  The modal comparison
+below shows how each modelling choice shifts the fundamental period.
 
 ![Fundamental periods by model](assets/sac3_periods.png)
 
-## Known limitation — panel zone + hinge modal degeneracy
+## Panel zone + hinge composition
 
-The Krawinkler & Gupta panel zone **combined with the bilinear hinge in the
-full 3-story frame** produces a degenerate, over-stiff modal response
-(T1 ≈ 0.20 s vs the expected ~1.3–1.4 s; exact eigenvalue multiplicities).  Each
-ingredient is correct in isolation — the panel zone softens the elastic model
-and the subassemblage, and the bilinear hinge alone gives M1 ≈ 0.159 m — so the
-defect is in how the zero-length panel-zone spring and the zero-length-section
-hinge compose at a shared joint.  The M2 NLTHA run is therefore a smoke check
-only until this is resolved (see [`benchmark_register.md` §5](benchmark_register.md),
-Track 1).
+Combining the Krawinkler & Gupta panel zone with the bilinear hinge in the full
+3-story frame initially produced a degenerate, over-stiff modal response
+(T1 ≈ 0.20 s; the sway modes were locked).  The root cause was a **chained
+`equalDOF`** at the joint: the panel zone ties the beam's ``*_pz`` node to the
+column (`equalDOF(col, beam, 1, 3)`), and the lumped hinge then tied its hinge
+node to that ``*_pz`` node (`equalDOF(beam, hinge, 1, 2, 3)`), making the hinge
+a slave-of-a-slave that the `Transformation` constraint handler mis-resolved —
+locking the frame's lateral DOFs.  The fix ties the hinge node **directly to the
+column node** (star topology — `equalDOF(col, hinge, 1, 3)` + out-of-plane fix),
+leaving the panel-zone spring and the hinge in series.  M2 now has
+**T1 ≈ 1.35 s**, correctly softer than both the elastic model (1.09 s) and M1
+(1.14 s).  Regression-guarded by `test_sac3_m2_panel_zone_modal_period`.
 
 ## Loadable artifact
 
@@ -149,7 +152,8 @@ artifact (each only when its file is absent), writing into `docs/assets/`.
 ## Tests
 
 - `tests/test_benchmark_sac3_nltha.py` — elastic + nonlinear NLTHA (synthetic
-  pulse always-on; LA21 gated), M1 band assertion, M2 smoke check.
+  pulse always-on, M1 + M2; LA21 gated), M1 band assertion, and
+  `test_sac3_m2_panel_zone_modal_period` (M2 fundamental-period regression guard).
 - `tests/test_analysis_csm.py::TestBuilderHingeModel` — bilinear hinge unit
   tests (config defaults, cantilever yield).
 - `tests/test_analysis_csm.py::TestPanelZone` — panel-zone subassemblage.

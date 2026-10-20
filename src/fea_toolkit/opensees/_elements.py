@@ -796,6 +796,15 @@ class ElementMixin:
         elements = self.mesh_model.frame_elements
         assignments = self.mesh_model.frame_assignments
 
+        # Panel-zone beam node → column node reverse map.  When a beam end has
+        # been re-pointed to a coincident ``*_pz`` node, the hinge's translation
+        # tie must go to the *column* node (the panel zone's master), not to the
+        # ``*_pz`` node — otherwise the equalDOF chain (hinge → *_pz → column)
+        # leaves the hinge node mis-constrained and locks the frame's sway DOFs.
+        pz_beam_to_col = {
+            spec.beam_node_id: spec.column_node_id for spec in self.mesh_model.panel_zones.values()
+        }
+
         next_node_tag = max((nd.node_tag for nd in self.mesh_model.nodes.values()), default=0) + 1
         # Consider existing OpenSees element tags (shells, rigid links already
         # created) and reserved offset-rigid-link tags to avoid collisions.
@@ -888,9 +897,26 @@ class ElementMixin:
             ops.node(hinge_j_tag, nj.x, nj.y, nj.z)
             self._created_node_tags.update([hinge_i_tag, hinge_j_tag])
 
-            # Tie translation DOFs between structural and hinge nodes
-            ops.equalDOF(ni.node_tag, hinge_i_tag, 1, 2, 3)
-            ops.equalDOF(nj.node_tag, hinge_j_tag, 1, 2, 3)
+            # Tie translation DOFs between structural and hinge nodes.  At a
+            # panel-zone joint the beam end is a coincident ``*_pz`` node whose
+            # in-plane translations are already tied to (and out-of-plane DOFs
+            # fixed by) the column — so tie the hinge to the *column* node and
+            # fix its out-of-plane DOFs, keeping the hinge a direct slave of the
+            # column rather than a slave-of-a-slave (which locks the sway modes).
+            col_i_id = pz_beam_to_col.get(ni.node_id)
+            col_j_id = pz_beam_to_col.get(nj.node_id)
+            if col_i_id is not None:
+                col_i = self.mesh_model.nodes[col_i_id]
+                ops.equalDOF(col_i.node_tag, hinge_i_tag, 1, 3)
+                ops.fix(hinge_i_tag, 0, 1, 0, 1, 0, 1)
+            else:
+                ops.equalDOF(ni.node_tag, hinge_i_tag, 1, 2, 3)
+            if col_j_id is not None:
+                col_j = self.mesh_model.nodes[col_j_id]
+                ops.equalDOF(col_j.node_tag, hinge_j_tag, 1, 3)
+                ops.fix(hinge_j_tag, 0, 1, 0, 1, 0, 1)
+            else:
+                ops.equalDOF(nj.node_tag, hinge_j_tag, 1, 2, 3)
 
             # --- Create Hysteretic hinge section ---
             mat = self.mesh_model.materials.get(sec.material)

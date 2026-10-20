@@ -79,22 +79,44 @@ def test_sac3_elastic_nltha_la21(resolve_ground_motion_record):
 
 
 def test_sac3_nonlinear_nltha_synthetic():
-    """The nonlinear SAC frame (bilinear hinges) converges under a synthetic
-    pulse with a finite, positive peak (always-on)."""
+    """The nonlinear SAC frame — M1 (bilinear hinges) and M2 (hinges + panel
+    zone) — converges under a synthetic pulse with a finite, positive peak
+    (always-on)."""
+    from openseespy.opensees import wipe
+
+    dt, n = 0.005, 200
+    t = np.arange(n) * dt
+    accel = np.zeros(n)
+    accel[:40] = 2.0 * np.sin(2.0 * math.pi * 1.0 * t[:40])
+
+    for panel_zone in (False, True):
+        wipe()
+        try:
+            b = build_builder(panel_zone=panel_zone)
+            res = b.run_transient_analysis(accel, dt, direction="X", damping_ratio=0.05)
+            assert res["converged_steps"] > 0
+            assert res["peak_displacement"] > 0.0
+            assert np.isfinite(res["peak_displacement"])
+        finally:
+            wipe()
+
+
+def test_sac3_m2_panel_zone_modal_period():
+    """M2 (bilinear hinges + Krawinkler & Gupta panel zone) has a sane
+    fundamental period — regression guard for the panel-zone + hinge equalDOF
+    degeneracy.
+
+    The combination once produced an over-stiff T1 ≈ 0.20 s (the sway modes were
+    locked by a chained equalDOF through the ``*_pz`` beam node).  The fixed
+    model softens to T1 ≈ 1.35 s (vs 1.09 s elastic, 1.14 s M1 hinge-only).
+    """
     from openseespy.opensees import wipe
 
     wipe()
     try:
-        b = build_builder(panel_zone=False)
-        dt = 0.005
-        n = 200
-        t = np.arange(n) * dt
-        accel = np.zeros(n)
-        accel[:40] = 2.0 * np.sin(2.0 * math.pi * 1.0 * t[:40])
-        res = b.run_transient_analysis(accel, dt, direction="X", damping_ratio=0.05)
-        assert res["converged_steps"] > 0
-        assert res["peak_displacement"] > 0.0
-        assert np.isfinite(res["peak_displacement"])
+        b = build_builder(panel_zone=True)
+        modal = b.run_modal_analysis(num_modes=1, print_results=False)
+        assert 1.2 < float(modal["periods"][0]) < 1.5
     finally:
         wipe()
 
@@ -109,12 +131,9 @@ def test_sac3_nonlinear_nltha_la21(resolve_ground_motion_record):
     test is therefore a smoke anchor only: it checks that both the M1 (hinges)
     and M2 (hinges + panel zone) models converge and return a finite peak.
 
-    The M2 (panel-zone) run is a smoke check only: the Krawinkler & Gupta panel
-    zone combined with the bilinear hinge in the full 3-story frame currently
-    produces a degenerate (over-stiff) modal response, a known limitation.  The
-    panel-zone softening is verified independently in
-    ``test_analysis_csm.py::TestPanelZone`` and by the elastic-model period
-    shift (1.09 → 1.31 s).
+    The M2 (panel-zone) run is a smoke check here because LA21 is not the record
+    for which Ohtori's band applies; the panel-zone + hinge modal response is
+    verified separately by ``test_sac3_m2_panel_zone_modal_period``.
     """
     from openseespy.opensees import wipe
 
