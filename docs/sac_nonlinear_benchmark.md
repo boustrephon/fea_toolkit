@@ -65,6 +65,41 @@ data are not redistributable):
 
 The leaning column stays elastic (no plastic hinge).
 
+### Approximation vs the benchmark trilinear backbone
+
+The `Steel01` bilinear hinge is an **approximation**, not a bit-exact port.  The
+benchmark's own member hysteresis is **trilinear**: `struct3.m`'s `mat_tbl`
+carries three flexural rigidities `EI1 → EI2 → EI3` with two break curvatures
+(`d1`, `d2`), evaluated by the authors' compiled S-function `Nonlin12.mexsol`
+/ `Nonlin12.dll` (the "DO NOT MODIFY THIS" block in the archive `README.txt`).
+That binary cannot be called from OpenSeesPy, so this model — like the
+independent OpenSeesPy port in
+[Johnsonlijian/eesd-1060116-reproducibility-20261003](https://github.com/Johnsonlijian/eesd-1060116-reproducibility-20261003)
+— collapses the trilinear branch onto a bilinear `Steel01` backbone (initial
+tangent `EI1`, 2 % hardening).  The *initial* stiffness — and hence the modal
+frequencies — is preserved exactly; only the post-yield branch and any damage
+accumulation differ from the MEX.
+
+The yield moment carries a calibration gap too.  The benchmark's first break is
+`My = EI1·d1`; this model uses `My = Zx·fy`.  The two agree closely for the
+columns but drift apart for the deeper beams:
+
+| Member | `Zx·fy` (this model) | `EI1·d1` (benchmark first break) | Δ |
+|---|---|---|---|
+| W14×257 column | ≈ 2530 kN·m | ≈ 2614 kN·m | −3 % |
+| W14×311 column | ≈ 3410 kN·m | ≈ 3236 kN·m | +5 % |
+| W33×118 beam | ≈ 1690 kN·m | ≈ 2191 kN·m | −23 % |
+| W30×116 beam | ≈ 1540 kN·m | ≈ 1996 kN·m | −23 % |
+| W24×68 beam | ≈ 626 kN·m | ≈ 935 kN·m | −33 % |
+| W21×44 beam | ≈ 388 kN·m | ≈ 504 kN·m | −23 % |
+
+A third spelling exists in the wild: the reference repo calibrates
+`My = 8.0 · EI1 · min(d1, d2) / L` (a fitted factor, not derived from section
+geometry) and reports a ~5–10 % median match to the published response.  None
+of the three reproduces the MEX exactly; this model favours `Zx·fy` because it
+is physical (AISC plastic modulus × yield strength) and needs no calibration
+constant.
+
 ![Bilinear hinge backbone](assets/sac3_hinge_backbone.png)
 
 ## Joint modelling — Krawinkler & Gupta panel zone (D2)
@@ -155,6 +190,10 @@ artifact (each only when its file is absent), writing into `docs/assets/`.
 - Krawinkler & Gupta (1998) — SAC steel-frame design / panel-zone modelling.
 - AISC *Steel Construction Manual* — the `Zx` tables behind the derived yield
   moments (W24×68, W30×116).
+- [Johnsonlijian/eesd-1060116-reproducibility-20261003](https://github.com/Johnsonlijian/eesd-1060116-reproducibility-20261003)
+  — an independent OpenSeesPy port of the same `struct3.m` plant (EESD control
+  paper), cross-checked against this model for the trilinear backbone and the
+  yield-moment calibration.
 - SAC ground motions (LA21) — see [Ground-Motion Data & Sources](ground_motion_data.md).
 
 ## Tests
