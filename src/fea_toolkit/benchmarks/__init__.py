@@ -1,22 +1,20 @@
-"""Published benchmark models (SAC 3-story, FEMA 355C Boston 3-/9-story, …).
+"""Published benchmark models (SAC 3-story, FEMA 355C LA/Seattle/Boston, …).
 
 This subpackage imports the OpenSees package (via
 :mod:`fea_toolkit.benchmarks.sac`), so it is deliberately **not** re-exported
 from the top-level ``fea_toolkit`` package — import it explicitly when a
 benchmark model is needed (tests, the figure generator, a viewer example).
 
-:mod:`fea_toolkit.benchmarks.sac_boston` is itself OpenSees-free (pure
+:mod:`fea_toolkit.benchmarks.fema355c` is itself OpenSees-free (pure
 ``SAPModelData`` construction + model-codec export — it imports no ``ops``).
 """
 
 from .fema355c import (
     build_fema355c,
+    write_snapshots,
 )
 from .fema355c import (
     schedules as fema355c_schedules,
-)
-from .fema355c import (
-    write_snapshots as write_fema355c_snapshots,
 )
 from .sac import (
     BEAM,
@@ -32,15 +30,6 @@ from .sac import (
     peak_x,
     preprocess_config,
 )
-from .sac_boston import (
-    boston3_2d,
-    boston3_3d,
-    boston9_2d,
-    boston9_3d,
-    build_2d,
-    build_3d,
-    write_snapshots,
-)
 
 __all__ = [
     "BEAM",
@@ -49,12 +38,6 @@ __all__ = [
     "COLUMN_FY",
     "SAC3_TCL",
     "SAC3_UNITS",
-    "boston3_2d",
-    "boston3_3d",
-    "boston9_2d",
-    "boston9_3d",
-    "build_2d",
-    "build_3d",
     "build_builder",
     "build_fema355c",
     "builder_config",
@@ -63,6 +46,5 @@ __all__ = [
     "load_model",
     "peak_x",
     "preprocess_config",
-    "write_fema355c_snapshots",
     "write_snapshots",
 ]
