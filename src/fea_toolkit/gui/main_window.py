@@ -707,6 +707,11 @@ class MainWindow(QMainWindow):
         a["file.open"] = self._real_action(
             "Open", self._on_open, shortcut="Ctrl+O", tip="Open a SAP2000 / ETABS model"
         )
+        a["file.open_benchmark"] = self._real_action(
+            "Open benchmark\u2026",
+            self._on_open_benchmark,
+            tip="Build a FEMA 355C / SAC Phase 2 benchmark model",
+        )
         a["file.open_results"] = self._real_action(
             "Open results\u2026",
             self._on_open_results,
@@ -963,6 +968,7 @@ class MainWindow(QMainWindow):
 
         m = bar.addMenu("&File")
         m.addAction(a["file.open"])
+        m.addAction(a["file.open_benchmark"])
         m.addAction(a["file.open_results"])
         m.addAction(a["file.open_project"])
         m.addSeparator()
@@ -1211,6 +1217,7 @@ class MainWindow(QMainWindow):
         main.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         for key in (
             "file.open",
+            "file.open_benchmark",
             "file.save_results",
             None,
             "analysis.run",
@@ -3502,6 +3509,35 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(
                 self, "Open failed", f"Could not open:\n{path}\n\nSee the message log."
             )
+
+    def _on_open_benchmark(self) -> None:
+        """Build a FEMA 355C / SAC Phase 2 benchmark model and display it."""
+        from .views.benchmark_dialog import BenchmarkDialog
+
+        choice = BenchmarkDialog.edit(parent=self)
+        if choice is None:
+            return
+        from ..benchmarks.fema355c import build_fema355c
+
+        source = (
+            f"FEMA 355C {choice['region']}{choice['stories']} "
+            f"{choice['design']} ({choice['direction']})"
+        )
+        self.log(f"Building benchmark {source} \u2026")
+        try:
+            model = build_fema355c(
+                str(choice["region"]),
+                int(choice["stories"]),
+                str(choice["design"]),
+                str(choice["direction"]),
+            )
+        except Exception as exc:
+            self.log(f"Failed to build benchmark {source}: {exc}", "error")
+            return
+        self._save_view_state()
+        self._remember_source(model, source=source)
+        self.show_model(model)
+        self.log(f"Opened benchmark: {source}.")
 
     def _on_open_results(self) -> None:
         """**File ▸ Open results…**: choose an archive and register its cases."""

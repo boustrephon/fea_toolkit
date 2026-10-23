@@ -2520,6 +2520,25 @@ def _masses_for(n_story: int) -> list[float]:
     return {3: MASS_3STORY, 10: MASS_9STORY, 22: MASS_20STORY}[n_story]
 
 
+def schedules() -> list[tuple[str, int, str]]:
+    """Return the encoded ``(region, stories, design)`` triples in display order.
+
+    Ordered region (LA, SE, BO), then stories (3, 9, 20), then design
+    (pre, post, rbs, r1, r2, r3) — a stable order for chooser UIs and tests.
+    This is the single source of truth for which combinations
+    :func:`build_fema355c` accepts.
+
+    Returns:
+        The 22 schedule keys.
+    """
+    _region_order = {"LA": 0, "SE": 1, "BO": 2}
+    _design_order = {"pre": 0, "post": 1, "rbs": 2, "r1": 3, "r2": 4, "r3": 5}
+    return sorted(
+        _SCHEDULES.keys(),
+        key=lambda key: (_region_order[key[0]], key[1], _design_order.get(key[2], 99)),
+    )
+
+
 def build_fema355c(region: str, stories: int, design: str, direction: str = "3d") -> SAPModelData:
     """Build one FEMA 355C / SAC Phase 2 model as a ``SAPModelData``.
 
@@ -2873,5 +2892,6 @@ __all__ = [
     "MASS_20STORY",
     "PSF_TO_PA",
     "build_fema355c",
+    "schedules",
     "write_snapshots",
 ]

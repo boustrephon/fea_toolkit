@@ -13,6 +13,9 @@ from .fema355c import (
     build_fema355c,
 )
 from .fema355c import (
+    schedules as fema355c_schedules,
+)
+from .fema355c import (
     write_snapshots as write_fema355c_snapshots,
 )
 from .sac import (
@@ -56,6 +59,7 @@ __all__ = [
     "build_fema355c",
     "builder_config",
     "enrich_nonlinear",
+    "fema355c_schedules",
     "load_model",
     "peak_x",
     "preprocess_config",

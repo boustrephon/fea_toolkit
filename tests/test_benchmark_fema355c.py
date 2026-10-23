@@ -118,7 +118,7 @@ def test_20story_geometry_matches_benchmark():
 # ── Full registry coverage (LA / Seattle / Boston, incl. redesigns) ──
 
 
-@pytest.mark.parametrize("region,stories,design", sorted(f._SCHEDULES))
+@pytest.mark.parametrize("region,stories,design", f.schedules())
 def test_every_schedule_builds(region, stories, design):
     """Every encoded schedule builds in both directions with non-empty models."""
     for direction in ("2d", "3d"):
@@ -126,6 +126,18 @@ def test_every_schedule_builds(region, stories, design):
         assert md.nodes
         assert md.frame_elements
         assert md.sections
+
+
+def test_schedules_lists_the_22_variants_in_display_order():
+    """``schedules()`` is the chooser's source of truth: 22 triples, stable order."""
+    triples = f.schedules()
+    assert len(triples) == 22
+    assert len(set(triples)) == 22
+    assert triples[0] == ("LA", 3, "pre")  # region, then stories, then design
+    assert triples[1] == ("LA", 3, "post")
+    assert ("SE", 9, "rbs") in triples
+    assert ("LA", 9, "r2") in triples
+    assert ("BO", 20, "post") in triples
 
 
 def test_boston_20_has_next_to_exterior_columns():

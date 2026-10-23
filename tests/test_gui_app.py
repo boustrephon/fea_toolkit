@@ -95,6 +95,85 @@ def test_real_actions_enabled_placeholders_disabled(window):
     assert "Milestone 5" not in pushover.toolTip()
 
 
+def test_open_benchmark_action_is_enabled(window):
+    """File ▸ Open benchmark… is a live action (no loaded model required)."""
+    assert window._actions["file.open_benchmark"].isEnabled()
+
+
+def test_benchmark_dialog_offers_only_valid_designs(qapp):
+    """The Design combo follows region + stories; never offers an invalid pair."""
+    from fea_toolkit.gui.views.benchmark_dialog import BenchmarkDialog
+
+    dlg = BenchmarkDialog()
+    try:
+        assert dlg.value() == {
+            "region": "LA",
+            "stories": 3,
+            "design": "pre",
+            "direction": "3d",
+        }
+        designs = [dlg._design.itemData(i) for i in range(dlg._design.count())]
+        assert designs == ["pre", "post"]
+
+        dlg._region.setCurrentIndex(dlg._region.findData("SE"))
+        dlg._stories.setCurrentIndex(dlg._stories.findData(9))
+        designs = [dlg._design.itemData(i) for i in range(dlg._design.count())]
+        assert designs == ["pre", "post", "rbs"]
+
+        dlg._region.setCurrentIndex(dlg._region.findData("LA"))
+        dlg._stories.setCurrentIndex(dlg._stories.findData(9))
+        designs = [dlg._design.itemData(i) for i in range(dlg._design.count())]
+        assert designs == ["pre", "post", "r1", "r2", "r3"]
+    finally:
+        dlg.close()
+
+
+def test_benchmark_dialog_choice_builds_a_model(qapp):
+    """The dialog's default choice feeds straight into ``build_fema355c``."""
+    from fea_toolkit.benchmarks.fema355c import build_fema355c
+    from fea_toolkit.gui.views.benchmark_dialog import BenchmarkDialog
+
+    dlg = BenchmarkDialog()
+    try:
+        choice = dlg.value()
+        model = build_fema355c(
+            str(choice["region"]),
+            int(choice["stories"]),
+            str(choice["design"]),
+            str(choice["direction"]),
+        )
+        assert model.nodes and model.frame_elements
+    finally:
+        dlg.close()
+
+
+def test_open_benchmark_action_builds_and_displays(window, monkeypatch):
+    """File ▸ Open benchmark… builds the chosen model in-process (no snapshot).
+
+    This drives the real ``_on_open_benchmark`` slot — including its
+    ``build_fema355c`` import — so a wrong relative-import depth there fails
+    here rather than only when a user clicks the menu.
+    """
+    from fea_toolkit.gui.views.benchmark_dialog import BenchmarkDialog
+
+    monkeypatch.setattr(
+        BenchmarkDialog,
+        "edit",
+        staticmethod(
+            lambda parent=None: {
+                "region": "LA",
+                "stories": 9,
+                "design": "r2",
+                "direction": "3d",
+            }
+        ),
+    )
+    window._actions["file.open_benchmark"].trigger()
+    assert window._store is not None
+    assert window._source_label == "FEMA 355C LA9 r2 (3d)"
+    assert window._model is not None
+
+
 def test_show_is_graceful_without_an_interactive_viewport(window):
     """Showing the window never raises, even when the viewport is off-screen.
 
