@@ -4,6 +4,7 @@ from fea_toolkit.model.element_context import element_rows, groups_of
 from fea_toolkit.model.sap_data import (
     AreaElement,
     FrameElement,
+    FrameRelease,
     Group,
     Material,
     Node,
@@ -39,6 +40,7 @@ def _model():
             "A1": AreaElement(area_id="A1", area_tag=1, node_ids=["1", "2", "3", "4"]),
         },
         frame_assignments={"1": "UB300"},
+        frame_releases={"1": FrameRelease("1", end_i=[0, 0, 0, 0, 0, 1], end_j=[0, 0, 0, 0, 1, 0])},
         area_assignments={"A1": "Slab200"},
         groups={
             "Cols": Group(name="Cols", objects=["Frame:1", "Joint:1"]),
@@ -54,6 +56,8 @@ def test_a_frame_reports_section_material_and_groups():
     assert element_rows(model, model.frame_elements["1"]) == [
         ("Section", "UB300 (I/Wide Flange)"),
         ("Material", "Steel"),
+        ("Release I", "M3"),
+        ("Release J", "M2"),
         ("Groups", "Cols, All"),
     ]
 
@@ -78,6 +82,8 @@ def test_a_split_child_resolves_through_its_parent():
     rows = element_rows(model, model.frame_elements["1a"])
     assert ("Section", "UB300 (I/Wide Flange)") in rows
     assert ("Material", "Steel") in rows
+    assert ("Release I", "M3") in rows
+    assert ("Release J", "M2") in rows
 
 
 def test_an_unassigned_element_has_no_section_or_material():
@@ -90,6 +96,13 @@ def test_an_unassigned_element_has_no_section_or_material():
 def test_a_groupless_entity_has_no_groups_row():
     model = _model()
     assert "Groups" not in dict(element_rows(model, model.frame_elements["2"]))
+
+
+def test_a_frame_without_a_release_has_no_release_rows():
+    model = _model()
+    rows = dict(element_rows(model, model.frame_elements["2"]))
+    assert "Release I" not in rows
+    assert "Release J" not in rows
 
 
 def test_none_model_adds_nothing():

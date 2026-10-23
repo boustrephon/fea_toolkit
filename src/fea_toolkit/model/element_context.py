@@ -85,13 +85,40 @@ def _material_label(model: Any, etype: str, eid: str, obj: Any) -> str:
     return f"{material} ({kind})" if kind and kind != material else material
 
 
-def element_rows(model: Any, obj: Any) -> list:
-    """``[("Section", …), ("Material", …), ("Groups", …)]`` for *obj*.
+def _release(model: Any, eid: str, obj: Any) -> Any:
+    """The frame end-release for *eid*, falling back to its parent's.
 
-    Rows with nothing to say are omitted, so an unassigned or ungrouped element
-    gains no clutter.  A frame or area reports its section and material; every
-    entity type reports its groups.  ``model is None`` (a results archive) adds
-    nothing.
+    A release is keyed by the original member id.  A split child's own id is
+    absent from ``frame_releases``, so when the direct lookup misses and the
+    element carries a ``parent_id``, the parent's release is used — the same
+    lineage :func:`_assignment` tracks.
+
+    Args:
+        model: A ``SAPModelData`` or ``MeshModel``, or ``None``.
+        eid: The frame element id.
+        obj: The selected :class:`FrameElement`.
+
+    Returns:
+        The matching :class:`~fea_toolkit.model.sap_data.FrameRelease`, or
+        ``None``.
+    """
+    releases = getattr(model, "frame_releases", None) or {}
+    release = releases.get(eid)
+    if release is None:
+        parent = getattr(obj, "parent_id", None)
+        if parent is not None:
+            release = releases.get(parent)
+    return release
+
+
+def element_rows(model: Any, obj: Any) -> list:
+    """``[(Section/Material, …), (Release …, …), (Groups, …)]`` for *obj*.
+
+    Rows with nothing to say are omitted, so an unassigned, unreleased or
+    ungrouped element gains no clutter.  A frame or area reports its section and
+    material; a frame additionally reports its member-end releases (the freed
+    local DOFs at each end); every entity type reports its groups.  ``model is
+    None`` (a results archive) adds nothing.
 
     Args:
         model: A ``SAPModelData`` or ``MeshModel``, or ``None``.
@@ -120,6 +147,13 @@ def element_rows(model: Any, obj: Any) -> list:
         material = _material_label(model, etype, eid, obj)
         if material:
             rows.append(("Material", material))
+    if isinstance(obj, FrameElement):
+        release = _release(model, eid, obj)
+        if release is not None:
+            for end, label in (("I", "Release I"), ("J", "Release J")):
+                dofs = release.released_labels(end)
+                if dofs:
+                    rows.append((label, ", ".join(dofs)))
     groups = groups_of(model, etype, eid)
     if groups:
         rows.append(("Groups", ", ".join(groups)))
