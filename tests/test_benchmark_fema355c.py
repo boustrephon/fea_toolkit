@@ -103,6 +103,76 @@ def test_3story_geometry_matches_benchmark():
     assert max(zs) == pytest.approx(3 * f.H13)
 
 
+def test_3story_ew_moment_frame_centered_and_rotated():
+    """E-W moment frames sit at grids 2-5 (bays 2-3/3-4/4-5), strong-axis E-W.
+
+    The moment-connected girders on grid lines A and E occupy bays 2→3, 3→4,
+    4→5; the released gravity beams occupy 1→2, 5→6, 6→7.  The moment-frame
+    columns (A2-A5, E2-E5) and the east gravity columns (A6, E6) are rotated
+    90° (strong-axis E-W); A6/E6 carry the gravity-column section.  The N-S
+    leaning columns E1/E7 are also rotated 90° (weak-axis in the N-S frame).
+    """
+    md = f.build_fema355c("LA", 3, "pre", "3d")
+    # Moment bays (girder, no release) on grid A at level 02F.
+    for eid in ("B-A2-A3-02F", "B-A3-A4-02F", "B-A4-A5-02F"):
+        assert eid in md.frame_elements
+        assert eid not in md.frame_releases
+        assert md.frame_assignments[eid] == "W33X118"  # girder, level 1
+    # Gravity bays (released) on grid A at level 02F.
+    for eid in ("B-A1-A2-02F", "B-A5-A6-02F", "B-A6-A7-02F"):
+        assert eid in md.frame_releases
+    # Moment-frame columns rotated 90° (strong-axis E-W).
+    for col in ("C-A2-01F", "C-A3-01F", "C-A4-01F", "C-A5-01F", "C-E2-01F", "C-E5-01F"):
+        assert md.frame_elements[col].angle == 90.0
+        assert md.frame_assignments[col] == "W14X311"  # interior perimeter column
+    # A6/E6 are gravity columns (W14X68), also rotated 90°.
+    for col in ("C-A6-01F", "C-E6-01F"):
+        assert md.frame_elements[col].angle == 90.0
+        assert md.frame_assignments[col] == "W14X68"
+    # Corner columns: A1/A7 (moment end of the N-S frames) stay unrotated; the
+    # leaning columns E1/E7 are rotated 90° (weak-axis in the N-S frame).
+    for col in ("C-A1-01F", "C-A7-01F"):
+        assert md.frame_elements[col].angle == 0.0
+    for col in ("C-E1-01F", "C-E7-01F"):
+        assert md.frame_elements[col].angle == 90.0
+        assert md.frame_assignments[col] == "W14X257"  # exterior column section
+
+
+def test_9story_corner_pinned_beams_and_rotated_columns():
+    """9-story LA/Boston: last beam (clockwise) pinned at the corner; E-W cols rotated.
+
+    On the north face (grid F) bay 1-2 is pinned at the F1 end and bay 5-6 is
+    moment-connected; on the west face (grid 1) bay A-B is pinned at the A1 end
+    and bay E-F is moment-connected.  The E-W frame columns (A1-A5, F2-F6) are
+    rotated 90° (strong-axis E-W).
+    """
+    md = f.build_fema355c("LA", 9, "pre", "3d")
+    # Grid F (north face).
+    assert "B-F5-F6-01F" not in md.frame_releases  # moment-connected
+    rel = md.frame_releases["B-F1-F2-01F"]
+    assert rel.end_i[5] == 1 and rel.end_j[5] == 0  # M3 released at the F1 end
+    # Grid 1 (west face).
+    assert "B-E1-F1-01F" not in md.frame_releases  # moment-connected
+    rel = md.frame_releases["B-A1-B1-01F"]
+    assert rel.end_i[5] == 1 and rel.end_j[5] == 0  # M3 released at the A1 end
+    # E-W frame columns rotated 90° (strong-axis E-W).
+    for col in ("C-A1-01F", "C-A5-01F", "C-F2-01F", "C-F6-01F"):
+        assert md.frame_elements[col].angle == 90.0
+    # Corner columns moment-connected to the N-S frames stay unrotated.
+    for col in ("C-A6-01F", "C-F1-01F"):
+        assert md.frame_elements[col].angle == 0.0
+
+
+def test_20story_ew_frame_columns_rotated():
+    """20-story E-W face columns A2-A6 / F2-F6 are rotated 90° (strong-axis E-W)."""
+    md = f.build_fema355c("LA", 20, "pre", "3d")
+    for col in ("C-A2-01F", "C-A6-01F", "C-F2-01F", "C-F6-01F"):
+        assert md.frame_elements[col].angle == 90.0
+    # Corner columns stay unrotated (strong-axis N-S).
+    for col in ("C-A1-01F", "C-A7-01F", "C-F1-01F", "C-F7-01F"):
+        assert md.frame_elements[col].angle == 0.0
+
+
 def test_20story_geometry_matches_benchmark():
     """5 bays x 22 levels @ 20 ft; heights 12/12/18 ft then 13 ft x 19."""
     md = f.build_fema355c("LA", 20, "pre", "2d")

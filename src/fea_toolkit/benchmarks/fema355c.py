@@ -1478,19 +1478,39 @@ _GEOM = {
 
 # ── Moment-frame layout per (region, stories) ────────────────────────────
 # ``ns_bays_moment`` / ``ew_bays_moment`` = full moment bays per perimeter
-# face; ``pinned`` closes the short bay that completes each face
-# (``None`` = all moment; ``"corner"`` = last beam pinned at the corner column,
-# LA/Boston 9-story 4.5-bay arrangement; ``"both"`` = pinned at both ends,
-# Seattle 9-story 4-bay arrangement).  ``box_corners`` = LA 20-story box
+# face; ``ew_moment_start`` = the 0-based E-W bay index where the E-W moment
+# frame begins (0 = grid line 1; the 3-story frames sit at grids 2-5, one bay
+# in from grid line 1).  ``pinned`` closes the short bay that completes each
+# face (``None`` = all moment; ``"corner"`` = last beam pinned at the corner
+# column, LA/Boston 9-story 4.5-bay arrangement; ``"both"`` = pinned at both
+# ends, Seattle 9-story 4-bay arrangement).  ``box_corners`` = LA 20-story box
 # corner columns.
 _MR = {
-    ("LA", 3): {"ns_bays_moment": 3, "ew_bays_moment": 3, "pinned": None, "box_corners": False},
+    ("LA", 3): {
+        "ns_bays_moment": 3,
+        "ew_bays_moment": 3,
+        "ew_moment_start": 1,
+        "pinned": None,
+        "box_corners": False,
+    },
     ("LA", 9): {"ns_bays_moment": 4, "ew_bays_moment": 4, "pinned": "corner", "box_corners": False},
     ("LA", 20): {"ns_bays_moment": 5, "ew_bays_moment": 6, "pinned": None, "box_corners": True},
-    ("SE", 3): {"ns_bays_moment": 3, "ew_bays_moment": 3, "pinned": None, "box_corners": False},
+    ("SE", 3): {
+        "ns_bays_moment": 3,
+        "ew_bays_moment": 3,
+        "ew_moment_start": 1,
+        "pinned": None,
+        "box_corners": False,
+    },
     ("SE", 9): {"ns_bays_moment": 4, "ew_bays_moment": 4, "pinned": "both", "box_corners": False},
     ("SE", 20): {"ns_bays_moment": 5, "ew_bays_moment": 6, "pinned": None, "box_corners": False},
-    ("BO", 3): {"ns_bays_moment": 3, "ew_bays_moment": 3, "pinned": None, "box_corners": False},
+    ("BO", 3): {
+        "ns_bays_moment": 3,
+        "ew_bays_moment": 3,
+        "ew_moment_start": 1,
+        "pinned": None,
+        "box_corners": False,
+    },
     ("BO", 9): {"ns_bays_moment": 4, "ew_bays_moment": 4, "pinned": "corner", "box_corners": False},
     ("BO", 20): {"ns_bays_moment": 5, "ew_bays_moment": 6, "pinned": None, "box_corners": False},
     # R3-LA9 redesign: 3 moment bays + 2 gravity bays per face (6 connections).
@@ -2369,23 +2389,25 @@ def _assemble(
     )
 
 
-def _add_col(frames, assigns, tag, ni, nj, sec, eid):
+def _add_col(frames, assigns, tag, ni, nj, sec, eid, angle=0.0):
     """Add a column frame element; return the next tag."""
-    frames[eid] = FrameElement(elem_id=eid, elem_tag=tag, node_i=str(ni), node_j=str(nj))
+    frames[eid] = FrameElement(
+        elem_id=eid, elem_tag=tag, node_i=str(ni), node_j=str(nj), angle=angle
+    )
     assigns[eid] = sec
     return tag + 1
 
 
-def _add_beam(
-    frames, assigns, releases, tag, ni, nj, sec, eid, release_j=False, release_both=False
-):
-    """Add a beam; release M3 (major moment) at the J end (or both ends)."""
+def _add_beam(frames, assigns, releases, tag, ni, nj, sec, eid, release_i=False, release_j=False):
+    """Add a beam; release M3 (major moment) at the I and/or J end."""
     frames[eid] = FrameElement(elem_id=eid, elem_tag=tag, node_i=str(ni), node_j=str(nj))
     assigns[eid] = sec
-    if release_both:
-        releases[eid] = FrameRelease(eid, end_i=[0, 0, 0, 0, 0, 1], end_j=[0, 0, 0, 0, 0, 1])
-    elif release_j:
-        releases[eid] = FrameRelease(eid, end_j=[0, 0, 0, 0, 0, 1])
+    if release_i or release_j:
+        releases[eid] = FrameRelease(
+            eid,
+            end_i=[0, 0, 0, 0, 0, 1] if release_i else [0] * 6,
+            end_j=[0, 0, 0, 0, 0, 1] if release_j else [0] * 6,
+        )
     return tag + 1
 
 
@@ -2418,6 +2440,13 @@ def _gravity_col_sec(sched: dict, j: int) -> str:
     ``gravity_col_other`` tier first, then the 4-column ``gravity_col_40``
     tier (split schedules without a separate "other" group), then the single
     ``gravity_col`` group.  ``col_int`` is a last-resort fallback only.
+
+    Args:
+        sched: The member schedule dict for the current model.
+        j: The zero-based story index into the schedule lists.
+
+    Returns:
+        The selected section name (e.g. ``"W14X193"``).
     """
     if "gravity_col_other" in sched:
         return sched["gravity_col_other"][j]
@@ -2644,6 +2673,11 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
     story = _story_labels(n_story, geom["base"])
     (pi0, pi1), (pk0, pk1) = _parse_penthouse(geom["penthouse"])
     two_group = "gravity_col_40" in sched  # 20-story: 4 + 2 gravity columns
+    pinned = mr.get("pinned")
+    ns_moment = mr["ns_bays_moment"]
+    ew_moment = mr["ew_bays_moment"]
+    ew_start = mr.get("ew_moment_start", 0)
+    ew_end = ew_start + ew_moment  # one past the last E-W moment bay
 
     # ── Nodes ──
     nodes: dict[str, Node] = {}
@@ -2694,33 +2728,89 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
             return None
         return _gravity_col_sec(sched, j)
 
+    # Column orientation: a column is strong-axis E-W (angle 90°) when it sits in
+    # an E-W moment frame (grids A/F) — or is the 3-story leaning/gravity column —
+    # and strong-axis N-S (angle 0°) when it belongs to an N-S frame.
+    rotate_ew = ew_start > 0  # 3-story: centred E-W frame + leaning columns
+    is_9story = pinned in ("corner", "both")
+    is_20story = pinned is None and ns_moment == ns  # all perimeter moment-resisting
+
+    def is_ew_moment_col(i, k):
+        """3-story perimeter column on grid A/E inside the centred E-W frame."""
+        return i in (0, ns) and ew_start <= k <= ew_end
+
+    def is_ew_gravity_col(i, k):
+        """3-story perimeter gravity column on grid A/E just east of the moment frame."""
+        return rotate_ew and i in (0, ns) and k == ew_end + 1 and k < ew
+
+    def is_ns_leaning_col(i, k):
+        """Leaning column at the gravity end of the 3-story N-S frames (E1/E7)."""
+        return rotate_ew and i == ns and k in (0, ew)
+
+    def is_ew_frame_col(i, k):
+        """9-story perimeter column on grid A/F that belongs to the E-W frame.
+
+        Grid A (south) moments A1-A5 and pins A6; grid F (north) pins F1 and
+        moments F2-F6 (the last beam going clockwise is pinned at the corner).
+        """
+        if i == 0:
+            return k < ew
+        if i == ns:
+            return k > 0
+        return False
+
+    def is_20story_ew_col(i, k):
+        """20-story perimeter column on grid A/F between the corners (E-W frame).
+
+        The 20-story has all perimeter connections moment-resisting; the
+        intermediate E-W face columns are strong-axis E-W while the corner
+        columns stay strong-axis N-S.
+        """
+        return i in (0, ns) and 0 < k < ew
+
+    def col_angle(i, k):
+        """Column rotation (degrees): 90° = strong-axis E-W."""
+        if rotate_ew and (
+            is_ew_moment_col(i, k) or is_ew_gravity_col(i, k) or is_ns_leaning_col(i, k)
+        ):
+            return 90.0
+        if is_9story and is_ew_frame_col(i, k):
+            return 90.0
+        if is_20story and is_20story_ew_col(i, k):
+            return 90.0
+        return 0.0
+
     # ── Columns ──
     has_next = "col_next" in sched  # Boston/Seattle 20-story "next to exterior"
     for i in range(n_ns):
         for k in range(n_ew):
             for j in range(n_story):
+                angle = col_angle(i, k)
                 if is_corner(i, k):
                     sec = sched["col_ext"][j]  # corner column (box for LA 20)
                 elif has_next and is_next(i, k):
                     sec = sched["col_next"][j]
                 elif is_perim(i, k):
-                    sec = sched["col_int"][j]
+                    if rotate_ew and is_ew_moment_col(i, k):
+                        sec = sched["col_int"][j]
+                    elif is_ew_gravity_col(i, k):
+                        sec = _gravity_col_sec(sched, j)
+                    else:
+                        sec = sched["col_int"][j]
                 else:
                     sec = gravity_sec(i, k, j)
                     if sec is None:
                         continue
                 eid = f"C-{_grid_label(i, k)}-{story[j]}"
                 etag = _add_col(
-                    frames, assigns, etag, grid[(i, k, j)], grid[(i, k, j + 1)], sec, eid
+                    frames, assigns, etag, grid[(i, k, j)], grid[(i, k, j + 1)], sec, eid, angle
                 )
 
     # ── Beams: N-S (along X) then E-W (along Y) ──
-    # Perimeter moment frames span ``ns_moment``/``ew_moment`` bays; the bays
-    # beyond are gravity bays (pinned) for ``pinned=None`` (3-/20-story) or a
-    # single pinned moment bay for ``pinned="corner"`` (9-story).
-    pinned = mr.get("pinned")
-    ns_moment = mr["ns_bays_moment"]
-    ew_moment = mr["ew_bays_moment"]
+    # Perimeter moment frames span ``ns_moment``/``ew_moment`` bays starting at
+    # grid line 1 (or ``ew_start`` for the E-W faces); the bays beyond are
+    # gravity bays (pinned) for ``pinned=None`` (3-/20-story) or a single
+    # pinned moment bay for ``pinned="corner"`` (9-story).
     beam_ns = sched.get("beam_20", sched.get("beam"))  # N-S interior beams
     beam_ew = sched.get("beam_40", sched.get("beam"))  # E-W interior beams
     pinned_girder = sched.get("beam_gravity", sched.get("girder"))  # pinned-bay girder
@@ -2728,16 +2818,30 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
         lvl = j - 1
         for k in range(n_ew):
             for i in range(ns):
+                sec = beam_ns[lvl]
+                release_i = release_j = False
                 if k in (0, ew):
-                    if i < ns_moment:
-                        sec = sched["girder"][lvl]
-                        release = False
+                    if pinned is None:
+                        # 3-/20-story (and R3): moment bays + gravity bay(s)
+                        # released at the J (gravity) end.
+                        if i < ns_moment:
+                            sec = sched["girder"][lvl]
+                        else:
+                            release_j = True
                     else:
-                        sec = beam_ns[lvl] if pinned is None else pinned_girder[lvl]
-                        release = True
-                else:
-                    sec = beam_ns[lvl]
-                    release = False
+                        # 9-story: 4 moment bays + the last beam (going clockwise)
+                        # pinned at the corner column (grid 1 → A1, grid 6 → F6).
+                        pinned_bay = (k == 0 and i == 0) or (k == ew and i == ns - 1)
+                        if pinned_bay:
+                            sec = pinned_girder[lvl]
+                            if pinned == "both":
+                                release_i = release_j = True
+                            elif k == 0:
+                                release_i = True
+                            else:
+                                release_j = True
+                        else:
+                            sec = sched["girder"][lvl]
                 eid = f"B-{_grid_label(i, k)}-{_grid_label(i + 1, k)}-{story[j]}"
                 etag = _add_beam(
                     frames,
@@ -2748,21 +2852,35 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
                     grid[(i + 1, k, j)],
                     sec,
                     eid,
-                    release_j=release,
-                    release_both=(release and pinned == "both"),
+                    release_i=release_i,
+                    release_j=release_j,
                 )
         for i in range(n_ns):
             for k in range(ew):
+                sec = beam_ew[lvl]
+                release_i = release_j = False
                 if i in (0, ns):
-                    if k < ew_moment:
-                        sec = sched["girder"][lvl]
-                        release = False
+                    if pinned is None:
+                        # 3-/20-story (and R3): moment bays + gravity bay(s)
+                        # released at the J (gravity) end.
+                        if ew_start <= k < ew_end:
+                            sec = sched["girder"][lvl]
+                        else:
+                            release_j = True
                     else:
-                        sec = beam_ew[lvl] if pinned is None else pinned_girder[lvl]
-                        release = True
-                else:
-                    sec = beam_ew[lvl]
-                    release = False
+                        # 9-story: 4 moment bays + the last beam (going clockwise)
+                        # pinned at the corner column (grid A → A6, grid F → F1).
+                        pinned_bay = (i == 0 and k == ew - 1) or (i == ns and k == 0)
+                        if pinned_bay:
+                            sec = pinned_girder[lvl]
+                            if pinned == "both":
+                                release_i = release_j = True
+                            elif i == 0:
+                                release_j = True
+                            else:
+                                release_i = True
+                        else:
+                            sec = sched["girder"][lvl]
                 eid = f"B-{_grid_label(i, k)}-{_grid_label(i, k + 1)}-{story[j]}"
                 etag = _add_beam(
                     frames,
@@ -2773,8 +2891,8 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
                     grid[(i, k + 1, j)],
                     sec,
                     eid,
-                    release_j=release,
-                    release_both=(release and pinned == "both"),
+                    release_i=release_i,
+                    release_j=release_j,
                 )
 
     # ── Restraints ──
@@ -2886,8 +3004,8 @@ def _build_2d(geom, mr, sched, fy) -> SAPModelData:
                 grid[(i + 1, j)],
                 sec,
                 eid,
+                release_i=(release and both),
                 release_j=release,
-                release_both=both,
             )
 
     restraints: dict[str, Restraint] = {}
