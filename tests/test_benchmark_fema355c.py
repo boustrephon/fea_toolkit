@@ -229,3 +229,45 @@ def test_integer_tags_stay_sequential():
     assert elem_tags == list(range(1, len(md.frame_elements) + 1))
     area_tags = sorted(a.area_tag for a in md.area_elements.values())
     assert area_tags == list(range(1, len(md.area_elements) + 1))
+
+
+def test_boston_3_2d_gravity_column_is_w12x58():
+    """BO 3 2D gravity bay uses the "others" gravity column, not a moment column."""
+    for design, moment_col in (("pre", "W14X99"), ("post", "W14X145")):
+        md = f.build_fema355c("BO", 3, design, "2d")
+        secs = {
+            md.frame_assignments[e.elem_id]
+            for e in md.frame_elements.values()
+            if e.node_i == "E-01F"
+        }
+        assert secs == {"W12X58"}
+        assert moment_col not in secs
+
+
+def test_2d_gravity_column_prefers_the_others_tier():
+    """The 2D gravity bay resolves gravity_col_other (LA/BO) or gravity_col (SE)."""
+    la = f.build_fema355c("LA", 3, "pre", "2d")
+    la_secs = {
+        la.frame_assignments[e.elem_id] for e in la.frame_elements.values() if e.node_i == "E-01F"
+    }
+    assert la_secs == {"W14X68"}  # "others"; the below-penthouse W14X82 is no longer used
+
+    se = f.build_fema355c("SE", 3, "pre", "2d")
+    se_secs = {
+        se.frame_assignments[e.elem_id] for e in se.frame_elements.values() if e.node_i == "E-01F"
+    }
+    assert se_secs == {"W10X77"}  # single gravity group (no "others" tier)
+
+    r3 = f.build_fema355c("LA", 9, "r3", "2d")
+    r3_secs = {
+        r3.frame_assignments[e.elem_id]
+        for e in r3.frame_elements.values()
+        if e.node_i in ("E-01B", "F-01B")
+    }
+    assert r3_secs == {"W14X193"}  # "others", not gravity_col (W14X211)
+
+    r2 = f.build_fema355c("LA", 9, "r2", "2d")
+    r2_secs = {
+        r2.frame_assignments[e.elem_id] for e in r2.frame_elements.values() if e.node_i == "K-01B"
+    }
+    assert r2_secs == {"W14X193"}  # "others", not gravity_col (W14X211)

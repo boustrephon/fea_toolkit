@@ -2411,6 +2411,21 @@ def _sections_for(sched: dict) -> dict[str, ISection]:
     return {n: _section(n) for n in names}
 
 
+def _gravity_col_sec(sched: dict, j: int) -> str:
+    """Gravity-column section for a grid point outside the penthouse footprint.
+
+    Preference order mirrors the split gravity-column groups: the dedicated
+    ``gravity_col_other`` tier first, then the 4-column ``gravity_col_40``
+    tier (split schedules without a separate "other" group), then the single
+    ``gravity_col`` group.  ``col_int`` is a last-resort fallback only.
+    """
+    if "gravity_col_other" in sched:
+        return sched["gravity_col_other"][j]
+    if "gravity_col_40" in sched:
+        return sched["gravity_col_40"][j]
+    return sched.get("gravity_col", sched["col_int"])[j]
+
+
 def _parse_penthouse(s: str) -> tuple[tuple[int, int], tuple[int, int]]:
     """Parse a ``"C3-D5"`` footprint into ((NS lo, hi), (EW lo, hi)) 0-based indices."""
     a, b = s.split("-")
@@ -2629,7 +2644,6 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
     story = _story_labels(n_story, geom["base"])
     (pi0, pi1), (pk0, pk1) = _parse_penthouse(geom["penthouse"])
     two_group = "gravity_col_40" in sched  # 20-story: 4 + 2 gravity columns
-    has_other = "gravity_col_other" in sched  # 3/9-story: columns outside penthouse
 
     # ── Nodes ──
     nodes: dict[str, Node] = {}
@@ -2678,11 +2692,7 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
         # gravity columns throughout.
         if n_story == 22:
             return None
-        if two_group:
-            return sched.get("gravity_col_other", sched["gravity_col_40"])[j]
-        if has_other:
-            return sched["gravity_col_other"][j]
-        return sched["gravity_col"][j]
+        return _gravity_col_sec(sched, j)
 
     # ── Columns ──
     has_next = "col_next" in sched  # Boston/Seattle 20-story "next to exterior"
@@ -2839,7 +2849,7 @@ def _build_2d(geom, mr, sched, fy) -> SAPModelData:
     def col_sec(i, j):
         role = roles[i]
         if role == "gravity":
-            return sched.get("gravity_col", sched["col_int"])[j]
+            return _gravity_col_sec(sched, j)
         return sched["col_" + role][j]
 
     for i in range(n_ns):
