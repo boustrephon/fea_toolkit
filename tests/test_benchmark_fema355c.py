@@ -181,3 +181,51 @@ def test_r3_redesign_three_moment_bays():
     # 5 bays, 6 column lines; the last 2 bays are gravity (released).
     releases = list(md.frame_releases.values())
     assert len(releases) == 20  # 2 gravity bays x 10 levels
+
+
+# ── Location-based identifiers ────────────────────────────────────────────
+
+
+def test_2d_node_ids_are_grid_and_level():
+    """2D node IDs are ``{grid}-{level}``: A-01F at the base, E-RF at the roof."""
+    md = f.build_fema355c("LA", 3, "pre", "2d")
+    assert "A-01F" in md.nodes
+    assert md.nodes["A-01F"].z == 0.0
+    assert "E-RF" in md.nodes
+    assert md.nodes["E-RF"].z == pytest.approx(3 * f.H13)
+
+
+def test_3d_node_ids_carry_both_grid_lines():
+    """3D node IDs are ``{NS}{EW}-{level}`` (e.g. A1-01F, E7-RF)."""
+    md = f.build_fema355c("LA", 3, "pre", "3d")
+    assert "A1-01F" in md.nodes
+    assert md.nodes["A1-01F"].x == 0.0 and md.nodes["A1-01F"].y == 0.0
+    assert "E7-RF" in md.nodes
+
+
+def test_basement_levels_label_deepest_first():
+    """20-story labels the basements 02B (deepest) and 01B, ground 01F."""
+    md = f.build_fema355c("LA", 20, "pre", "3d")
+    assert md.nodes["A1-02B"].z == 0.0
+    assert md.nodes["A1-01B"].z == pytest.approx(f.H12)
+    assert md.nodes["A1-01F"].z == pytest.approx(2 * f.H12)
+
+
+def test_frame_and_panel_ids_are_location_based():
+    """Columns/beams/panels are keyed off their grid lines and level."""
+    md2 = f.build_fema355c("LA", 3, "pre", "2d")
+    assert "C-A-01F" in md2.frame_elements  # column at grid A, story 01F→02F
+    assert "B-A-B-02F" in md2.frame_elements  # beam A–B at level 02F
+    md3 = f.build_fema355c("LA", 3, "pre", "3d")
+    assert "P-A1-02F" in md3.area_elements  # floor panel at bay A1, level 02F
+
+
+def test_integer_tags_stay_sequential():
+    """The OpenSees ``*_tag`` integers are unchanged: dense 1..N per entity."""
+    md = f.build_fema355c("LA", 20, "pre", "3d")
+    node_tags = sorted(n.node_tag for n in md.nodes.values())
+    assert node_tags == list(range(1, len(md.nodes) + 1))
+    elem_tags = sorted(e.elem_tag for e in md.frame_elements.values())
+    assert elem_tags == list(range(1, len(md.frame_elements) + 1))
+    area_tags = sorted(a.area_tag for a in md.area_elements.values())
+    assert area_tags == list(range(1, len(md.area_elements) + 1))

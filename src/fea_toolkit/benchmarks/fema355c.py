@@ -23,6 +23,15 @@ Approximations (documented, not fabrications):
 * Dead (96/83 psf) and reduced live (20 psf) loads are nodal ``joint_loads``
   by tributary area; steel self-weight (13 psf) rides on material density.
 * 3D builders emit one loads-only floor panel per bay per level.
+
+Identifiers are location-based rather than sequential: nodes are
+``{grid}-{level}`` (e.g. ``A1-02F``, ``C3-RF``); columns are
+``C-{grid}-{level}``, beams ``B-{grid}-{grid}-{level}`` and floor panels
+``P-{grid}-{level}``, keyed off their grid lines and lower level.  Grid lines
+letter ``A``… along N-S and number ``1``… along E-W; levels run ``02B`` /
+``01B`` (deepest basement first), then ``01F``… for the ground and upper
+floors, and ``RF`` for the roof.  Integer OpenSees tags (``*_tag``) are
+unchanged.
 """
 
 from __future__ import annotations
@@ -2360,16 +2369,17 @@ def _assemble(
     )
 
 
-def _add_col(frames, assigns, tag, ni, nj, sec):
+def _add_col(frames, assigns, tag, ni, nj, sec, eid):
     """Add a column frame element; return the next tag."""
-    frames[str(tag)] = FrameElement(elem_id=str(tag), elem_tag=tag, node_i=str(ni), node_j=str(nj))
-    assigns[str(tag)] = sec
+    frames[eid] = FrameElement(elem_id=eid, elem_tag=tag, node_i=str(ni), node_j=str(nj))
+    assigns[eid] = sec
     return tag + 1
 
 
-def _add_beam(frames, assigns, releases, tag, ni, nj, sec, release_j=False, release_both=False):
+def _add_beam(
+    frames, assigns, releases, tag, ni, nj, sec, eid, release_j=False, release_both=False
+):
     """Add a beam; release M3 (major moment) at the J end (or both ends)."""
-    eid = str(tag)
     frames[eid] = FrameElement(elem_id=eid, elem_tag=tag, node_i=str(ni), node_j=str(nj))
     assigns[eid] = sec
     if release_both:
@@ -2417,6 +2427,38 @@ def _levels(heights: list[float]) -> list[float]:
         z += h
         out.append(z)
     return out
+
+
+def _grid_label(i: int, k: Optional[int] = None) -> str:
+    """Grid label for an N-S line (``k is None``) or an N-S x E-W point.
+
+    N-S lines letter ``A``…; E-W lines number ``1``… (e.g. ``A1``, ``C3``).
+    """
+    ns = chr(ord("A") + i)
+    return ns if k is None else f"{ns}{k + 1}"
+
+
+def _basement_count(base: str) -> int:
+    """Number of basement levels implied by a geometry's base type."""
+    return {"fixed": 0, "pinned_ground": 1, "pinned_ground_2basement": 2}[base]
+
+
+def _story_labels(n_story: int, base: str) -> list[str]:
+    """Level labels, bottom to top: ``02B``/``01B``, ``01F``…, ``RF``.
+
+    Basements label deepest-first (``02B`` below ``01B``); the ground line is
+    ``01F`` and the roof is ``RF``.
+    """
+    n_base = _basement_count(base)
+    labels: list[str] = []
+    for j in range(n_story + 1):
+        if j < n_base:
+            labels.append(f"{n_base - j:02d}B")
+        elif j == n_story:
+            labels.append("RF")
+        else:
+            labels.append(f"{j - n_base + 1:02d}F")
+    return labels
 
 
 def _out_of_plane() -> list[int]:
@@ -2493,14 +2535,14 @@ def _gravity_3d(ns, ew, bay, n_story, grid) -> list[JointLoad]:
     return loads
 
 
-def _floor_panels_3d(ns, ew, n_story, grid) -> dict[str, AreaElement]:
+def _floor_panels_3d(ns, ew, n_story, grid, story) -> dict[str, AreaElement]:
     """One loads-only floor panel per bay per level (3D), for diaphragm viewing."""
     panels: dict[str, AreaElement] = {}
     tag = 1
     for j in range(1, n_story + 1):
         for i in range(ns):
             for k in range(ew):
-                aid = f"F{tag}"
+                aid = f"P-{_grid_label(i, k)}-{story[j]}"
                 panels[aid] = AreaElement(
                     area_id=aid,
                     area_tag=tag,
@@ -2584,6 +2626,7 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
     n_ns = ns + 1
     n_ew = ew + 1
     levels = _levels(heights)
+    story = _story_labels(n_story, geom["base"])
     (pi0, pi1), (pk0, pk1) = _parse_penthouse(geom["penthouse"])
     two_group = "gravity_col_40" in sched  # 20-story: 4 + 2 gravity columns
     has_other = "gravity_col_other" in sched  # 3/9-story: columns outside penthouse
@@ -2595,7 +2638,7 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
     for i in range(n_ns):
         for k in range(n_ew):
             for j in range(n_story + 1):
-                nid = str(tag)
+                nid = f"{_grid_label(i, k)}-{story[j]}"
                 nodes[nid] = Node(node_id=nid, node_tag=tag, x=i * bay, y=k * bay, z=levels[j])
                 grid[(i, k, j)] = nid
                 tag += 1
@@ -2656,7 +2699,10 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
                     sec = gravity_sec(i, k, j)
                     if sec is None:
                         continue
-                etag = _add_col(frames, assigns, etag, grid[(i, k, j)], grid[(i, k, j + 1)], sec)
+                eid = f"C-{_grid_label(i, k)}-{story[j]}"
+                etag = _add_col(
+                    frames, assigns, etag, grid[(i, k, j)], grid[(i, k, j + 1)], sec, eid
+                )
 
     # ── Beams: N-S (along X) then E-W (along Y) ──
     # Perimeter moment frames span ``ns_moment``/``ew_moment`` bays; the bays
@@ -2682,6 +2728,7 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
                 else:
                     sec = beam_ns[lvl]
                     release = False
+                eid = f"B-{_grid_label(i, k)}-{_grid_label(i + 1, k)}-{story[j]}"
                 etag = _add_beam(
                     frames,
                     assigns,
@@ -2690,6 +2737,7 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
                     grid[(i, k, j)],
                     grid[(i + 1, k, j)],
                     sec,
+                    eid,
                     release_j=release,
                     release_both=(release and pinned == "both"),
                 )
@@ -2705,6 +2753,7 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
                 else:
                     sec = beam_ew[lvl]
                     release = False
+                eid = f"B-{_grid_label(i, k)}-{_grid_label(i, k + 1)}-{story[j]}"
                 etag = _add_beam(
                     frames,
                     assigns,
@@ -2713,6 +2762,7 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
                     grid[(i, k, j)],
                     grid[(i, k + 1, j)],
                     sec,
+                    eid,
                     release_j=release,
                     release_both=(release and pinned == "both"),
                 )
@@ -2730,7 +2780,7 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
     masses = _masses_for(n_story)
     added_masses = _lump_3d(masses, ns, ew, n_ns, n_ew, grid, n_story)
     joint_loads = _gravity_3d(ns, ew, bay, n_story, grid)
-    area_elements = _floor_panels_3d(ns, ew, n_story, grid)
+    area_elements = _floor_panels_3d(ns, ew, n_story, grid, story)
     return _assemble(
         nodes,
         restraints,
@@ -2753,6 +2803,7 @@ def _build_2d(geom, mr, sched, fy) -> SAPModelData:
     n_story = len(heights)
     n_ns = ns + 1
     levels = _levels(heights)
+    story = _story_labels(n_story, geom["base"])
     ns_moment = mr["ns_bays_moment"]
     pinned = mr.get("pinned")
 
@@ -2774,7 +2825,7 @@ def _build_2d(geom, mr, sched, fy) -> SAPModelData:
     tag = 1
     for i in range(n_ns):
         for j in range(n_story + 1):
-            nid = str(tag)
+            nid = f"{_grid_label(i)}-{story[j]}"
             nodes[nid] = Node(node_id=nid, node_tag=tag, x=i * bay, y=0.0, z=levels[j])
             grid[(i, j)] = nid
             tag += 1
@@ -2793,7 +2844,10 @@ def _build_2d(geom, mr, sched, fy) -> SAPModelData:
 
     for i in range(n_ns):
         for j in range(n_story):
-            etag = _add_col(frames, assigns, etag, grid[(i, j)], grid[(i, j + 1)], col_sec(i, j))
+            eid = f"C-{_grid_label(i)}-{story[j]}"
+            etag = _add_col(
+                frames, assigns, etag, grid[(i, j)], grid[(i, j + 1)], col_sec(i, j), eid
+            )
 
     for j in range(1, n_story + 1):
         lvl = j - 1
@@ -2812,6 +2866,7 @@ def _build_2d(geom, mr, sched, fy) -> SAPModelData:
                 sec = sched["girder"][lvl]
                 release = False
                 both = False
+            eid = f"B-{_grid_label(i)}-{_grid_label(i + 1)}-{story[j]}"
             etag = _add_beam(
                 frames,
                 assigns,
@@ -2820,6 +2875,7 @@ def _build_2d(geom, mr, sched, fy) -> SAPModelData:
                 grid[(i, j)],
                 grid[(i + 1, j)],
                 sec,
+                eid,
                 release_j=release,
                 release_both=both,
             )
