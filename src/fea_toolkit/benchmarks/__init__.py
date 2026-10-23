@@ -9,6 +9,12 @@ benchmark model is needed (tests, the figure generator, a viewer example).
 ``SAPModelData`` construction + model-codec export — it imports no ``ops``).
 """
 
+from .fema355c import (
+    build_fema355c,
+)
+from .fema355c import (
+    write_snapshots as write_fema355c_snapshots,
+)
 from .sac import (
     BEAM,
     BEAM_FY,
@@ -47,10 +53,12 @@ __all__ = [
     "build_2d",
     "build_3d",
     "build_builder",
+    "build_fema355c",
     "builder_config",
     "enrich_nonlinear",
     "load_model",
     "peak_x",
     "preprocess_config",
+    "write_fema355c_snapshots",
     "write_snapshots",
 ]
