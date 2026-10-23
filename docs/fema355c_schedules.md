@@ -183,6 +183,22 @@ Note: Column line A strong axis; line F weak axis; lines B-E interior.
 
 Note: basement floor (-1 level) has simple connections.
 
+> **Cross-check note (Notre Dame benchmark).** The Notre Dame "Benchmark Control
+> Problems" MATLAB files (`struct9.m`, `struct20.m`, Ohtori/Christenson/Spencer
+> 1999) encode the LA pre-Northridge models (matched here by area + strong-axis
+> inertia against the AISC section table). `struct9.m` matches Table B-1 exactly —
+> columns, girders, and the splice materials 12–16 (weighted `6/13`/`7/13` blends
+> of the two sections listed at a splice floor). `struct20.m` matches the B-1
+> columns exactly (15×15 box corners + W24 interior, splices 17–25), but its
+> moment-frame girders differ in two places:
+>
+> | Level | struct20.m | FEMA 355C B-1 |
+> | :--- | :--- | :--- |
+> | basement (-2/-1) | W30X99 (pinned, elem type 3) | W14X22 (simple) |
+> | 14/15 – 16/17 | W24X131 | W30X99 |
+>
+> The FEMA 355C B-1 (Phase 2) values are the ones encoded in `fema355c.py`.
+
 ## 6. Table B-2 — LA post-Northridge cover plates
 
 Top plate: W1 x T1 (width x thickness), fixed 18 in length, tapers to 3 in wide.
