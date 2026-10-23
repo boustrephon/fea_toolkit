@@ -113,3 +113,59 @@ def test_20story_geometry_matches_benchmark():
     assert zs[3] == pytest.approx(2 * f.H12 + f.H18)
     assert max(zs) == pytest.approx(2 * f.H12 + f.H18 + 19 * f.H13)
     assert max(n.x for n in md.nodes.values()) == pytest.approx(5 * f.BAY_20)
+
+
+# ── Full registry coverage (LA / Seattle / Boston, incl. redesigns) ──
+
+
+@pytest.mark.parametrize("region,stories,design", sorted(f._SCHEDULES))
+def test_every_schedule_builds(region, stories, design):
+    """Every encoded schedule builds in both directions with non-empty models."""
+    for direction in ("2d", "3d"):
+        md = f.build_fema355c(region, stories, design, direction)
+        assert md.nodes
+        assert md.frame_elements
+        assert md.sections
+
+
+def test_boston_20_has_next_to_exterior_columns():
+    """Boston 20 uses a third (W36) column tier next to the corner columns."""
+    md = f.build_fema355c("BO", 20, "pre", "3d")
+    sections = set(md.frame_assignments.values())
+    assert "W36X194" in sections  # next-to-exterior (pre)
+    assert "W36X260" in sections  # interior
+    assert "W14X370" in sections  # exterior corner
+
+
+def test_seattle_9_pinned_both_ends():
+    """Seattle 9 has the short bay pinned at both ends (4-bay arrangement)."""
+    md = f.build_fema355c("SE", 9, "pre", "3d")
+    both = [r for r in md.frame_releases.values() if any(r.end_i)]
+    assert both
+    for rel in both:
+        assert rel.end_i[5] == 1  # M3 released at I
+        assert rel.end_j[5] == 1  # M3 released at J
+
+
+def test_seattle_20_single_gravity_column_group():
+    """Seattle 20 uses one (not 4+2) gravity column group below the penthouse."""
+    md = f.build_fema355c("SE", 20, "pre", "3d")
+    assert "W14X426" in md.sections  # single gravity column group (pre)
+
+
+def test_r2_redesign_15ft_bays():
+    """R2-LA9 uses 15 ft bays: 10 x 10 bays, 9 moment bays per face."""
+    md = f.build_fema355c("LA", 9, "r2", "3d")
+    xs = {n.x for n in md.nodes.values()}
+    ys = {n.y for n in md.nodes.values()}
+    assert len(xs) == 11  # 10 bays + 1
+    assert len(ys) == 11
+    assert max(xs) == pytest.approx(10 * f.BAY_15)
+
+
+def test_r3_redesign_three_moment_bays():
+    """R3-LA9 keeps 5 bays but only 3 moment bays per face (2 gravity bays)."""
+    md = f.build_fema355c("LA", 9, "r3", "2d")
+    # 5 bays, 6 column lines; the last 2 bays are gravity (released).
+    releases = list(md.frame_releases.values())
+    assert len(releases) == 20  # 2 gravity bays x 10 levels

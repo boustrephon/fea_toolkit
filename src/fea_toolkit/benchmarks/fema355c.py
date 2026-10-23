@@ -48,6 +48,7 @@ from ..model.sap_data import (
 FT = 0.3048  # m per foot
 BAY_30 = 30.0 * FT  # 9.144 m  (3- and 9-story)
 BAY_20 = 20.0 * FT  # 6.096 m  (20-story)
+BAY_15 = 15.0 * FT  # 4.572 m  (R2-LA9 redesign)
 H12 = 12.0 * FT  # 3.6576 m  (basement)
 H13 = 13.0 * FT  # 3.9624 m  (typical story)
 H18 = 18.0 * FT  # 5.4864 m  (ground floor)
@@ -1483,6 +1484,13 @@ _MR = {
     ("BO", 3): {"ns_bays_moment": 3, "ew_bays_moment": 3, "pinned": None, "box_corners": False},
     ("BO", 9): {"ns_bays_moment": 4, "ew_bays_moment": 4, "pinned": "corner", "box_corners": False},
     ("BO", 20): {"ns_bays_moment": 5, "ew_bays_moment": 6, "pinned": None, "box_corners": False},
+    # R3-LA9 redesign: 3 moment bays + 2 gravity bays per face (6 connections).
+    ("LA", 9, "r3"): {
+        "ns_bays_moment": 3,
+        "ew_bays_moment": 3,
+        "pinned": None,
+        "box_corners": False,
+    },
 }
 
 # ── Member schedules per (region, stories, design) ───────────────────────
@@ -1742,7 +1750,520 @@ _SCHEDULES = {
             "W24X62": {"top": (5.0, 0.75), "bottom": (9.0, 0.5)},
         },
     },
-    # __SCHEDULES_MORE__
+    # ── Boston ─────────────────────────────────────────────────────────
+    ("BO", 3, "pre"): {
+        "col_ext": ["W14X74"] * 3,
+        "col_int": ["W14X99"] * 3,
+        "girder": ["W18X35", "W21X57", "W21X62"],
+        "gravity_col_40": ["W12X65"] * 3,  # 4 columns below penthouse
+        "gravity_col_20": ["W12X72"] * 3,  # 2 columns below penthouse
+        "gravity_col_other": ["W12X58"] * 3,
+        "beam": ["W16X26", "W16X26", "W14X22"],
+    },
+    ("BO", 3, "post"): {
+        "col_ext": ["W14X82"] * 3,
+        "col_int": ["W14X145"] * 3,
+        "girder": ["W21X62", "W21X62", "W14X48"],
+        "gravity_col_40": ["W12X65"] * 3,
+        "gravity_col_20": ["W12X72"] * 3,
+        "gravity_col_other": ["W12X58"] * 3,
+        "beam": ["W16X26", "W16X26", "W14X22"],
+    },
+    ("BO", 9, "pre"): {
+        "col_ext": ["W14X211"] * 2
+        + ["W14X159"] * 2
+        + ["W14X132"] * 2
+        + ["W14X99"] * 2
+        + ["W14X61"] * 2,
+        "col_int": ["W14X283"] * 2
+        + ["W14X233"] * 2
+        + ["W14X211"] * 2
+        + ["W14X176"] * 2
+        + ["W14X120"] * 2,
+        "girder": [
+            "W24X68",
+            "W36X135",
+            "W33X118",
+            "W30X116",
+            "W30X116",
+            "W30X108",
+            "W30X99",
+            "W27X94",
+            "W24X76",
+            "W18X40",
+        ],
+        "gravity_col_40": ["W14X145"] * 2
+        + ["W14X120"] * 2
+        + ["W14X99"] * 2
+        + ["W12X79"] * 2
+        + ["W12X53"] * 2,
+        "gravity_col_20": ["W14X159"] * 2
+        + ["W14X132"] * 2
+        + ["W12X106"] * 2
+        + ["W12X79"] * 2
+        + ["W12X58"] * 2,
+        "gravity_col_other": ["W14X145"] * 2
+        + ["W12X120"] * 2
+        + ["W14X90"] * 2
+        + ["W12X65"] * 2
+        + ["W8X48"] * 2,
+        "beam": ["W16X26"] * 9 + ["W14X22"],
+        "beam_gravity": [
+            "W24X68",
+            "W27X94",
+            "W27X84",
+            "W27X84",
+            "W24X76",
+            "W24X76",
+            "W24X68",
+            "W24X62",
+            "W24X55",
+            "W18X40",
+        ],
+    },
+    ("BO", 9, "post"): {
+        "col_ext": ["W14X283"] * 2
+        + ["W14X257"] * 2
+        + ["W14X211"] * 2
+        + ["W14X159"] * 2
+        + ["W14X109"] * 2,
+        "col_int": ["W14X500"] * 2
+        + ["W14X455"] * 2
+        + ["W14X398"] * 2
+        + ["W14X311"] * 2
+        + ["W14X193"] * 2,
+        "girder": [
+            "W12X53",
+            "W33X141",
+            "W33X141",
+            "W21X101",
+            "W21X101",
+            "W21X101",
+            "W21X101",
+            "W18X97",
+            "W16X67",
+            "W12X53",
+        ],
+        "gravity_col_40": ["W14X145"] * 2
+        + ["W14X120"] * 2
+        + ["W14X99"] * 2
+        + ["W12X79"] * 2
+        + ["W12X53"] * 2,
+        "gravity_col_20": ["W14X159"] * 2
+        + ["W14X132"] * 2
+        + ["W12X106"] * 2
+        + ["W12X79"] * 2
+        + ["W12X58"] * 2,
+        "gravity_col_other": ["W14X145"] * 2
+        + ["W12X120"] * 2
+        + ["W14X90"] * 2
+        + ["W12X65"] * 2
+        + ["W8X48"] * 2,
+        "beam": ["W16X26"] * 9 + ["W14X22"],
+        "beam_gravity": [
+            "W12X53",
+            "W16X67",
+            "W16X67",
+            "W16X67",
+            "W16X67",
+            "W14X61",
+            "W12X58",
+            "W12X58",
+            "W12X53",
+            "W12X53",
+        ],
+    },
+    ("BO", 20, "pre"): {
+        "col_ext": ["W14X370"] * 4
+        + ["W14X311"] * 2
+        + ["W14X283"] * 2
+        + ["W14X233"] * 2
+        + ["W14X193"] * 2
+        + ["W14X159"] * 2
+        + ["W14X132"] * 2
+        + ["W14X109"] * 2
+        + ["W14X82"] * 2
+        + ["W14X61"] * 2,
+        "col_next": ["W36X194"] * 4
+        + ["W36X182"] * 2
+        + ["W36X170"] * 2
+        + ["W36X160"] * 2
+        + ["W36X150"] * 2
+        + ["W36X135"] * 2
+        + ["W30X116"] * 2
+        + ["W30X99"] * 2
+        + ["W27X84"] * 2
+        + ["W24X68"] * 2,
+        "col_int": ["W36X260"] * 4
+        + ["W33X221"] * 2
+        + ["W33X201"] * 4
+        + ["W30X173"] * 4
+        + ["W27X161"] * 2
+        + ["W27X146"] * 2
+        + ["W24X131"] * 2
+        + ["W24X68"] * 2,
+        "girder": [
+            "W12X14",
+            "W27X94",
+            "W36X182",
+            "W36X160",
+            "W36X160",
+            "W36X150",
+            "W36X150",
+            "W36X150",
+            "W36X135",
+            "W36X135",
+            "W33X130",
+            "W33X130",
+            "W33X130",
+            "W33X118",
+            "W33X118",
+            "W30X116",
+            "W30X108",
+            "W30X99",
+            "W27X94",
+            "W27X84",
+            "W24X68",
+            "W18X35",
+        ],
+        "gravity_col_40": ["W14X311"] * 4
+        + ["W14X257"] * 2
+        + ["W14X233"] * 2
+        + ["W14X211"] * 2
+        + ["W14X176"] * 2
+        + ["W14X145"] * 2
+        + ["W14X120"] * 2
+        + ["W12X96"] * 2
+        + ["W12X72"] * 2
+        + ["W10X49"] * 2,
+        "gravity_col_20": ["W14X211"] * 4
+        + ["W14X176"] * 2
+        + ["W14X159"] * 2
+        + ["W14X145"] * 2
+        + ["W14X120"] * 2
+        + ["W14X109"] * 2
+        + ["W14X90"] * 2
+        + ["W12X72"] * 2
+        + ["W10X60"] * 2
+        + ["W8X48"] * 2,
+        "beam_40": ["W18X40"] * 22,
+        "beam_20": ["W12X16"] + ["W12X19"] * 20 + ["W14X22"],
+    },
+    ("BO", 20, "post"): {
+        "col_ext": ["W14X455"] * 4
+        + ["W14X370"] * 2
+        + ["W14X342"] * 4
+        + ["W14X311"] * 2
+        + ["W14X283"] * 4
+        + ["W14X193"] * 2
+        + ["W14X159"] * 2
+        + ["W14X109"] * 2,
+        "col_next": ["W36X393"] * 4
+        + ["W36X328"] * 2
+        + ["W36X300"] * 4
+        + ["W36X260"] * 6
+        + ["W36X182"] * 2
+        + ["W36X150"] * 2
+        + ["W24X117"] * 2,
+        "col_int": ["W36X485"] * 4
+        + ["W36X393"] * 2
+        + ["W36X359"] * 4
+        + ["W36X300"] * 4
+        + ["W36X280"] * 2
+        + ["W36X210"] * 2
+        + ["W36X150"] * 2
+        + ["W24X131"] * 2,
+        "girder": ["W12X14", "W16X67"]
+        + ["W33X141"] * 5
+        + ["W24X131"] * 6
+        + ["W24X117"] * 2
+        + ["W24X104"] * 3
+        + ["W21X101", "W18X86", "W18X76", "W12X53"],
+        "gravity_col_40": ["W14X311"] * 4
+        + ["W14X257"] * 2
+        + ["W14X233"] * 2
+        + ["W14X211"] * 2
+        + ["W14X176"] * 2
+        + ["W14X145"] * 2
+        + ["W14X120"] * 2
+        + ["W12X96"] * 2
+        + ["W12X72"] * 2
+        + ["W10X49"] * 2,
+        "gravity_col_20": ["W14X211"] * 4
+        + ["W14X176"] * 2
+        + ["W14X159"] * 2
+        + ["W14X145"] * 2
+        + ["W14X120"] * 2
+        + ["W14X109"] * 2
+        + ["W14X90"] * 2
+        + ["W12X72"] * 2
+        + ["W10X60"] * 2
+        + ["W8X48"] * 2,
+        "beam_40": ["W18X40"] * 22,
+        "beam_20": ["W12X16"] + ["W12X19"] * 20 + ["W14X22"],
+    },
+    # ── Seattle ────────────────────────────────────────────────────────
+    ("SE", 3, "pre"): {
+        "col_ext": ["W14X159"] * 3,
+        "col_int": ["W14X176"] * 3,
+        "girder": ["W24X76", "W24X84", "W18X40"],
+        "gravity_col": ["W10X77", "W10X60", "W10X60"],
+        "beam": ["W16X26", "W16X26", "W14X22"],
+    },
+    ("SE", 3, "post"): {
+        "col_ext": ["W14X342", "W14X159", "W14X159"],
+        "col_int": ["W14X398", "W14X159", "W14X159"],
+        "girder": ["W33X141", "W21X62", "W21X62"],
+        "gravity_col": ["W10X77", "W10X60", "W10X60"],
+        "beam": ["W16X26", "W16X26", "W14X22"],
+    },
+    ("SE", 9, "pre"): {
+        "col_ext": ["W24X229"] * 4 + ["W24X207"] * 2 + ["W24X162"] * 2 + ["W24X131"] * 2,
+        "col_int": ["W24X229"] * 4 + ["W24X207"] * 2 + ["W24X162"] * 2 + ["W24X131"] * 2,
+        "girder": [
+            "W30X108",
+            "W30X108",
+            "W30X116",
+            "W30X108",
+            "W27X94",
+            "W27X94",
+            "W24X76",
+            "W24X76",
+            "W24X62",
+            "W24X62",
+        ],
+        "gravity_col": [
+            "W14X159",
+            "W14X159",
+            "W14X132",
+            "W14X132",
+            "W14X109",
+            "W14X109",
+            "W14X90",
+            "W14X90",
+            "W14X61",
+            "W14X61",
+        ],
+        "beam": ["W16X31"] + ["W16X26"] * 8 + ["W14X22"],
+    },
+    ("SE", 9, "post"): {
+        "col_ext": ["W24X229"] * 4 + ["W24X207"] * 2 + ["W24X162"] * 2 + ["W24X131"] * 2,
+        "col_int": ["W24X229"] * 4 + ["W24X207"] * 2 + ["W24X162"] * 2 + ["W24X131"] * 2,
+        "girder": [
+            "W27X114",
+            "W27X114",
+            "W27X114",
+            "W27X94",
+            "W27X94",
+            "W27X94",
+            "W24X76",
+            "W24X76",
+            "W21X62",
+            "W21X62",
+        ],
+        "gravity_col": [
+            "W14X159",
+            "W14X159",
+            "W14X132",
+            "W14X132",
+            "W14X109",
+            "W14X109",
+            "W14X90",
+            "W14X90",
+            "W14X61",
+            "W14X61",
+        ],
+        "beam": ["W16X31"] + ["W16X26"] * 8 + ["W14X22"],
+    },
+    ("SE", 9, "rbs"): {
+        "col_ext": ["W24X176"] * 6 + ["W24X131"] * 2 + ["W24X94"] * 2,
+        "col_int": ["W24X229"] * 4 + ["W24X207"] * 2 + ["W24X162"] * 2 + ["W24X131"] * 2,
+        "girder": [
+            "W30X108",
+            "W30X116",
+            "W30X116",
+            "W30X108",
+            "W27X94",
+            "W27X94",
+            "W24X84",
+            "W24X76",
+            "W24X55",
+            "W21X44",
+        ],
+        "gravity_col": [
+            "W14X159",
+            "W14X159",
+            "W14X132",
+            "W14X132",
+            "W14X109",
+            "W14X109",
+            "W14X90",
+            "W14X90",
+            "W14X61",
+            "W14X61",
+        ],
+        "beam": ["W16X31"] + ["W16X26"] * 8 + ["W14X22"],
+    },
+    ("SE", 20, "pre"): {
+        "col_ext": ["W24X229"] * 6 + ["W24X192"] * 8 + ["W24X162"] * 4 + ["W24X131"] * 4,
+        "col_int": ["W24X229"] * 6 + ["W24X192"] * 8 + ["W24X162"] * 4 + ["W24X131"] * 4,
+        "girder": ["W12X14"]
+        + ["W30X132"] * 7
+        + ["W30X116"] * 2
+        + ["W27X114"] * 2
+        + ["W27X94"] * 4
+        + ["W24X62"] * 2
+        + ["W21X57"] * 4,
+        "gravity_col": ["W14X426"] * 2
+        + ["W14X398"] * 2
+        + ["W14X342"] * 2
+        + ["W14X311"] * 2
+        + ["W14X257"] * 2
+        + ["W14X233"] * 2
+        + ["W14X193"] * 2
+        + ["W14X159"] * 2
+        + ["W14X120"] * 2
+        + ["W14X90"] * 2
+        + ["W14X61"] * 2,
+        "beam_40": ["W21X44", "W21X50"] + ["W21X44"] * 19 + ["W18X35"],
+        "beam_20": ["W12X14", "W12X16"] + ["W12X14"] * 20,
+    },
+    ("SE", 20, "post"): {
+        "col_ext": ["W24X306"] * 6
+        + ["W24X279"] * 6
+        + ["W24X229"] * 2
+        + ["W24X192"] * 2
+        + ["W24X162"] * 2
+        + ["W24X131"] * 4,
+        "col_int": ["W24X306"] * 6
+        + ["W24X279"] * 6
+        + ["W24X229"] * 2
+        + ["W24X192"] * 2
+        + ["W24X162"] * 2
+        + ["W24X131"] * 4,
+        "girder": ["W12X14"] + ["W27X129"] * 8 + ["W24X103"] * 4 + ["W24X84"] * 3 + ["W21X62"] * 6,
+        "gravity_col": ["W14X426"] * 2
+        + ["W14X398"] * 2
+        + ["W14X342"] * 2
+        + ["W14X311"] * 2
+        + ["W14X257"] * 2
+        + ["W14X233"] * 2
+        + ["W14X193"] * 2
+        + ["W14X159"] * 2
+        + ["W14X120"] * 2
+        + ["W14X90"] * 2
+        + ["W14X61"] * 2,
+        "beam_40": ["W21X44", "W21X50"] + ["W21X44"] * 19 + ["W18X35"],
+        "beam_20": ["W12X14", "W12X16"] + ["W12X14"] * 20,
+    },
+    # ── LA 9-story redesigns (Table B-9) ───────────────────────────────
+    # Gravity columns / beams are unchanged from LA 9 pre (B-9 lists only the
+    # redesigned moment-frame members).
+    ("LA", 9, "r1"): {
+        "col_ext": ["W14X283"] * 2
+        + ["W14X211"] * 2
+        + ["W14X193"] * 2
+        + ["W14X145"] * 2
+        + ["W14X90"] * 2,
+        "col_int": ["W14X311"] * 2
+        + ["W14X233"] * 2
+        + ["W14X193"] * 2
+        + ["W14X145"] * 2
+        + ["W14X90"] * 2,
+        "girder": [
+            "W36X210",
+            "W36X210",
+            "W36X210",
+            "W36X150",
+            "W36X150",
+            "W36X135",
+            "W36X135",
+            "W33X118",
+            "W33X118",
+            "W24X68",
+        ],
+        "gravity_col": ["W14X211"] * 3
+        + ["W14X159"] * 2
+        + ["W14X120"] * 2
+        + ["W14X90"] * 2
+        + ["W14X61"],
+        "gravity_col_other": ["W14X193"] * 3
+        + ["W14X145"] * 2
+        + ["W14X109"] * 2
+        + ["W14X82"] * 2
+        + ["W14X48"],
+        "beam": ["W21X44"] + ["W18X35"] * 8 + ["W16X26"],
+    },
+    ("LA", 9, "r2"): {
+        "col_ext": ["W14X233"] * 2
+        + ["W14X145"] * 2
+        + ["W14X132"] * 2
+        + ["W14X109"] * 2
+        + ["W14X74"] * 2,
+        "col_int": ["W14X233"] * 2
+        + ["W14X145"] * 2
+        + ["W14X132"] * 2
+        + ["W14X109"] * 2
+        + ["W14X74"] * 2,
+        "girder": [
+            "W33X118",
+            "W33X118",
+            "W30X99",
+            "W27X94",
+            "W27X102",
+            "W24X84",
+            "W27X84",
+            "W24X62",
+            "W24X62",
+            "W18X35",
+        ],
+        "gravity_col": ["W14X211"] * 3
+        + ["W14X159"] * 2
+        + ["W14X120"] * 2
+        + ["W14X90"] * 2
+        + ["W14X61"],
+        "gravity_col_other": ["W14X193"] * 3
+        + ["W14X145"] * 2
+        + ["W14X109"] * 2
+        + ["W14X82"] * 2
+        + ["W14X48"],
+        "beam": ["W21X44"] + ["W18X35"] * 8 + ["W16X26"],
+    },
+    ("LA", 9, "r3"): {
+        "col_ext": ["W14X342"] * 2
+        + ["W14X283"] * 2
+        + ["W14X233"] * 2
+        + ["W14X193"] * 2
+        + ["W14X159"] * 2,
+        "col_int": ["W14X426"] * 2
+        + ["W14X283"] * 2
+        + ["W14X257"] * 2
+        + ["W14X211"] * 2
+        + ["W14X159"] * 2,
+        "girder": [
+            "W36X256",
+            "W36X256",
+            "W36X210",
+            "W36X210",
+            "W36X182",
+            "W36X182",
+            "W33X141",
+            "W33X130",
+            "W30X116",
+            "W24X94",
+        ],
+        "gravity_col": ["W14X211"] * 3
+        + ["W14X159"] * 2
+        + ["W14X120"] * 2
+        + ["W14X90"] * 2
+        + ["W14X61"],
+        "gravity_col_other": ["W14X193"] * 3
+        + ["W14X145"] * 2
+        + ["W14X109"] * 2
+        + ["W14X82"] * 2
+        + ["W14X48"],
+        "beam": ["W21X44"] + ["W18X35"] * 8 + ["W16X26"],
+    },
 }
 
 
@@ -1864,6 +2385,7 @@ def _sections_for(sched: dict) -> dict[str, ISection]:
     for key in (
         "col_ext",
         "col_int",
+        "col_next",
         "gravity_col",
         "gravity_col_40",
         "gravity_col_20",
@@ -1874,7 +2396,7 @@ def _sections_for(sched: dict) -> dict[str, ISection]:
             names.add(v)
         elif isinstance(v, list):
             names.update(v)
-    for key in ("girder", "beam"):
+    for key in ("girder", "beam", "beam_40", "beam_20", "beam_gravity"):
         names.update(sched.get(key, []))
     return {n: _section(n) for n in names}
 
@@ -2014,7 +2536,18 @@ def build_fema355c(region: str, stories: int, design: str, direction: str = "3d"
     design = design.lower()
     direction = direction.lower()
     geom = _GEOM[stories]
-    mr = _MR[(region, stories)]
+    mr = _MR.get((region, stories, design), _MR[(region, stories)])
+    if region == "LA" and stories == 9 and design == "r2":
+        # R2-LA9 redesign: 15 ft bays, 9 moment bays per face (18 connections).
+        geom = {
+            "ns_bays": 10,
+            "ew_bays": 10,
+            "bay": BAY_15,
+            "heights": _GEOM[9]["heights"],
+            "base": "pinned_ground",
+            "penthouse": "D5-G7",
+        }
+        mr = {"ns_bays_moment": 9, "ew_bays_moment": 9, "pinned": None, "box_corners": False}
     sched = _SCHEDULES[(region, stories, design)]
     _, col_fy = _STEEL_FY[region]
     if direction == "2d":
@@ -2060,29 +2593,44 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
     def is_perim(i, k):
         return i in (0, ns) or k in (0, ew)
 
+    def is_next(i, k):
+        """Perimeter column adjacent to a corner (Boston/Seattle 20-story)."""
+        if i in (0, ns):
+            return k in (1, ew - 1)
+        if k in (0, ew):
+            return i in (1, ns - 1)
+        return False
+
     def in_pent(i, k):
         return pi0 <= i <= pi1 and pk0 <= k <= pk1
 
     def gravity_sec(i, k, j):
         """Gravity column section for an interior grid point, or None (no column)."""
-        if two_group:
-            if not in_pent(i, k):
-                return None  # 20-story: columns only below the penthouse
-            if k in (pk0, pk1):
-                return sched["gravity_col_40"][j]  # 4 corner (E-W edge) columns
-            return sched["gravity_col_20"][j]  # 2 middle columns
         if in_pent(i, k):
+            if two_group:
+                if k in (pk0, pk1):
+                    return sched["gravity_col_40"][j]  # 4 corner (E-W edge) columns
+                return sched["gravity_col_20"][j]  # 2 middle columns
             return sched["gravity_col"][j]
+        # Outside the penthouse: the 20-story interior is open; the 3-/9-story has
+        # gravity columns throughout.
+        if n_story == 22:
+            return None
+        if two_group:
+            return sched.get("gravity_col_other", sched["gravity_col_40"])[j]
         if has_other:
             return sched["gravity_col_other"][j]
         return sched["gravity_col"][j]
 
     # ── Columns ──
+    has_next = "col_next" in sched  # Boston/Seattle 20-story "next to exterior"
     for i in range(n_ns):
         for k in range(n_ew):
             for j in range(n_story):
                 if is_corner(i, k):
                     sec = sched["col_ext"][j]  # corner column (box for LA 20)
+                elif has_next and is_next(i, k):
+                    sec = sched["col_next"][j]
                 elif is_perim(i, k):
                     sec = sched["col_int"][j]
                 else:
@@ -2098,6 +2646,9 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
     pinned = mr.get("pinned")
     ns_moment = mr["ns_bays_moment"]
     ew_moment = mr["ew_bays_moment"]
+    beam_ns = sched.get("beam_20", sched.get("beam"))  # N-S interior beams
+    beam_ew = sched.get("beam_40", sched.get("beam"))  # E-W interior beams
+    pinned_girder = sched.get("beam_gravity", sched.get("girder"))  # pinned-bay girder
     for j in range(1, n_story + 1):
         lvl = j - 1
         for k in range(n_ew):
@@ -2107,10 +2658,10 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
                         sec = sched["girder"][lvl]
                         release = False
                     else:
-                        sec = sched["beam"][lvl] if pinned is None else sched["girder"][lvl]
+                        sec = beam_ns[lvl] if pinned is None else pinned_girder[lvl]
                         release = True
                 else:
-                    sec = sched["beam"][lvl]
+                    sec = beam_ns[lvl]
                     release = False
                 etag = _add_beam(
                     frames,
@@ -2130,10 +2681,10 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
                         sec = sched["girder"][lvl]
                         release = False
                     else:
-                        sec = sched["beam"][lvl] if pinned is None else sched["girder"][lvl]
+                        sec = beam_ew[lvl] if pinned is None else pinned_girder[lvl]
                         release = True
                 else:
-                    sec = sched["beam"][lvl]
+                    sec = beam_ew[lvl]
                     release = False
                 etag = _add_beam(
                     frames,
@@ -2233,10 +2784,15 @@ def _build_2d(geom, mr, sched, fy) -> SAPModelData:
                 sec = sched.get("beam", sched["girder"])[lvl]
                 release = True
                 both = False
+            elif pinned is not None and i == ns - 1:
+                # pinned corner bay: special (single-MR) girder, released at J
+                sec = sched.get("beam_gravity", sched["girder"])[lvl]
+                release = True
+                both = pinned == "both"
             else:
                 sec = sched["girder"][lvl]
-                release = pinned is not None and i == ns - 1
-                both = release and pinned == "both"
+                release = False
+                both = False
             etag = _add_beam(
                 frames,
                 assigns,
@@ -2303,6 +2859,7 @@ def write_snapshots(dest: Optional[Path] = None) -> list[Path]:
 
 
 __all__ = [
+    "BAY_15",
     "BAY_20",
     "BAY_30",
     "DEAD_FLOOR_PA",
