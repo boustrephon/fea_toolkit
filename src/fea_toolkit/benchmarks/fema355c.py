@@ -1484,7 +1484,12 @@ _GEOM = {
 # face (``None`` = all moment; ``"corner"`` = last beam pinned at the corner
 # column, LA/Boston 9-story 4.5-bay arrangement; ``"both"`` = pinned at both
 # ends, Seattle 9-story 4-bay arrangement).  ``box_corners`` = LA 20-story box
-# corner columns.
+# corner columns.  ``col_rotation`` classifies the perimeter-column strong-axis
+# orientation so ``_build_3d`` dispatches on it directly instead of inferring
+# the layout: ``"centered"`` = 3-story centred E-W frame + leaning columns,
+# ``"pinned_corner"`` = 9-story short bay pinned at the corner, ``"perimeter"``
+# = 20-story all-perimeter moment-resisting, ``None`` = no special E-W
+# orientation (the R2/R3 redesigns).
 _MR = {
     ("LA", 3): {
         "ns_bays_moment": 3,
@@ -1492,33 +1497,73 @@ _MR = {
         "ew_moment_start": 1,
         "pinned": None,
         "box_corners": False,
+        "col_rotation": "centered",
     },
-    ("LA", 9): {"ns_bays_moment": 4, "ew_bays_moment": 4, "pinned": "corner", "box_corners": False},
-    ("LA", 20): {"ns_bays_moment": 5, "ew_bays_moment": 6, "pinned": None, "box_corners": True},
+    ("LA", 9): {
+        "ns_bays_moment": 4,
+        "ew_bays_moment": 4,
+        "pinned": "corner",
+        "box_corners": False,
+        "col_rotation": "pinned_corner",
+    },
+    ("LA", 20): {
+        "ns_bays_moment": 5,
+        "ew_bays_moment": 6,
+        "pinned": None,
+        "box_corners": True,
+        "col_rotation": "perimeter",
+    },
     ("SE", 3): {
         "ns_bays_moment": 3,
         "ew_bays_moment": 3,
         "ew_moment_start": 1,
         "pinned": None,
         "box_corners": False,
+        "col_rotation": "centered",
     },
-    ("SE", 9): {"ns_bays_moment": 4, "ew_bays_moment": 4, "pinned": "both", "box_corners": False},
-    ("SE", 20): {"ns_bays_moment": 5, "ew_bays_moment": 6, "pinned": None, "box_corners": False},
+    ("SE", 9): {
+        "ns_bays_moment": 4,
+        "ew_bays_moment": 4,
+        "pinned": "both",
+        "box_corners": False,
+        "col_rotation": "pinned_corner",
+    },
+    ("SE", 20): {
+        "ns_bays_moment": 5,
+        "ew_bays_moment": 6,
+        "pinned": None,
+        "box_corners": False,
+        "col_rotation": "perimeter",
+    },
     ("BO", 3): {
         "ns_bays_moment": 3,
         "ew_bays_moment": 3,
         "ew_moment_start": 1,
         "pinned": None,
         "box_corners": False,
+        "col_rotation": "centered",
     },
-    ("BO", 9): {"ns_bays_moment": 4, "ew_bays_moment": 4, "pinned": "corner", "box_corners": False},
-    ("BO", 20): {"ns_bays_moment": 5, "ew_bays_moment": 6, "pinned": None, "box_corners": False},
+    ("BO", 9): {
+        "ns_bays_moment": 4,
+        "ew_bays_moment": 4,
+        "pinned": "corner",
+        "box_corners": False,
+        "col_rotation": "pinned_corner",
+    },
+    ("BO", 20): {
+        "ns_bays_moment": 5,
+        "ew_bays_moment": 6,
+        "pinned": None,
+        "box_corners": False,
+        "col_rotation": "perimeter",
+    },
     # R3-LA9 redesign: 3 moment bays + 2 gravity bays per face (6 connections).
     ("LA", 9, "r3"): {
         "ns_bays_moment": 3,
         "ew_bays_moment": 3,
         "pinned": None,
         "box_corners": False,
+        "col_rotation": None,
     },
 }
 
@@ -2730,10 +2775,9 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
 
     # Column orientation: a column is strong-axis E-W (angle 90°) when it sits in
     # an E-W moment frame (grids A/F) — or is the 3-story leaning/gravity column —
-    # and strong-axis N-S (angle 0°) when it belongs to an N-S frame.
-    rotate_ew = ew_start > 0  # 3-story: centred E-W frame + leaning columns
-    is_9story = pinned in ("corner", "both")
-    is_20story = pinned is None and ns_moment == ns  # all perimeter moment-resisting
+    # and strong-axis N-S (angle 0°) when it belongs to an N-S frame.  ``col_rotation``
+    # (set in ``_MR``) selects the layout's E-W column pattern.
+    col_rotation = mr.get("col_rotation")
 
     def is_ew_moment_col(i, k):
         """3-story perimeter column on grid A/E inside the centred E-W frame."""
@@ -2741,11 +2785,11 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
 
     def is_ew_gravity_col(i, k):
         """3-story perimeter gravity column on grid A/E just east of the moment frame."""
-        return rotate_ew and i in (0, ns) and k == ew_end + 1 and k < ew
+        return col_rotation == "centered" and i in (0, ns) and k == ew_end + 1 and k < ew
 
     def is_ns_leaning_col(i, k):
         """Leaning column at the gravity end of the 3-story N-S frames (E1/E7)."""
-        return rotate_ew and i == ns and k in (0, ew)
+        return col_rotation == "centered" and i == ns and k in (0, ew)
 
     def is_ew_frame_col(i, k):
         """9-story perimeter column on grid A/F that belongs to the E-W frame.
@@ -2769,14 +2813,14 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
         return i in (0, ns) and 0 < k < ew
 
     def col_angle(i, k):
-        """Column rotation (degrees): 90° = strong-axis E-W."""
-        if rotate_ew and (
+        """Column rotation (degrees): 90° = strong-axis E-W, dispatching on ``col_rotation``."""
+        if col_rotation == "centered" and (
             is_ew_moment_col(i, k) or is_ew_gravity_col(i, k) or is_ns_leaning_col(i, k)
         ):
             return 90.0
-        if is_9story and is_ew_frame_col(i, k):
+        if col_rotation == "pinned_corner" and is_ew_frame_col(i, k):
             return 90.0
-        if is_20story and is_20story_ew_col(i, k):
+        if col_rotation == "perimeter" and is_20story_ew_col(i, k):
             return 90.0
         return 0.0
 
@@ -2791,7 +2835,7 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
                 elif has_next and is_next(i, k):
                     sec = sched["col_next"][j]
                 elif is_perim(i, k):
-                    if rotate_ew and is_ew_moment_col(i, k):
+                    if col_rotation == "centered" and is_ew_moment_col(i, k):
                         sec = sched["col_int"][j]
                     elif is_ew_gravity_col(i, k):
                         sec = _gravity_col_sec(sched, j)
