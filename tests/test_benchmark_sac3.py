@@ -8,9 +8,9 @@ end-to-end, then solved with the native modal runner.
 
 Reference — Ohtori, Christenson, Spencer & Dyke (2004), "Benchmark Control
 Problems for Seismically Excited Nonlinear Buildings", *ASCE J. Eng. Mech.*
-130(4):366, DOI 10.1061/(ASCE)0733-9399(2004)130:4(366): the first two natural
-frequencies of the 3-story evaluation model are 0.99 Hz and 3.06 Hz (periods
-1.01 s and 0.327 s).
+130(4):366, DOI 10.1061/(ASCE)0733-9399(2004)130:4(366): the first three natural
+frequencies of the 3-story evaluation model are 0.99 Hz, 3.06 Hz and 5.83 Hz
+(periods 1.01 s, 0.327 s and 0.172 s).
 
 The transcription follows the official benchmark model data (``struct3.m``):
 W14x257 / W14x311 columns, per-level beams, and a leaning column.  The lateral
@@ -25,8 +25,8 @@ from fea_toolkit.io.tcl_importer import parse_tcl_model
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 from fea_toolkit.opensees.preprocessor import preprocess_model
 
-# First two natural periods (s), Ohtori et al. (2004).
-REF_PERIODS = (1.01, 0.327)
+# First three natural periods (s), Ohtori et al. (2004).
+REF_PERIODS = (1.01, 0.327, 0.172)
 REF_TOL = 0.03
 
 
@@ -45,9 +45,9 @@ def builder():
 
 def test_modal_periods_match_otori(builder):
     result = builder.run_modal_analysis(
-        num_modes=2, print_results=False, eigen_solver="fullGenLapack"
+        num_modes=3, print_results=False, eigen_solver="fullGenLapack"
     )
-    got = result["periods"][:2]
+    got = result["periods"][:3]
     for g, r in zip(got, REF_PERIODS):
         assert g == pytest.approx(r, rel=REF_TOL), f"period {g:.4f} vs reference {r}"
 
@@ -66,8 +66,8 @@ def test_faithful_modal_periods_match_otori():
     wipe()
     try:
         b = build_builder(nonlinear=False, fidelity="faithful")
-        m = b.run_modal_analysis(num_modes=2, print_results=False, eigen_solver="fullGenLapack")
-        got = m["periods"][:2]
+        m = b.run_modal_analysis(num_modes=3, print_results=False, eigen_solver="fullGenLapack")
+        got = m["periods"][:3]
         for g, r in zip(got, REF_PERIODS):
             assert g == pytest.approx(r, rel=0.05), f"period {g:.4f} vs reference {r}"
     finally:
