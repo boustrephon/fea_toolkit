@@ -47,6 +47,7 @@ from ..model.sap_data import (
     FrameRelease,
     ISection,
     JointLoad,
+    MassSource,
     Material,
     Node,
     Restraint,
@@ -1447,8 +1448,15 @@ _BOX_SECTIONS: dict[str, tuple[float, ...]] = {
 }
 
 # ── Geometry (Figure B-1; identical across regions) ──────────────────────
-# ``heights`` is the per-story height list (m); ``base`` selects the restraint
-# prescription.  ``penthouse`` is a (grids, lines) footprint string.
+# ``heights`` is the per-story height list (m) — one entry per level, bottom
+# to top, *including* basement levels; ``base`` selects the restraint
+# prescription (and thus the basement count, see ``_basement_count``).
+# ``penthouse`` is a (grids, lines) footprint string.
+#
+# Level-index convention used throughout the builders: ``n_levels =
+# len(heights)`` is the number of *levels* (3-story → 3; 9-story → 10 incl.
+# its one basement; 20-story → 22 incl. its two basements), NOT the story
+# count.  Node level ``j`` runs 0 (base) .. ``n_levels`` (roof).
 _GEOM = {
     3: {
         "ns_bays": 4,
@@ -2430,6 +2438,11 @@ def _assemble(
         frame_releases=frame_releases or {},
         joint_loads=joint_loads or [],
         added_masses=added_masses or {},
+        # A masses-only MASS SOURCE is what makes ``compute_seismic_masses``
+        # actually apply ``added_masses``: without it the modal / RS / pushover
+        # runners fall back to element self-weight + DEAD loads and silently
+        # drop the seismic masses.  Mirrors the Tcl importer's behaviour.
+        mass_sources=({"MSSSRC1": MassSource(name="MSSSRC1", masses=True)} if added_masses else {}),
         units=_UNITS,
     )
 
@@ -2532,7 +2545,7 @@ def _basement_count(base: str) -> int:
     return {"fixed": 0, "pinned_ground": 1, "pinned_ground_2basement": 2}[base]
 
 
-def _story_labels(n_story: int, base: str) -> list[str]:
+def _story_labels(n_levels: int, base: str) -> list[str]:
     """Level labels, bottom to top: ``02B``/``01B``, ``01F``…, ``RF``.
 
     Basements label deepest-first (``02B`` below ``01B``); the ground line is
@@ -2540,10 +2553,10 @@ def _story_labels(n_story: int, base: str) -> list[str]:
     """
     n_base = _basement_count(base)
     labels: list[str] = []
-    for j in range(n_story + 1):
+    for j in range(n_levels + 1):
         if j < n_base:
             labels.append(f"{n_base - j:02d}B")
-        elif j == n_story:
+        elif j == n_levels:
             labels.append("RF")
         else:
             labels.append(f"{j - n_base + 1:02d}F")
@@ -2555,10 +2568,17 @@ def _out_of_plane() -> list[int]:
     return [0, 1, 0, 1, 0, 1]
 
 
-def _lump_2d(masses, n_lines, ns, grid, n_story) -> dict[str, float]:
-    """Distribute per-level masses across column lines (half the building, 2D)."""
+def _lump_2d(masses, n_lines, ns, grid, n_levels) -> dict[str, float]:
+    """Distribute per-level masses across column lines (half the building, 2D).
+
+    ``masses`` is bottom-up per above-grade level; its last entry is always
+    the roof.  The roof sits at the top level ``j == n_levels``, so the
+    lowest mass-bearing level is ``first = n_levels - len(masses) + 1`` —
+    the levels below ``first`` (the base and any basement levels) carry no
+    seismic mass.
+    """
     added: dict[str, float] = {}
-    first = n_story - len(masses) + 1
+    first = n_levels - len(masses) + 1
     for idx, m in enumerate(masses):
         j = first + idx
         weights = [0.5 if i in (0, ns) else 1.0 for i in range(n_lines)]
@@ -2568,10 +2588,17 @@ def _lump_2d(masses, n_lines, ns, grid, n_story) -> dict[str, float]:
     return added
 
 
-def _lump_3d(masses, ns, ew, n_ns_lines, n_ew_lines, grid, n_story) -> dict[str, float]:
-    """Distribute per-level masses across the plan by tributary slab area (3D)."""
+def _lump_3d(masses, ns, ew, n_ns_lines, n_ew_lines, grid, n_levels) -> dict[str, float]:
+    """Distribute per-level masses across the plan by tributary slab area (3D).
+
+    ``masses`` is bottom-up per above-grade level; its last entry is always
+    the roof.  The roof sits at the top level ``j == n_levels``, so the
+    lowest mass-bearing level is ``first = n_levels - len(masses) + 1`` —
+    the levels below ``first`` (the base and any basement levels) carry no
+    seismic mass.
+    """
     added: dict[str, float] = {}
-    first = n_story - len(masses) + 1
+    first = n_levels - len(masses) + 1
     for idx, m in enumerate(masses):
         j = first + idx
         for i in range(n_ns_lines):
@@ -2585,15 +2612,15 @@ def _lump_3d(masses, ns, ew, n_ns_lines, n_ew_lines, grid, n_story) -> dict[str,
     return added
 
 
-def _gravity_2d(ns, ew_bays, bay, n_story, grid) -> list[JointLoad]:
+def _gravity_2d(ns, ew_bays, bay, n_levels, grid) -> list[JointLoad]:
     """Nodal DEAD/LIVE loads for the planar frame (half-building tributary)."""
     n_lines = ns + 1
     area = (ns * bay) * (ew_bays * bay / 2.0)
     weights = [0.5 if i in (0, ns) else 1.0 for i in range(n_lines)]
     total = sum(weights)
     loads: list[JointLoad] = []
-    for j in range(1, n_story + 1):
-        dead_p = DEAD_ROOF_PA if j == n_story else DEAD_FLOOR_PA
+    for j in range(1, n_levels + 1):
+        dead_p = DEAD_ROOF_PA if j == n_levels else DEAD_FLOOR_PA
         for i, w in enumerate(weights):
             frac = w / total
             nid = grid[(i, j)]
@@ -2602,14 +2629,14 @@ def _gravity_2d(ns, ew_bays, bay, n_story, grid) -> list[JointLoad]:
     return loads
 
 
-def _gravity_3d(ns, ew, bay, n_story, grid) -> list[JointLoad]:
+def _gravity_3d(ns, ew, bay, n_levels, grid) -> list[JointLoad]:
     """Nodal DEAD/LIVE loads for the full 3D building (whole footprint)."""
     area = (ns * bay) * (ew * bay)
     n_ns = ns + 1
     n_ew = ew + 1
     loads: list[JointLoad] = []
-    for j in range(1, n_story + 1):
-        dead_p = DEAD_ROOF_PA if j == n_story else DEAD_FLOOR_PA
+    for j in range(1, n_levels + 1):
+        dead_p = DEAD_ROOF_PA if j == n_levels else DEAD_FLOOR_PA
         for i in range(n_ns):
             for k in range(n_ew):
                 w = 1.0
@@ -2624,11 +2651,11 @@ def _gravity_3d(ns, ew, bay, n_story, grid) -> list[JointLoad]:
     return loads
 
 
-def _floor_panels_3d(ns, ew, n_story, grid, story) -> dict[str, AreaElement]:
+def _floor_panels_3d(ns, ew, n_levels, grid, story) -> dict[str, AreaElement]:
     """One loads-only floor panel per bay per level (3D), for diaphragm viewing."""
     panels: dict[str, AreaElement] = {}
     tag = 1
-    for j in range(1, n_story + 1):
+    for j in range(1, n_levels + 1):
         for i in range(ns):
             for k in range(ew):
                 aid = f"P-{_grid_label(i, k)}-{story[j]}"
@@ -2646,9 +2673,19 @@ def _floor_panels_3d(ns, ew, n_story, grid, story) -> dict[str, AreaElement]:
     return panels
 
 
-def _masses_for(n_story: int) -> list[float]:
-    """Seismic mass list for a schedule's story count."""
-    return {3: MASS_3STORY, 10: MASS_9STORY, 22: MASS_20STORY}[n_story]
+def _masses_for(n_levels: int) -> list[float]:
+    """Seismic mass list (bottom-up) for a building's *level* count.
+
+    Keyed on ``n_levels = len(heights)`` — the number of levels *including*
+    basements — not the story count: 3-story → 3 levels, 9-story → 10 (one
+    basement), 20-story → 22 (two basements).  The lists are per above-grade
+    level; :func:`_lump_2d` / :func:`_lump_3d` anchor them to the correct
+    level index (see the ``first`` derivation there).
+    """
+    by_levels = {3: MASS_3STORY, 10: MASS_9STORY, 22: MASS_20STORY}
+    if n_levels not in by_levels:
+        raise KeyError(f"no seismic-mass schedule for {n_levels} levels")
+    return by_levels[n_levels]
 
 
 def schedules() -> list[tuple[str, int, str]]:
@@ -2670,7 +2707,13 @@ def schedules() -> list[tuple[str, int, str]]:
     )
 
 
-def build_fema355c(region: str, stories: int, design: str, direction: str = "3d") -> SAPModelData:
+def build_fema355c(
+    region: str,
+    stories: int,
+    design: str,
+    direction: str = "3d",
+    restrain_ground_laterally: bool = True,
+) -> SAPModelData:
     """Build one FEMA 355C / SAC Phase 2 model as a ``SAPModelData``.
 
     Args:
@@ -2678,6 +2721,12 @@ def build_fema355c(region: str, stories: int, design: str, direction: str = "3d"
         stories: 3, 9 or 20.
         design: ``"pre"``, ``"post"``, Seattle ``"rbs"``, or LA9 ``"r1"/"r2"/"r3"``.
         direction: ``"3d"`` (full building) or ``"2d"`` (planar N-S moment frame).
+        restrain_ground_laterally: For basement buildings (9- and 20-story),
+            whether the ground level (top of the basement stack) is laterally
+            restrained, modelling the concrete foundation walls / surrounding
+            soil.  ``True`` (default) matches the benchmark's definition;
+            ``False`` restrains the structure only at the bottom basement level
+            — the common "bounding" alternative for basement analyses.
 
     Returns:
         The assembled model in SI (N, m, kg); materials authored in Pa (SI).
@@ -2701,21 +2750,21 @@ def build_fema355c(region: str, stories: int, design: str, direction: str = "3d"
     sched = _SCHEDULES[(region, stories, design)]
     _, col_fy = _STEEL_FY[region]
     if direction == "2d":
-        return _build_2d(geom, mr, sched, col_fy)
-    return _build_3d(geom, mr, sched, col_fy)
+        return _build_2d(geom, mr, sched, col_fy, restrain_ground_laterally)
+    return _build_3d(geom, mr, sched, col_fy, restrain_ground_laterally)
 
 
-def _build_3d(geom, mr, sched, fy) -> SAPModelData:
+def _build_3d(geom, mr, sched, fy, restrain_ground_laterally=True) -> SAPModelData:
     """Build the full 3D building: 4 perimeter moment frames + gravity columns."""
     ns = geom["ns_bays"]
     ew = geom["ew_bays"]
     bay = geom["bay"]
     heights = geom["heights"]
-    n_story = len(heights)
+    n_levels = len(heights)  # number of *levels* (incl. basements), not stories
     n_ns = ns + 1
     n_ew = ew + 1
     levels = _levels(heights)
-    story = _story_labels(n_story, geom["base"])
+    story = _story_labels(n_levels, geom["base"])
     (pi0, pi1), (pk0, pk1) = _parse_penthouse(geom["penthouse"])
     two_group = "gravity_col_40" in sched  # 20-story: 4 + 2 gravity columns
     pinned = mr.get("pinned")
@@ -2730,7 +2779,7 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
     tag = 1
     for i in range(n_ns):
         for k in range(n_ew):
-            for j in range(n_story + 1):
+            for j in range(n_levels + 1):
                 nid = f"{_grid_label(i, k)}-{story[j]}"
                 nodes[nid] = Node(node_id=nid, node_tag=tag, x=i * bay, y=k * bay, z=levels[j])
                 grid[(i, k, j)] = nid
@@ -2769,7 +2818,7 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
             return sched["gravity_col"][j]
         # Outside the penthouse: the 20-story interior is open; the 3-/9-story has
         # gravity columns throughout.
-        if n_story == 22:
+        if n_levels == 22:
             return None
         return _gravity_col_sec(sched, j)
 
@@ -2828,7 +2877,7 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
     has_next = "col_next" in sched  # Boston/Seattle 20-story "next to exterior"
     for i in range(n_ns):
         for k in range(n_ew):
-            for j in range(n_story):
+            for j in range(n_levels):
                 angle = col_angle(i, k)
                 if is_corner(i, k):
                     sec = sched["col_ext"][j]  # corner column (box for LA 20)
@@ -2858,7 +2907,7 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
     beam_ns = sched.get("beam_20", sched.get("beam"))  # N-S interior beams
     beam_ew = sched.get("beam_40", sched.get("beam"))  # E-W interior beams
     pinned_girder = sched.get("beam_gravity", sched.get("girder"))  # pinned-bay girder
-    for j in range(1, n_story + 1):
+    for j in range(1, n_levels + 1):
         lvl = j - 1
         for k in range(n_ew):
             for i in range(ns):
@@ -2940,19 +2989,27 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
                 )
 
     # ── Restraints ──
+    # Base is pinned (or fixed for the basement-free 3-story); the ground level
+    # (top of the basement stack, level ``n_base``) is laterally restrained to
+    # model the concrete foundation walls / surrounding soil.  The benchmark
+    # restrains the *ground* level — not the intermediate basement level — so
+    # the lateral tie is placed at ``n_base`` (level 1 for the 9-story, level 2
+    # for the 20-story), not always at level 1.
+    n_base = _basement_count(geom["base"])
     restraints: dict[str, Restraint] = {}
     for i in range(n_ns):
         for k in range(n_ew):
             if geom["base"] == "fixed":
                 restraints[grid[(i, k, 0)]] = Restraint([1, 1, 1, 1, 1, 1])
-            else:  # pinned basement + ground (and 1st-basement) restraint
+            else:  # pinned base at the bottom basement level
                 restraints[grid[(i, k, 0)]] = Restraint([1, 1, 1, 1, 0, 1])
-                restraints[grid[(i, k, 1)]] = Restraint([1, 1, 0, 1, 0, 1])
+                if restrain_ground_laterally:
+                    restraints[grid[(i, k, n_base)]] = Restraint([1, 1, 0, 1, 0, 1])
 
-    masses = _masses_for(n_story)
-    added_masses = _lump_3d(masses, ns, ew, n_ns, n_ew, grid, n_story)
-    joint_loads = _gravity_3d(ns, ew, bay, n_story, grid)
-    area_elements = _floor_panels_3d(ns, ew, n_story, grid, story)
+    masses = _masses_for(n_levels)
+    added_masses = _lump_3d(masses, ns, ew, n_ns, n_ew, grid, n_levels)
+    joint_loads = _gravity_3d(ns, ew, bay, n_levels, grid)
+    area_elements = _floor_panels_3d(ns, ew, n_levels, grid, story)
     return _assemble(
         nodes,
         restraints,
@@ -2967,15 +3024,15 @@ def _build_3d(geom, mr, sched, fy) -> SAPModelData:
     )
 
 
-def _build_2d(geom, mr, sched, fy) -> SAPModelData:
+def _build_2d(geom, mr, sched, fy, restrain_ground_laterally=True) -> SAPModelData:
     """Build the planar N-S moment frame (X-Z plane), matching the benchmark."""
     ns = geom["ns_bays"]
     bay = geom["bay"]
     heights = geom["heights"]
-    n_story = len(heights)
+    n_levels = len(heights)  # number of *levels* (incl. basements), not stories
     n_ns = ns + 1
     levels = _levels(heights)
-    story = _story_labels(n_story, geom["base"])
+    story = _story_labels(n_levels, geom["base"])
     ns_moment = mr["ns_bays_moment"]
     pinned = mr.get("pinned")
 
@@ -2996,7 +3053,7 @@ def _build_2d(geom, mr, sched, fy) -> SAPModelData:
     grid: dict[tuple[int, int], str] = {}
     tag = 1
     for i in range(n_ns):
-        for j in range(n_story + 1):
+        for j in range(n_levels + 1):
             nid = f"{_grid_label(i)}-{story[j]}"
             nodes[nid] = Node(node_id=nid, node_tag=tag, x=i * bay, y=0.0, z=levels[j])
             grid[(i, j)] = nid
@@ -3015,13 +3072,13 @@ def _build_2d(geom, mr, sched, fy) -> SAPModelData:
         return sched["col_" + role][j]
 
     for i in range(n_ns):
-        for j in range(n_story):
+        for j in range(n_levels):
             eid = f"C-{_grid_label(i)}-{story[j]}"
             etag = _add_col(
                 frames, assigns, etag, grid[(i, j)], grid[(i, j + 1)], col_sec(i, j), eid
             )
 
-    for j in range(1, n_story + 1):
+    for j in range(1, n_levels + 1):
         lvl = j - 1
         for i in range(ns):
             if pinned is None and i >= ns_moment:
@@ -3052,22 +3109,25 @@ def _build_2d(geom, mr, sched, fy) -> SAPModelData:
                 release_j=release,
             )
 
+    # Same ground-level lateral-tie logic as the 3D builder: it sits at the top
+    # of the basement stack (level ``n_base``), not always at level 1.
+    n_base = _basement_count(geom["base"])
     restraints: dict[str, Restraint] = {}
     for i in range(n_ns):
-        for j in range(n_story + 1):
+        for j in range(n_levels + 1):
             nid = grid[(i, j)]
             if j == 0:
                 restraints[nid] = Restraint(
                     [1, 1, 1, 1, 1, 1] if geom["base"] == "fixed" else [1, 1, 1, 1, 0, 1]
                 )
-            elif geom["base"] != "fixed" and j == 1:
+            elif n_base > 0 and j == n_base and restrain_ground_laterally:
                 restraints[nid] = Restraint([1, 1, 0, 1, 0, 1])
             else:
                 restraints[nid] = Restraint(_out_of_plane())
 
-    masses = _masses_for(n_story)
-    added_masses = _lump_2d(masses, n_ns, ns, grid, n_story)
-    joint_loads = _gravity_2d(ns, geom["ew_bays"], bay, n_story, grid)
+    masses = _masses_for(n_levels)
+    added_masses = _lump_2d(masses, n_ns, ns, grid, n_levels)
+    joint_loads = _gravity_2d(ns, geom["ew_bays"], bay, n_levels, grid)
     return _assemble(
         nodes,
         restraints,
