@@ -61,9 +61,11 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
 - **SAC steel frames (3/9/20-story)** — Ohtori et al. (2004), ASCE J. Eng. Mech.
   130(4):366, DOI 10.1061/(ASCE)0733-9399(2004)130:4(366); design by Krawinkler &
   Gupta (1998).  Publishes natural frequencies (modal T2 anchor) + NLTHA + pushover.
-  Implemented as the elastic [SAC modal anchor](sac_benchmark.md) and the
-  nonlinear [SAC NLTHA benchmark](sac_nonlinear_benchmark.md) (bilinear hinges +
-  K&G panel zone, M1 vs M2).
+  Implemented as the elastic [SAC modal anchor](sac_benchmark.md) — full frequency
+  sets asserted for all three buildings — and the nonlinear
+  [SAC NLTHA benchmark](sac_nonlinear_benchmark.md) (bilinear hinges + K&G panel
+  zone, M1 vs M2).  The 9/20-story nonlinear NLTHA widening is tracked in
+  [benchmark_roadmap.md](benchmark_roadmap.md) §2.
 - **Haselton & Deierlein (2007) / SP3 Risk** — sp3risk.com — 30+ RC SMF OpenSees
   models (1–20 stories) with pushover / NLTHA / IDA.
 - **SPEAR project RC frame** (Eurocode 8) — alternative RC NLTHA benchmark.
@@ -75,6 +77,10 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
 - **Thomsen & Wallace RW2** — canonical OpenSees wall benchmark (3.66 m tall,
   102 mm, 1.22 m web); parameters tabulated in the OpenSees Days 2014 concrete
   walls workshop.
+- **Hidalgo et al. (2005) Chilean shear-wall buildings** — 50 RC wall buildings
+  (12/15/20/22/28 storeys) with published fundamental periods (Table 1) — the
+  building-level wall-system benchmark; see
+  [benchmark_roadmap.md](benchmark_roadmap.md) §1.
 - **UoA-UW RC Wall Database** — Shegay et al. (2021), DesignSafe DOI
   10.17603/ds2-r12q-t415 (142 walls).
 - **UCLA-RCWalls** (Abdullah 2019) — 1100+ walls.
@@ -87,6 +93,10 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
   tables (see .clinerules §5.8).
 
 ## 4. Phased roadmap
+
+> The extended proposals (Chilean shear-wall benchmark, SAC 9/20-story widening,
+> VecTor / SeismoBuild candidates) are tracked in
+> [benchmark_roadmap.md](benchmark_roadmap.md).
 
 - **Phase 1 — one benchmark per cell (anchors).**  Euler/`PL³/(3EI)` cantilever,
   Przemieniecki/Paz 3-story modal + CQC RS, one PEER column, SAC 3-story (modal

@@ -32,13 +32,13 @@ Transcribed from Ohtori et al. (2004), Figure 1 / benchmark data:
 ## Reference
 
 Ohtori, Christenson, Spencer & Dyke (2004), *ASCE J. Eng. Mech.* 130(4):366,
-DOI 10.1061/(ASCE)0733-9399(2004)130:4(366).  First two natural frequencies of
-the 3-story evaluation model: **0.99 Hz and 3.06 Hz** (periods **1.01 s** and
-**0.327 s**).
+DOI 10.1061/(ASCE)0733-9399(2004)130:4(366).  First three natural frequencies of
+the 3-story evaluation model: **0.99 Hz, 3.06 Hz and 5.83 Hz** (periods
+**1.01 s, 0.327 s and 0.172 s**).
 
 ## Acceptance
 
-T2 — published code verification.  The test asserts the first two periods
+T2 — published code verification.  The test asserts the first three periods
 against the reference within **±3 %**.
 
 ### Member schedule
@@ -49,6 +49,47 @@ columns are W14×257 (exterior) / W14×311 (interior) with a leaning column, and
 the lateral model uses bare-steel beam inertia (the composite slab is a
 gravity-only effect).  This lands the first two periods on the published values
 (1.01 s / 0.327 s) to within ±3 %.
+
+## Modal anchor — full frequency set
+
+The SAC benchmark publishes complete natural-frequency sets for all three
+buildings, and the toolkit now asserts the full set for each (B1):
+
+| Building | Published natural frequencies (Hz) | Asserted |
+|---|---|---|
+| 3-story | 0.99, 3.06, 5.83 | ✅ 3 modes (`test_benchmark_sac3.py`) |
+| 9-story | 0.443, 1.18, 2.05, 3.09, 4.27 | ✅ 5 modes (`test_benchmark_fema355c_modal.py`) |
+| 20-story | 0.261, 0.753, 1.30, 1.83, 2.40, 2.44, 2.92, 3.01, 3.63, 3.68 | ✅ 10 modes (`test_benchmark_fema355c_modal.py`) |
+
+The 9-story reproduces all five to within ±1 % and the 20-story all ten to
+within ±1.5 % (measured, `fullGenLapack`).  The 20-story's closely-spaced
+pairs (2.40/2.44, 2.92/3.01, 3.63/3.68 Hz) are **not** torsional 3D modes —
+the planar N-S frame reproduces them all, so they arise within the 2D frame
+itself (the benchmark evaluation models are 2D, `Num_DOF = 3 × Num_node`).
+
+### The 3-story generator gap (fema355c vs the faithful transcription)
+
+The unified :mod:`fea_toolkit.benchmarks.fema355c` generator also builds a
+3-story model, but its third mode is ≈ 5.44 Hz — 6.8 % below Ohtori's
+5.83 Hz — and it gains a spurious extra mode (≈ 5.67 Hz).  The faithful
+`struct3.m` transcription in :mod:`fea_toolkit.benchmarks.sac` reproduces all
+three (5.85 Hz faithful, 5.74 Hz simplified), so **the canonical 3-story modal
+anchor is `sac.py`, not `fema355c`**.
+
+The cause is the gravity-bay idealisation: `fema355c`'s 2D builder models the
+fourth (gravity) bay with a lighter *released* beam (W18×35 / W16×26, pinned at
+the gravity column), whereas `struct3.m` / `sac.py` use a W21×44 flexural beam
+against a small-inertia leaning column.  The released bay decouples the gravity
+column into its own low-frequency mode and softens the frame's third mode.
+The `fema355c` 3-story still gets the first two modes right (0.99 / 3.06 Hz)
+because its total lateral stiffness is well calibrated; only the higher-mode
+stiffness *distribution* differs.  Closing this is a follow-up to the `fema355c`
+3-story generator, not a physics gap.
+
+## SAC widening roadmap
+
+See [benchmark_roadmap.md](benchmark_roadmap.md) §2 — B2 (9-story nonlinear
+NLTHA), B3 (20-story nonlinear NLTHA), B4 (Phase-I base isolation, deferred).
 
 ## Implementation
 
