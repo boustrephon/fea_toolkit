@@ -147,8 +147,22 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   (+20 %).  `F_max` is the single-frame base shear (no ×2 — confirmed against
   `struct3.m`'s `Element_mass`).  The transient solver needed
   `NewtonLineSearch` (plain Newton died at the trilinear yield corners, t≈10.4
-  s).  The base-shear (−12 %) and floor-acceleration (+20 %) gaps remain open;
-  run the full 10×3 matrix next.
+  s).  The base-shear (−12 %) and floor-acceleration (+20 %) gaps remain open.
+
+  **Preferred hinge — `beamWithHinges` (concentrated plasticity).**  Added as
+  `hinge_model='beam_with_hinges'` (trilinear only): an elastic interior
+  (E, A, Iz, Iy, G, J) with a trilinear moment-*curvature* `Uniaxial` section
+  at each end (Lp = L/6 — the benchmark's θ = φ·L/6 member-end rotation).  No
+  "nearly rigid" lumped spring, so the elastic stiffness is the exact 6EI1/L
+  (T1 0.993 s vs elastic 0.994 s).  Three-way El Centro 1.0 (3-story), reported
+  beamWithHinges / lumped / elastic: roof 0.151 / 0.154 / 0.207 m (target
+  0.151), drift 0.0152 / 0.0155 / 0.0205 (target 0.0150), base shear
+  9.32 / 8.89 / 12.70 MN (target 10.12), Nd 23 / 22 / 0 (target 22) — the
+  beamWithHinges is the best match on every primary quantity.  The
+  floor-acceleration gap remains (+36 %) and looks like a higher-mode/damping
+  effect.  `F_max` as the single-frame base shear (no ×2) is noted but the
+  `EvalNLBM.m` `mi` is 2× the frame mass — the ×2 convention is still open.
+  Run the full 10×3 matrix next.
 - **B4 — Phase-I base isolation — deferred.** Needs a base-isolation element
   path the toolkit does not have (friction pendulum / elastomeric isolator).
 

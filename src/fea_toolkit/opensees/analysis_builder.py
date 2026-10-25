@@ -286,16 +286,21 @@ class AnalysisBuilder(
             "simplify_distributed_loads": False,
             "constraint_method": "spring",
             "hinge_model": "fiber",  # Distributed plasticity by default
-            # ── Lumped-hinge backbone (hinge_model='lumped') ──
+            # ── Hinge backbones (hinge_model='lumped' or 'beam_with_hinges') ──
             # "asce41" (default): Hysteretic backbone matched to ASCE 41
             # rotation limits.  "bilinear": Steel01 bilinear hinge (yield
             # moment My = Z·fy, hardening_ratio) for concentrated-plasticity
-            # steel moment frames (e.g. the SAC benchmark).
+            # steel moment frames (e.g. the SAC benchmark).  "trilinear": the
+            # Ohtori mat_tbl EI1/EI2/EI3 + d1/d2 backbone.
             "hinge_backbone": "asce41",
             "hardening_ratio": 0.02,
             # Elastic rotational stiffness of the bilinear (Steel01) hinge, as
             # a multiple of the member's own flexural stiffness 6EI/L.
             "hinge_stiffness_factor": 10.0,
+            # Plastic hinge length for hinge_model='beam_with_hinges', as a
+            # fraction of the member length.  The benchmark's member-end
+            # rotation is θ = φ·L/6, so the default 1/6 reproduces it.
+            "hinge_length_fraction": 1.0 / 6.0,
             # ── Member end releases / partial fixity ──
             # Honour SAP2000 frame end releases (and partial-fixity springs)
             # by inserting zero-length release elements at member ends.  On by
@@ -603,6 +608,7 @@ class AnalysisBuilder(
             self._create_sections()
             self._create_shell_elements()
             self._create_panel_zones()
+            self._reset_hinge_recorders()
             self._create_lumped_hinges()
             self._create_bond_slip_springs()
             self._create_member_releases()

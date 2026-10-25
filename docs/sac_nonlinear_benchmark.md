@@ -158,10 +158,18 @@ The faithful mapping is therefore OpenSees `beamWithHinges` (elastic interior
 **lumped-hinge** `Hysteretic` (`hinge_backbone="trilinear"` via
 `enrich_trilinear`, 6EI/L κ→θ) — topology-consistent with the M1/M2 bilinear
 hinge and correct at the backbone anchor points (`My = EI1·d1`, `M2`), with only
-the elastic→plastic transition approximated (no `Lp`/α).  It is the chosen A1
-deliverable; `beamWithHinges` is deferred unless the A4 comparison drifts
-outside tolerance.  Wiring the trilinear variant into `build_builder` is tracked
-in `benchmark_roadmap.md` §2 A1 / P40.
+the elastic→plastic transition approximated (no `Lp`/α) and a "nearly rigid"
+elastic spring that softens T1 ~5 %.
+
+The preferred `beam_with_hinges` topology (also now implemented) replaces the
+lumped spring with a `beamWithHinges` element: an elastic interior
+(`E, A, Iz, Iy, G, J`) plus a trilinear moment-*curvature* `Uniaxial` section
+(strong-axis `Mz`) at each end, with `Lp = L/6` (`hinge_length_fraction` — the
+benchmark's θ = φ·L/6 member-end rotation).  No "nearly rigid" spring, so the
+elastic stiffness is the exact `6EI1/L` (T1 0.993 s vs the elastic anchor
+0.994 s), and the damage recorders read member-end *curvature* directly.  It is
+the closest match to the published El Centro 1.0 peak (roof 0.151 m, drift
+0.0152, base shear 9.32 MN, Nd 23 — targets 0.151 / 0.0150 / 10.12 / 22).
 
 ![Bilinear hinge backbone](assets/sac3_hinge_backbone.png)
 

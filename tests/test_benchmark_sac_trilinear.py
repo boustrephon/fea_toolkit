@@ -93,3 +93,57 @@ def test_build_builder_trilinear_matches_m1_period():
     assert t1_tri == pytest.approx(t1_bi, rel=0.02)
     # And it stays on the published elastic anchor (0.99 Hz → 1.01 s).
     assert t1_tri == pytest.approx(1.01, rel=0.05)
+
+
+def test_beam_with_hinges_builds_and_matches_elastic_period():
+    """``hinge_model='beam_with_hinges'`` keeps the exact elastic stiffness.
+
+    The benchmark's own concentrated-plasticity element (an elastic interior
+    plus M-φ hinge sections) has no "nearly rigid" lumped spring, so its first
+    period matches the elastic anchor — the lumped hinge softens it (~5 %).
+    """
+    from openseespy.opensees import wipe
+
+    wipe()
+    try:
+        elastic = sac.build_builder(nonlinear=False)
+        t1_elastic = float(
+            elastic.run_modal_analysis(num_modes=1, print_results=False)["periods"][0]
+        )
+    finally:
+        wipe()
+
+    wipe()
+    try:
+        b = sac.build_builder(nonlinear=True, backbone="trilinear", hinge_model="beam_with_hinges")
+        t1_bwh = float(b.run_modal_analysis(num_modes=1, print_results=False)["periods"][0])
+        # 27 members → 54 recorded hinge ends; end sections 1 (i) and 6 (j).
+        assert len(b._hinge_tags) == 54
+        assert b._hinge_sections[:2] == [1, 6]
+        assert t1_bwh == pytest.approx(t1_elastic, rel=0.02)
+    finally:
+        wipe()
+
+
+def test_beam_with_hinges_nltha_synthetic():
+    """``beam_with_hinges`` converges under a synthetic pulse and yields."""
+    import math
+
+    import numpy as np
+    from openseespy.opensees import wipe
+
+    dt, n = 0.005, 300
+    t = np.arange(n) * dt
+    accel = np.zeros(n)
+    accel[:40] = 30.0 * np.sin(2.0 * math.pi * 1.0 * t[:40])  # strong — forces yield
+
+    wipe()
+    try:
+        b = sac.build_builder(nonlinear=True, backbone="trilinear", hinge_model="beam_with_hinges")
+        res = b.run_transient_analysis(accel, dt, direction="X", damping_ratio=0.02)
+        assert res["converged_steps"] > 0
+        assert np.isfinite(sac.peak_x(res))
+        assert res["num_yielded_hinges"] > 0
+        assert res["peak_plastic_rotation"] > 0.0
+    finally:
+        wipe()

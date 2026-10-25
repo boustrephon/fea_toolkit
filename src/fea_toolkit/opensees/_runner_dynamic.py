@@ -143,14 +143,16 @@ class TransientRunnerMixin:
         # is *both* fixed and equalDOF-tied to its lumped-hinge node (the
         # `ops.nodeReaction` path reads back zero there).
 
-        # Lumped-hinge damage tracking (φmax / Emax / Nd).  The zero-length
-        # hinge is a `zeroLength` element whose deformation is
-        # [P, Vy, Vz, T, My, Mz]; for a planar frame the in-plane bending is
-        # index 4 (My — rotation about the out-of-plane axis), verified against
-        # the installed OpenSeesPy.  Dissipated energy is the net work ∫M·dθ
-        # (trapezoidal), summed per hinge.
+        # Hinge damage tracking (φmax / Emax / Nd).  Two hinge topologies:
+        # * a lumped zero-length hinge (``_hinge_sections[i] is None``) — a
+        #   `zeroLength` element whose in-plane deformation is index 4 (My);
+        # * a beamWithHinges end section (``_hinge_sections[i]`` is 1 or 6) —
+        #   the member-end curvature, read via ``section``.
+        # Dissipated energy is the net work ∫M·dθ (trapezoidal), summed per
+        # hinge.
         hinge_tags = list(getattr(self, "_hinge_tags", None) or [])
         hinge_theta_y = list(getattr(self, "_hinge_yield_rotations", None) or [])
+        hinge_sections = list(getattr(self, "_hinge_sections", None) or [])
         n_hinges = len(hinge_tags)
         hinge_prev_theta = [0.0] * n_hinges
         hinge_prev_moment = [0.0] * n_hinges
@@ -175,15 +177,20 @@ class TransientRunnerMixin:
                 )
             )
             for i, tag in enumerate(hinge_tags):
-                theta = float(ops.eleResponse(tag, "deformation")[4])
-                moment = float(ops.eleResponse(tag, "force")[4])
-                peak_plastic_rotation = max(peak_plastic_rotation, abs(theta))
+                sec_num = hinge_sections[i] if hinge_sections else None
+                if sec_num is None:
+                    deform = float(ops.eleResponse(tag, "deformation")[4])
+                    moment = float(ops.eleResponse(tag, "force")[4])
+                else:
+                    deform = float(ops.eleResponse(tag, "section", sec_num, "deformation")[0])
+                    moment = float(ops.eleResponse(tag, "section", sec_num, "force")[0])
+                peak_plastic_rotation = max(peak_plastic_rotation, abs(deform))
                 hinge_energy[i] += (
-                    0.5 * (hinge_prev_moment[i] + moment) * (theta - hinge_prev_theta[i])
+                    0.5 * (hinge_prev_moment[i] + moment) * (deform - hinge_prev_theta[i])
                 )
-                if hinge_theta_y and abs(theta) > hinge_theta_y[i]:
+                if hinge_theta_y and abs(deform) > hinge_theta_y[i]:
                     hinge_yielded[i] = True
-                hinge_prev_theta[i] = theta
+                hinge_prev_theta[i] = deform
                 hinge_prev_moment[i] = moment
 
         times = np.arange(converged_steps) * dt

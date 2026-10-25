@@ -628,6 +628,96 @@ class ElementMixin:
             ops.geomTransf(transf_type, transf_tag, *vecxz)
         self._transf_tags[tag] = transf_tag
 
+        # ── beamWithHinges (concentrated plasticity) ────────────────
+        # The benchmark's own formulation: an elastic interior (E, A, Iz, Iy,
+        # G, J) with a trilinear moment-*curvature* hinge section (Uniaxial,
+        # strong-axis Mz) at each end.  No "nearly rigid" lumped spring, so the
+        # elastic stiffness is the exact 6EI1/L.  The plastic hinge length
+        # converts curvature to member-end rotation; the benchmark's
+        # member-end rotation is θ = φ·L/6, so Lp = L/6 (hinge_length_fraction).
+        if (
+            self.config.get("hinge_model") == "beam_with_hinges"
+            and self.config.get("hinge_backbone") == "trilinear"
+        ):
+            _sec = self.mesh_model.sections.get(sec_name)
+            _mat = self.mesh_model.materials.get(_sec.material) if _sec else None
+            ei1 = getattr(_sec, "ei1", None) or 0.0
+            ei2 = getattr(_sec, "ei2", None) or 0.0
+            ei3 = getattr(_sec, "ei3", None) or 0.0
+            d1 = getattr(_sec, "d1", None) or 0.0
+            d2 = getattr(_sec, "d2", None) or 0.0
+            if ei1 <= 0.0 or ei2 <= 0.0 or d1 <= 0.0 or d2 <= d1:
+                raise ValueError(
+                    f"hinge_backbone='trilinear' (beamWithHinges) needs a valid "
+                    f"mat_tbl backbone on section '{sec_name}' "
+                    f"(ei1={ei1}, ei2={ei2}, d1={d1}, d2={d2})"
+                )
+            my_tri = ei1 * d1
+            m2 = my_tri + ei2 * (d2 - d1)
+            d3 = 2.0 * d2
+            m3 = m2 + (ei3 or ei2 * 0.02) * (d3 - d2)
+            E = _mat.E_mod if _mat and _mat.E_mod > 0 else 2.0e11
+            G = _mat.G_mod if _mat and _mat.G_mod and _mat.G_mod > 0 else 0.4 * E
+            A = getattr(_sec, "A", None) or 0.0
+            Iz = getattr(_sec, "I33", None) or 0.0
+            Iy = getattr(_sec, "I22", None) or 0.0
+            J = getattr(_sec, "J", None) or 0.0
+            if not hasattr(self, "_bwh_tag_counter"):
+                self._bwh_tag_counter = (
+                    max((v for v in self.section_tags.values()), default=0) + 500
+                )
+            _mat_tag = self._bwh_tag_counter
+            _sec_tag = self._bwh_tag_counter + 1
+            self._bwh_tag_counter += 2
+            ops.uniaxialMaterial(
+                "Hysteretic",
+                _mat_tag,
+                my_tri,
+                d1,
+                m2,
+                d2,
+                m3,
+                d3,
+                -my_tri,
+                -d1,
+                -m2,
+                -d2,
+                -m3,
+                -d3,
+                1.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+            )
+            ops.section("Uniaxial", _sec_tag, _mat_tag, "Mz")
+            _L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
+            _lp = float(self.config.get("hinge_length_fraction", 1.0 / 6.0)) * _L
+            ops.element(
+                "beamWithHinges",
+                tag,
+                ni.node_tag,
+                nj.node_tag,
+                _sec_tag,
+                _lp,
+                _sec_tag,
+                _lp,
+                E,
+                max(A, 1e-6),
+                max(Iz, 1e-12),
+                max(Iy, 1e-12),
+                G,
+                max(J, 1e-12),
+                transf_tag,
+            )
+            # Damage recorders — the member's two end sections (1 = i-end,
+            # 6 = j-end under the 6-point plastic-hinge integration).
+            self._hinge_tags.extend([tag, tag])
+            self._hinge_sections.extend([1, 6])
+            self._hinge_yield_rotations.extend([d1, d1])
+            self._hinge_yield_moments.extend([my_tri, my_tri])
+            return
+
         # Element
         elem_type = self.config["element_type"]
         n_ip = self.config.get("num_int_pts", 3)
@@ -759,6 +849,23 @@ class ElementMixin:
             brace_ids = self._brace_selection or set()
         return _check_buckling(self.mesh_model, brace_ids, K, axial_demand, print_results)
 
+    def _reset_hinge_recorders(self) -> None:
+        """Reset the transient runner's hinge-damage recorder lists.
+
+        The transient runner reads these to report φmax / Emax / Nd.  Reset on
+        every :meth:`build_domain` so a rebuild (e.g. before each ground-motion
+        record) does not append to the previous build's lists.  ``_hinge_tags``
+        holds one element tag per hinge location; ``_hinge_sections`` holds the
+        ``beamWithHinges`` section number at that location (``None`` for a
+        lumped zero-length hinge); ``_hinge_yield_rotations`` /
+        ``_hinge_yield_moments`` hold the yield threshold (rotation for lumped,
+        curvature for ``beamWithHinges``) and yield moment.
+        """
+        self._hinge_tags: list[int] = []
+        self._hinge_sections: list = []
+        self._hinge_yield_rotations: list[float] = []
+        self._hinge_yield_moments: list[float] = []
+
     def _create_lumped_hinges(self) -> None:
         """Replace frame elements with lumped plasticity hinges.
 
@@ -823,11 +930,8 @@ class ElementMixin:
         new_elements: dict[str, FrameElement] = {}
         new_assignments: dict[str, str] = {}
         # Hinge instrumentation for the transient runner's damage recorders
-        # (φmax / Emax / Nd): the zero-length hinge element tags and their
-        # strong-axis yield rotation/moment, rebuilt on each build_domain.
-        self._hinge_tags: list[int] = []
-        self._hinge_yield_rotations: list[float] = []
-        self._hinge_yield_moments: list[float] = []
+        # (φmax / Emax / Nd), rebuilt on each build_domain.
+        self._reset_hinge_recorders()
 
         for eid, elem in list(elements.items()):
             if elem.inactive:
@@ -1162,6 +1266,7 @@ class ElementMixin:
                 )
 
             self._hinge_tags.extend([hinge_i_elem_tag, hinge_j_elem_tag])
+            self._hinge_sections.extend([None, None])
             self._hinge_yield_rotations.extend([hinge_theta_y, hinge_theta_y])
             self._hinge_yield_moments.extend([hinge_my, hinge_my])
 

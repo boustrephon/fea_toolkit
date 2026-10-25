@@ -485,7 +485,7 @@ def load_model(
     return md
 
 
-def builder_config(backbone: str = "bilinear") -> dict[str, Any]:
+def builder_config(backbone: str = "bilinear", hinge_model: str = "lumped") -> dict[str, Any]:
     """The ``AnalysisBuilder`` config for the nonlinear evaluation model.
 
     Purely build-level choices (element type, hinge model).  The panel-zone
@@ -496,10 +496,13 @@ def builder_config(backbone: str = "bilinear") -> dict[str, Any]:
     Args:
         backbone: ``"bilinear"`` (default, the M1/M2 Steel01 hinge) or
             ``"trilinear"`` (the transcribed ``mat_tbl`` backbone).
+        hinge_model: ``"lumped"`` (default, zero-length rotational springs) or
+            ``"beam_with_hinges"`` (the benchmark's own concentrated-plasticity
+            ``beamWithHinges`` element — trilinear backbone only).
     """
     return {
         "element_type": "elasticBeamColumn",
-        "hinge_model": "lumped",
+        "hinge_model": hinge_model,
         "hinge_backbone": backbone,
     }
 
@@ -552,6 +555,7 @@ def build_builder(
     *,
     nonlinear: bool = True,
     backbone: str = "bilinear",
+    hinge_model: str = "lumped",
     fidelity: str = "simplified",
 ) -> AnalysisBuilder:
     """Build a SAC model (3/9/20-story, elastic or nonlinear) into an
@@ -570,12 +574,14 @@ def build_builder(
             hinges); ``False`` for the elastic anchor.
         backbone: ``"bilinear"`` (default, the M1/M2 Steel01 hinge) or
             ``"trilinear"`` (the transcribed ``mat_tbl`` backbone).
+        hinge_model: ``"lumped"`` (default) or ``"beam_with_hinges"`` (the
+            benchmark's own concentrated-plasticity element, trilinear only).
         fidelity: ``"simplified"`` (default) or ``"faithful"`` — 3-story only
             (the explicit ``struct3.m`` rigid floor diaphragms).
     """
     md = load_model(building=building, nonlinear=nonlinear, backbone=backbone)
     mesh = preprocess_model(md, preprocess_config(panel_zone=panel_zone))
-    cfg = builder_config(backbone) if nonlinear else {}
+    cfg = builder_config(backbone, hinge_model) if nonlinear else {}
     b = AnalysisBuilder(mesh, cfg)
     b.build_domain()
     if fidelity == "faithful" and building == 3:

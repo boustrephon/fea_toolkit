@@ -192,6 +192,33 @@ def test_sac3_nonlinear_nltha_elcentro(resolve_ground_motion_record):
         wipe()
 
 
+@pytest.mark.needs_ground_motion("ELCENTRO")
+def test_sac3_beam_with_hinges_elcentro(resolve_ground_motion_record):
+    """``beam_with_hinges`` (trilinear) under El Centro lands on the peak.
+
+    The ``beamWithHinges`` element is the preferred hinge: its roof peak
+    (≈0.151 m) matches Ohtori Table 3 within ±10 %, and its yielded-hinge count
+    is within ±3 of the benchmark's 22.
+    """
+    from openseespy.opensees import wipe
+
+    from fea_toolkit.io.ground_motion import read_time_history_csv
+
+    wipe()
+    try:
+        record_path = resolve_ground_motion_record("ELCENTRO")
+        times, accel = read_time_history_csv(record_path)
+        dt = float(times[1] - times[0])
+        b = build_builder(backbone="trilinear", hinge_model="beam_with_hinges")
+        res = b.run_transient_analysis(accel, dt, direction="X", damping_ratio=0.02)
+        assert res["converged_steps"] > 0
+        peak = peak_x(res)
+        assert 0.10 < peak < 0.25, f"beamWithHinges El Centro peak {peak:.3f} m out of band"
+        assert res["num_yielded_hinges"] == pytest.approx(22, abs=3)
+    finally:
+        wipe()
+
+
 # ── A3 — transient-runner peak recorders (drift/accel/vel/base-shear/φmax/Emax/Nd) ──
 # `run_transient_analysis` now returns per-node velocity/acceleration histories,
 # the base-shear history (global equilibrium Σ m·(a_rel + ag)), and the
