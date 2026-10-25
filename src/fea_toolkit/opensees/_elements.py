@@ -832,6 +832,12 @@ class ElementMixin:
 
         new_elements: dict[str, FrameElement] = {}
         new_assignments: dict[str, str] = {}
+        # Hinge instrumentation for the transient runner's damage recorders
+        # (φmax / Emax / Nd): the zero-length hinge element tags and their
+        # strong-axis yield rotation/moment, rebuilt on each build_domain.
+        self._hinge_tags: list[int] = []
+        self._hinge_yield_rotations: list[float] = []
+        self._hinge_yield_moments: list[float] = []
 
         for eid, elem in list(elements.items()):
             if elem.inactive:
@@ -1001,6 +1007,8 @@ class ElementMixin:
                 e0_weak = stiff_factor * 6.0 * E * max(I22, 1e-12) / max(L, 1e-12)
                 ops.uniaxialMaterial("Steel01", hinge_mat_tag + 1, My, e0_strong, b)
                 ops.uniaxialMaterial("Steel01", hinge_mat_tag + 2, My_weak, e0_weak, b)
+                hinge_theta_y = My / max(e0_strong, 1e-12)
+                hinge_my = My
             elif self.config.get("hinge_backbone") == "trilinear":
                 # Trilinear hinge (Hysteretic) from the transcribed Ohtori
                 # ``mat_tbl`` backbone — elastic EI1, post-yield EI2, hardening
@@ -1055,6 +1063,8 @@ class ElementMixin:
                         0.0,
                         0.0,
                     )
+                hinge_theta_y = theta_y
+                hinge_my = my_tri
             else:
                 # Strong-axis moment (ASCE 41 Hysteretic backbone)
                 ops.uniaxialMaterial(
@@ -1092,6 +1102,8 @@ class ElementMixin:
                     0.0,
                     0.0,
                 )
+                hinge_theta_y = theta_y
+                hinge_my = My
             # Torsion (elastic — no inelastic torsion expected)
             ops.uniaxialMaterial(
                 "Elastic", hinge_mat_tag + 3, G * max(J_val, 1e-6) / L if J_val else G * 1e-6 / L
@@ -1171,6 +1183,10 @@ class ElementMixin:
                     nj.node_tag,
                     hinge_sec_tag - 1,
                 )
+
+            self._hinge_tags.extend([hinge_i_elem_tag, hinge_j_elem_tag])
+            self._hinge_yield_rotations.extend([hinge_theta_y, hinge_theta_y])
+            self._hinge_yield_moments.extend([hinge_my, hinge_my])
 
             # --- Shorten original element to span between hinge nodes ---
             elem.node_i = hinge_i_id

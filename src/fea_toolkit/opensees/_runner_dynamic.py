@@ -50,8 +50,12 @@ class TransientRunnerMixin:
             num_steps: Number of integration steps (default ``len(accel)``).
 
         Returns:
-            Dict with ``times`` (s), ``displacements`` (``{node_tag:
-            (num_steps, 3) ndarray}``), ``peak_displacement`` (m),
+            Dict with ``times`` (s), per-node ``displacements`` /
+            ``velocities`` / ``accelerations`` (``{node_tag: (num_steps, 3)
+            ndarray}``), ``base_shear`` (per-step total base shear via global
+            equilibrium ``Σ m·(a_rel + ag)``), ``peak_displacement`` (m),
+            ``peak_base_shear`` (N), ``peak_plastic_rotation`` (rad),
+            ``max_dissipated_energy`` (N·m), ``num_yielded_hinges``,
             ``converged_steps`` and the two Rayleigh ``period_1`` / ``period_2``.
         """
         accel = np.asarray(accel, dtype=float)
@@ -125,6 +129,32 @@ class TransientRunnerMixin:
         # ── Integrate and record ──
         node_tags = list(ops.getNodeTags())
         disp_history: dict[int, list[list[float]]] = {t: [] for t in node_tags}
+        vel_history: dict[int, list[list[float]]] = {t: [] for t in node_tags}
+        accel_history: dict[int, list[list[float]]] = {t: [] for t in node_tags}
+
+        # Base shear via global equilibrium — the total nodal inertial force
+        # Σ m·(a_rel + ag).  This is exact for a base-excited structure with no
+        # applied loads (the benchmark convention), and robust against the
+        # Transformation handler mis-resolving the reaction at a base node that
+        # is *both* fixed and equalDOF-tied to its lumped-hinge node (the
+        # `ops.nodeReaction` path reads back zero there).
+
+        # Lumped-hinge damage tracking (φmax / Emax / Nd).  The zero-length
+        # hinge's section deformation/force are the Aggregator DOFs
+        # [P, Mz, My, T]; for a planar frame the in-plane bending is index 2
+        # (My — rotation about the out-of-plane axis), verified against the
+        # installed OpenSeesPy.  Dissipated energy is the net work ∫M·dθ
+        # (trapezoidal), summed per hinge.
+        hinge_tags = list(getattr(self, "_hinge_tags", None) or [])
+        hinge_theta_y = list(getattr(self, "_hinge_yield_rotations", None) or [])
+        n_hinges = len(hinge_tags)
+        hinge_prev_theta = [0.0] * n_hinges
+        hinge_prev_moment = [0.0] * n_hinges
+        hinge_energy = [0.0] * n_hinges
+        hinge_yielded = [False] * n_hinges
+        peak_plastic_rotation = 0.0
+
+        base_shear_steps: list[float] = []
         converged_steps = 0
         for _ in range(num_steps):
             if ops.analyze(1, dt) != 0:
@@ -132,9 +162,30 @@ class TransientRunnerMixin:
             converged_steps += 1
             for t in node_tags:
                 disp_history[t].append([float(ops.nodeDisp(t, d)) for d in (1, 2, 3)])
+                vel_history[t].append([float(ops.nodeVel(t, d)) for d in (1, 2, 3)])
+                accel_history[t].append([float(ops.nodeAccel(t, d)) for d in (1, 2, 3)])
+            ag = float(accel[converged_steps - 1]) if converged_steps <= len(accel) else 0.0
+            base_shear_steps.append(
+                sum(
+                    float(ops.nodeMass(t, 1)) * (float(ops.nodeAccel(t, 1)) + ag) for t in node_tags
+                )
+            )
+            for i, tag in enumerate(hinge_tags):
+                theta = float(ops.eleResponse(tag, "deformation")[2])
+                moment = float(ops.eleResponse(tag, "section", 1, "force")[2])
+                peak_plastic_rotation = max(peak_plastic_rotation, abs(theta))
+                hinge_energy[i] += (
+                    0.5 * (hinge_prev_moment[i] + moment) * (theta - hinge_prev_theta[i])
+                )
+                if hinge_theta_y and abs(theta) > hinge_theta_y[i]:
+                    hinge_yielded[i] = True
+                hinge_prev_theta[i] = theta
+                hinge_prev_moment[i] = moment
 
         times = np.arange(converged_steps) * dt
         displacements = {t: np.asarray(v) for t, v in disp_history.items()}
+        velocities = {t: np.asarray(v) for t, v in vel_history.items()}
+        accelerations = {t: np.asarray(v) for t, v in accel_history.items()}
         peak = 0.0
         for v in displacements.values():
             if v.size:
@@ -143,7 +194,14 @@ class TransientRunnerMixin:
         return {
             "times": times,
             "displacements": displacements,
+            "velocities": velocities,
+            "accelerations": accelerations,
+            "base_shear": np.asarray(base_shear_steps),
             "peak_displacement": peak,
+            "peak_base_shear": float(np.max(np.abs(base_shear_steps))) if base_shear_steps else 0.0,
+            "peak_plastic_rotation": peak_plastic_rotation,
+            "max_dissipated_energy": float(max(hinge_energy)) if hinge_energy else 0.0,
+            "num_yielded_hinges": int(sum(hinge_yielded)),
             "converged_steps": converged_steps,
             "period_1": period_1,
             "period_2": period_2,

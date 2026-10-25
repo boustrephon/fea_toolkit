@@ -118,12 +118,15 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   (A3/A4): the `krawinkler_gupta` panel-zone path and the 9-story gravity-bay
   pin under `hinge_model='lumped'` (the lumped hinges re-point the member ends
   and win over the release).
-- **A3 — NLTHA + peak extraction (not started).** Reproduce settings exactly
-  (Newmark β=1/4 γ=1/2, dt=0.005 s, 100/180 s; Rayleigh ζ=2 % at mode 1 +
-  `nCutOff` — mode 2 for 3/9-story, mode 5 for 20-story) and add the seven peak
-  recorders (drift/accel/velocity/base-shear/φmax/Emax/Nd; see P41 in
-  `_pending_work.md`).  Whether the benchmark applies P-Δ (vs Linear geometry)
-  is still to be confirmed from the paper.
+- **A3 — NLTHA + peak extraction (recorders landed; P-Δ / Rayleigh confirmed).**
+  `run_transient_analysis` now records the seven peak quantities — drift (from
+  `displacements`), per-node velocity / acceleration, base shear (global
+  equilibrium `Σ m·(a_rel + ag)`), and φmax / Emax / Nd from the lumped hinges
+  (see P41 in `_pending_work.md`).  Settings confirmed: Newmark β=1/4 γ=1/2,
+  dt=0.005 s, Rayleigh ζ=2 % at mode 1 + `nCutOff` (mode 2 for 3/9-story, mode 5
+  for 20-story — pass `period_2 = T5` explicitly); the benchmark applies **no
+  P-Δ** (linear stiffness, `geomTransf Linear`).  The remaining piece is the A4
+  comparison itself.
 - **A4 — comparison (not started).** Parse `unctrl3/9/20.mat` as the
   authoritative targets, reconcile column ordering and `d_max`/`δmax`
   semantics, and assert within ±5–10 % — 3-story El Centro 1.0 first, then the

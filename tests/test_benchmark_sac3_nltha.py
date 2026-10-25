@@ -190,3 +190,75 @@ def test_sac3_nonlinear_nltha_elcentro(resolve_ground_motion_record):
         assert np.isfinite(peak_x(res))
     finally:
         wipe()
+
+
+# ── A3 — transient-runner peak recorders (drift/accel/vel/base-shear/φmax/Emax/Nd) ──
+# `run_transient_analysis` now returns per-node velocity/acceleration histories,
+# the base-shear history (global equilibrium Σ m·(a_rel + ag)), and the
+# lumped-hinge damage quantities (peak plastic rotation, dissipated energy,
+# yielded-hinge count).  See docs/_pending_work.md P41.
+
+
+def test_transient_recorders_force_and_kinematic_quantities():
+    """The elastic runner returns velocity/acceleration/base-shear histories.
+
+    A synthetic pulse drives the elastic 3-story frame; the base shear (via
+    global equilibrium) and the per-node kinematic histories are all finite and
+    non-zero, and the base shear is the total inertial force Σ m·(a_rel + ag).
+    """
+    from openseespy.opensees import nodeMass, wipe
+
+    wipe()
+    try:
+        b = build_builder(nonlinear=False)
+        dt, n = 0.005, 200
+        t = np.arange(n) * dt
+        accel = np.zeros(n)
+        accel[:40] = 2.0 * np.sin(2.0 * math.pi * 1.0 * t[:40])
+        res = b.run_transient_analysis(accel, dt, direction="X", damping_ratio=0.05)
+
+        assert res["converged_steps"] == n
+        assert res["base_shear"].shape == (n,)
+        assert res["peak_base_shear"] > 0.0
+        assert np.isfinite(res["peak_base_shear"])
+        for key in ("velocities", "accelerations"):
+            arr = next(iter(res[key].values()))
+            assert arr.shape == (n, 3)
+            assert np.isfinite(arr).all()
+
+        # Global-equilibrium cross-check at the final step: base shear equals the
+        # sum of nodal inertial forces m·(a_rel + ag).
+        step = n - 1
+        inertial = sum(
+            nodeMass(tag, 1) * (res["accelerations"][tag][step][0] + accel[step])
+            for tag in res["accelerations"]
+        )
+        assert res["base_shear"][step] == pytest.approx(inertial, rel=1e-6)
+    finally:
+        wipe()
+
+
+def test_transient_recorders_hinge_damage():
+    """The trilinear runner reports φmax / Emax / Nd when hinges yield.
+
+    A monotonic (pushover-like) acceleration drives the trilinear frame into
+    yield, so the lumped-hinge damage recorders are non-trivial.
+    """
+    from openseespy.opensees import wipe
+
+    wipe()
+    try:
+        b = build_builder(backbone="trilinear")
+        dt, n = 0.005, 300
+        accel = 30.0 * np.ones(n)  # monotonic — forces hinge yield
+        res = b.run_transient_analysis(accel, dt, direction="X", damping_ratio=0.02)
+
+        assert res["converged_steps"] == n
+        assert len(b._hinge_tags) > 0
+        assert res["peak_plastic_rotation"] > 0.0
+        assert res["num_yielded_hinges"] > 0
+        assert res["max_dissipated_energy"] > 0.0
+        # The peak plastic rotation exceeds the (small) hinge yield rotation.
+        assert res["peak_plastic_rotation"] > b._hinge_yield_rotations[0]
+    finally:
+        wipe()
