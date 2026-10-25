@@ -80,8 +80,11 @@ for a JSON manifest registry, and carries no waveform data.
   `tests/fixtures/ground_motion_manifests.json` — five PEER NGA-West2
   *manifests* (metadata only, **no waveforms**) under the PEER user-agreement
   licence, which is restricted (research use, no redistribution) and **not**
-  public domain.  The `data/ground_motion/public/` mirror currently holds only
-  its README — no waveforms are committed.
+  public domain, plus the SAC benchmark records: `LA21` and the four Ohtori
+  et al. (2004) benchmark signals (`ELCENTRO`, `HACHINOHE`, `NORTHRIDGE`,
+  `KOBE`), each with its provenance and licence.  The
+  `data/ground_motion/public/` mirror currently holds only its README — no
+  waveforms are committed.
 - **Fetched**: the full NGA / K-NET / ESM / AFAD / BHRC / CSMNC sets, pulled
   locally when deeper multi-record validation is wanted.
 

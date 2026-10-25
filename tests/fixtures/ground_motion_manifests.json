@@ -83,5 +83,41 @@
     "scale_factor": 1.0,
     "rotation": "as_recorded",
     "note": "El Centro 1940, extracted from the SAC benchmark archive (elcentro.mat), dt=0.02 s, m/s^2"
+  },
+  {
+    "record_id": "HACHINOHE",
+    "provider": "sac_benchmark",
+    "event": "Tokachi-oki (1968)",
+    "station": "Hachinohe City",
+    "component": "N-S",
+    "source_url": "https://datacenterhub.org/resources/257/HACHINOHE.csv",
+    "licence": "historical Japanese strong-motion record (research use)",
+    "scale_factor": 1.0,
+    "rotation": "as_recorded",
+    "note": "Hachinohe 1968 N-S, extracted from the SAC benchmark archive (Files_bldg_full3.zip -> MATLAB_Utility/hachinhe.mat), dt=0.01 s, m/s^2"
+  },
+  {
+    "record_id": "KOBE",
+    "provider": "sac_benchmark",
+    "event": "Kobe, Japan (1995)",
+    "station": "JMA Kobe Observatory",
+    "component": "N-S",
+    "source_url": "https://datacenterhub.org/resources/257/KOBE.csv",
+    "licence": "historical Japanese strong-motion record (JMA; research use)",
+    "scale_factor": 1.0,
+    "rotation": "as_recorded",
+    "note": "Kobe 1995 JMA N-S, extracted from the SAC benchmark archive (Files_bldg_full3.zip -> MATLAB_Utility/kobe.mat), dt=0.02 s, m/s^2"
+  },
+  {
+    "record_id": "NORTHRIDGE",
+    "provider": "sac_benchmark",
+    "event": "Northridge-01 (1994)",
+    "station": "Sylmar County Hospital",
+    "component": "N-S",
+    "source_url": "https://datacenterhub.org/resources/257/NORTHRIDGE.csv",
+    "licence": "historical US strong-motion record (CDMG/CSMIP; research use)",
+    "scale_factor": 1.0,
+    "rotation": "as_recorded",
+    "note": "Northridge 1994 Sylmar N-S, extracted from the SAC benchmark archive (Files_bldg_full3.zip -> MATLAB_Utility/northrdg.mat), dt=0.02 s, m/s^2"
   }
 ]
