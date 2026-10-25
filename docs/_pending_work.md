@@ -144,6 +144,41 @@ warranted — `pushover_step_stride` and the per-block flags are the answer):
 
 ### Tier 3 — Feature gaps (placeholders / partial)
 
+#### P40 — trilinear hinge backbone option (`hinge_backbone="trilinear"`)
+
+Source: `docs/sac_nonlinear_benchmark.md`;
+`src/fea_toolkit/benchmarks/sac_member_data.py`;
+`src/fea_toolkit/opensees/_elements.py`.
+
+**What.**  `hinge_backbone` supports `"asce41"` (default) and `"bilinear"`
+(Steel01) only.  The Ohtori SAC benchmark's member hysteresis is trilinear —
+three flexural rigidities `EI1→EI2→EI3` with break curvatures `d1`/`d2`
+(`My = EI1·d1`), now transcribed in `benchmarks/sac_member_data.py`
+(`MAT_TBL_3/9/20`).  A `"trilinear"` branch is needed so the SAC model consumes
+those backbones.  Open sub-decision: the benchmark's backbone is a member-level
+M–κ law (curvature), while the lumped hinge is a rotational M–θ spring, so the
+M–κ → M–θ mapping (hinge length) has to be chosen.
+
+**Where.**  `opensees/_elements.py` (the `hinge_backbone` dispatch beside
+`asce41`/`bilinear`); `benchmarks/sac.py` (`enrich_nonlinear` / `builder_config`)
+to assign the transcribed backbones per member via the `element_tbl` assignment.
+
+#### P41 — transient-runner peak extraction (velocity / acceleration / reactions / hinge damage)
+
+Source: `docs/sac_nonlinear_benchmark.md`;
+`src/fea_toolkit/opensees/_runner_dynamic.py`.
+
+**What.**  `run_transient_analysis` returns only `times`, per-node
+`displacements`, `peak_displacement`, `converged_steps` and the Rayleigh
+periods.  The Ohtori NLTHA comparison needs per-step `nodeVel` / `nodeAccel`
+(plus ground acceleration for the absolute value), `reactions` +
+`nodeReaction` for base shear, and the hinge plastic-rotation / dissipated-energy
+response for φmax / Emax / Nd — the last of which needs its response name
+verified against the installed OpenSeesPy rather than guessed.
+
+**Where.**  `opensees/_runner_dynamic.py` — a `_record_step` expansion plus a
+hinge-damage post-pass.
+
 #### P25 — classic support symbols on top of the per-DOF glyphs
 
 Source: this register, *DONE — support restraints*; `docs/dev_notes.md` →

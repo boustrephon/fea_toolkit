@@ -81,11 +81,33 @@ detailed plan.  Summary:
 
 - **B1 — modal-anchor completion (done).** Assert the full published frequency
   set: 3-story (0.99/3.06/5.83 Hz), 9-story (5 modes), 20-story (10 modes).
-- **B2 — 9-story nonlinear NLTHA (T4).** Generalise `sac.py`'s bilinear-hinge +
-  K&G panel-zone enrichment to the 9-story schedules in `fema355c.py`; validate
-  peak roof displacement against Ohtori Table 3.
-- **B3 — 20-story nonlinear NLTHA (T4, slow).** Same for the 20-story; mark
-  `@pytest.mark.slow` and gate on the ground-motion mirror.
+The nonlinear NLTHA widening — matching Ohtori Table 3–5 for the 3/9/20-story
+frames under the ten record cases — is planned as an A0–A4 sequence:
+
+- **A0 — record sourcing (done).** El Centro / Hachinohe / Northridge / Kobe
+  extracted from `Files_bldg_full3.zip` into the ground-motion mirror,
+  manifests registered, gated PGA test (`tests/test_benchmark_sac_records.py`).
+- **A1 — trilinear backbone (transcription done; implementation pending).**
+  `benchmarks/sac_member_data.py` transcribes `mat_tbl` from `struct3/9/20.m`
+  (EI1/EI2/EI3 + EA/GA + break curvatures d1/d2 + splice rows), verified
+  byte-for-byte by `tests/test_benchmark_sac_member_data.py`.  The
+  `hinge_backbone="trilinear"` branch and switching the SAC model onto the
+  backbones are still to do (see P40 in `_pending_work.md`).
+- **A2 — 9/20-story models (not started).** Build the 9/20-story Ohtori models
+  from `struct9/20.m` (geometry, seismic masses, base fixity, rigid floors, and
+  the `element_tbl` member→backbone assignment).  The earlier "Zx/fy per
+  W-section" framing is superseded — the benchmark defines members by backbone
+  directly.
+- **A3 — NLTHA + peak extraction (not started).** Reproduce settings exactly
+  (Newmark β=1/4 γ=1/2, dt=0.005 s, 100/180 s; Rayleigh ζ=2 % at mode 1 +
+  `nCutOff` — mode 2 for 3/9-story, mode 5 for 20-story) and add the seven peak
+  recorders (drift/accel/velocity/base-shear/φmax/Emax/Nd; see P41 in
+  `_pending_work.md`).  Whether the benchmark applies P-Δ (vs Linear geometry)
+  is still to be confirmed from the paper.
+- **A4 — comparison (not started).** Parse `unctrl3/9/20.mat` as the
+  authoritative targets, reconcile column ordering and `d_max`/`δmax`
+  semantics, and assert within ±5–10 % — 3-story El Centro 1.0 first, then the
+  full 10-case × 3-building matrix.
 - **B4 — Phase-I base isolation — deferred.** Needs a base-isolation element
   path the toolkit does not have (friction pendulum / elastomeric isolator).
 
