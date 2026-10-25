@@ -551,7 +551,7 @@ one section.
 
 #### 10.2 Lumped Plasticity (``hinge_model: 'lumped'``)
 
-Uses ``zeroLengthSection`` elements at member ends with an elastic interior.
+Uses ``zeroLength`` elements at member ends with an elastic interior.
 This path directly replicates SAP2000's ASCE 41 hinge assignment::
 
     structural_node_i → hinge_i → elastic_mid → hinge_j → structural_node_j
@@ -559,11 +559,11 @@ This path directly replicates SAP2000's ASCE 41 hinge assignment::
 Key implementation details:
 
 * **Coincident nodes** are created at each element end with the same coordinates.
-* **``equalDOF``** ties translation DOFs (1,2,3) between structural and hinge
-  nodes so only rotations are released across the zero-length hinge.
-* **``Aggregator`` section** couples axial (P) and moment (Mz, My) responses
-  using a ``Hysteretic`` backbone material calibrated from the section's yield
-  moment and ASCE 41 rotation limits.
+* **``zeroLength`` + ``-mat``/``-dir``** carries all six DOFs with no
+  ``equalDOF``: rigid ``Elastic`` materials retain the retained DOFs
+  (P, Vy, Vz, T), while the two rotational DOFs are carried by ``Hysteretic``
+  (or ``Steel01`` for the bilinear hinge) backbone materials calibrated from
+  the section's yield moment and ASCE 41 rotation limits.
 * **ASCE 41-17 §10.8 hinge length**: ``fea_toolkit.capacity.asce41.hinge_length``
   implements Eq 10-1 / 10-2 / ACI formulas for steel, brace, and RC
   members.

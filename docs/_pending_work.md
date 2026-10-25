@@ -182,10 +182,12 @@ Source: `docs/sac_nonlinear_benchmark.md`;
 `Σ m·(a_rel + ag)` — exact for the base-excited, no-gravity benchmark), and the
 lumped-hinge damage quantities
 (`peak_plastic_rotation` φmax, `max_dissipated_energy` Emax as the net work
-`∫M·dθ`, `num_yielded_hinges` Nd).  The hinge bending response is the
-`zeroLengthSection` Aggregator DOF index 2 (`My`, the in-plane rotation),
-verified against the installed OpenSeesPy; `_create_lumped_hinges` stores the
-hinge tags + strong-axis yield rotation/moment for the damage post-pass.  The
+`∫M·dθ`, `num_yielded_hinges` Nd).  The lumped-hinge bending response is the
+`zeroLength` element's `deformation` / `force` index 4 (dir 5, the strong-axis
+in-plane hinge); the `beamWithHinges` path records the end-section
+`deformation` / `force` index 0 for sections 1 and 6.  `_create_lumped_hinges`
+stores the hinge tags + strong-axis yield rotation/moment for the damage
+post-pass.  The
 benchmark applies **no P-Δ** (linear stiffness, `geomTransf Linear`), and its
 Rayleigh ζ=2 % at mode 1 + `nCutOff` matches the runner's two-period formula —
 the 20-story needs `period_2 = T5` passed explicitly.

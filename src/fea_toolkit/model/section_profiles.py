@@ -335,6 +335,22 @@ def _sd_regions(section: SDSection) -> list[Region]:
     return regions
 
 
+def _display_depth(section: Any) -> float:
+    """The section depth to draw: the display-only dim when present, else ``depth``."""
+    d = getattr(section, "depth_disp", None)
+    if d is None or d <= 0:
+        d = getattr(section, "depth", None)
+    return float(d) if d is not None and d > 0 else 0.0
+
+
+def _display_tw(section: Any) -> float:
+    """The section web thickness to draw: display-only when present, else ``tw``."""
+    t = getattr(section, "tw_disp", None)
+    if t is None or t <= 0:
+        t = getattr(section, "tw", None)
+    return float(t) if t is not None and t > 0 else 0.0
+
+
 def section_profile_outline(section: Union[Section, Any]) -> Optional[ProfileOutline]:
     """The closed cross-section outline of *section*.
 
@@ -369,15 +385,17 @@ def section_profile_outline(section: Union[Section, Any]) -> Optional[ProfileOut
         is_circle = True
         radius = section.diameter / 2.0
     elif isinstance(section, ISection):
-        if section.depth > 0 and section.bf > 0:
-            pts_2d = profile_i(section.depth, section.bf, section.tf, section.tw)
+        depth = _display_depth(section)
+        if depth > 0 and section.bf > 0:
+            pts_2d = profile_i(depth, section.bf, section.tf, _display_tw(section))
     elif isinstance(section, PipeSection):
         if section.od > 0:
             is_circle = True
             radius = section.od / 2.0
     elif isinstance(section, BoxSection):
-        if section.depth > 0 and section.bf > 0:
-            pts_2d = profile_box(section.depth, section.bf, section.tf, section.tw)
+        depth = _display_depth(section)
+        if depth > 0 and section.bf > 0:
+            pts_2d = profile_box(depth, section.bf, section.tf, _display_tw(section))
     elif isinstance(section, ChannelSection) and section.depth > 0 and section.bf > 0:
         pts_2d = profile_channel(section.depth, section.bf, section.tf, section.tw)
     elif isinstance(section, SDSection):
@@ -476,9 +494,10 @@ def section_plates(
         return [_circle_open_points(radius, circle_segments)]
 
     if isinstance(section, ISection):
-        if section.depth <= 0 or section.bf <= 0:
+        depth = _display_depth(section)
+        if depth <= 0 or section.bf <= 0:
             return _zero_dimension_plates(section)
-        h, w = section.depth / 2.0, section.bf / 2.0
+        h, w = depth / 2.0, section.bf / 2.0
         tf = section.tf
         return [
             [(-w, h - tf / 2.0), (w, h - tf / 2.0)],  # top flange
@@ -499,10 +518,11 @@ def section_plates(
         ]
 
     if isinstance(section, BoxSection):
-        if section.depth <= 0 or section.bf <= 0:
+        depth = _display_depth(section)
+        if depth <= 0 or section.bf <= 0:
             return _zero_dimension_plates(section)
-        h, w = section.depth / 2.0, section.bf / 2.0
-        tf, tw = section.tf, section.tw
+        h, w = depth / 2.0, section.bf / 2.0
+        tf, tw = section.tf, _display_tw(section)
         y = h - tf / 2.0
         x = w - tw / 2.0
         return [

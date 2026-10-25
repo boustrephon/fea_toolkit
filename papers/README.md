@@ -23,9 +23,10 @@ quarto render papers/ohtori_modal_verification.qmd --to html   # quick check
 quarto render papers/ohtori_modal_verification.qmd --to pdf    # manuscript (needs LaTeX)
 ```
 
-The `jupyter: venv_opensees` key in the `.qmd` frontmatter names the Jupyter
-kernel; change it to the kernel registered for *your* OpenSees environment
-(register with `python -m ipykernel install --user --name <kernel>`). The code
-chunks import `fea_toolkit` and `openseespy`, so they need the same OpenSeesPy
-venv as the test suite. Citations are resolved from `references.bib`; the
-generated `.html` / `*_files/` build outputs are gitignored.
+The `jupyter: venv_opensees` key has been removed from the `.qmd` frontmatter;
+Quarto executes the code through the Python environment selected above (either
+the activated OpenSeesPy venv or the `QUARTO_PYTHON` override), so no Jupyter
+kernelspec registration is required. The code chunks import `fea_toolkit` and
+`openseespy`, so they need the same OpenSeesPy venv as the test suite.
+Citations are resolved from `references.bib`; the generated `.html` /
+`*_files/` build outputs are gitignored.

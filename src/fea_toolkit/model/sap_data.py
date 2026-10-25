@@ -445,14 +445,6 @@ class Section:
     # Plastic moduli (from manufacturer DB where available)
     Z33: Optional[float] = None
     Z22: Optional[float] = None
-    # Trilinear flexural backbone (EI1/EI2/EI3 rigidities + break curvatures
-    # d1/d2) for concentrated-plasticity members (the SAC/Ohtori benchmark).
-    # ``None`` unless stamped by ``benchmarks.sac.enrich_trilinear``.
-    ei1: Optional[float] = None
-    ei2: Optional[float] = None
-    ei3: Optional[float] = None
-    d1: Optional[float] = None
-    d2: Optional[float] = None
     # Extra
     manufacturer: Optional[str] = None
     # Stiffness modifiers from FRAME SECTION PROPERTIES 01 - GENERAL
@@ -468,6 +460,16 @@ class Section:
     # doubly-symmetric shapes.
     ecc_v2: float = 0.0
     ecc_v3: float = 0.0
+    # Trilinear flexural backbone (EI1/EI2/EI3 rigidities + break curvatures
+    # d1/d2) for concentrated-plasticity members (the SAC/Ohtori benchmark).
+    # ``None`` unless stamped by ``benchmarks.sac.enrich_trilinear``.  Kept
+    # after ``ecc_v3`` so positional construction of ``Section`` and its
+    # subclasses is unchanged.
+    ei1: Optional[float] = None
+    ei2: Optional[float] = None
+    ei3: Optional[float] = None
+    d1: Optional[float] = None
+    d2: Optional[float] = None
 
     @property
     def shape_id(self) -> str:
@@ -610,6 +612,11 @@ class ISection(Section):
     bf: float = 0.0  # Flange width B
     tf: float = 0.0  # Flange thickness
     tw: float = 0.0  # Web thickness
+    # Display-only physical dimensions (for the visualiser), kept separate from
+    # the analysis ``depth``/``tw`` (panel-zone geometry) so a display fallback
+    # never feeds the panel-zone computation.
+    depth_disp: Optional[float] = None
+    tw_disp: Optional[float] = None
 
     def to_fiber_patches(
         self, materials: dict[str, int], nfy: int = 8, nfz: int = 4
@@ -671,6 +678,9 @@ class BoxSection(Section):
     bf: float = 0.0  # B
     tf: float = 0.0  # Flange (top/bottom) thickness
     tw: float = 0.0  # Web (left/right) thickness
+    # Display-only physical dimensions (see :class:`ISection`).
+    depth_disp: Optional[float] = None
+    tw_disp: Optional[float] = None
 
     def to_fiber_patches(
         self, materials: dict[str, int], nfy: int = 8, nfz: int = 4

@@ -1003,9 +1003,11 @@ class ElementMixin:
 
             structural_node_i → hinge_i → elastic_mid → hinge_j → structural_node_j
 
-        Coincident hinge nodes sit at the same coordinates.  Translation
-        DOFs (1,2,3) are tied with ``equalDOF`` so only rotations (4,5,6)
-        are released across the zero-length hinge elements.
+        Coincident hinge nodes sit at the same coordinates.  Each hinge is a
+        ``zeroLength`` element carrying all six DOFs via ``-mat``/``-dir``
+        (no ``equalDOF``): rigid ``Elastic`` materials retain P/Vy/Vz/T,
+        while the hinge materials (``Hysteretic`` or ``Steel01``) provide the
+        two rotational DOFs.
 
         Hinge backbones use ``Hysteretic`` materials matched to ASCE 41
         rotation limits.

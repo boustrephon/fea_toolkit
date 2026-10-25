@@ -50,18 +50,24 @@ class TransientRunnerMixin:
             num_steps: Number of integration steps (default ``len(accel)``).
 
         Returns:
-            Dict with ``times`` (s), per-node ``displacements`` /
-            ``velocities`` / ``accelerations`` (``{node_tag: (converged_steps, 3)
-            ndarray}``), ``base_shear`` (per-step total base shear via global
-            equilibrium ``Σ m·(a_rel + ag)``), ``peak_displacement`` (m),
-            ``peak_base_shear`` (N), ``peak_plastic_rotation`` (rad),
-            ``max_dissipated_energy`` (N·m), ``num_yielded_hinges``,
-            ``converged_steps`` and the two Rayleigh ``period_1`` / ``period_2``.
+            Dict with ``times`` (s), per-node ``displacements``
+            (``{node_tag: (converged_steps, 3) ndarray}``) and, only when
+            ``transient_record_kinematics`` is enabled, ``velocities`` /
+            ``accelerations`` (same shape, else empty dicts), ``base_shear``
+            (per-step total base shear via global equilibrium
+            ``Σ m·(a_rel + ag)`` over **all** nodes), ``peak_displacement``
+            (m), ``peak_base_shear`` (N), ``peak_plastic_rotation`` (the
+            maximum total hinge deformation — rad for lumped hinges, 1/m for
+            ``beamWithHinges`` end-section curvature), ``max_dissipated_energy``
+            (N·m), ``num_yielded_hinges``, ``converged_steps`` and the two
+            Rayleigh ``period_1`` / ``period_2``.
 
         The builder ``config`` may set ``transient_algorithm`` (the solver
-        algorithm; default ``"Newton"``) and ``transient_record_node_tags`` (an
+        algorithm; default ``"Newton"``), ``transient_record_node_tags`` (an
         iterable of node tags whose histories are recorded; default ``None`` =
-        every node).
+        every node) and ``transient_record_kinematics`` (a bool enabling
+        velocity/acceleration recording for the selected nodes; default
+        ``False`` — only displacements are recorded).
         """
         accel = np.asarray(accel, dtype=float)
         if num_steps is None:
@@ -149,15 +155,22 @@ class TransientRunnerMixin:
         else:
             record_node_tags = all_node_tags
 
+        # Velocity/acceleration recording is opt-in (default off): displacement
+        # histories are always recorded for the selected nodes; the full
+        # kinematic triplet is allocated and queried only when enabled.
+        record_kinematics = bool(self.config.get("transient_record_kinematics", False))
+
         # Preallocate per-node kinematic histories (num_steps, 3); the returned
         # dicts are sliced to the converged step count at the end.
         disp_history: dict[int, np.ndarray] = {
             t: np.zeros((num_steps, 3)) for t in record_node_tags
         }
-        vel_history: dict[int, np.ndarray] = {t: np.zeros((num_steps, 3)) for t in record_node_tags}
-        accel_history: dict[int, np.ndarray] = {
-            t: np.zeros((num_steps, 3)) for t in record_node_tags
-        }
+        vel_history: dict[int, np.ndarray] = (
+            {t: np.zeros((num_steps, 3)) for t in record_node_tags} if record_kinematics else {}
+        )
+        accel_history: dict[int, np.ndarray] = (
+            {t: np.zeros((num_steps, 3)) for t in record_node_tags} if record_kinematics else {}
+        )
 
         # Cache each node's mass once before the time loop.
         node_mass = {t: float(ops.nodeMass(t, dof)) for t in all_node_tags}
@@ -193,8 +206,9 @@ class TransientRunnerMixin:
             step = converged_steps
             for t in record_node_tags:
                 disp_history[t][step] = [float(ops.nodeDisp(t, d)) for d in (1, 2, 3)]
-                vel_history[t][step] = [float(ops.nodeVel(t, d)) for d in (1, 2, 3)]
-                accel_history[t][step] = [float(ops.nodeAccel(t, d)) for d in (1, 2, 3)]
+                if record_kinematics:
+                    vel_history[t][step] = [float(ops.nodeVel(t, d)) for d in (1, 2, 3)]
+                    accel_history[t][step] = [float(ops.nodeAccel(t, d)) for d in (1, 2, 3)]
             # Ground acceleration at the integrator's *current* pseudo-time after
             # this step (sample index ``step + 1`` — ``accel[0]`` is t=0),
             # zero once that time is beyond the acceleration series.
@@ -204,7 +218,7 @@ class TransientRunnerMixin:
             # for the recorded subset).
             shear = 0.0
             for t in all_node_tags:
-                if t in accel_history:
+                if record_kinematics and t in accel_history:
                     a_rel = float(accel_history[t][step][dof - 1])
                 else:
                     a_rel = float(ops.nodeAccel(t, dof))

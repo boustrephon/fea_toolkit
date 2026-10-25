@@ -22,7 +22,6 @@ format:
   pdf: default
   html: default
 number-sections: true
-jupyter: venv_opensees
 bibliography: references.bib
 ---
 
@@ -49,9 +48,9 @@ choices that the comparison exposed.
 
 # Benchmark buildings
 
-The three Los Angeles pre-Northridge frames share the same plan (five bays in
-the N–S perimeter frame, 9.144 m bay width) but differ in height, member
-schedule and base condition.
+The three Los Angeles pre-Northridge frames share the same N–S perimeter
+plan — four bays in the 3-story frame, five bays in the 9- and 20-story
+frames — but differ in height, member schedule and base condition.
 
 | Property | 3-story | 9-story | 20-story |
 |---|---|---|---|
@@ -131,7 +130,7 @@ values are those emitted by the code in @sec-reproducibility; re-executing that
 code regenerates every number.
 
 ```{python}
-#| label: fig-verify
+#| label: run-all
 #| warning: false
 def _run_all():
     measured = {
@@ -151,44 +150,41 @@ measured = _run_all()
 
 ::: {#tbl-freq}
 
-**3-story** (faithful `struct3.m` transcription, `sac.py`)
+```{python}
+#| echo: false
+#| output: asis
+#| warning: false
+_LABELS = {
+    3: "faithful `struct3.m` transcription, `sac.py`",
+    9: "unified `fema355c` generator",
+    20: "unified `fema355c` generator",
+}
 
-| Mode | Published (Hz) | This study (Hz) | Error (%) |
-|:----:|:--------------:|:---------------:|:---------:|
-| 1 | 0.99 | 1.0065 | +1.67 |
-| 2 | 3.06 | 3.0989 | +1.27 |
-| 3 | 5.83 | 5.8469 | +0.29 |
 
-**9-story** (unified `fema355c` generator)
+def _pub(x: float) -> str:
+    """Format a published frequency with its trailing zeros preserved."""
+    s = f"{x:.3f}"
+    while s.endswith("0") and len(s.split(".")[1]) > 2:
+        s = s[:-1]
+    return s
 
-| Mode | Published (Hz) | This study (Hz) | Error (%) |
-|:----:|:--------------:|:---------------:|:---------:|
-| 1 | 0.443 | 0.4460 | +0.68 |
-| 2 | 1.18 | 1.1837 | +0.31 |
-| 3 | 2.05 | 2.0615 | +0.56 |
-| 4 | 3.09 | 3.1202 | +0.98 |
-| 5 | 4.27 | 4.2991 | +0.68 |
 
-**20-story** (unified `fema355c` generator)
-
-| Mode | Published (Hz) | This study (Hz) | Error (%) |
-|:----:|:--------------:|:---------------:|:---------:|
-| 1 | 0.261 | 0.2628 | +0.69 |
-| 2 | 0.753 | 0.7574 | +0.58 |
-| 3 | 1.30 | 1.3069 | +0.53 |
-| 4 | 1.83 | 1.8438 | +0.75 |
-| 5 | 2.40 | 2.4183 | +0.76 |
-| 6 | 2.44 | 2.4720 | +1.31 |
-| 7 | 2.92 | 2.9547 | +1.19 |
-| 8 | 3.01 | 3.0323 | +0.74 |
-| 9 | 3.63 | 3.6657 | +0.98 |
-| 10 | 3.68 | 3.7146 | +0.94 |
-
-:::
+for stories in (3, 9, 20):
+    print(f"**{stories}-story** ({_LABELS[stories]})")
+    print()
+    print("| Mode | Published (Hz) | This study (Hz) | Error (%) |")
+    print("|:----:|:--------------:|:---------------:|:---------:|")
+    for i, (pf, mf) in enumerate(zip(PUBLISHED[stories], measured[stories]), start=1):
+        err = 100.0 * (mf - pf) / pf
+        print(f"| {i} | {_pub(pf)} | {mf:.4f} | {err:+.2f} |")
+    print()
+```
 
 Comparison of computed (this study) and published (Ohtori et al. 2004)
 natural frequencies; @fig-freq-compare shows the same values graphically, with
 the relative difference annotated above each mode.
+
+:::
 
 ```{python}
 #| label: fig-freq-compare
@@ -357,8 +353,8 @@ gravity-bay idealisation in the 3-story frame.
 
 # Reproducibility {#sec-reproducibility}
 
-The complete computation is the code in @fig-verify plus the helpers in the
-Methods section, run in the project's OpenSees environment:
+The complete computation is the code that produces @tbl-freq plus the helpers
+in the Methods section, run in the project's OpenSees environment:
 
 ```bash
 pip install -e ".[report]"

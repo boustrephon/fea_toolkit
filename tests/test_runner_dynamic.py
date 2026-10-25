@@ -125,3 +125,7 @@ def test_smoke_runs_and_returns_finite(builder):
     assert res["converged_steps"] > 0
     assert np.isfinite(res["peak_displacement"])
     assert res["times"].shape == (res["converged_steps"],)
+    # Velocity/acceleration recording is opt-in (default off) — only the
+    # displacement histories are populated.
+    assert res["velocities"] == {}
+    assert res["accelerations"] == {}

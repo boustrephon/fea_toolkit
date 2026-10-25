@@ -254,7 +254,9 @@ def enrich_display_sections(md: SAPModelData, building: int = 3) -> SAPModelData
     section's flange dimensions (``bf``, ``tf``) so the visualiser can draw the
     cross-section.  The analysis properties (``A``, ``I33``, ``I22``, ``J``,
     ``Z33``, ``Z22`` and the ``ei1/ei2/ei3/d1/d2`` backbone) and the panel-zone
-    ``depth``/``tw`` are preserved unchanged.
+    ``depth``/``tw`` are preserved unchanged; the physical display depth and
+    web thickness go to the separate ``depth_disp``/``tw_disp`` fields so they
+    never feed the panel-zone computation.
 
     Args:
         md: The enriched SAC model; sections are rebuilt in place.
@@ -288,10 +290,12 @@ def enrich_display_sections(md: SAPModelData, building: int = 3) -> SAPModelData
             J=sec.J,
             Z33=sec.Z33,
             Z22=sec.Z22,
-            depth=getattr(sec, "depth", None) or d,
+            depth=getattr(sec, "depth", None),
             bf=bf,
             tf=tf,
-            tw=getattr(sec, "tw", None) or tw,
+            tw=getattr(sec, "tw", None),
+            depth_disp=d,
+            tw_disp=tw,
             ei1=sec.ei1,
             ei2=sec.ei2,
             ei3=sec.ei3,
@@ -446,7 +450,7 @@ def _build_benchmark_model(building: int) -> SAPModelData:
 
 
 def load_model(
-    building: int = 3, nonlinear: bool = True, *, backbone: str = "bilinear"
+    *, building: int = 3, nonlinear: bool = True, backbone: str = "bilinear"
 ) -> SAPModelData:
     """Load a SAC model (3/9/20-story); enrich for nonlinear use.
 
@@ -454,6 +458,9 @@ def load_model(
     (``sac_3story.tcl``); the 9/20-story models are built programmatically from
     the transcribed ``struct9.m`` / ``struct20.m`` data (geometry, ``mat_tbl``
     backbones, ``element_tbl`` member schedule, seismic masses).
+
+    ``building`` is keyword-only, so the first positional argument selects
+    ``nonlinear`` (``load_model(True)`` / ``load_model(False)``).
 
     Args:
         building: 3, 9 or 20.
@@ -585,9 +592,9 @@ def _add_faithful_diaphragms(mesh: Any) -> None:
 
 
 def build_builder(
+    *,
     building: int = 3,
     panel_zone: bool = False,
-    *,
     nonlinear: bool = True,
     backbone: str = "bilinear",
     hinge_model: str = "lumped",
@@ -600,6 +607,9 @@ def build_builder(
     called, so it is ready to run an analysis.  The M2 variant preprocesses with
     ``panel_zone_model='krawinkler_gupta'`` (a separate ``MeshModel``), keeping
     the builder read-only.
+
+    ``building`` is keyword-only, so the first positional argument selects
+    ``panel_zone`` (``build_builder(True)`` / ``build_builder(False)``).
 
     Args:
         building: 3, 9 or 20 (see :func:`load_model`).

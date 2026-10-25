@@ -275,7 +275,8 @@ The legacy single‑stage ``OpenSeesBuilder`` has been removed.
   2e  │ _create_sections()       │ ops.section('Elastic', tag, …)  │ includes ShellSections
   2f  │ _create_shell_elements() │ ops.element('ShellMITC4', …)    │
       │                          │ ops.section('ElasticMembranePlateSection', …)
-  2g  │ _create_lumped_hinges()  │ zeroLengthSection hinges        │ optional
+  2g  │ _create_lumped_hinges()  │ ops.element('zeroLength', …)    │ optional
+      │                          │ ops.uniaxialMaterial(…)         │
   2h  │ _create_elements()       │ ops.element('elasticBeamColumn')│ 🔗 Check D
       │                          │ ops.geomTransf('Linear', …)     │
 ```

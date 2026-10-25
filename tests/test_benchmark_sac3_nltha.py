@@ -238,6 +238,9 @@ def test_transient_recorders_force_and_kinematic_quantities():
     wipe()
     try:
         b = build_builder(nonlinear=False)
+        # Kinematics recording is opt-in (default off) — this test exercises
+        # the enabled path so the velocity/acceleration histories exist.
+        b.config["transient_record_kinematics"] = True
         dt, n = 0.005, 200
         t = np.arange(n) * dt
         accel = np.zeros(n)
