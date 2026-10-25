@@ -909,6 +909,10 @@ class ElementMixin:
             # fixed by) the column — so tie the hinge to the *column* node and
             # fix its out-of-plane DOFs, keeping the hinge a direct slave of the
             # column rather than a slave-of-a-slave (which locks the sway modes).
+            # NB: this equalDOF tie is why the base reaction reads zero at a
+            # fixed base (Transformation can't follow a node that is both fixed
+            # and an equalDOF master) — see docs/sac_nonlinear_benchmark.md
+            # "Hinge translation tie" for the zeroLength -mat/-dir alternative.
             col_i_id = pz_beam_to_col.get(ni.node_id)
             col_j_id = pz_beam_to_col.get(nj.node_id)
             if col_i_id is not None:

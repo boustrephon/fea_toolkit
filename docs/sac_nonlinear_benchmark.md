@@ -65,6 +65,46 @@ data are not redistributable):
 
 The leaning column stays elastic (no plastic hinge).
 
+### Hinge translation tie — `equalDOF` (and why the base reads zero reaction)
+
+The zero-length hinge is a `zeroLengthSection` whose Aggregator section carries
+only `[P, Mz, My, T]` — **no shear**.  The hinge node's translations must
+therefore be tied rigidly to the structural node (so the member still transmits
+shear and axial), done with `equalDOF(struct_node, hinge_node, 1, 2, 3)` while
+the rotations stay free across the hinge.  OpenSees has no native
+"rigid-in-shear, hinge-in-moment" element, so a tie is unavoidable *with this
+section type*.
+
+That `equalDOF` is the same constraint the panel-zone section above shows is
+fragile under the `Transformation` handler.  At a **fixed base** the structural
+node is *both* `fix`ed and the `equalDOF` master; `Transformation` "does not
+follow constraints", so the fixed-DOF reaction is mis-resolved and
+`ops.nodeReaction` reads back zero (verified against a clean no-hinge model,
+which returns the exact reaction).  The base shear is therefore recovered by
+**global equilibrium** `Σ m·(a_rel + ag)` — exact for the base-excited,
+no-gravity benchmark — see `opensees/_runner_dynamic.py`.
+
+Alternatives, for the record:
+
+- **`zeroLength` element + `-mat`/`-dir` (preferred fix).**  Supply a rigid
+  `Elastic` spring on the retained DOFs (P, V2, V3, T) and the hinge material on
+  M2/M3, with no `equalDOF` — the base node is then only `fix`ed and the
+  reaction is correct (verified: a base hinge modelled this way returns exactly
+  `-1000 N` under a `1000 N` tip load).  This is the "extra node + `zeroLength`"
+  pattern already used for frame releases (`opensees/releases.py`,
+  `member_releases.md`, which states `equalDOF` is *deliberately not used*).  It
+  would also un-block the 9-story gravity-bay pin, currently skipped because a
+  release and a hinge both re-point the member end and the lumped hinge wins.
+  Cost: a finite (η = 100) rigidity on the retained DOFs rather than exact.
+- **`Penalty` / `Lagrange` handlers.**  Handle multiple constraints on one node,
+  but change the global solve (cost / conditioning) and were not needed.
+- **`beamWithHinges`.**  No extra node or constraint at all (the hinge lives in
+  the element formulation); deferred per the A1 decision.
+
+Decision: keep the validated `equalDOF` topology and compute the base shear by
+global equilibrium; migrate the hinge to the `zeroLength -mat/-dir` pattern when
+the nonlinear comparison needs the gravity-bay pin or an exact base reaction.
+
 ### Approximation vs the benchmark trilinear backbone
 
 The `Steel01` bilinear hinge is an **approximation**, not a bit-exact port.  The
