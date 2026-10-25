@@ -14,6 +14,9 @@ nonlinear evaluation-model variants:
 * **M2** — M1 plus an explicit Krawinkler & Gupta panel zone at each
   beam-column joint (``panel_zone_model='krawinkler_gupta'``).
 
+Both variants default to the bilinear hinge; ``backbone="trilinear"`` switches
+them onto the transcribed ``mat_tbl`` backbone (``hinge_backbone="trilinear"``).
+
 Both variants use the member schedule from the official benchmark data
 (``struct3.m``): W14x257 / W14x311 columns, per-level beams (W33x118 / W30x116 /
 W24x68) with a W21x44 fourth bay, and a leaning column.  The lateral model uses
@@ -256,33 +259,43 @@ def enrich_display_sections(md: SAPModelData, building: int = 3) -> SAPModelData
     return md
 
 
-def load_model(nonlinear: bool = True) -> SAPModelData:
+def load_model(nonlinear: bool = True, *, backbone: str = "bilinear") -> SAPModelData:
     """Load the SAC model from the bundled Tcl; enrich for nonlinear use.
 
     Args:
         nonlinear: When True, call :func:`enrich_nonlinear` so the model carries
             plastic moduli and yield strengths.  When False, return the bare
             elastic model (the T2 modal anchor's input).
+        backbone: ``"bilinear"`` (default) or ``"trilinear"``.  With
+            ``"trilinear"``, also call :func:`enrich_trilinear` so the sections
+            carry the transcribed ``mat_tbl`` backbone consumed by the
+            ``hinge_backbone="trilinear"`` path.
     """
     md = parse_tcl_model(SAC3_TCL.read_text(encoding="utf-8"), SAC3_UNITS)
     if nonlinear:
         enrich_nonlinear(md)
+        if backbone == "trilinear":
+            enrich_trilinear(md)
         enrich_display_sections(md)
     return md
 
 
-def builder_config() -> dict[str, Any]:
+def builder_config(backbone: str = "bilinear") -> dict[str, Any]:
     """The ``AnalysisBuilder`` config for the nonlinear evaluation model.
 
     Purely build-level choices (element type, hinge model).  The panel-zone
     choice is a *preprocessing* choice and lives in
     :func:`preprocess_config` — the builder keys off the frozen
     ``mesh_model.panel_zones`` spec instead.
+
+    Args:
+        backbone: ``"bilinear"`` (default, the M1/M2 Steel01 hinge) or
+            ``"trilinear"`` (the transcribed ``mat_tbl`` backbone).
     """
     return {
         "element_type": "elasticBeamColumn",
         "hinge_model": "lumped",
-        "hinge_backbone": "bilinear",
+        "hinge_backbone": backbone,
     }
 
 
@@ -329,7 +342,11 @@ def _add_faithful_diaphragms(mesh: Any) -> None:
 
 
 def build_builder(
-    panel_zone: bool = False, *, nonlinear: bool = True, fidelity: str = "simplified"
+    panel_zone: bool = False,
+    *,
+    nonlinear: bool = True,
+    backbone: str = "bilinear",
+    fidelity: str = "simplified",
 ) -> AnalysisBuilder:
     """Build the SAC model (elastic, or nonlinear M1/M2) into an ``AnalysisBuilder``.
 
@@ -343,13 +360,15 @@ def build_builder(
             zone); ``False`` for M1.
         nonlinear: ``True`` for the nonlinear evaluation models (bilinear
             hinges); ``False`` for the elastic (T2) anchor.
+        backbone: ``"bilinear"`` (default, the M1/M2 Steel01 hinge) or
+            ``"trilinear"`` (the transcribed ``mat_tbl`` backbone).
         fidelity: ``"simplified"`` (default) — the floor diaphragm is implicit
             (rigid-axial beams); or ``"faithful"`` — the rigid floor diaphragms
             are explicit, matching ``struct3.m``'s master-slave table.
     """
-    md = load_model(nonlinear=nonlinear)
+    md = load_model(nonlinear=nonlinear, backbone=backbone)
     mesh = preprocess_model(md, preprocess_config(panel_zone=panel_zone))
-    cfg = builder_config() if nonlinear else {}
+    cfg = builder_config(backbone) if nonlinear else {}
     b = AnalysisBuilder(mesh, cfg)
     b.build_domain()
     if fidelity == "faithful":

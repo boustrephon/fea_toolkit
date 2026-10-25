@@ -58,3 +58,38 @@ def test_trilinear_builder_builds():
         assert len(ops.getEleTags()) > 0
     finally:
         ops.wipe()
+
+
+def _first_period(backbone: str) -> float:
+    """First modal period of the nonlinear model with the given backbone."""
+    from openseespy.opensees import wipe
+
+    wipe()
+    try:
+        b = sac.build_builder(nonlinear=True, backbone=backbone)
+        return float(b.run_modal_analysis(num_modes=1, print_results=False)["periods"][0])
+    finally:
+        wipe()
+
+
+def test_load_model_trilinear_wires_backbones():
+    """``load_model(backbone="trilinear")`` stamps the backbones via the new wiring."""
+    try:
+        md = sac.load_model(nonlinear=True, backbone="trilinear")
+        cols = {round(s.A, 9): s for s in md.sections.values()}
+        w14x257 = cols[round(0.048759, 9)]
+        assert w14x257.ei1 == pytest.approx(MAT_TBL_3[1].ei1)
+        assert w14x257.d1 == pytest.approx(MAT_TBL_3[1].d1)
+    finally:
+        ops.wipe()
+
+
+def test_build_builder_trilinear_matches_m1_period():
+    """``backbone="trilinear"`` lands on the M1 period (EI1 ≈ elastic EI)."""
+    t1_tri = _first_period("trilinear")
+    t1_bi = _first_period("bilinear")
+    # EI1 is the benchmark's own elastic rigidity, so the trilinear hinge's
+    # elastic stiffness matches the bilinear hinge's — same first period.
+    assert t1_tri == pytest.approx(t1_bi, rel=0.02)
+    # And it stays on the published elastic anchor (0.99 Hz → 1.01 s).
+    assert t1_tri == pytest.approx(1.01, rel=0.05)
