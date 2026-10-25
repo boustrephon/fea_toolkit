@@ -127,10 +127,19 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   for 20-story — pass `period_2 = T5` explicitly); the benchmark applies **no
   P-Δ** (linear stiffness, `geomTransf Linear`).  The remaining piece is the A4
   comparison itself.
-- **A4 — comparison (not started).** Parse `unctrl3/9/20.mat` as the
-  authoritative targets, reconcile column ordering and `d_max`/`δmax`
-  semantics, and assert within ±5–10 % — 3-story El Centro 1.0 first, then the
-  full 10-case × 3-building matrix.
+- **A4 — comparison (part-blocked on a trilinear-hinge bug).** The
+  ``unctrl#.mat`` targets are parsed and transcribed
+  (`benchmarks/sac_response_data.py`; ``tests/test_benchmark_sac_response_data.py``),
+  and the case ordering is resolved (``Run_NLBM.m``: El Centro 0.5/1.0/1.5,
+  Hachinohe 0.5/1.0/1.5, Northridge 0.5/1.0, Kobe 0.5/1.0).  `F_max` is
+  confirmed to be the total inertial force `Σ m·(a_rel+ag)` (the evaluator's
+  *whole-building* `mi`).  **First comparison (3-story El Centro 1.0) exposed a
+  bug:** the *elastic* model's base shear (10.40 MN) lands on `F_max` (10.12 MN,
+  +2.8 %), but the *trilinear* lumped-hinge model returns ≈ 1.74 MN with zero
+  yielded hinges — the hinge backbone is softening the response ~6× instead of
+  acting nearly-rigid in the elastic range.  Root-cause the trilinear hinge
+  (compare its monotonic pushover against the elastic model) before resuming the
+  matrix.
 - **B4 — Phase-I base isolation — deferred.** Needs a base-isolation element
   path the toolkit does not have (friction pendulum / elastomeric isolator).
 
