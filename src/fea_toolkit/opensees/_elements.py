@@ -1001,6 +1001,60 @@ class ElementMixin:
                 e0_weak = stiff_factor * 6.0 * E * max(I22, 1e-12) / max(L, 1e-12)
                 ops.uniaxialMaterial("Steel01", hinge_mat_tag + 1, My, e0_strong, b)
                 ops.uniaxialMaterial("Steel01", hinge_mat_tag + 2, My_weak, e0_weak, b)
+            elif self.config.get("hinge_backbone") == "trilinear":
+                # Trilinear hinge (Hysteretic) from the transcribed Ohtori
+                # ``mat_tbl`` backbone — elastic EI1, post-yield EI2, hardening
+                # EI3, break curvatures d1/d2 (My = EI1*d1).  The member-level
+                # curvature→rotation conversion uses the member end stiffness
+                # 6EI/L, so the hinge's rotational slopes are 6*EI2/L and
+                # 6*EI3/L, with a "nearly rigid" elastic stiffness
+                # (hinge_stiffness_factor × 6*EI1/L) so the elastic interior
+                # member carries the elastic deformation.
+                ei1 = getattr(sec, "ei1", None) or 0.0
+                ei2 = getattr(sec, "ei2", None) or 0.0
+                ei3 = getattr(sec, "ei3", None) or 0.0
+                d1 = getattr(sec, "d1", None) or 0.0
+                d2 = getattr(sec, "d2", None) or 0.0
+                if ei1 <= 0.0 or ei2 <= 0.0 or d1 <= 0.0 or d2 <= d1:
+                    raise ValueError(
+                        f"hinge_backbone='trilinear' needs a valid mat_tbl "
+                        f"backbone on section '{sec_name}' "
+                        f"(ei1={ei1}, ei2={ei2}, d1={d1}, d2={d2})"
+                    )
+                stiff_factor = float(self.config.get("hinge_stiffness_factor", 10.0))
+                k0 = stiff_factor * 6.0 * ei1 / max(L, 1e-12)
+                k1 = 6.0 * ei2 / max(L, 1e-12)
+                k2 = 6.0 * (ei3 or ei2 * 0.02) / max(L, 1e-12)
+
+                my_tri = ei1 * d1
+                m2 = my_tri + ei2 * (d2 - d1)
+                theta_y = my_tri / k0
+                theta_2 = theta_y + (m2 - my_tri) / k1
+                theta_cap = theta_2 * 2.0
+                m_cap = m2 + k2 * (theta_cap - theta_2)
+
+                for mat_tag in (hinge_mat_tag + 1, hinge_mat_tag + 2):
+                    ops.uniaxialMaterial(
+                        "Hysteretic",
+                        mat_tag,
+                        my_tri,
+                        theta_y,
+                        m2,
+                        theta_2,
+                        m_cap,
+                        theta_cap,
+                        -my_tri,
+                        -theta_y,
+                        -m2,
+                        -theta_2,
+                        -m_cap,
+                        -theta_cap,
+                        1.0,
+                        1.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                    )
             else:
                 # Strong-axis moment (ASCE 41 Hysteretic backbone)
                 ops.uniaxialMaterial(

@@ -35,6 +35,7 @@ from ..io.tcl_importer import parse_tcl_model
 from ..model.sap_data import Material, SAPModelData
 from ..opensees.analysis_builder import AnalysisBuilder
 from ..opensees.preprocessor import preprocess_model
+from .sac_member_data import MAT_TBL_3
 
 #: Bundled Tcl transcription of the SAC 3-story N-S perimeter frame.
 SAC3_TCL = Path(__file__).with_name("sac_3story.tcl")
@@ -64,6 +65,18 @@ _BEAMS_BY_I = {
     7.6145e-4: {"Z33": 2.524e-3, "depth": 0.602, "tw": 0.0105},  # W24x68
     3.50775e-4: {"Z33": 1.563e-3, "depth": 0.526, "tw": 0.0089},  # W21x44
 }
+
+#: ``mat_tbl`` ``Mat_no`` per member (struct3.m ``element_tbl``), keyed by the
+#: same area/inertia as ``_COLUMNS_BY_AREA`` / ``_BEAMS_BY_I``.  The leaning
+#: column (material 6) and the rigid-axial link bay (material 7) are included.
+_COLUMN_MAT_NO = {0.048759: 1, 0.05895: 2}  # W14x257 → 1, W14x311 → 2
+_BEAM_MAT_NO = {
+    2.455e-3: 3,  # W33x118 → 3
+    2.0514e-3: 4,  # W30x116 → 4
+    7.6145e-4: 5,  # W24x68 → 5
+    3.50775e-4: 7,  # W21x44 → 7 (rigid-axial link bay)
+}
+_LEANING_MAT_NO = 6
 
 #: Representative members for the figure generator / docs.
 COLUMN = {"Z33": 7.34e-3, "depth": 0.417, "tw": 0.0435, "fy": COLUMN_FY}  # W14x257
@@ -133,6 +146,34 @@ def enrich_nonlinear(md: SAPModelData) -> SAPModelData:
         sec.Z33 = props["Z33"]
         sec.depth = props["depth"]
         sec.tw = props["tw"]
+    return md
+
+
+def enrich_trilinear(md: SAPModelData) -> SAPModelData:
+    """Stamp the Ohtori trilinear backbones (``mat_tbl``) onto the SAC sections.
+
+    Maps each moment-frame section to its ``Mat_no`` (columns by area, beams by
+    inertia — the same keys as :func:`enrich_nonlinear`) and writes the
+    trilinear backbone ``(EI1, EI2, EI3, d1, d2)`` onto the section so the
+    builder's ``hinge_backbone='trilinear'`` path can read it.  The leaning
+    column (material 6) and the rigid-axial link bay (material 7) are included.
+    """
+    roles = _frame_element_roles(md)
+    for eid, sname in md.frame_assignments.items():
+        sec = md.sections.get(sname)
+        if sec is None:
+            continue
+        if roles.get(eid) == "col":
+            mat_no = _match_props(_COLUMN_MAT_NO, sec.A, 1e-6)
+            if mat_no is None:
+                mat_no = _LEANING_MAT_NO  # leaning (gravity) column
+        else:
+            mat_no = _match_props(_BEAM_MAT_NO, sec.I33, 1e-8)
+            if mat_no is None:
+                continue
+        row = MAT_TBL_3[mat_no]
+        sec.ei1, sec.ei2, sec.ei3 = row.ei1, row.ei2, row.ei3
+        sec.d1, sec.d2 = row.d1, row.d2
     return md
 
 
@@ -255,6 +296,7 @@ __all__ = [
     "build_builder",
     "builder_config",
     "enrich_nonlinear",
+    "enrich_trilinear",
     "load_model",
     "peak_x",
     "preprocess_config",

@@ -445,6 +445,14 @@ class Section:
     # Plastic moduli (from manufacturer DB where available)
     Z33: Optional[float] = None
     Z22: Optional[float] = None
+    # Trilinear flexural backbone (EI1/EI2/EI3 rigidities + break curvatures
+    # d1/d2) for concentrated-plasticity members (the SAC/Ohtori benchmark).
+    # ``None`` unless stamped by ``benchmarks.sac.enrich_trilinear``.
+    ei1: Optional[float] = None
+    ei2: Optional[float] = None
+    ei3: Optional[float] = None
+    d1: Optional[float] = None
+    d2: Optional[float] = None
     # Extra
     manufacturer: Optional[str] = None
     # Stiffness modifiers from FRAME SECTION PROPERTIES 01 - GENERAL
