@@ -184,9 +184,24 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   `Σ m·(a_rel + ag)` was sampled one step too early); with the sampling
   corrected the base shear reproduces the target to ±4 %, so no unpublished
   `Nonlin12` interpolation is needed.  The 3-story ten-case matrix is run (see
-  `sac_trilinear_hinge_approaches.md` and the nonlinear paper); the 9/20-story
-  NLTHA is deferred (9-story gravity-bay release, 20-story `beamWithHinges`
-  flexibility singularity).
+  `sac_trilinear_hinge_approaches.md` and the nonlinear paper).
+
+  **9/20-story NLTHA — `beamWithHinges` fails for the box columns; the lumped
+  hinge is the working path.**  The 20-story's corner columns are 15×15 box
+  tubes whose flexural inertia (Iz ≈ 1.2e-3 m⁴) is ~4× smaller than the W
+  columns'.  The force-based `beamWithHinges` element assembles its 6×6 element
+  flexibility from the hinge (`Uniaxial` Mz) plus the elastic interior, and for
+  that small Iz the matrix is ill-conditioned — `ForceBeamColumn3d::update()`
+  prints "could not invert flexibility" and the analysis dies.  The lumped
+  hinge (`elasticBeamColumn` + `zeroLength` spring) is displacement-based and
+  robust, so the 9/20-story matrix runs `hinge_model='lumped'` +
+  `backbone='trilinear'` (the ~4–5 % elastic softening vs the exact
+  `beamWithHinges` is acceptable for the taller frames).  The Rayleigh anchor
+  periods are still taken from the *elastic* model (the lumped model is ~3×
+  larger, making a `fullGenLapack` solve impractically slow; and the damping is
+  an elastic property).  The 9-story gravity-bay release is skipped under the
+  lumped hinge (lumped hinges re-point the member ends and win over the
+  release), as before.
 - **B4 — Phase-I base isolation — deferred.** Needs a base-isolation element
   path the toolkit does not have (friction pendulum / elastomeric isolator).
 
