@@ -40,6 +40,7 @@ from .sac_member_data import (
 from .sac_run import (
     compute_metrics,
     floor_levels,
+    manifest_path,
     run_case,
     run_matrix,
     write_manifest,
@@ -65,6 +66,7 @@ __all__ = [
     "fema355c_schedules",
     "floor_levels",
     "load_model",
+    "manifest_path",
     "peak_x",
     "preprocess_config",
     "run_case",

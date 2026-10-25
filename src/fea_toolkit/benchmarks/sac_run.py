@@ -169,6 +169,11 @@ def _cache_dir() -> Path:
     return _repo_root() / "docs" / "assets" / "sac_nltha"
 
 
+def manifest_path() -> Path:
+    """Path to the committed metrics manifest (the paper reads this JSON)."""
+    return _cache_dir() / "sac_nltha_metrics.json"
+
+
 def _case_path(
     building: int, record_id: str, intensity: float, hinge_model: str, backbone: str
 ) -> Path:
@@ -340,7 +345,7 @@ def write_manifest(rows: list[dict[str, Any]], path: Optional[str] = None) -> Pa
     Drops the per-case fingerprint (a cache detail) and the histories; the
     scalar metrics and provenance round-trip as plain JSON.
     """
-    out = Path(path) if path else _cache_dir() / "sac_nltha_metrics.json"
+    out = Path(path) if path else manifest_path()
     scalar_keys = [
         "roof_disp",
         "d_max",
@@ -377,6 +382,7 @@ __all__ = [
     "case_fingerprint",
     "compute_metrics",
     "floor_levels",
+    "manifest_path",
     "record_path",
     "run_case",
     "run_matrix",

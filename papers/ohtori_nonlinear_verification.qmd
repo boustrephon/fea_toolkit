@@ -144,11 +144,11 @@ manifest.
 #| label: matrix-table
 #| warning: false
 import json
-from pathlib import Path
 
 from fea_toolkit.benchmarks.sac_response_data import CASE_ORDER, UNCTRL_TARGETS
+from fea_toolkit.benchmarks.sac_run import manifest_path
 
-manifest = json.loads(Path("docs/assets/sac_nltha/sac_nltha_metrics.json").read_text())
+manifest = json.loads(manifest_path().read_text())
 row = {f"{r['record']} {r['intensity']:g}": r for r in manifest if r["building"] == 3}
 targets = UNCTRL_TARGETS[3]
 
