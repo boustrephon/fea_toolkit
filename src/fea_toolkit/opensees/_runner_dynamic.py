@@ -122,7 +122,11 @@ class TransientRunnerMixin:
         ops.numberer("RCM")
         ops.system("BandGeneral")
         ops.test("EnergyIncr", 1.0e-6, 200, 0)
-        ops.algorithm("Newton")
+        # NewtonLineSearch (not plain Newton): the trilinear Hysteretic hinge has
+        # two sharp yield corners, and plain Newton fails to converge there (the
+        # 3-story El Centro run died at t≈10.4 s).  The line search walks the
+        # Newton step back when a full step overshoots a corner.
+        ops.algorithm("NewtonLineSearch")
         ops.integrator("Newmark", 0.5, 0.25)
         ops.analysis("Transient")
 

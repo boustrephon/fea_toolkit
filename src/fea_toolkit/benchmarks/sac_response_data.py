@@ -30,11 +30,11 @@ Quantities (the ``EvalNLBM.m`` denominators J1/J2/J3/J7/J8/J9):
   curvature).
 * ``N_d``     — number of damaged (yielded) connections.
 
-``F_max`` uses the **whole-building** mass (the evaluator's ``mi``), which is
-twice the per-frame seismic mass in ``struct#.m`` — so a single planar frame's
-base shear must be doubled to compare.  ``d_max`` / ``xdd_max`` are the maxima
-over the floor levels.  A ``NaN`` marks a case the archive recorded without a
-damage value (the 3-story Hachinohe 0.5 run).
+``F_max`` is the single-frame base shear ``Σ mi·xdd_i`` using the *frame* mass
+``mi`` (``struct#.m``'s ``Element_mass`` / ``seismic_mass#`` — the model uses the
+same mass, so a single planar frame's base shear compares directly, no doubling).
+``d_max`` / ``xdd_max`` are the maxima over the floor levels.  A ``NaN`` marks a
+case the archive recorded without a damage value (the 3-story Hachinohe 0.5 run).
 """
 
 from typing import NamedTuple

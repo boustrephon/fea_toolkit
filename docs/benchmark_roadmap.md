@@ -140,7 +140,15 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   retained DOFs P/Vy/Vz/T, hinge on My/Mz, no `equalDOF`) — the release-element
   convention.  Monotonic elastic-vs-trilinear now agree to 0.1 % (8.83 vs
   8.84 MN) and reversing to ~10 % (6.91 vs 6.23 MN, with the hinges now
-  correctly yielding).  Re-run the El Centro 1.0 comparison and the full matrix.
+  correctly yielding).  **First comparison (3-story El Centro 1.0, trilinear,
+  2 % damping):** roof displacement 0.154 m vs 0.151 m (Ohtori Table 3, +2 %),
+  interstory drift 0.0155 vs 0.01503 (×1.03), yielded hinges 22 vs 22, base
+  shear 8.89 vs 10.12 MN (−12 %), peak floor acceleration 7.84 vs 6.54 m/s²
+  (+20 %).  `F_max` is the single-frame base shear (no ×2 — confirmed against
+  `struct3.m`'s `Element_mass`).  The transient solver needed
+  `NewtonLineSearch` (plain Newton died at the trilinear yield corners, t≈10.4
+  s).  The base-shear (−12 %) and floor-acceleration (+20 %) gaps remain open;
+  run the full 10×3 matrix next.
 - **B4 — Phase-I base isolation — deferred.** Needs a base-isolation element
   path the toolkit does not have (friction pendulum / elastomeric isolator).
 
