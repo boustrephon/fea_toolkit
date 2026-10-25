@@ -6,6 +6,12 @@ from pathlib import Path
 import pytest
 
 from fea_toolkit.benchmarks.sac_member_data import (
+    BEAM_MATERIALS_3,
+    BEAM_MATERIALS_9,
+    BEAM_MATERIALS_20,
+    COLUMN_MATERIALS_3,
+    COLUMN_MATERIALS_9,
+    COLUMN_MATERIALS_20,
     MAT_TBL_3,
     MAT_TBL_9,
     MAT_TBL_20,
@@ -138,3 +144,36 @@ def test_module_matches_source_verbatim(fname, table):
     assert set(table) == set(base) | set(splices), (
         f"{fname}: module rows {sorted(table)} != source rows {sorted(set(base) | set(splices))}"
     )
+
+
+def _parse_element_tbl(text: str, marker: str) -> list[list[int]]:
+    """Parse one ``element_tbl(:,3)`` block into per-floor material rows."""
+    start = text.index(marker)
+    end = text.index("]'", start)
+    rows: list[list[int]] = []
+    for line in text[start:end].splitlines():
+        s = line.split("%")[0].replace("...", " ").strip()
+        tokens = s.split()
+        if tokens and tokens[0].isdigit():
+            rows.append([int(x) for x in tokens])
+    return rows
+
+
+@pytest.mark.parametrize(
+    ("fname", "col_table", "beam_table"),
+    [
+        ("struct3.m", COLUMN_MATERIALS_3, BEAM_MATERIALS_3),
+        ("struct9.m", COLUMN_MATERIALS_9, BEAM_MATERIALS_9),
+        ("struct20.m", COLUMN_MATERIALS_20, BEAM_MATERIALS_20),
+    ],
+)
+def test_element_tbl_matches_source_verbatim(fname, col_table, beam_table):
+    """The committed element_tbl assignment reproduces struct*.m exactly."""
+    path = _SRC_DIR / fname
+    if not path.exists():
+        pytest.skip(f"benchmark source not present: {path}")
+    text = path.read_text(encoding="utf-8")
+    cols = _parse_element_tbl(text, "element_tbl(1:Num_col,3) = [")
+    beams = _parse_element_tbl(text, "element_tbl(Num_col+1:Num_col+Num_beam,3) = [")
+    assert cols == col_table, f"{fname} column materials:\n{cols}\n!=\n{col_table}"
+    assert beams == beam_table, f"{fname} beam materials:\n{beams}\n!=\n{beam_table}"

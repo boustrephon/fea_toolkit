@@ -128,6 +128,105 @@ MAT_TBL_20: dict[int, MemberBackbone] = {
 }
 
 
+# ═══════════════════════════════════════════════════════════════
+# Member → material assignment (element_tbl(:,3))
+# ═══════════════════════════════════════════════════════════════
+# element_tbl(:,3) maps each member to a ``Mat_no``.  Each inner list is one
+# floor's members in bay order (columns first, then beams), matching the
+# source's per-floor comment rows.  The last column is the leaning (gravity)
+# column (struct3); the last beam of each floor is the rigid-axial link bay
+# (struct3 material 7).  The source also tags those link-bay beams with an
+# element type flag (3 or 5) in ``element_tbl(:,4)`` — not transcribed here.
+
+COLUMN_MATERIALS_3: list[list[int]] = [
+    [1, 2, 2, 1, 6],  # 1st floor
+    [1, 2, 2, 1, 6],  # 2nd floor
+    [1, 2, 2, 1, 6],  # 3rd floor
+]
+
+BEAM_MATERIALS_3: list[list[int]] = [
+    [3, 3, 3, 7],  # 2nd floor
+    [4, 4, 4, 7],  # 3rd floor
+    [5, 5, 5, 7],  # roof
+]
+
+COLUMN_MATERIALS_9: list[list[int]] = [
+    [1, 2, 2, 2, 2, 1],  # basement
+    [1, 2, 2, 2, 2, 1],  # 1st floor
+    [1, 12, 12, 12, 12, 1],  # 2nd floor
+    [1, 3, 3, 3, 3, 1],  # 3rd floor
+    [13, 14, 14, 14, 14, 13],  # 4th floor
+    [4, 1, 1, 1, 1, 4],  # 5th floor
+    [15, 13, 13, 13, 13, 15],  # 6th floor
+    [5, 4, 4, 4, 4, 5],  # 7th floor
+    [16, 15, 15, 15, 15, 16],  # 8th floor
+    [6, 5, 5, 5, 5, 6],  # 9th floor
+]
+
+BEAM_MATERIALS_9: list[list[int]] = [
+    [7, 7, 7, 7, 7],  # 1st floor
+    [7, 7, 7, 7, 7],  # 2nd floor
+    [7, 7, 7, 7, 7],  # 3rd floor
+    [8, 8, 8, 8, 8],  # 4th floor
+    [8, 8, 8, 8, 8],  # 5th floor
+    [8, 8, 8, 8, 8],  # 6th floor
+    [8, 8, 8, 8, 8],  # 7th floor
+    [9, 9, 9, 9, 9],  # 8th floor
+    [10, 10, 10, 10, 10],  # 9th floor
+    [11, 11, 11, 11, 11],  # roof
+]
+
+COLUMN_MATERIALS_20: list[list[int]] = [
+    [1, 2, 2, 2, 2, 1],  # 1st basement
+    [1, 2, 2, 2, 2, 1],  # 2nd basement
+    [1, 2, 2, 2, 2, 1],  # 1st floor
+    [17, 2, 2, 2, 2, 17],  # 2nd floor
+    [3, 2, 2, 2, 2, 3],  # 3rd floor
+    [3, 2, 2, 2, 2, 3],  # 4th floor
+    [18, 19, 19, 19, 19, 18],  # 5th floor
+    [4, 5, 5, 5, 5, 4],  # 6th floor
+    [4, 5, 5, 5, 5, 4],  # 7th floor
+    [4, 5, 5, 5, 5, 4],  # 8th floor
+    [4, 5, 5, 5, 5, 4],  # 9th floor
+    [4, 5, 5, 5, 5, 4],  # 10th floor
+    [4, 20, 20, 20, 20, 4],  # 11th floor
+    [4, 6, 6, 6, 6, 4],  # 12th floor
+    [4, 6, 6, 6, 6, 4],  # 13th floor
+    [21, 22, 22, 22, 22, 21],  # 14th floor
+    [7, 8, 8, 8, 8, 7],  # 15th floor
+    [7, 8, 8, 8, 8, 7],  # 16th floor
+    [7, 23, 23, 23, 23, 7],  # 17th floor
+    [7, 9, 9, 9, 9, 7],  # 18th floor
+    [24, 25, 25, 25, 25, 24],  # 19th floor
+    [10, 11, 11, 11, 11, 10],  # 20th floor
+]
+
+BEAM_MATERIALS_20: list[list[int]] = [
+    [12, 12, 12, 12, 12],  # 1st basement
+    [12, 12, 12, 12, 12],  # 1st floor
+    [12, 12, 12, 12, 12],  # 2nd floor
+    [12, 12, 12, 12, 12],  # 3rd floor
+    [12, 12, 12, 12, 12],  # 4th floor
+    [12, 12, 12, 12, 12],  # 5th floor
+    [13, 13, 13, 13, 13],  # 6th floor
+    [13, 13, 13, 13, 13],  # 7th floor
+    [13, 13, 13, 13, 13],  # 8th floor
+    [13, 13, 13, 13, 13],  # 9th floor
+    [13, 13, 13, 13, 13],  # 10th floor
+    [13, 13, 13, 13, 13],  # 11th floor
+    [12, 12, 12, 12, 12],  # 12th floor
+    [12, 12, 12, 12, 12],  # 13th floor
+    [12, 12, 12, 12, 12],  # 14th floor
+    [8, 8, 8, 8, 8],  # 15th floor
+    [8, 8, 8, 8, 8],  # 16th floor
+    [8, 8, 8, 8, 8],  # 17th floor
+    [14, 14, 14, 14, 14],  # 18th floor
+    [14, 14, 14, 14, 14],  # 19th floor
+    [15, 15, 15, 15, 15],  # 20th floor
+    [16, 16, 16, 16, 16],  # roof
+]
+
+
 # ── Building index ──
 MAT_TBLS: dict[int, dict[int, MemberBackbone]] = {
     3: MAT_TBL_3,
@@ -136,6 +235,12 @@ MAT_TBLS: dict[int, dict[int, MemberBackbone]] = {
 }
 
 __all__ = [
+    "BEAM_MATERIALS_3",
+    "BEAM_MATERIALS_9",
+    "BEAM_MATERIALS_20",
+    "COLUMN_MATERIALS_3",
+    "COLUMN_MATERIALS_9",
+    "COLUMN_MATERIALS_20",
     "MAT_TBLS",
     "MAT_TBL_3",
     "MAT_TBL_9",
