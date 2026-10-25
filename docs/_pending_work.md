@@ -155,9 +155,13 @@ Source: `docs/sac_nonlinear_benchmark.md`;
 three flexural rigidities `EI1→EI2→EI3` with break curvatures `d1`/`d2`
 (`My = EI1·d1`), now transcribed in `benchmarks/sac_member_data.py`
 (`MAT_TBL_3/9/20`).  A `"trilinear"` branch is needed so the SAC model consumes
-those backbones.  Open sub-decision: the benchmark's backbone is a member-level
-M–κ law (curvature), while the lumped hinge is a rotational M–θ spring, so the
-M–κ → M–θ mapping (hinge length) has to be chosen.
+those backbones.  **Resolved (2026-10-25):** the benchmark member is a
+concentrated-plasticity *one-component* model (Giberson 1967; Clough & Johnston
+1966) — elastic interior + end hinges — and publishes **no plastic-hinge length
+and no yield-index (α) law** (both live in the compiled S-function).  The
+faithful mapping is OpenSees `beamWithHinges` (elastic interior `EI1` +
+trilinear M–κ end hinges), so the κ→θ conversion is the element's job, not a
+manual hinge length.  See `docs/sac_nonlinear_benchmark.md`.
 
 **Where.**  `opensees/_elements.py` (the `hinge_backbone` dispatch beside
 `asce41`/`bilinear`); `benchmarks/sac.py` (`enrich_nonlinear` / `builder_config`)

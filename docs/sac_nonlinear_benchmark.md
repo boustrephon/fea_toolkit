@@ -100,6 +100,23 @@ of the three reproduces the MEX exactly; this model favours `Zx·fy` because it
 is physical (AISC plastic modulus × yield strength) and needs no calibration
 constant.
 
+### Trilinear backbone — transcribed, and the member model identified
+
+The exact trilinear backbone is now transcribed in
+:mod:`fea_toolkit.benchmarks.sac_member_data` (`MAT_TBL_3/9/20` — `EI1/EI2/EI3`
++ `EA/GA` + break curvatures `d1/d2`, plus the `element_tbl` member→`Mat_no`
+assignment), verified byte-for-byte against `struct3/9/20.m`.  Research into the
+benchmark's member formulation (Ohtori et al. 2004 §Nonlinear Analysis Tool;
+Clough & Johnston 1966; Giberson 1967; the IDARC2D verification) establishes that
+the member is a **concentrated-plasticity one-component model** — elastic
+interior plus end hinges — and that the benchmark publishes **neither a
+plastic-hinge length (`Lp`) nor a yield-index (`α`) interpolation law**; both
+live in the compiled S-function and are second-order (they shape the
+elastic→plastic transition, not the backbone anchor points `My = EI1·d1` / `M2`).
+The faithful mapping is therefore OpenSees `beamWithHinges` (elastic interior
+`EI1` + trilinear M–κ end hinges), replacing the current `Steel01` bilinear
+hinge.
+
 ![Bilinear hinge backbone](assets/sac3_hinge_backbone.png)
 
 ## Joint modelling — Krawinkler & Gupta panel zone (D2)
