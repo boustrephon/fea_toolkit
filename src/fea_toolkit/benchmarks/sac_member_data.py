@@ -234,6 +234,80 @@ MAT_TBLS: dict[int, dict[int, MemberBackbone]] = {
     20: MAT_TBL_20,
 }
 
+
+# ── Mat_no → display section name (for visualisation) ──
+# Each backbone (Mat_no) maps to the physical W/box section it represents, so
+# the visualiser can draw the cross-section shape.  Splice rows (weighted
+# blends of two sections) map to their *below-splice* section.  The 3-story
+# leaning column (mat 6) is a conceptual aggregate of the gravity framing and
+# maps to a representative gravity section.  Display-only: the analysis
+# properties stay on the backbone (``MAT_TBL_*``).
+MAT_TO_SECTION_3: dict[int, str] = {
+    1: "W14X257",
+    2: "W14X311",
+    3: "W33X118",
+    4: "W30X116",
+    5: "W24X68",
+    6: "W14X82",  # leaning column (representative gravity section)
+    7: "W21X44",  # rigid-axial link bay
+}
+
+MAT_TO_SECTION_9: dict[int, str] = {
+    1: "W14X370",
+    2: "W14X500",
+    3: "W14X455",
+    4: "W14X283",
+    5: "W14X257",
+    6: "W14X233",
+    7: "W36X160",
+    8: "W36X135",
+    9: "W30X99",
+    10: "W27X84",
+    11: "W24X68",
+    # splice rows 12-16 → below-splice section
+    12: "W14X500",
+    13: "W14X370",
+    14: "W14X455",
+    15: "W14X283",
+    16: "W14X257",
+}
+
+MAT_TO_SECTION_20: dict[int, str] = {
+    1: "15X15X2.00",
+    2: "W24X335",
+    3: "15X15X1.25",
+    4: "15X15X1.00",
+    5: "W24X229",
+    6: "W24X192",
+    7: "15X15X0.75",
+    8: "W24X131",
+    9: "W24X117",
+    10: "15X15X0.50",
+    11: "W24X84",
+    12: "W30X99",
+    13: "W30X108",
+    14: "W27X84",
+    15: "W24X62",
+    16: "W21X50",
+    # splice rows 17-25 → below-splice section
+    17: "15X15X2.00",
+    18: "15X15X1.25",
+    19: "W24X335",
+    20: "W24X229",
+    21: "15X15X1.00",
+    22: "W24X192",
+    23: "W24X131",
+    24: "15X15X0.75",
+    25: "W24X117",
+}
+
+#: Mat_no → section name per building, keyed like ``MAT_TBLS``.
+MAT_TO_SECTION: dict[int, dict[int, str]] = {
+    3: MAT_TO_SECTION_3,
+    9: MAT_TO_SECTION_9,
+    20: MAT_TO_SECTION_20,
+}
+
 __all__ = [
     "BEAM_MATERIALS_3",
     "BEAM_MATERIALS_9",
@@ -245,5 +319,9 @@ __all__ = [
     "MAT_TBL_3",
     "MAT_TBL_9",
     "MAT_TBL_20",
+    "MAT_TO_SECTION",
+    "MAT_TO_SECTION_3",
+    "MAT_TO_SECTION_9",
+    "MAT_TO_SECTION_20",
     "MemberBackbone",
 ]

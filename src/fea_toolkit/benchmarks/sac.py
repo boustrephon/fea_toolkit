@@ -32,10 +32,10 @@ from typing import Any, Optional
 import numpy as np
 
 from ..io.tcl_importer import parse_tcl_model
-from ..model.sap_data import Material, SAPModelData
+from ..model.sap_data import BoxSection, ISection, Material, SAPModelData
 from ..opensees.analysis_builder import AnalysisBuilder
 from ..opensees.preprocessor import preprocess_model
-from .sac_member_data import MAT_TBL_3
+from .sac_member_data import MAT_TBL_3, MAT_TO_SECTION
 
 #: Bundled Tcl transcription of the SAC 3-story N-S perimeter frame.
 SAC3_TCL = Path(__file__).with_name("sac_3story.tcl")
@@ -177,6 +177,79 @@ def enrich_trilinear(md: SAPModelData) -> SAPModelData:
     return md
 
 
+def enrich_display_sections(md: SAPModelData, building: int = 3) -> SAPModelData:
+    """Rebuild the SAC sections with their physical W/box display shapes.
+
+    Each backbone-defined section is rebuilt as an :class:`ISection` (or
+    :class:`BoxSection` for the 20-story box corners) carrying the physical
+    section's flange dimensions (``bf``, ``tf``) so the visualiser can draw the
+    cross-section.  The analysis properties (``A``, ``I33``, ``I22``, ``J``,
+    ``Z33``, ``Z22`` and the ``ei1/ei2/ei3/d1/d2`` backbone) and the panel-zone
+    ``depth``/``tw`` are preserved unchanged.
+
+    Args:
+        md: The enriched SAC model; sections are rebuilt in place.
+        building: 3, 9 or 20 — selects the ``Mat_no → section`` map.  The
+            9/20-story maps are ready for the A2 model builder; the section →
+            ``Mat_no`` matching below is currently 3-story (area/inertia).
+
+    Returns:
+        *md*, mutated in place.
+    """
+    from ..model.steel_sections import BOX_SECTIONS, W_SECTIONS
+
+    name_map = MAT_TO_SECTION[building]
+    roles = _frame_element_roles(md)
+
+    mat_by_section: dict[str, int] = {}
+    for eid, sname in md.frame_assignments.items():
+        if sname in mat_by_section:
+            continue
+        sec = md.sections.get(sname)
+        if sec is None:
+            continue
+        if roles.get(eid) == "col":
+            mat_no = _match_props(_COLUMN_MAT_NO, sec.A, 1e-6)
+            if mat_no is None:
+                mat_no = _LEANING_MAT_NO
+        else:
+            mat_no = _match_props(_BEAM_MAT_NO, sec.I33, 1e-8)
+            if mat_no is None:
+                continue
+        mat_by_section[sname] = mat_no
+
+    for sname, mat_no in mat_by_section.items():
+        sec = md.sections[sname]
+        shape_name = name_map[mat_no]
+        if shape_name in BOX_SECTIONS:
+            cls, shape = BoxSection, "Box/Tube"
+        else:
+            cls, shape = ISection, "I/Wide Flange"
+        row = BOX_SECTIONS.get(shape_name) or W_SECTIONS.get(shape_name)
+        _, _, _, _, d, bf, tf, tw, _, _ = row
+        md.sections[sname] = cls(
+            name=sname,
+            shape=shape,
+            material=sec.material,
+            A=sec.A,
+            I33=sec.I33,
+            I22=sec.I22,
+            J=sec.J,
+            Z33=sec.Z33,
+            Z22=sec.Z22,
+            depth=getattr(sec, "depth", None) or d,
+            bf=bf,
+            tf=tf,
+            tw=getattr(sec, "tw", None) or tw,
+            ei1=sec.ei1,
+            ei2=sec.ei2,
+            ei3=sec.ei3,
+            d1=sec.d1,
+            d2=sec.d2,
+        )
+    return md
+
+
 def load_model(nonlinear: bool = True) -> SAPModelData:
     """Load the SAC model from the bundled Tcl; enrich for nonlinear use.
 
@@ -188,6 +261,7 @@ def load_model(nonlinear: bool = True) -> SAPModelData:
     md = parse_tcl_model(SAC3_TCL.read_text(encoding="utf-8"), SAC3_UNITS)
     if nonlinear:
         enrich_nonlinear(md)
+        enrich_display_sections(md)
     return md
 
 
@@ -295,6 +369,7 @@ __all__ = [
     "SAC3_UNITS",
     "build_builder",
     "builder_config",
+    "enrich_display_sections",
     "enrich_nonlinear",
     "enrich_trilinear",
     "load_model",
