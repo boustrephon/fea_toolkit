@@ -19,6 +19,9 @@ class SectionLibrary:
     Usage:
         lib = SectionLibrary(Path("section_dict.pkl"), target_units='m')
         lib.enrich_section(my_section)   # my_section must be in target_units
+
+    When ``db_path`` is missing, lookups fall back to the in-code AISC table in
+    :mod:`fea_toolkit.model.steel_sections` (SI units).
     """
 
     # Mapping from property name to length exponent
@@ -94,8 +97,12 @@ class SectionLibrary:
         self._load()
 
     def _load(self) -> None:
-        with open(self.db_path, "rb") as f:
-            self._catalogues = pickle.load(f)
+        try:
+            with open(self.db_path, "rb") as f:
+                self._catalogues = pickle.load(f)
+        except FileNotFoundError:
+            # No bundled database file: fall back to the in-code AISC table.
+            self._catalogues = {}
 
     def list_catalogues(self) -> list[str]:
         return list(self._catalogues.keys())
@@ -109,7 +116,11 @@ class SectionLibrary:
                 props["_catalogue"] = cat_name
                 props["_length_units"] = cat_data.get("LENGTH_UNITS", "m")
                 return props
-        return None
+        # Fall back to the in-code AISC table (SI) when the database file is
+        # absent or does not contain the section.
+        from .steel_sections import get_section_properties as _builtin
+
+        return _builtin(name)
 
     def _convert_value(self, value: Any, from_units: str, exponent: int) -> Optional[float]:
         """Convert a numeric value based on length exponent."""
@@ -146,8 +157,7 @@ class SectionLibrary:
             return section
 
         from_units = props.pop("_length_units", "mm")
-        # Remove internal marker
-        props.pop("_catalogue", None)
+        catalogue = props.pop("_catalogue", "unknown")
 
         # Process all known properties using the exponent map
         for prop_name, exponent in self._EXPONENT_MAP.items():
@@ -173,5 +183,5 @@ class SectionLibrary:
             # Add more mappings as needed
 
         # Set manufacturer name
-        section.manufacturer = props.get("_catalogue", "unknown")
+        section.manufacturer = catalogue
         return section
