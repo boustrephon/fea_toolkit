@@ -301,6 +301,12 @@ class AnalysisBuilder(
             # fraction of the member length.  The benchmark's member-end
             # rotation is θ = φ·L/6, so the default 1/6 reproduces it.
             "hinge_length_fraction": 1.0 / 6.0,
+            # Transient (time-history) solver: run_transient_analysis() reads
+            # ``transient_algorithm`` (plain Newton by default).  The SAC
+            # trilinear hinge opts in to NewtonLineSearch via
+            # benchmarks/sac.builder_config() — its two sharp yield corners need
+            # the line search to converge.
+            "transient_algorithm": "Newton",
             # ── Member end releases / partial fixity ──
             # Honour SAP2000 frame end releases (and partial-fixity springs)
             # by inserting zero-length release elements at member ends.  On by

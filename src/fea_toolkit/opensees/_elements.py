@@ -23,6 +23,51 @@ from .releases import plan_releases
 logger = logging.getLogger(__name__)
 
 
+def _trilinear_backbone(
+    ei1: float, ei2: float, ei3: float, d1: float, d2: float
+) -> tuple[float, float, float]:
+    """Validate a trilinear M-phi backbone and derive its first two corners.
+
+    The Ohtori ``mat_tbl`` backbone has three flexural slopes -- elastic ``EI1``
+    (0 -> d1), post-yield ``EI2`` (d1 -> d2), hardening ``EI3`` (d2 -> inf) --
+    and the two break curvatures ``d1``/``d2``.  This helper validates the
+    backbone and derives the first two corner moments shared by every trilinear
+    hinge formulation (``beamWithHinges``, the lumped ``Hysteretic`` hinge, and
+    the two-``Steel02``-in-parallel decomposition).
+
+    ``EI3`` may be zero (perfectly plastic beyond ``d2``) -- that is *not*
+    invalid.  Callers that need a non-zero hardening slope (the ``Hysteretic``
+    branches, which need a finite third corner) use the returned ``ei3_eff``
+    fallback (``EI2 * 0.02``); :func:`_parallel_steel02_trilinear` consumes the
+    *raw* ``ei3``.
+
+    Args:
+        ei1: Elastic flexural slope (moment per curvature), model units.
+        ei2: Post-yield flexural slope.
+        ei3: Hardening flexural slope (``0`` for perfectly plastic beyond d2).
+        d1: First (yield) break curvature.
+        d2: Second break curvature.
+
+    Returns:
+        ``(my_tri, m2, ei3_eff)`` -- the first yield moment ``EI1*d1``, the
+        second corner moment ``My + EI2*(d2 - d1)``, and the effective hardening
+        slope (``ei3`` when positive, else ``EI2 * 0.02``).
+
+    Raises:
+        ValueError: For a non-positive backbone (``ei1``, ``ei2`` or ``d1``) or
+            non-monotonic break curvatures (``d2 <= d1``).
+    """
+    if ei1 <= 0.0 or ei2 <= 0.0 or d1 <= 0.0 or d2 <= d1:
+        raise ValueError(
+            f"trilinear backbone needs ei1>0, ei2>0, d1>0, d2>d1 "
+            f"(got ei1={ei1}, ei2={ei2}, d1={d1}, d2={d2})"
+        )
+    my_tri = ei1 * d1
+    m2 = my_tri + ei2 * (d2 - d1)
+    ei3_eff = ei3 if ei3 > 0.0 else ei2 * 0.02
+    return my_tri, m2, ei3_eff
+
+
 def _parallel_steel02_trilinear(
     ei1: float, ei2: float, ei3: float, d1: float, d2: float
 ) -> tuple[dict[str, float], dict[str, float]]:
@@ -59,11 +104,7 @@ def _parallel_steel02_trilinear(
             split into two positive springs (needs ``EI3 < EI2`` and
             ``EI1 + EI3 > EI2``, i.e. a monotonic softening trilinear).
     """
-    if ei1 <= 0.0 or ei2 <= 0.0 or d1 <= 0.0 or d2 <= d1:
-        raise ValueError(
-            f"trilinear backbone needs ei1>0, ei2>0, d1>0, d2>d1 "
-            f"(got ei1={ei1}, ei2={ei2}, d1={d1}, d2={d2})"
-        )
+    _trilinear_backbone(ei1, ei2, ei3, d1, d2)  # shared backbone validation
     e_b = ei2 - ei3
     e_a = ei1 - ei2 + ei3
     if e_a <= 0.0 or e_b <= 0.0 or ei3 < 0.0:
@@ -700,17 +741,16 @@ class ElementMixin:
             ei3 = getattr(_sec, "ei3", None) or 0.0
             d1 = getattr(_sec, "d1", None) or 0.0
             d2 = getattr(_sec, "d2", None) or 0.0
-            if ei1 <= 0.0 or ei2 <= 0.0 or d1 <= 0.0 or d2 <= d1:
-                raise ValueError(
-                    f"hinge_backbone='trilinear' (beamWithHinges) needs a valid "
-                    f"mat_tbl backbone on section '{sec_name}' "
-                    f"(ei1={ei1}, ei2={ei2}, d1={d1}, d2={d2})"
-                )
-            my_tri = ei1 * d1
-            m2 = my_tri + ei2 * (d2 - d1)
+            my_tri, m2, ei3_eff = _trilinear_backbone(ei1, ei2, ei3, d1, d2)
             d3 = 2.0 * d2
-            m3 = m2 + (ei3 or ei2 * 0.02) * (d3 - d2)
-            E = _mat.E_mod if _mat and _mat.E_mod > 0 else 2.0e11
+            m3 = m2 + ei3_eff * (d3 - d2)
+            E = getattr(_mat, "E_mod", None) if _mat is not None else None
+            if not E or E <= 0.0:
+                _mat_name = getattr(_mat, "name", None) if _mat is not None else None
+                raise ValueError(
+                    f"hinge_model='beam_with_hinges' needs a positive E_mod on "
+                    f"section '{sec_name}' (material {_mat_name!r}); got E={E!r}"
+                )
             G = _mat.G_mod if _mat and _mat.G_mod and _mat.G_mod > 0 else 0.4 * E
             A = getattr(_sec, "A", None) or 0.0
             Iz = getattr(_sec, "I33", None) or 0.0
@@ -725,9 +765,7 @@ class ElementMixin:
                 # backbone with a smooth Giuffré–Menegotto–Pinto transition —
                 # the analogue of the benchmark Nonlin12 S-function's yield-index
                 # α interpolation, which the sharp-break Hysteretic lacks.
-                _spring_a, _spring_b = _parallel_steel02_trilinear(
-                    ei1, ei2, ei3 or ei2 * 0.02, d1, d2
-                )
+                _spring_a, _spring_b = _parallel_steel02_trilinear(ei1, ei2, ei3, d1, d2)
                 _mat_a = self._bwh_tag_counter
                 _mat_b = self._bwh_tag_counter + 1
                 _mat_par = self._bwh_tag_counter + 2
@@ -1198,19 +1236,16 @@ class ElementMixin:
                 ei3 = getattr(sec, "ei3", None) or 0.0
                 d1 = getattr(sec, "d1", None) or 0.0
                 d2 = getattr(sec, "d2", None) or 0.0
-                if ei1 <= 0.0 or ei2 <= 0.0 or d1 <= 0.0 or d2 <= d1:
-                    raise ValueError(
-                        f"hinge_backbone='trilinear' needs a valid mat_tbl "
-                        f"backbone on section '{sec_name}' "
-                        f"(ei1={ei1}, ei2={ei2}, d1={d1}, d2={d2})"
-                    )
+                my_tri, m2, ei3_eff = _trilinear_backbone(ei1, ei2, ei3, d1, d2)
                 stiff_factor = float(self.config.get("hinge_stiffness_factor", 10.0))
+                if stiff_factor <= 0.0 or not math.isfinite(stiff_factor):
+                    raise ValueError(
+                        f"hinge_stiffness_factor must be positive and finite, got {stiff_factor}"
+                    )
                 k0 = stiff_factor * 6.0 * ei1 / max(L, 1e-12)
                 k1 = 6.0 * ei2 / max(L, 1e-12)
-                k2 = 6.0 * (ei3 or ei2 * 0.02) / max(L, 1e-12)
+                k2 = 6.0 * ei3_eff / max(L, 1e-12)
 
-                my_tri = ei1 * d1
-                m2 = my_tri + ei2 * (d2 - d1)
                 theta_y = my_tri / k0
                 theta_2 = theta_y + (m2 - my_tri) / k1
                 theta_cap = theta_2 * 2.0
@@ -1296,9 +1331,13 @@ class ElementMixin:
                 orient = None
 
             # --- Create zero-length hinge elements (zeroLength + -mat/-dir) ---
-            # Retained DOFs (P, Vy, Vz, T) are rigid; My/Mz are the hinge.
+            # Retained DOFs (P, Vy, Vz, T) are rigid; the flexural hinges are
+            # the two rotational DOFs.  `-orient (vx, vz)` (above) points the
+            # hinge's local y-axis along the member's local z — the strong
+            # axis — so dir 5 is the strong-axis (in-plane) hinge and dir 6
+            # the weak-axis hinge.
             m = hinge_mat_tag - 6  # base material tag
-            mats = [m, m + 4, m + 5, m + 3, m + 2, m + 1]  # P, Vy, Vz, T, My, Mz
+            mats = [m, m + 4, m + 5, m + 3, m + 1, m + 2]  # P, Vy, Vz, T, strong, weak
             dirs = [1, 2, 3, 4, 5, 6]
 
             hinge_i_elem_tag = next_tag

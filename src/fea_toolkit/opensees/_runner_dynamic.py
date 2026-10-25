@@ -51,12 +51,17 @@ class TransientRunnerMixin:
 
         Returns:
             Dict with ``times`` (s), per-node ``displacements`` /
-            ``velocities`` / ``accelerations`` (``{node_tag: (num_steps, 3)
+            ``velocities`` / ``accelerations`` (``{node_tag: (converged_steps, 3)
             ndarray}``), ``base_shear`` (per-step total base shear via global
             equilibrium ``Σ m·(a_rel + ag)``), ``peak_displacement`` (m),
             ``peak_base_shear`` (N), ``peak_plastic_rotation`` (rad),
             ``max_dissipated_energy`` (N·m), ``num_yielded_hinges``,
             ``converged_steps`` and the two Rayleigh ``period_1`` / ``period_2``.
+
+        The builder ``config`` may set ``transient_algorithm`` (the solver
+        algorithm; default ``"Newton"``) and ``transient_record_node_tags`` (an
+        iterable of node tags whose histories are recorded; default ``None`` =
+        every node).
         """
         accel = np.asarray(accel, dtype=float)
         if num_steps is None:
@@ -122,30 +127,50 @@ class TransientRunnerMixin:
         ops.numberer("RCM")
         ops.system("BandGeneral")
         ops.test("EnergyIncr", 1.0e-6, 200, 0)
-        # NewtonLineSearch (not plain Newton): the trilinear Hysteretic hinge has
-        # two sharp yield corners, and plain Newton fails to converge there (the
-        # 3-story El Centro run died at t≈10.4 s).  The line search walks the
-        # Newton step back when a full step overshoots a corner.
-        ops.algorithm("NewtonLineSearch")
+        # Algorithm is configurable.  Plain Newton is the default; the SAC
+        # trilinear Hysteretic hinge has two sharp yield corners where plain
+        # Newton fails to converge (the 3-story El Centro run died at t≈10.4 s),
+        # so that model opts in to ``transient_algorithm='NewtonLineSearch'``.
+        # The line search walks the Newton step back when a full step overshoots
+        # a corner.
+        ops.algorithm(self.config.get("transient_algorithm", "Newton"))
         ops.integrator("Newmark", 0.5, 0.25)
         ops.analysis("Transient")
 
         # ── Integrate and record ──
-        node_tags = list(ops.getNodeTags())
-        disp_history: dict[int, list[list[float]]] = {t: [] for t in node_tags}
-        vel_history: dict[int, list[list[float]]] = {t: [] for t in node_tags}
-        accel_history: dict[int, list[list[float]]] = {t: [] for t in node_tags}
+        all_node_tags = list(ops.getNodeTags())
+        # Optional config subset of node tags whose histories are recorded
+        # (default: every node).  Base shear still needs the *full* node set, so
+        # ``all_node_tags`` is kept separately below.
+        record_cfg = self.config.get("transient_record_node_tags")
+        if record_cfg:
+            wanted = {int(t) for t in record_cfg}
+            record_node_tags = [t for t in all_node_tags if t in wanted]
+        else:
+            record_node_tags = all_node_tags
+
+        # Preallocate per-node kinematic histories (num_steps, 3); the returned
+        # dicts are sliced to the converged step count at the end.
+        disp_history: dict[int, np.ndarray] = {
+            t: np.zeros((num_steps, 3)) for t in record_node_tags
+        }
+        vel_history: dict[int, np.ndarray] = {t: np.zeros((num_steps, 3)) for t in record_node_tags}
+        accel_history: dict[int, np.ndarray] = {
+            t: np.zeros((num_steps, 3)) for t in record_node_tags
+        }
+
+        # Cache each node's mass once before the time loop.
+        node_mass = {t: float(ops.nodeMass(t, dof)) for t in all_node_tags}
 
         # Base shear via global equilibrium — the total nodal inertial force
         # Σ m·(a_rel + ag).  This is exact for a base-excited structure with no
-        # applied loads (the benchmark convention), and robust against the
-        # Transformation handler mis-resolving the reaction at a base node that
-        # is *both* fixed and equalDOF-tied to its lumped-hinge node (the
-        # `ops.nodeReaction` path reads back zero there).
+        # applied loads (the benchmark convention) and is independent of how the
+        # constraint handler resolves the base-node reaction.
 
         # Hinge damage tracking (φmax / Emax / Nd).  Two hinge topologies:
         # * a lumped zero-length hinge (``_hinge_sections[i] is None``) — a
-        #   `zeroLength` element whose in-plane deformation is index 4 (My);
+        #   `zeroLength` element whose in-plane deformation is index 4 (dir 5,
+        #   the strong-axis hinge);
         # * a beamWithHinges end section (``_hinge_sections[i]`` is 1 or 6) —
         #   the member-end curvature, read via ``section``.
         # Dissipated energy is the net work ∫M·dθ (trapezoidal), summed per
@@ -165,17 +190,26 @@ class TransientRunnerMixin:
         for _ in range(num_steps):
             if ops.analyze(1, dt) != 0:
                 break
-            converged_steps += 1
-            for t in node_tags:
-                disp_history[t].append([float(ops.nodeDisp(t, d)) for d in (1, 2, 3)])
-                vel_history[t].append([float(ops.nodeVel(t, d)) for d in (1, 2, 3)])
-                accel_history[t].append([float(ops.nodeAccel(t, d)) for d in (1, 2, 3)])
-            ag = float(accel[converged_steps - 1]) if converged_steps <= len(accel) else 0.0
-            base_shear_steps.append(
-                sum(
-                    float(ops.nodeMass(t, 1)) * (float(ops.nodeAccel(t, 1)) + ag) for t in node_tags
-                )
-            )
+            step = converged_steps
+            for t in record_node_tags:
+                disp_history[t][step] = [float(ops.nodeDisp(t, d)) for d in (1, 2, 3)]
+                vel_history[t][step] = [float(ops.nodeVel(t, d)) for d in (1, 2, 3)]
+                accel_history[t][step] = [float(ops.nodeAccel(t, d)) for d in (1, 2, 3)]
+            # Ground acceleration at the integrator's *current* pseudo-time after
+            # this step (sample index ``step + 1`` — ``accel[0]`` is t=0),
+            # zero once that time is beyond the acceleration series.
+            ag = float(accel[step + 1]) if step + 1 < len(accel) else 0.0
+            # Base shear via global equilibrium over *all* nodes, reusing the
+            # recorded acceleration where available (no duplicate nodeAccel call
+            # for the recorded subset).
+            shear = 0.0
+            for t in all_node_tags:
+                if t in accel_history:
+                    a_rel = float(accel_history[t][step][dof - 1])
+                else:
+                    a_rel = float(ops.nodeAccel(t, dof))
+                shear += node_mass[t] * (a_rel + ag)
+            base_shear_steps.append(shear)
             for i, tag in enumerate(hinge_tags):
                 sec_num = hinge_sections[i] if hinge_sections else None
                 if sec_num is None:
@@ -192,11 +226,12 @@ class TransientRunnerMixin:
                     hinge_yielded[i] = True
                 hinge_prev_theta[i] = deform
                 hinge_prev_moment[i] = moment
+            converged_steps += 1
 
         times = np.arange(converged_steps) * dt
-        displacements = {t: np.asarray(v) for t, v in disp_history.items()}
-        velocities = {t: np.asarray(v) for t, v in vel_history.items()}
-        accelerations = {t: np.asarray(v) for t, v in accel_history.items()}
+        displacements = {t: v[:converged_steps] for t, v in disp_history.items()}
+        velocities = {t: v[:converged_steps] for t, v in vel_history.items()}
+        accelerations = {t: v[:converged_steps] for t, v in accel_history.items()}
         peak = 0.0
         for v in displacements.values():
             if v.size:

@@ -159,16 +159,15 @@ a concentrated-plasticity *one-component* model (Giberson 1967; Clough & Johnsto
 1966) — elastic interior + end hinges — and publishes **no plastic-hinge length
 (`Lp`) and no yield-index (α) law** (both live in the compiled S-function).
 
-**What remains.**  (1) **Wiring** — `builder_config()`/`build_builder()`/
-`load_model()` still hardcode `hinge_backbone="bilinear"`; add a
-`backbone="bilinear"|"trilinear"` parameter (bilinear M1/M2 path untouched) and
-an anchor test (trilinear elastic period ≈ M1, `My = EI1·d1` at W14×257).
-(2) **Element choice — settled: lumped-hinge trilinear is the A1 deliverable.**
-The `6EI/L` lumped-hinge approximation is topology-consistent with M1/M2 and
-correct at the backbone anchor points (`My = EI1·d1`, `M2`); `Lp`/α only shape
-the elastic→plastic transition.  The more faithful `beamWithHinges` (elastic
-interior `EI1` + trilinear M–κ end hinges, κ→θ done by the element) is **deferred**
-— escalate only if the A4 comparison drifts outside ±5–10 %.
+**What remains.**  Only the A4 comparison itself.  The wiring is landed:
+`builder_config()` / `build_builder()` / `load_model()` all accept
+`backbone="bilinear"|"trilinear"|"trilinear_steel02"|"trilinear_clough"` (and
+`hinge_model="lumped"|"beam_with_hinges"`), and the four hinge formulations —
+lumped `Hysteretic`, `beamWithHinges` + `Hysteretic`, + two-`Steel02`-in-parallel,
+and + Clough — share the one transcribed backbone (see
+`docs/sac_trilinear_hinge_approaches.md`).  The `beamWithHinges` one-component
+mapping (elastic interior `EI1` + trilinear M–κ end hinges, κ→θ done by the
+element, `Lp = L/6`) is the **preferred** A4 hinge, not a deferred fallback.
 
 **Where.**  `opensees/_elements.py` (the `hinge_backbone` dispatch);
 `benchmarks/sac.py` (`enrich_trilinear` / `builder_config`).
@@ -180,9 +179,8 @@ Source: `docs/sac_nonlinear_benchmark.md`;
 
 **Status (2026-10-25).** Landed.  `run_transient_analysis` now records per-step
 `nodeVel` / `nodeAccel` histories, the base-shear history (global equilibrium
-`Σ m·(a_rel + ag)` — `ops.nodeReaction` reads back zero at a base node that is
-*both* fixed and `equalDOF`-tied to its lumped-hinge node under the
-`Transformation` handler), and the lumped-hinge damage quantities
+`Σ m·(a_rel + ag)` — exact for the base-excited, no-gravity benchmark), and the
+lumped-hinge damage quantities
 (`peak_plastic_rotation` φmax, `max_dissipated_energy` Emax as the net work
 `∫M·dθ`, `num_yielded_hinges` Nd).  The hinge bending response is the
 `zeroLengthSection` Aggregator DOF index 2 (`My`, the in-plane rotation),

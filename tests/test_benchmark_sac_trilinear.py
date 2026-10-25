@@ -15,6 +15,31 @@ from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 from fea_toolkit.opensees.preprocessor import preprocess_model
 
 
+def test_builder_config_validates_hinge_pairings():
+    """``builder_config`` accepts only the supported hinge/backbone pairings."""
+    assert sac.builder_config("bilinear", "lumped")["hinge_backbone"] == "bilinear"
+    assert sac.builder_config("trilinear", "lumped")["hinge_backbone"] == "trilinear"
+    assert sac.builder_config("trilinear", "beam_with_hinges")["hinge_model"] == "beam_with_hinges"
+    assert (
+        sac.builder_config("trilinear_steel02", "beam_with_hinges")["hinge_backbone"]
+        == "trilinear_steel02"
+    )
+    assert (
+        sac.builder_config("trilinear_clough", "beam_with_hinges")["hinge_backbone"]
+        == "trilinear_clough"
+    )
+
+    for backbone, hinge_model in (
+        ("bilinear", "beam_with_hinges"),
+        ("trilinear_steel02", "lumped"),
+        ("trilinear_clough", "lumped"),
+        ("bogus", "lumped"),
+        ("trilinear", "bogus"),
+    ):
+        with pytest.raises(ValueError):
+            sac.builder_config(backbone, hinge_model)
+
+
 def test_enrich_trilinear_stamps_mat_tbl_backbones():
     """The SAC sections carry the exact struct3.m trilinear backbones."""
     md = sac.load_model(nonlinear=True)

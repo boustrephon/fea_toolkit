@@ -512,11 +512,33 @@ def builder_config(backbone: str = "bilinear", hinge_model: str = "lumped") -> d
         hinge_model: ``"lumped"`` (default, zero-length rotational springs) or
             ``"beam_with_hinges"`` (the benchmark's own concentrated-plasticity
             ``beamWithHinges`` element — trilinear backbone only).
+
+    Raises:
+        ValueError: For an unsupported ``hinge_model``/``backbone`` pairing
+            (only ``lumped`` + ``bilinear``/``trilinear``, and
+            ``beam_with_hinges`` + ``trilinear``/``trilinear_steel02``/
+            ``trilinear_clough`` are valid).
     """
+    _valid_backbones = {
+        "lumped": ("bilinear", "trilinear"),
+        "beam_with_hinges": ("trilinear", "trilinear_steel02", "trilinear_clough"),
+    }
+    allowed = _valid_backbones.get(hinge_model)
+    if allowed is None or backbone not in allowed:
+        raise ValueError(
+            f"unsupported hinge_model/backbone combination: "
+            f"hinge_model={hinge_model!r} with backbone={backbone!r}; "
+            f"valid pairings are lumped+{{bilinear,trilinear}} and "
+            f"beam_with_hinges+{{trilinear,trilinear_steel02,trilinear_clough}}"
+        )
     return {
         "element_type": "elasticBeamColumn",
         "hinge_model": hinge_model,
         "hinge_backbone": backbone,
+        # The trilinear Hysteretic hinge has two sharp yield corners where plain
+        # Newton stalls; the SAC transient runs opt in to the line search (the
+        # default elsewhere is plain Newton).
+        "transient_algorithm": "NewtonLineSearch",
     }
 
 

@@ -211,7 +211,9 @@ def test_sac3_beam_with_hinges_elcentro(resolve_ground_motion_record):
         res = b.run_transient_analysis(accel, dt, direction="X", damping_ratio=0.02)
         assert res["converged_steps"] > 0
         peak = peak_x(res)
-        assert 0.10 < peak < 0.25, f"beamWithHinges El Centro peak {peak:.3f} m out of band"
+        assert peak == pytest.approx(0.151, rel=0.10), (
+            f"beamWithHinges El Centro peak {peak:.3f} m outside ±10% of 0.151 m"
+        )
         assert res["num_yielded_hinges"] == pytest.approx(22, abs=3)
     finally:
         wipe()
@@ -251,14 +253,24 @@ def test_transient_recorders_force_and_kinematic_quantities():
             assert arr.shape == (n, 3)
             assert np.isfinite(arr).all()
 
-        # Global-equilibrium cross-check at the final step: base shear equals the
-        # sum of nodal inertial forces m·(a_rel + ag).
-        step = n - 1
-        inertial = sum(
-            nodeMass(tag, 1) * (res["accelerations"][tag][step][0] + accel[step])
-            for tag in res["accelerations"]
-        )
-        assert res["base_shear"][step] == pytest.approx(inertial, rel=1e-6)
+        # Global-equilibrium cross-check: base shear at recorded step ``step``
+        # equals the total inertial force Σ m·(a_rel + ag), where ag is the
+        # ground acceleration read back from the Path series the runner fed to
+        # ``ops.timeSeries('Path', ...)`` (linear interpolation of the ``accel``
+        # samples) at the end-of-step time ``(step + 1) * dt``.  Check a step
+        # near the pulse peak rather than the (near-zero) final step.
+        t_grid = np.arange(len(accel)) * dt
+
+        def _ag(step: int) -> float:
+            return float(np.interp((step + 1) * dt, t_grid, accel))
+
+        peak_step = int(np.argmax(np.abs(accel))) - 1  # end-of-step at pulse peak
+        for step in (20, peak_step):
+            inertial = sum(
+                nodeMass(tag, 1) * (res["accelerations"][tag][step][0] + _ag(step))
+                for tag in res["accelerations"]
+            )
+            assert res["base_shear"][step] == pytest.approx(inertial, rel=1e-6)
     finally:
         wipe()
 

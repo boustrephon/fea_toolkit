@@ -100,9 +100,9 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   `tests/test_benchmark_sac_trilinear.py`.  The trilinear variant is exposed as
   `backbone="trilinear"` on `builder_config()` / `load_model()` / `build_builder()`
   (the bilinear M1/M2 default is unchanged) with a modal/yield anchor test.  The
-  lumped-hinge trilinear is the chosen A1 deliverable (topology-consistent with
-  M1/M2); the more faithful `beamWithHinges` one-component mapping is deferred —
-  escalate only if the A4 comparison drifts outside ±5–10 % (see P40).
+  lumped-hinge trilinear is topology-consistent with M1/M2; the more faithful
+  `beamWithHinges` one-component mapping is now implemented too (see A4 and
+  `sac_trilinear_hinge_approaches.md`).
 - **A2 — 9/20-story models (done).** `load_model(building=9|20)` /
   `build_builder(building=9|20)` build the Ohtori models programmatically from
   `struct9/20.m` (geometry, seismic masses, and the base fixity — a pinned base

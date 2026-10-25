@@ -65,45 +65,36 @@ data are not redistributable):
 
 The leaning column stays elastic (no plastic hinge).
 
-### Hinge translation tie — `equalDOF` (and why the base reads zero reaction)
+### Hinge translation tie — `zeroLength -mat/-dir` (no `equalDOF`)
 
-The zero-length hinge is a `zeroLengthSection` whose Aggregator section carries
-only `[P, Mz, My, T]` — **no shear**.  The hinge node's translations must
-therefore be tied rigidly to the structural node (so the member still transmits
-shear and axial), done with `equalDOF(struct_node, hinge_node, 1, 2, 3)` while
-the rotations stay free across the hinge.  OpenSees has no native
-"rigid-in-shear, hinge-in-moment" element, so a tie is unavoidable *with this
-section type*.
+Each zero-length hinge is a `zeroLength` element carrying **all six DOFs** via
+`-mat`/`-dir`: a rigid `Elastic` spring on the retained DOFs (P, Vy, Vz, T) and
+the hinge material on the two rotational DOFs (dir 5 = strong-axis `Mz`, dir 6 =
+weak-axis `My`, oriented by `-orient (vx, vz)`).  No `equalDOF` is used, so the
+base node is only `fix`ed and `ops.nodeReaction` resolves correctly.  The base
+shear is still recovered by **global equilibrium** `Σ m·(a_rel + ag)` — exact
+for the base-excited, no-gravity benchmark — see `opensees/_runner_dynamic.py`.
 
-That `equalDOF` is the same constraint the panel-zone section above shows is
-fragile under the `Transformation` handler.  At a **fixed base** the structural
-node is *both* `fix`ed and the `equalDOF` master; `Transformation` "does not
-follow constraints", so the fixed-DOF reaction is mis-resolved and
-`ops.nodeReaction` reads back zero (verified against a clean no-hinge model,
-which returns the exact reaction).  The base shear is therefore recovered by
-**global equilibrium** `Σ m·(a_rel + ag)` — exact for the base-excited,
-no-gravity benchmark — see `opensees/_runner_dynamic.py`.
+*Historical note.*  An earlier revision modelled the hinge as a
+`zeroLengthSection` Aggregator carrying only `[P, Mz, My, T]` (no shear) and
+tied the hinge node's translations to the structural node with
+`equalDOF(struct_node, hinge_node, 1, 2, 3)`.  That `equalDOF` is fragile under
+the `Transformation` handler: at a fixed base the structural node is *both*
+`fix`ed and the `equalDOF` master, `Transformation` "does not follow
+constraints", and `ops.nodeReaction` reads back zero.  The `zeroLength -mat/-dir`
+revision — the same "extra node + `zeroLength`" pattern used for frame releases
+(`opensees/releases.py`, which states `equalDOF` is *deliberately not used*) —
+fixed that and a cyclic-softening bug in the trilinear hinge (see
+`benchmark_roadmap.md` §2 A4).
 
-Alternatives, for the record:
+The 9-story gravity-bay pin remains skipped under `hinge_model='lumped'`: the
+member-end release and the lumped hinge both re-point the member end, and the
+lumped hinge wins (`opensees/_elements.py` `_create_member_releases`).  It is
+left for the A3/A4 comparison.
 
-- **`zeroLength` element + `-mat`/`-dir` (preferred fix).**  Supply a rigid
-  `Elastic` spring on the retained DOFs (P, V2, V3, T) and the hinge material on
-  M2/M3, with no `equalDOF` — the base node is then only `fix`ed and the
-  reaction is correct (verified: a base hinge modelled this way returns exactly
-  `-1000 N` under a `1000 N` tip load).  This is the "extra node + `zeroLength`"
-  pattern already used for frame releases (`opensees/releases.py`,
-  `member_releases.md`, which states `equalDOF` is *deliberately not used*).  It
-  would also un-block the 9-story gravity-bay pin, currently skipped because a
-  release and a hinge both re-point the member end and the lumped hinge wins.
-  Cost: a finite (η = 100) rigidity on the retained DOFs rather than exact.
-- **`Penalty` / `Lagrange` handlers.**  Handle multiple constraints on one node,
-  but change the global solve (cost / conditioning) and were not needed.
-- **`beamWithHinges`.**  No extra node or constraint at all (the hinge lives in
-  the element formulation); deferred per the A1 decision.
+`beamWithHinges` (below) needs no extra node or constraint at all — the hinge
+lives in the element formulation.
 
-Decision: keep the validated `equalDOF` topology and compute the base shear by
-global equilibrium; migrate the hinge to the `zeroLength -mat/-dir` pattern when
-the nonlinear comparison needs the gravity-bay pin or an exact base reaction.
 
 ### Approximation vs the benchmark trilinear backbone
 
@@ -170,9 +161,11 @@ elastic stiffness is the exact `6EI1/L` (T1 0.993 s vs the elastic anchor
 0.994 s), and the damage recorders read member-end *curvature* directly.  At the
 benchmark's `dt_cal = 0.005 s` it is the closest match to the published
 El Centro 1.0 peak (roof 0.149 m, drift 0.0148, base shear 12.03 MN as the
-whole-building ×2, Nd 22 — targets 0.151 / 0.0150 / 10.12 / 22); the base-shear
-+19 % gap is the unknown hinge length `Lp` (the benchmark's Rayleigh damping is
-the same uncapped `a0·M + a1·K` form, so it is not the damping).
+whole-building ×2, Nd 22 — targets 0.151 / 0.0150 / 10.12 / 22).  The residual
+base-shear gap is a *monotonic transition* effect — the benchmark `Nonlin12`
+S-function's unpublished yield-index α interpolation, which smooths the
+elastic→plastic transition — not a hinge-length or damping effect (see
+`sac_trilinear_hinge_approaches.md`).
 
 ![Bilinear hinge backbone](assets/sac3_hinge_backbone.png)
 
@@ -219,18 +212,17 @@ below shows how each modelling choice shifts the fundamental period.
 
 ## Panel zone + hinge composition
 
-Combining the Krawinkler & Gupta panel zone with the bilinear hinge in the full
-3-story frame initially produced a degenerate, over-stiff modal response
-(T1 ≈ 0.20 s; the sway modes were locked).  The root cause was a **chained
-`equalDOF`** at the joint: the panel zone ties the beam's ``*_pz`` node to the
-column (`equalDOF(col, beam, 1, 3)`), and the lumped hinge then tied its hinge
-node to that ``*_pz`` node (`equalDOF(beam, hinge, 1, 2, 3)`), making the hinge
-a slave-of-a-slave that the `Transformation` constraint handler mis-resolved —
-locking the frame's lateral DOFs.  The fix ties the hinge node **directly to the
-column node** (star topology — `equalDOF(col, hinge, 1, 3)` + out-of-plane fix),
-leaving the panel-zone spring and the hinge in series.  M2 now has
-**T1 ≈ 1.13 s**, correctly softer than both the elastic model (0.99 s) and M1
+Combining the Krawinkler & Gupta panel zone with the bilinear hinge produces the
+**M2** model: the panel-zone spring and the member-end hinge sit in series, and
+**T1 ≈ 1.13 s** — correctly softer than both the elastic model (0.99 s) and M1
 (1.04 s).  Regression-guarded by `test_sac3_m2_panel_zone_modal_period`.
+
+*Historical note.*  An earlier revision degenerated (T1 ≈ 0.20 s, sway modes
+locked) because the panel zone tied the beam's ``*_pz`` node to the column
+(`equalDOF(col, beam, 1, 3)`) and the then-`equalDOF` hinge tied its hinge node
+to that ``*_pz`` node — a **chained `equalDOF`** the `Transformation` handler
+mis-resolved.  The `zeroLength -mat/-dir` hinge (no `equalDOF`) removed the
+chain.
 
 The panel-zone web thickness (`t_p` = column `tw`) carries a ~1/2 in (≈0.013 m)
 add-on over the bare column web — e.g. the W14×257 panel zone uses 0.0435 m

@@ -16,7 +16,7 @@ Reference — Ohtori, Christenson, Spencer & Dyke (2004), *ASCE J. Eng. Mech.*
 Unlike the FEMA 355C generator (``test_benchmark_fema355c_modal.py``), these are
 built from the benchmark's own ``element_tbl`` member schedule and ``mat_tbl``
 backbones, so the elastic section rigidities are ``EI1`` (not AISC ``E·I``).
-Both frequency sets reproduce to within ±0.5 %.
+Both frequency sets reproduce to within ±1 %.
 """
 
 import pytest
@@ -44,7 +44,7 @@ def test_modal_periods_match_otori(building):
         )
         got = [float(p) for p in result["periods"][: len(ref)]]
         for g, r in zip(got, ref):
-            assert g == pytest.approx(r, rel=0.02), f"{building}-story {g:.4f} s vs {r}"
+            assert g == pytest.approx(r, rel=0.01), f"{building}-story {g:.4f} s vs {r}"
     finally:
         wipe()
 
