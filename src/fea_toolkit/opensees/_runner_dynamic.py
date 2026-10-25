@@ -140,10 +140,10 @@ class TransientRunnerMixin:
         # `ops.nodeReaction` path reads back zero there).
 
         # Lumped-hinge damage tracking (φmax / Emax / Nd).  The zero-length
-        # hinge's section deformation/force are the Aggregator DOFs
-        # [P, Mz, My, T]; for a planar frame the in-plane bending is index 2
-        # (My — rotation about the out-of-plane axis), verified against the
-        # installed OpenSeesPy.  Dissipated energy is the net work ∫M·dθ
+        # hinge is a `zeroLength` element whose deformation is
+        # [P, Vy, Vz, T, My, Mz]; for a planar frame the in-plane bending is
+        # index 4 (My — rotation about the out-of-plane axis), verified against
+        # the installed OpenSeesPy.  Dissipated energy is the net work ∫M·dθ
         # (trapezoidal), summed per hinge.
         hinge_tags = list(getattr(self, "_hinge_tags", None) or [])
         hinge_theta_y = list(getattr(self, "_hinge_yield_rotations", None) or [])
@@ -171,8 +171,8 @@ class TransientRunnerMixin:
                 )
             )
             for i, tag in enumerate(hinge_tags):
-                theta = float(ops.eleResponse(tag, "deformation")[2])
-                moment = float(ops.eleResponse(tag, "section", 1, "force")[2])
+                theta = float(ops.eleResponse(tag, "deformation")[4])
+                moment = float(ops.eleResponse(tag, "force")[4])
                 peak_plastic_rotation = max(peak_plastic_rotation, abs(theta))
                 hinge_energy[i] += (
                     0.5 * (hinge_prev_moment[i] + moment) * (theta - hinge_prev_theta[i])

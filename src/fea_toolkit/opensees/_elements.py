@@ -796,15 +796,6 @@ class ElementMixin:
         elements = self.mesh_model.frame_elements
         assignments = self.mesh_model.frame_assignments
 
-        # Panel-zone beam node → column node reverse map.  When a beam end has
-        # been re-pointed to a coincident ``*_pz`` node, the hinge's translation
-        # tie must go to the *column* node (the panel zone's master), not to the
-        # ``*_pz`` node — otherwise the equalDOF chain (hinge → *_pz → column)
-        # leaves the hinge node mis-constrained and locks the frame's sway DOFs.
-        pz_beam_to_col = {
-            spec.beam_node_id: spec.column_node_id for spec in self.mesh_model.panel_zones.values()
-        }
-
         next_node_tag = max((nd.node_tag for nd in self.mesh_model.nodes.values()), default=0) + 1
         # Consider existing OpenSees element tags (shells, rigid links already
         # created) and reserved offset-rigid-link tags to avoid collisions.
@@ -827,7 +818,6 @@ class ElementMixin:
         hinge_tag_base = (
             max((v for v in self.section_tags.values()), default=0) + len(self.section_tags) + 100
         )
-        hinge_sec_tag = hinge_tag_base
         hinge_mat_tag = hinge_tag_base + len(self.section_tags) + 1
 
         new_elements: dict[str, FrameElement] = {}
@@ -903,31 +893,6 @@ class ElementMixin:
             ops.node(hinge_j_tag, nj.x, nj.y, nj.z)
             self._created_node_tags.update([hinge_i_tag, hinge_j_tag])
 
-            # Tie translation DOFs between structural and hinge nodes.  At a
-            # panel-zone joint the beam end is a coincident ``*_pz`` node whose
-            # in-plane translations are already tied to (and out-of-plane DOFs
-            # fixed by) the column — so tie the hinge to the *column* node and
-            # fix its out-of-plane DOFs, keeping the hinge a direct slave of the
-            # column rather than a slave-of-a-slave (which locks the sway modes).
-            # NB: this equalDOF tie is why the base reaction reads zero at a
-            # fixed base (Transformation can't follow a node that is both fixed
-            # and an equalDOF master) — see docs/sac_nonlinear_benchmark.md
-            # "Hinge translation tie" for the zeroLength -mat/-dir alternative.
-            col_i_id = pz_beam_to_col.get(ni.node_id)
-            col_j_id = pz_beam_to_col.get(nj.node_id)
-            if col_i_id is not None:
-                col_i = self.mesh_model.nodes[col_i_id]
-                ops.equalDOF(col_i.node_tag, hinge_i_tag, 1, 3)
-                ops.fix(hinge_i_tag, 0, 1, 0, 1, 0, 1)
-            else:
-                ops.equalDOF(ni.node_tag, hinge_i_tag, 1, 2, 3)
-            if col_j_id is not None:
-                col_j = self.mesh_model.nodes[col_j_id]
-                ops.equalDOF(col_j.node_tag, hinge_j_tag, 1, 3)
-                ops.fix(hinge_j_tag, 0, 1, 0, 1, 0, 1)
-            else:
-                ops.equalDOF(nj.node_tag, hinge_j_tag, 1, 2, 3)
-
             # --- Create Hysteretic hinge section ---
             mat = self.mesh_model.materials.get(sec.material)
 
@@ -991,8 +956,20 @@ class ElementMixin:
             theta_cap = theta_y * 6.0
             theta_cap_weak = theta_y_weak * 6.0
 
-            # Axial material (elastic)
-            ops.uniaxialMaterial("Elastic", hinge_mat_tag, max(A_val, 1e-6) * E / L)
+            # Retained DOFs are rigid (η × member stiffness) — the hinge is a
+            # pure rotational spring; the elastic member carries P/V/T.  The
+            # rigid translations live inside a zeroLength element (the release
+            # convention) so no equalDOF tie is needed.
+            eta = float(self.config.get("release_rigidity_factor", 100.0))
+            ops.uniaxialMaterial(
+                "Elastic", hinge_mat_tag, eta * max(A_val, 1e-6) * E / L
+            )  # P (dir 1)
+            ops.uniaxialMaterial(
+                "Elastic", hinge_mat_tag + 4, eta * G * max(A_val, 1e-6) / L
+            )  # Vy (dir 2)
+            ops.uniaxialMaterial(
+                "Elastic", hinge_mat_tag + 5, eta * G * max(A_val, 1e-6) / L
+            )  # Vz (dir 3)
             if self.config.get("hinge_backbone") == "bilinear":
                 # Bilinear steel hinge (Steel01) — concentrated plasticity for
                 # steel moment frames (e.g. the SAC benchmark).  The elastic
@@ -1108,25 +1085,14 @@ class ElementMixin:
                 )
                 hinge_theta_y = theta_y
                 hinge_my = My
-            # Torsion (elastic — no inelastic torsion expected)
+            # Torsion (rigid — no inelastic torsion expected)
             ops.uniaxialMaterial(
-                "Elastic", hinge_mat_tag + 3, G * max(J_val, 1e-6) / L if J_val else G * 1e-6 / L
+                "Elastic",
+                hinge_mat_tag + 3,
+                eta * (G * max(J_val, 1e-6) / L if J_val else G * 1e-6 / L),
             )
 
-            ops.section(
-                "Aggregator",
-                hinge_sec_tag,
-                hinge_mat_tag,
-                "P",
-                hinge_mat_tag + 1,
-                "Mz",
-                hinge_mat_tag + 2,
-                "My",
-                hinge_mat_tag + 3,
-                "T",
-            )
-            hinge_sec_tag += 1
-            hinge_mat_tag += 4
+            hinge_mat_tag += 6
 
             # Get local axes for element orientation
             try:
@@ -1135,57 +1101,64 @@ class ElementMixin:
             except Exception:
                 orient = None
 
-            # --- Create zero-length hinge elements ---
+            # --- Create zero-length hinge elements (zeroLength + -mat/-dir) ---
+            # Retained DOFs (P, Vy, Vz, T) are rigid; My/Mz are the hinge.
+            m = hinge_mat_tag - 6  # base material tag
+            mats = [m, m + 4, m + 5, m + 3, m + 2, m + 1]  # P, Vy, Vz, T, My, Mz
+            dirs = [1, 2, 3, 4, 5, 6]
+
             hinge_i_elem_tag = next_tag
             next_tag += 1
             if orient:
                 ops.element(
-                    "zeroLengthSection",
+                    "zeroLength",
                     hinge_i_elem_tag,
                     ni.node_tag,
                     hinge_i_tag,
-                    hinge_sec_tag - 1,
+                    "-mat",
+                    *mats,
+                    "-dir",
+                    *dirs,
                     "-orient",
-                    orient[0],
-                    orient[1],
-                    orient[2],
-                    orient[3],
-                    orient[4],
-                    orient[5],
+                    *orient,
                 )
             else:
                 ops.element(
-                    "zeroLengthSection",
+                    "zeroLength",
                     hinge_i_elem_tag,
                     ni.node_tag,
                     hinge_i_tag,
-                    hinge_sec_tag - 1,
+                    "-mat",
+                    *mats,
+                    "-dir",
+                    *dirs,
                 )
 
             hinge_j_elem_tag = next_tag
             next_tag += 1
             if orient:
                 ops.element(
-                    "zeroLengthSection",
+                    "zeroLength",
                     hinge_j_elem_tag,
                     hinge_j_tag,
                     nj.node_tag,
-                    hinge_sec_tag - 1,
+                    "-mat",
+                    *mats,
+                    "-dir",
+                    *dirs,
                     "-orient",
-                    orient[0],
-                    orient[1],
-                    orient[2],
-                    orient[3],
-                    orient[4],
-                    orient[5],
+                    *orient,
                 )
             else:
                 ops.element(
-                    "zeroLengthSection",
+                    "zeroLength",
                     hinge_j_elem_tag,
                     hinge_j_tag,
                     nj.node_tag,
-                    hinge_sec_tag - 1,
+                    "-mat",
+                    *mats,
+                    "-dir",
+                    *dirs,
                 )
 
             self._hinge_tags.extend([hinge_i_elem_tag, hinge_j_elem_tag])
