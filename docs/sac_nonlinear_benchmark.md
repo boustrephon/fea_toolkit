@@ -56,11 +56,11 @@ data are not redistributable):
 
 | Member | Zx (in³ → m³) | fy (MPa) | My = Zx·fy |
 |---|---|---|---|
-| W14×257 column | 448 → 7.34e-3 | 345 | ≈ 2530 kN·m |
+| W14×257 column | 487 → 7.98e-3 | 345 | ≈ 2750 kN·m |
 | W14×311 column | 603 → 9.88e-3 | 345 | ≈ 3410 kN·m |
 | W33×118 beam | 415 → 6.80e-3 | 248 | ≈ 1690 kN·m |
 | W30×116 beam | 378 → 6.194e-3 | 248 | ≈ 1540 kN·m |
-| W24×68 beam | 154 → 2.524e-3 | 248 | ≈ 626 kN·m |
+| W24×68 beam | 177 → 2.90e-3 | 248 | ≈ 719 kN·m |
 | W21×44 beam | 95.4 → 1.563e-3 | 248 | ≈ 388 kN·m |
 
 The leaning column stays elastic (no plastic hinge).
@@ -86,11 +86,11 @@ columns but drift apart for the deeper beams:
 
 | Member | `Zx·fy` (this model) | `EI1·d1` (benchmark first break) | Δ |
 |---|---|---|---|
-| W14×257 column | ≈ 2530 kN·m | ≈ 2614 kN·m | −3 % |
+| W14×257 column | ≈ 2750 kN·m | ≈ 2614 kN·m | +5 % |
 | W14×311 column | ≈ 3410 kN·m | ≈ 3236 kN·m | +5 % |
 | W33×118 beam | ≈ 1690 kN·m | ≈ 2191 kN·m | −23 % |
 | W30×116 beam | ≈ 1540 kN·m | ≈ 1996 kN·m | −23 % |
-| W24×68 beam | ≈ 626 kN·m | ≈ 935 kN·m | −33 % |
+| W24×68 beam | ≈ 719 kN·m | ≈ 935 kN·m | −23 % |
 | W21×44 beam | ≈ 388 kN·m | ≈ 504 kN·m | −23 % |
 
 A third spelling exists in the wild: the reference repo calibrates
@@ -174,6 +174,13 @@ column node** (star topology — `equalDOF(col, hinge, 1, 3)` + out-of-plane fix
 leaving the panel-zone spring and the hinge in series.  M2 now has
 **T1 ≈ 1.13 s**, correctly softer than both the elastic model (0.99 s) and M1
 (1.04 s).  Regression-guarded by `test_sac3_m2_panel_zone_modal_period`.
+
+The panel-zone web thickness (`t_p` = column `tw`) carries a ~1/2 in (≈0.013 m)
+add-on over the bare column web — e.g. the W14×257 panel zone uses 0.0435 m
+rather than the 0.030 m web.  The Ohtori paper does not document doubler
+plates, but the transcribed values are only consistent with a non-documented
+1/2 in doubler (1/4 in per face), so they are kept as-is
+(`sac.py` `_COLUMNS_BY_AREA`) rather than "corrected" to the bare web.
 
 ## Loadable artifact
 

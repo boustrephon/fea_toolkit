@@ -53,16 +53,22 @@ BEAM_FY = 248e6
 
 #: Moment-frame columns keyed by area (m²).  The far-line *leaning* column
 #: (models the interior gravity framing) is absent — it stays elastic.
+#:
+#: ``tw`` is the panel-zone web thickness.  The transcribed values are ~1/2 in
+#: (≈0.013 m) larger than the bare column web (W14x257 web = 0.030 m), which is
+#: only consistent with a non-documented doubler plate (1/4 in per face).  The
+#: Ohtori paper does not record doubler plates, so the values are kept as-is
+#: rather than "corrected" to the bare web.
 _COLUMNS_BY_AREA = {
-    0.048759: {"Z33": 7.34e-3, "depth": 0.417, "tw": 0.0435},  # W14x257
-    0.05895: {"Z33": 9.88e-3, "depth": 0.437, "tw": 0.0488},  # W14x311
+    0.048759: {"Z33": 7.98e-3, "depth": 0.417, "tw": 0.0435},  # W14x257 (Zx 487 in³)
+    0.05895: {"Z33": 9.88e-3, "depth": 0.437, "tw": 0.0488},  # W14x311 (Zx 603 in³)
 }
 
 #: Beams keyed by strong-axis inertia (m⁴) — rigid axial A = 0.05 m².
 _BEAMS_BY_I = {
     2.455e-3: {"Z33": 6.80e-3, "depth": 0.836, "tw": 0.0140},  # W33x118
     2.0514e-3: {"Z33": 6.194e-3, "depth": 0.762, "tw": 0.0144},  # W30x116
-    7.6145e-4: {"Z33": 2.524e-3, "depth": 0.602, "tw": 0.0105},  # W24x68
+    7.6145e-4: {"Z33": 2.90e-3, "depth": 0.602, "tw": 0.0105},  # W24x68 (Zx 177 in³)
     3.50775e-4: {"Z33": 1.563e-3, "depth": 0.526, "tw": 0.0089},  # W21x44
 }
 
@@ -79,7 +85,7 @@ _BEAM_MAT_NO = {
 _LEANING_MAT_NO = 6
 
 #: Representative members for the figure generator / docs.
-COLUMN = {"Z33": 7.34e-3, "depth": 0.417, "tw": 0.0435, "fy": COLUMN_FY}  # W14x257
+COLUMN = {"Z33": 7.98e-3, "depth": 0.417, "tw": 0.0435, "fy": COLUMN_FY}  # W14x257
 BEAM = {"Z33": 6.194e-3, "depth": 0.762, "tw": 0.0144, "fy": BEAM_FY}  # W30x116
 
 #: The three explicit rigid floor diaphragms from ``struct3.m``'s master-slave
