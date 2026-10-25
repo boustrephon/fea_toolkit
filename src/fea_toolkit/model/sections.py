@@ -79,6 +79,7 @@ class SectionLibrary:
     INCH_TO_MM = 25.4
     INCH_TO_CM = 2.54
     INCH_TO_M = 0.0254
+    M_TO_MM = 1000.0
     FOOT_TO_MM = 304.8
     FOOT_TO_CM = 30.48
     FOOT_TO_M = 0.3048
@@ -143,6 +144,8 @@ class SectionLibrary:
             factor = (1.0 / self.INCH_TO_MM) ** exponent
         elif from_units == "m" and self.target_units == "in":
             factor = (1.0 / self.INCH_TO_M) ** exponent
+        elif from_units == "m" and self.target_units == "mm":
+            factor = self.M_TO_MM**exponent
         else:
             factor = 1.0  # unknown units, no conversion
         return val * factor

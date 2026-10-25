@@ -1552,7 +1552,7 @@ def _build_3d(geom, mr, sched, fy, restrain_ground_laterally=True) -> SAPModelDa
                         above = sched["col_int"][j + 1] if j + 1 < n_levels else below
                     elif is_ew_gravity_col(i, k):
                         below = _gravity_col_sec(sched, j)
-                        above = below  # gravity column — no splice split
+                        above = _gravity_col_sec(sched, j + 1) if j + 1 < n_levels else below
                     else:
                         below = sched["col_int"][j]
                         above = sched["col_int"][j + 1] if j + 1 < n_levels else below
@@ -1560,7 +1560,7 @@ def _build_3d(geom, mr, sched, fy, restrain_ground_laterally=True) -> SAPModelDa
                     below = gravity_sec(i, k, j)
                     if below is None:
                         continue
-                    above = below  # gravity column — no splice split
+                    above = gravity_sec(i, k, j + 1) if j + 1 < n_levels else below
 
                 ni = grid[(i, k, j)]
                 nj = grid[(i, k, j + 1)]
@@ -1759,10 +1759,9 @@ def _build_2d(geom, mr, sched, fy, restrain_ground_laterally=True) -> SAPModelDa
         return sched["col_" + role][j]
 
     for i in range(n_ns):
-        role = roles[i]
         for j in range(n_levels):
             below = col_sec(i, j)
-            above = col_sec(i, j + 1) if j + 1 < n_levels and role != "gravity" else below
+            above = col_sec(i, j + 1) if j + 1 < n_levels else below
             ni = grid[(i, j)]
             nj = grid[(i, j + 1)]
             if above == below:
@@ -1832,6 +1831,15 @@ def _build_2d(geom, mr, sched, fy, restrain_ground_laterally=True) -> SAPModelDa
                 restraints[nid] = Restraint([1, 1, 0, 1, 0, 1])
             else:
                 restraints[nid] = Restraint(_out_of_plane())
+
+    # The ``-SPL`` splice nodes are free in-plane nodes like the grid nodes,
+    # but they are not in ``grid`` — give them the same out-of-plane restraint
+    # (the Preprocessor carries restraints through unchanged, so this is the
+    # only place they are fixed before the 3D ``ndm=3``/``ndf=6`` domain is
+    # built).
+    for nid in nodes:
+        if nid not in restraints:
+            restraints[nid] = Restraint(_out_of_plane())
 
     masses = _masses_for(n_levels)
     added_masses = _lump_2d(masses, n_ns, ns, grid, n_levels)

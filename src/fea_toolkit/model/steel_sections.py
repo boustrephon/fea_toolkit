@@ -1391,9 +1391,14 @@ BOX_SECTIONS: dict[str, tuple[float, ...]] = {
 def get_section_properties(name: str) -> Optional[dict[str, Any]]:
     """Return a :class:`SectionLibrary`-style properties dict for *name*.
 
-    Keys are the section fields plus ``"_length_units"`` (``"m"``) and
-    ``"_catalogue"`` (``"AISC13"``) markers, matching
-    :meth:`fea_toolkit.model.sections.SectionLibrary.get_section_properties`.
+    Args:
+        name: The section name to look up in the W-shape / box tables.
+
+    Returns:
+        The section-properties dictionary, or ``None`` when *name* is not in
+        either table.  Keys are the section fields plus ``"_length_units"``
+        (``"m"``) and ``"_catalogue"`` (``"AISC13"``) markers, matching
+        :meth:`fea_toolkit.model.sections.SectionLibrary.get_section_properties`.
     """
     row = W_SECTIONS.get(name)
     if row is None:

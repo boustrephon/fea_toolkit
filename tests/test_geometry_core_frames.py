@@ -95,6 +95,26 @@ class TestSectionLibrary:
         assert hasattr(sec, "Z33")
 
 
+def test_section_library_builtin_fallback_converts_m_to_mm():
+    """The in-code AISC fallback (metre-based) converts to mm on enrichment."""
+    from fea_toolkit.model.sections import SectionLibrary
+
+    lib = SectionLibrary(Path("/nonexistent/section_dict.pkl"), target_units="mm")
+    sec = Section(
+        name="W14X257",
+        shape="I/Wide Flange",
+        material="Steel",
+        A=0.0,
+        I33=0.0,
+        I22=0.0,
+        J=0.0,
+    )
+    lib.enrich_section(sec)
+    # W14X257 depth/bf in the builtin table are 0.41656 m / 0.4064 m → mm.
+    assert sec.depth == pytest.approx(416.56)
+    assert sec.bf == pytest.approx(406.4)
+
+
 # ============================================================================
 # Integration test: parser -> model data -> geometry
 # ============================================================================

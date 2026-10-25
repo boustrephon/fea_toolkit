@@ -13,9 +13,9 @@ from fea_toolkit.model.sap_data import BoxSection
         (3, "2d", 20, 27, 3),
         (3, "3d", 140, 279, 24),
         (9, "2d", 88, 132, 10),
-        (9, "3d", 472, 1036, 40),
+        (9, "3d", 536, 1100, 40),
         (20, "2d", 166, 270, 0),
-        (20, "3d", 1072, 2284, 0),
+        (20, "3d", 1106, 2318, 0),
     ],
 )
 def test_la_model_counts(stories, direction, nodes, elements, releases):
