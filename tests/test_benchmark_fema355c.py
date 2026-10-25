@@ -12,10 +12,10 @@ from fea_toolkit.model.sap_data import BoxSection
     [
         (3, "2d", 20, 27, 3),
         (3, "3d", 140, 279, 24),
-        (9, "2d", 66, 110, 10),
-        (9, "3d", 396, 960, 40),
-        (20, "2d", 138, 242, 0),
-        (20, "3d", 966, 2178, 0),
+        (9, "2d", 88, 132, 10),
+        (9, "3d", 472, 1036, 40),
+        (20, "2d", 166, 270, 0),
+        (20, "3d", 1072, 2284, 0),
     ],
 )
 def test_la_model_counts(stories, direction, nodes, elements, releases):
@@ -23,6 +23,32 @@ def test_la_model_counts(stories, direction, nodes, elements, releases):
     assert len(md.nodes) == nodes
     assert len(md.frame_elements) == elements
     assert len(md.frame_releases) == releases
+
+
+def test_column_splice_nodes_sit_six_feet_above_a_floor():
+    """Every splice node is 6 ft (1.8288 m) above a floor centreline."""
+    md = f.build_fema355c("LA", 9, "pre", "2d")
+    floor_zs = {nd.z for nid, nd in md.nodes.items() if not nid.endswith("-SPL")}
+    spl_nodes = [nd for nid, nd in md.nodes.items() if nid.endswith("-SPL")]
+    assert spl_nodes
+    for nd in spl_nodes:
+        assert any(abs(nd.z - (z + f.SPLICE)) < 1e-9 for z in floor_zs)
+
+
+def test_column_splice_splits_a_story_into_two_segments():
+    """A spliced column is two segments (-A below, -B above) with distinct sections."""
+    md = f.build_fema355c("LA", 9, "pre", "2d")
+    pairs: set[tuple[str, str]] = set()
+    for eid in md.frame_elements:
+        if eid.endswith("-A"):
+            b_eid = eid[:-1] + "B"
+            assert b_eid in md.frame_elements
+            below = md.frame_assignments[eid]
+            above = md.frame_assignments[b_eid]
+            assert below != above
+            pairs.add((below, above))
+    # The 9-story interior column at 2/3 splices W14X500 -> W14X455.
+    assert ("W14X500", "W14X455") in pairs
 
 
 @pytest.mark.parametrize(
@@ -176,7 +202,7 @@ def test_20story_ew_frame_columns_rotated():
 def test_20story_geometry_matches_benchmark():
     """5 bays x 22 levels @ 20 ft; heights 12/12/18 ft then 13 ft x 19."""
     md = f.build_fema355c("LA", 20, "pre", "2d")
-    zs = sorted({n.z for n in md.nodes.values()})
+    zs = sorted({n.z for nid, n in md.nodes.items() if not nid.endswith("-SPL")})
     assert len(zs) == 23
     assert zs[1] == pytest.approx(f.H12)
     assert zs[2] == pytest.approx(2 * f.H12)

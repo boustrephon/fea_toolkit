@@ -17,8 +17,9 @@ Units are SI (N, m, kg); materials are authored in SI (Pa) and used as-is
 
 Approximations (documented, not fabrications):
 
-* Column splices (6 ft above the floor line) are approximated level-by-level
-  (the below-splice section is used for the whole story).
+* Column splices are modelled geometrically: where a story lists two sections
+  (below / above splice), the column is split 6 ft above the floor centreline
+  into a below-splice and an above-splice segment.
 * The penthouse is not modelled structurally (mass only).
 * Dead (96/83 psf) and reduced live (20 psf) loads are nodal ``joint_loads``
   by tributary area; steel self-weight (13 psf) rides on material density.
@@ -68,6 +69,7 @@ BAY_15 = 15.0 * FT  # 4.572 m  (R2-LA9 redesign)
 H12 = 12.0 * FT  # 3.6576 m  (basement)
 H13 = 13.0 * FT  # 3.9624 m  (typical story)
 H18 = 18.0 * FT  # 5.4864 m  (ground floor)
+SPLICE = 6.0 * FT  # 1.8288 m  (column splice height above the floor centreline)
 
 E_STEEL = 2.0e11  # Pa
 G_STEEL = 7.7e10  # Pa
@@ -1536,25 +1538,53 @@ def _build_3d(geom, mr, sched, fy, restrain_ground_laterally=True) -> SAPModelDa
         for k in range(n_ew):
             for j in range(n_levels):
                 angle = col_angle(i, k)
+                # Resolve the below-splice section, plus the story above's
+                # section — when they differ the column is spliced 6 ft up.
                 if is_corner(i, k):
-                    sec = sched["col_ext"][j]  # corner column (box for LA 20)
+                    below = sched["col_ext"][j]  # corner column (box for LA 20)
+                    above = sched["col_ext"][j + 1] if j + 1 < n_levels else below
                 elif has_next and is_next(i, k):
-                    sec = sched["col_next"][j]
+                    below = sched["col_next"][j]
+                    above = sched["col_next"][j + 1] if j + 1 < n_levels else below
                 elif is_perim(i, k):
                     if col_rotation == "centered" and is_ew_moment_col(i, k):
-                        sec = sched["col_int"][j]
+                        below = sched["col_int"][j]
+                        above = sched["col_int"][j + 1] if j + 1 < n_levels else below
                     elif is_ew_gravity_col(i, k):
-                        sec = _gravity_col_sec(sched, j)
+                        below = _gravity_col_sec(sched, j)
+                        above = below  # gravity column — no splice split
                     else:
-                        sec = sched["col_int"][j]
+                        below = sched["col_int"][j]
+                        above = sched["col_int"][j + 1] if j + 1 < n_levels else below
                 else:
-                    sec = gravity_sec(i, k, j)
-                    if sec is None:
+                    below = gravity_sec(i, k, j)
+                    if below is None:
                         continue
-                eid = f"C-{_grid_label(i, k)}-{story[j]}"
-                etag = _add_col(
-                    frames, assigns, etag, grid[(i, k, j)], grid[(i, k, j + 1)], sec, eid, angle
-                )
+                    above = below  # gravity column — no splice split
+
+                ni = grid[(i, k, j)]
+                nj = grid[(i, k, j + 1)]
+                if above == below:
+                    eid = f"C-{_grid_label(i, k)}-{story[j]}"
+                    etag = _add_col(frames, assigns, etag, ni, nj, below, eid, angle)
+                else:
+                    # Splice: split the story into a lower (below-splice) and
+                    # upper (above-splice) segment at a node 6 ft above the
+                    # floor centreline.
+                    spl_nid = f"{_grid_label(i, k)}-{story[j]}-SPL"
+                    if spl_nid not in nodes:
+                        nodes[spl_nid] = Node(
+                            node_id=spl_nid,
+                            node_tag=tag,
+                            x=i * bay,
+                            y=k * bay,
+                            z=levels[j] + SPLICE,
+                        )
+                        tag += 1
+                    eid_a = f"C-{_grid_label(i, k)}-{story[j]}-A"
+                    etag = _add_col(frames, assigns, etag, ni, spl_nid, below, eid_a, angle)
+                    eid_b = f"C-{_grid_label(i, k)}-{story[j]}-B"
+                    etag = _add_col(frames, assigns, etag, spl_nid, nj, above, eid_b, angle)
 
     # ── Beams: N-S (along X) then E-W (along Y) ──
     # Perimeter moment frames span ``ns_moment``/``ew_moment`` bays starting at
@@ -1729,11 +1759,32 @@ def _build_2d(geom, mr, sched, fy, restrain_ground_laterally=True) -> SAPModelDa
         return sched["col_" + role][j]
 
     for i in range(n_ns):
+        role = roles[i]
         for j in range(n_levels):
-            eid = f"C-{_grid_label(i)}-{story[j]}"
-            etag = _add_col(
-                frames, assigns, etag, grid[(i, j)], grid[(i, j + 1)], col_sec(i, j), eid
-            )
+            below = col_sec(i, j)
+            above = col_sec(i, j + 1) if j + 1 < n_levels and role != "gravity" else below
+            ni = grid[(i, j)]
+            nj = grid[(i, j + 1)]
+            if above == below:
+                eid = f"C-{_grid_label(i)}-{story[j]}"
+                etag = _add_col(frames, assigns, etag, ni, nj, below, eid)
+            else:
+                # Splice 6 ft above the floor centreline: split into a lower
+                # (below-splice) and upper (above-splice) segment.
+                spl_nid = f"{_grid_label(i)}-{story[j]}-SPL"
+                if spl_nid not in nodes:
+                    nodes[spl_nid] = Node(
+                        node_id=spl_nid,
+                        node_tag=tag,
+                        x=i * bay,
+                        y=0.0,
+                        z=levels[j] + SPLICE,
+                    )
+                    tag += 1
+                eid_a = f"C-{_grid_label(i)}-{story[j]}-A"
+                etag = _add_col(frames, assigns, etag, ni, spl_nid, below, eid_a)
+                eid_b = f"C-{_grid_label(i)}-{story[j]}-B"
+                etag = _add_col(frames, assigns, etag, spl_nid, nj, above, eid_b)
 
     for j in range(1, n_levels + 1):
         lvl = j - 1
@@ -1836,6 +1887,7 @@ __all__ = [
     "MASS_9STORY",
     "MASS_20STORY",
     "PSF_TO_PA",
+    "SPLICE",
     "build_fema355c",
     "schedules",
     "write_snapshots",
