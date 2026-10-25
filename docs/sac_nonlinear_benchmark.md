@@ -160,12 +160,12 @@ benchmark's θ = φ·L/6 member-end rotation).  No "nearly rigid" spring, so the
 elastic stiffness is the exact `6EI1/L` (T1 0.993 s vs the elastic anchor
 0.994 s), and the damage recorders read member-end *curvature* directly.  At the
 benchmark's `dt_cal = 0.005 s` it is the closest match to the published
-El Centro 1.0 peak (roof 0.149 m, drift 0.0148, base shear 12.03 MN as the
-whole-building ×2, Nd 22 — targets 0.151 / 0.0150 / 10.12 / 22).  The residual
-base-shear gap is a *monotonic transition* effect — the benchmark `Nonlin12`
-S-function's unpublished yield-index α interpolation, which smooths the
-elastic→plastic transition — not a hinge-length or damping effect (see
-`sac_trilinear_hinge_approaches.md`).
+El Centro 1.0 peak (roof 0.149 m, drift 0.0148, base shear 10.27 MN as the
+whole-building ×2, Nd 22 — targets 0.151 / 0.0150 / 10.12 / 22).  The base
+shear reproduces the target to +1.5 % (an earlier +19 % was an artefact of the
+transient runner's ground-acceleration sampling, since corrected), so no
+unpublished `Nonlin12` interpolation is needed to match `F_max` (see
+`sac_trilinear_hinge_approaches.md` and the nonlinear paper).
 
 ![Bilinear hinge backbone](assets/sac3_hinge_backbone.png)
 

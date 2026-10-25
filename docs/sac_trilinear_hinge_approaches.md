@@ -114,9 +114,9 @@ doubled (`Num_MRF = 2`); see `benchmark_roadmap.md` §2 A4.
 | quantity | target | A (lumped) | B (bwh+Hyst) | C (bwh+Steel02) | D (bwh+Clough) |
 |---|---|---|---|---|---|
 | roof disp. (m) | 0.151 | 0.153 (+1 %) | 0.149 (−1 %) | 0.145 (−4 %) | 0.126 (−17 %) |
-| base shear ×2 (MN) | 10.12 | 10.75 (+6 %) | 12.03 (+19 %) | 11.55 (+14 %) | 11.91 (+18 %) |
+| base shear ×2 (MN) | 10.12 | 10.15 (+0.3 %) | 10.27 (+1.5 %) | 10.23 (+1.1 %) | 9.71 (−4 %) |
 | max. drift | 0.0150 | 0.0155 (+3 %) | 0.0148 (−1 %) | 0.0143 (−5 %) | 0.0134 (−11 %) |
-| roof abs. accel (m/s²) | 6.54 | 6.99 (+7 %) | 6.88 (+5 %) | 6.47 (−1 %) | 6.89 (+5 %) |
+| roof abs. accel (m/s²) | 6.54 | 7.09 (+8 %) | 6.95 (+6 %) | 6.54 (0 %) | 6.96 (+6 %) |
 | yielded hinges `Nd` | 22 | 22 | 22 | 22 | 16 |
 
 The elastic anchor, for reference: roof 0.206 m, base shear ×2 20.81 MN,
@@ -126,69 +126,57 @@ drift 0.0207, roof accel 10.03 m/s², `Nd = 0`.
 
 The four formulations split the five quantities cleanly by mechanism:
 
-* **A (lumped)** is closest on **base shear** (+6 %) and roof (+1 %) but is
-  the softest elastically (T1 ≈ 1.041 s) and worst on roof acceleration (+7 %).
+* **A (lumped)** is closest on **base shear** (+0.3 %) and roof (+1 %) but is
+  the softest elastically (T1 ≈ 1.041 s) and worst on roof acceleration (+8 %).
 * **B (bwh + Hysteretic)** holds the exact elastic stiffness and is closest on
-  **roof** (−1 %) and **drift** (−1 %), but worst on **base shear** (+19 %).
+  **roof** (−1 %) and **drift** (−1 %), with base shear +1.5 %.
 * **C (bwh + Steel02)** keeps the exact elastic stiffness and is closest on
-  **roof acceleration** (−1 %), with base shear midway (+14 %).
+  **roof acceleration** (0 %), with base shear +1.1 %.
 * **D (bwh + Clough)** adds unloading-stiffness degradation and *over-softens*
   the displacement — roof −17 %, drift −11 %, and under-yields (`Nd` = 16) —
-  **yet leaves the base shear at +18 %**, essentially unchanged from B.
+  **yet leaves the base shear essentially unchanged** (−4 % vs B's +1.5 %).
 
 The decisive column is D: changing *only* the cyclic law (at a fixed backbone
 and elastic stiffness) moves **displacement and yielding** but not the base
 shear.  The base shear is therefore set by the **backbone and elastic
 stiffness** (the monotonic force path), not by the unloading/reloading rule.
-The three `beamWithHinges` forms (B/C/D, all T1 ≈ 0.993 s) cluster at
-11.5–12.0 MN regardless of the cyclic detail, while the softer lumped hinge
-(T1 ≈ 1.041 s) drops to 10.75 MN.
+All four formulations land within ±4 % of the published base shear — the three
+`beamWithHinges` forms (B/C/D, all T1 ≈ 0.993 s) cluster at 9.7–10.3 MN and the
+softer lumped hinge (T1 ≈ 1.041 s) at 10.15 MN.
 
-## The remaining gap
+## The base shear is reproduced
 
-The base shear stays high (+19 % B, +14 % C, +18 % D) after ruling out, in
-order:
-
-* **Cyclic law** — D (Clough unloading-stiffness degradation) left the base
-  shear at +18 %: the cyclic path does not set the peak force (hypothesis
-  refuted).
-* **Hinge length `Lp`** — a L/10 → L/3 sweep moved base shear < 1 %
-  (hypothesis retracted).
-* **Floor diaphragm** — the explicit `struct3.m` `equalDOF` master-slave
-  (`fidelity='faithful'`) changed nothing: the rigid-axial floor beams already
-  tie the floors' X DOFs exactly.
-* **Integration step** — 0.005 s is non-negotiable (0.02 s inflated base shear
-  ~55 %).
-* **Mass / damping / elastic stiffness** — all match (FEMA 355C storey mass ×2;
-  the same uncapped `a0·M + a1·K` Rayleigh; T1 exact).
-
-What remains is the **effective backbone in the plastic range**, not the cyclic
-law: the benchmark's `Nonlin12` applies a yield-index α interpolation that
-smooths the elastic→plastic transition, lowering the secant stiffness once a
-member yields — which lowers the peak force while leaving the elastic T1 (and
-the displacement, set by the first mode) almost unchanged.  That interpolation
-is neither published nor redistributable.
+The earlier pass of this comparison reported the base shear 6–19 % high and
+attributed the residual to the unpublished `Nonlin12` yield-index α
+interpolation.  That was an artefact of the transient runner, not the model:
+the ground acceleration in the equilibrium sum `Σ m·(a_rel + ag)` was sampled
+one integration step too early, biasing the peak.  With the sampling corrected,
+the base shear lands on the published `F_max` to within ±4 % (and +1.5 % on the
+El Centro 1.0 anchor), so the benchmark's base shear **is** recoverable from the
+published backbone and elastic stiffness — no unpublished interpolation is
+needed.  The hypotheses ruled out along the way (cyclic law D, hinge length
+`Lp`, floor diaphragm, integration step, mass/damping) all still hold; they were
+simply not the cause, because there is no remaining gap to explain.
 
 ## What this tells us about the Ohtori model
 
-1. **The backbone is public and matched, but not sufficient.**  Reproducing the
-   `mat_tbl` anchors exactly yields the displacement to ±4 % (A/B/C) but the
-   force 6–19 % high.  The model's identity lives in the unpublished parts of
-   the `Nonlin12` S-function.
+1. **The backbone is public and sufficient for the peaks.**  Reproducing the
+   `mat_tbl` anchors exactly yields the displacement to ±4 % (A/B/C) **and** the
+   base shear to ±4 % — the published peak response is recoverable without the
+   unpublished parts of the `Nonlin12` S-function.
 
-2. **Displacement is robust to the hinge choice; force is not — but the
-   sensitivity splits by mechanism.**  Roof, drift and `Nd` barely move across
-   A/B/C, while the base shear spreads 10.75–12.03 MN.  The D column shows the
-   *direction*: the cyclic law governs displacement and yielding, while the
-   base shear is governed by the backbone (monotonic) and elastic stiffness.
+2. **Displacement and force split by mechanism.**  Roof, drift and `Nd` barely
+   move across A/B/C, and the base shear now also barely moves (9.7–10.3 MN).
+   The D column shows the *direction*: the cyclic law governs displacement and
+   yielding (roof −17 %, `Nd` 16), while the base shear is governed by the
+   backbone (monotonic) and elastic stiffness.
 
-3. **The base-shear gap is a *transition* effect, not a cyclic effect.**  D's
-   stiffness degradation moved displacement and `Nd` but not force; C's smooth
-   `Steel02` transition moved force (19 % → 14 %).  So Ohtori's member softens
-   *monotonically* (the α interpolation through the elastic→plastic transition)
-   rather than *cyclically*.  That is the one ingredient we cannot reproduce,
-   and it is why the softest formulation — the lumped hinge's "nearly rigid"
-   series compliance, not degradation — lands closest on base shear.
+3. **The cyclic law is decisive for damage, not for force.**  D's Clough
+   degradation moved displacement and `Nd` but not base shear; C's smooth
+   `Steel02` transition moved roof acceleration but left base shear within
+   ±1.5 %.  So for drift/damage checks the cyclic law is the choice that
+   matters, while for force checks it is a red herring — the monotonic backbone
+   governs.
 
 4. **Practical consequence.**  For drift-based checks any of the four will do;
    for force-based checks the cyclic law is a red herring — what matters is the
@@ -201,11 +189,12 @@ is neither published nor redistributable.
 * **Reproduce the elastic stiffness and roof/drift** (best for drift-based
   design checks): B — `beam_with_hinges` + `trilinear`.
 * **Reproduce base shear / accelerations** (best for force-based or
-  acceleration-based checks): C — `beam_with_hinges` + `trilinear_steel02`
-  (the smooth transition is what moves the force); A (lumped) is the closest
-  base-shear match if the ~5 % elastic softening is acceptable.  D (Clough) is
-  *not* recommended — it degrades displacement/yielding without touching the
-  force.
+  acceleration-based checks): B or C — `beam_with_hinges` + `trilinear` /
+  `trilinear_steel02` (both hold the exact elastic stiffness and land within
+  ±2 % on base shear; C additionally matches the roof acceleration).  A
+  (lumped) is the closest base-shear match if the ~5 % elastic softening is
+  acceptable.  D (Clough) is *not* recommended — it degrades displacement and
+  yielding without improving the force.
 * **Cheapest, most robust** for scoping studies: A — `lumped` + `trilinear`.
 
 ## API

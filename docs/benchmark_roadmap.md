@@ -174,18 +174,19 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
 
   **El Centro 1.0 (3-story, dt=0.005)**, lumped / bwh+Hysteretic /
   bwh+Steel02 / bwh+Clough (target in parentheses): roof 0.153 / 0.149 /
-  0.145 / 0.126 m (0.151), base shear ×2 10.75 / 12.03 / 11.55 / 11.91 MN
-  (10.12), xdd 6.99 / 6.88 / 6.47 / 6.89 m/s² (6.54), Nd 22 / 22 / 22 / 16
+  0.145 / 0.126 m (0.151), base shear ×2 10.15 / 10.27 / 10.23 / 9.71 MN
+  (10.12), xdd 7.09 / 6.95 / 6.54 / 6.96 m/s² (6.54), Nd 22 / 22 / 22 / 16
   (22).  The Clough run is the decisive control: changing *only* the cyclic law
   moves displacement and yielding (roof −17 %, Nd 16) but **not** the base
-  shear (+18 %), so the base shear is set by the **backbone / elastic
-  stiffness**, not the unloading/reloading rule.  The Lp hypothesis was
-  **retracted** (a L/10→L/3 sweep moved base shear <1 %), as was the
-  floor-diaphragm hypothesis (`equalDOF` added nothing — the rigid-axial beams
-  already tie the floors).  What remains is ``Nonlin12``'s yield-index α
-  interpolation, which smooths the elastic→plastic *transition* (a monotonic
-  backbone effect, not a cyclic one) and lowers the secant stiffness once a
-  member yields.  Run the full 10×3 matrix next.
+  shear (−4 %), so the base shear is set by the **backbone / elastic
+  stiffness**, not the unloading/reloading rule.  An earlier +6–19 % base-shear
+  gap was an artefact of the transient runner (the ground acceleration in
+  `Σ m·(a_rel + ag)` was sampled one step too early); with the sampling
+  corrected the base shear reproduces the target to ±4 %, so no unpublished
+  `Nonlin12` interpolation is needed.  The 3-story ten-case matrix is run (see
+  `sac_trilinear_hinge_approaches.md` and the nonlinear paper); the 9/20-story
+  NLTHA is deferred (9-story gravity-bay release, 20-story `beamWithHinges`
+  flexibility singularity).
 - **B4 — Phase-I base isolation — deferred.** Needs a base-isolation element
   path the toolkit does not have (friction pendulum / elastomeric isolator).
 
