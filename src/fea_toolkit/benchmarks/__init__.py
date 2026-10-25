@@ -30,14 +30,26 @@ from .sac import (
     peak_x,
     preprocess_config,
 )
+from .sac_member_data import (
+    MAT_TBL_3,
+    MAT_TBL_9,
+    MAT_TBL_20,
+    MAT_TBLS,
+    MemberBackbone,
+)
 
 __all__ = [
     "BEAM",
     "BEAM_FY",
     "COLUMN",
     "COLUMN_FY",
+    "MAT_TBLS",
+    "MAT_TBL_3",
+    "MAT_TBL_9",
+    "MAT_TBL_20",
     "SAC3_TCL",
     "SAC3_UNITS",
+    "MemberBackbone",
     "build_builder",
     "build_fema355c",
     "builder_config",
