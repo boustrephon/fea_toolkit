@@ -168,13 +168,12 @@ def test_sac3_nonlinear_nltha_elcentro(resolve_ground_motion_record):
     """
     from openseespy.opensees import wipe
 
-    from fea_toolkit.io.ground_motion import read_time_history_csv
+    from fea_toolkit.benchmarks.sac import load_benchmark_record
 
     wipe()
     try:
         record_path = resolve_ground_motion_record("ELCENTRO")
-        times, accel = read_time_history_csv(record_path)
-        dt = float(times[1] - times[0])
+        accel, dt = load_benchmark_record(record_path)
 
         b = build_builder(panel_zone=False)
         res = b.run_transient_analysis(accel, dt, direction="X", damping_ratio=0.02)
@@ -202,13 +201,12 @@ def test_sac3_beam_with_hinges_elcentro(resolve_ground_motion_record):
     """
     from openseespy.opensees import wipe
 
-    from fea_toolkit.io.ground_motion import read_time_history_csv
+    from fea_toolkit.benchmarks.sac import load_benchmark_record
 
     wipe()
     try:
         record_path = resolve_ground_motion_record("ELCENTRO")
-        times, accel = read_time_history_csv(record_path)
-        dt = float(times[1] - times[0])
+        accel, dt = load_benchmark_record(record_path)
         b = build_builder(backbone="trilinear", hinge_model="beam_with_hinges")
         res = b.run_transient_analysis(accel, dt, direction="X", damping_ratio=0.02)
         assert res["converged_steps"] > 0

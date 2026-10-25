@@ -62,6 +62,12 @@ SAC3_TCL = Path(__file__).with_name("sac_3story.tcl")
 #: SI unit system of the bundled model (N, m, kg).
 SAC3_UNITS: dict[str, str] = {"F": "N", "L": "m", "T": "C"}
 
+#: Integration time step of the benchmark's NLTHA (``struct#.m`` ``dt_cal``).
+#: The archive records are stored at their native sampling (0.02 s for
+#: El Centro / Northridge / Kobe, 0.01 s for Hachinohe); the benchmark
+#: sub-steps them to 0.005 s (Newmark β=1/4, γ=1/2) for the integration.
+SAC_DT_CAL: float = 0.005
+
 # ── SAC member schedule (SI) ──
 # From the official benchmark model data (Ohtori et al. 2004, NEES archive
 # resource 257, `struct3.m`).  Columns are 345 MPa (50 ksi); beams 248 MPa
@@ -589,6 +595,32 @@ def build_builder(
     return b
 
 
+def load_benchmark_record(path: str, dt: float = SAC_DT_CAL) -> tuple[np.ndarray, float]:
+    """Read a benchmark ground-motion record, resampled to the integration step.
+
+    The four benchmark signals are archived at their native sampling; the
+    benchmark integrates them at ``dt_cal = 0.005`` s (``struct#.m``, Newmark
+    β=1/4 γ=1/2).  This helper reads a record and linearly resamples it to
+    *dt* so the transient analysis matches the benchmark's integration step.
+
+    Args:
+        path: Path to the CSV record (``time,accel`` columns, m/s²).
+        dt: Target integration step (s); defaults to :data:`SAC_DT_CAL`.
+
+    Returns:
+        ``(accel, dt)`` — the resampled acceleration samples (m/s²) and the
+        integration step (s).
+    """
+    from ..io.ground_motion import read_time_history_csv
+
+    times, accel = read_time_history_csv(path)
+    dt0 = float(times[1] - times[0])
+    if abs(dt0 - dt) > 1e-9:
+        t_new = np.arange(0.0, times[-1] + dt, dt)
+        accel = np.interp(t_new, times, accel)
+    return accel, float(dt)
+
+
 def peak_x(res: dict[str, Any]) -> float:
     """Peak |X| displacement over all nodes (≈ the roof peak for a shear frame)."""
     peak = 0.0
@@ -605,11 +637,13 @@ __all__ = [
     "COLUMN_FY",
     "SAC3_TCL",
     "SAC3_UNITS",
+    "SAC_DT_CAL",
     "build_builder",
     "builder_config",
     "enrich_display_sections",
     "enrich_nonlinear",
     "enrich_trilinear",
+    "load_benchmark_record",
     "load_model",
     "peak_x",
     "preprocess_config",

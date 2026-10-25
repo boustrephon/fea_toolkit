@@ -127,42 +127,45 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   for 20-story — pass `period_2 = T5` explicitly); the benchmark applies **no
   P-Δ** (linear stiffness, `geomTransf Linear`).  The remaining piece is the A4
   comparison itself.
-- **A4 — comparison (trilinear-hinge bug fixed; matrix can resume).** The
-  ``unctrl#.mat`` targets are parsed and transcribed
+- **A4 — comparison (preferred `beamWithHinges` hinge landed; matrix can resume).**
+  The ``unctrl#.mat`` targets are transcribed
   (`benchmarks/sac_response_data.py`; ``tests/test_benchmark_sac_response_data.py``),
   and the case ordering is resolved (``Run_NLBM.m``: El Centro 0.5/1.0/1.5,
-  Hachinohe 0.5/1.0/1.5, Northridge 0.5/1.0, Kobe 0.5/1.0).  `F_max` is
-  confirmed to be the total inertial force `Σ m·(a_rel+ag)`.  The first
-  comparison exposed a **cyclic-softening bug** in the trilinear hinge: the
-  `zeroLengthSection`+Aggregator+`equalDOF` hinge lost its elastic stiffness on
-  load reversal (no yield, yet ≈5–8× softer under reversing load).  **Fixed** by
-  switching the hinge to a `zeroLength` element with `-mat`/`-dir` (rigid
-  retained DOFs P/Vy/Vz/T, hinge on My/Mz, no `equalDOF`) — the release-element
-  convention.  Monotonic elastic-vs-trilinear now agree to 0.1 % (8.83 vs
-  8.84 MN) and reversing to ~10 % (6.91 vs 6.23 MN, with the hinges now
-  correctly yielding).  **First comparison (3-story El Centro 1.0, trilinear,
-  2 % damping):** roof displacement 0.154 m vs 0.151 m (Ohtori Table 3, +2 %),
-  interstory drift 0.0155 vs 0.01503 (×1.03), yielded hinges 22 vs 22, base
-  shear 8.89 vs 10.12 MN (−12 %), peak floor acceleration 7.84 vs 6.54 m/s²
-  (+20 %).  `F_max` is the single-frame base shear (no ×2 — confirmed against
-  `struct3.m`'s `Element_mass`).  The transient solver needed
-  `NewtonLineSearch` (plain Newton died at the trilinear yield corners, t≈10.4
-  s).  The base-shear (−12 %) and floor-acceleration (+20 %) gaps remain open.
+  Hachinohe 0.5/1.0/1.5, Northridge 0.5/1.0, Kobe 0.5/1.0).
 
-  **Preferred hinge — `beamWithHinges` (concentrated plasticity).**  Added as
-  `hinge_model='beam_with_hinges'` (trilinear only): an elastic interior
-  (E, A, Iz, Iy, G, J) with a trilinear moment-*curvature* `Uniaxial` section
-  at each end (Lp = L/6 — the benchmark's θ = φ·L/6 member-end rotation).  No
-  "nearly rigid" lumped spring, so the elastic stiffness is the exact 6EI1/L
-  (T1 0.993 s vs elastic 0.994 s).  Three-way El Centro 1.0 (3-story), reported
-  beamWithHinges / lumped / elastic: roof 0.151 / 0.154 / 0.207 m (target
-  0.151), drift 0.0152 / 0.0155 / 0.0205 (target 0.0150), base shear
-  9.32 / 8.89 / 12.70 MN (target 10.12), Nd 23 / 22 / 0 (target 22) — the
-  beamWithHinges is the best match on every primary quantity.  The
-  floor-acceleration gap remains (+36 %) and looks like a higher-mode/damping
-  effect.  `F_max` as the single-frame base shear (no ×2) is noted but the
-  `EvalNLBM.m` `mi` is 2× the frame mass — the ×2 convention is still open.
-  Run the full 10×3 matrix next.
+  Two conventions, both verified against the benchmark sources:
+
+  * **`F_max` is the whole-building base shear.**  ``EvalNLBM.m``'s ``mi`` is
+    the FEMA 355C storey mass, exactly 2× the per-frame ``seismic_mass#`` in
+    ``struct#.m`` (``Num_MRF = 2``) — to within 0.15 % (kip-sec²/ft rounding).
+    The 2-D model simulates one N-S MRF at half the storey mass, so a single
+    planar frame's base shear must be **doubled** to compare to `F_max`.
+  * **`dt_cal = 0.005 s`.**  ``struct#.m`` integrates at 0.005 s (Newmark
+    β=1/4 γ=1/2), sub-stepping the records' native 0.02 s sampling.
+    ``benchmarks.sac.load_benchmark_record`` resamples to ``SAC_DT_CAL``;
+    integrating at 0.02 s inflated the base shear ~55 % and `xdd_max` ~25 %.
+
+  The first comparison exposed a **cyclic-softening bug** in the trilinear
+  hinge (``zeroLengthSection``+Aggregator+``equalDOF`` lost elastic stiffness
+  on reversal) — **fixed** by a ``zeroLength`` hinge with ``-mat``/``-dir``.
+  The transient solver also needed ``NewtonLineSearch`` (plain Newton died at
+  the trilinear yield corners).
+
+  **Preferred hinge — `beamWithHinges`.**  ``hinge_model='beam_with_hinges'``
+  (trilinear only): an elastic interior (E, A, Iz, Iy, G, J) with a trilinear
+  moment-*curvature* `Uniaxial` section (strong-axis Mz) at each end, Lp = L/6
+  (the benchmark's θ = φ·L/6 member-end rotation).  No "nearly rigid" spring,
+  so the elastic stiffness is the exact 6EI1/L (T1 0.993 s vs elastic 0.994 s).
+
+  **Three-way El Centro 1.0 (3-story, dt=0.005)**, beamWithHinges / lumped /
+  elastic: roof 0.149 / 0.153 / 0.206 m (target 0.151), drift
+  0.0148 / 0.0155 / 0.0207 (target 0.0150), base shear ×2
+  12.03 / 10.75 / 20.81 MN (target 10.12), xdd 6.88 / 6.99 / 10.03 m/s²
+  (target 6.54), Nd 22 / 22 / 0 (target 22) — the beamWithHinges matches every
+  primary quantity to ≤5 % except base shear (+19 %).  The +19 % is the hinge
+  length Lp (not damping — the benchmark's Rayleigh is the same uncapped
+  a0·M + a1·K form), which lives in the non-redistributable ``Nonlin12``
+  S-function; a larger Lp would close it.  Run the full 10×3 matrix next.
 - **B4 — Phase-I base isolation — deferred.** Needs a base-isolation element
   path the toolkit does not have (friction pendulum / elastomeric isolator).
 
