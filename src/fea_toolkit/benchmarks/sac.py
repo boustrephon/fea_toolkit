@@ -374,8 +374,10 @@ def _build_benchmark_model(building: int) -> SAPModelData:
             nodes[nid] = Node(node_id=nid, node_tag=tag, x=i * bay, y=0.0, z=levels[j])
             tag += 1
 
-    # One elastic section per backbone: A = EA/E, I = EI1/E (the same
-    # convention as the 3-story Tcl transcription).
+    # One elastic section per backbone: A = EA/E, I33 = EI1/E (strong axis),
+    # I22 = EI2/E (weak axis).  The backbones carry no torsion constant, and the
+    # out-of-plane DOFs (uy, rx, rz) are restrained anyway, so J is left equal to
+    # I33 as an out-of-plane placeholder (same convention as the 3-story Tcl).
     sections: dict[str, Section] = {}
     for mat_no, row in mat_tbl.items():
         inertia = row.ei1 / _SAC_E
@@ -385,7 +387,7 @@ def _build_benchmark_model(building: int) -> SAPModelData:
             material="Steel",
             A=row.ea / _SAC_E,
             I33=inertia,
-            I22=inertia,
+            I22=row.ei2 / _SAC_E,
             J=inertia,
         )
 
