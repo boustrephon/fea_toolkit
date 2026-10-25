@@ -158,9 +158,16 @@ def _elastic_rayleigh_periods(building: int) -> tuple[Optional[float], Optional[
 
     The benchmark's Rayleigh ζ=2 % is anchored at mode 1 + mode 2 (3/9-story) or
     mode 5 (20-story).  The periods come from the elastic model — the lumped
-    hinge model is ~3× larger (hinge nodes), so a ``fullGenLapack`` solve on it
-    is impractically slow, and the benchmark's damping is an elastic property
+    hinge model is ~3× larger (hinge nodes), so an eigen solve on it is
+    impractically slow, and the benchmark's damping is an elastic property
     anyway.  ``None`` falls back to the runner's own 2-mode solve.
+
+    The default (ARPACK) solver is used: it is exact for the elastic model
+    (healthy, non-singular stiffness) and returns in milliseconds, whereas
+    ``fullGenLapack`` is needlessly slow here.  :meth:`run_modal_analysis`
+    probes solvability with a static self-weight step first (the "initial load"
+    ARPACK needs) and falls back to ``fullGenLapack`` automatically if ARPACK
+    fails, so no robustness is lost.
     """
     from openseespy.opensees import wipe
 
@@ -169,7 +176,7 @@ def _elastic_rayleigh_periods(building: int) -> tuple[Optional[float], Optional[
     try:
         elastic = sac.build_builder(building=building, nonlinear=False)
         modal = elastic.run_modal_analysis(
-            num_modes=num_modes, print_results=False, eigen_solver="fullGenLapack"
+            num_modes=num_modes, print_results=False, eigen_solver="default"
         )
         periods = list(modal.get("periods", []))
     finally:
@@ -236,8 +243,8 @@ def run_case(
     from openseespy.opensees import wipe
 
     # Rayleigh anchor periods, computed on the (small) elastic model before the
-    # nonlinear domain is built — the lumped hinge model is ~3× larger, so a
-    # fullGenLapack solve on it is impractically slow.
+    # nonlinear domain is built — the lumped hinge model is ~3× larger, so an
+    # eigen solve on it is much slower.
     period_1, period_2 = _elastic_rayleigh_periods(building)
 
     wipe()
