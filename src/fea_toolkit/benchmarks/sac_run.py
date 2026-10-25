@@ -43,6 +43,7 @@ _CODE_FILES = (
     "benchmarks/sac.py",
     "benchmarks/sac_member_data.py",
     "benchmarks/sac_response_data.py",
+    "benchmarks/sac_run.py",
     "opensees/_elements.py",
     "opensees/_runner_dynamic.py",
 )
@@ -152,17 +153,33 @@ def compute_metrics(
     }
 
 
-def _rayleigh_periods(builder: Any, building: int) -> tuple[Optional[float], Optional[float]]:
-    """Rayleigh anchor periods — mode 1 + mode 2 (3/9-story) or mode 5 (20-story)."""
-    if building != 20:
-        return None, None  # the runner's default 2-mode solve suffices
-    modal = builder.run_modal_analysis(
-        num_modes=5, print_results=False, eigen_solver="fullGenLapack"
-    )
-    periods = list(modal.get("periods", []))
-    if len(periods) < 5:
+def _elastic_rayleigh_periods(building: int) -> tuple[Optional[float], Optional[float]]:
+    """Rayleigh anchor periods from the *elastic* model.
+
+    The benchmark's Rayleigh ζ=2 % is anchored at mode 1 + mode 2 (3/9-story) or
+    mode 5 (20-story).  The periods come from the elastic model — the lumped
+    hinge model is ~3× larger (hinge nodes), so a ``fullGenLapack`` solve on it
+    is impractically slow, and the benchmark's damping is an elastic property
+    anyway.  ``None`` falls back to the runner's own 2-mode solve.
+    """
+    from openseespy.opensees import wipe
+
+    num_modes = 5 if building == 20 else 2
+    wipe()
+    try:
+        elastic = sac.build_builder(building=building, nonlinear=False)
+        modal = elastic.run_modal_analysis(
+            num_modes=num_modes, print_results=False, eigen_solver="fullGenLapack"
+        )
+        periods = list(modal.get("periods", []))
+    finally:
+        wipe()
+
+    if len(periods) < num_modes:
         return None, None
-    return float(periods[0]), float(periods[4])
+    if building == 20:
+        return float(periods[0]), float(periods[4])
+    return float(periods[0]), float(periods[1])
 
 
 def _cache_dir() -> Path:
@@ -218,6 +235,11 @@ def run_case(
 
     from openseespy.opensees import wipe
 
+    # Rayleigh anchor periods, computed on the (small) elastic model before the
+    # nonlinear domain is built — the lumped hinge model is ~3× larger, so a
+    # fullGenLapack solve on it is impractically slow.
+    period_1, period_2 = _elastic_rayleigh_periods(building)
+
     wipe()
     try:
         builder = sac.build_builder(
@@ -225,7 +247,6 @@ def run_case(
         )
         levels = floor_levels(builder)
         tags = [t for _, t in levels]
-        period_1, period_2 = _rayleigh_periods(builder, building)
 
         # Record only the representative floor nodes (limit memory) but keep
         # their velocity/acceleration so ``xdd_max`` can be reconstructed.
