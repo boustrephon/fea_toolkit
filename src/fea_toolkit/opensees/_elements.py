@@ -23,6 +23,61 @@ from .releases import plan_releases
 logger = logging.getLogger(__name__)
 
 
+def _parallel_steel02_trilinear(
+    ei1: float, ei2: float, ei3: float, d1: float, d2: float
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Decompose a trilinear M-φ backbone into two Steel02 springs in parallel.
+
+    The Ohtori ``mat_tbl`` backbone has three flexural slopes — elastic ``EI1``
+    (0 → d1), post-yield ``EI2`` (d1 → d2), hardening ``EI3`` (d2 → ∞).  Two
+    bilinear springs summed at the shared curvature (``uniaxialMaterial
+    Parallel``) reproduce it exactly:
+
+    * spring A yields first (at ``d1``) and hardens at ``H_A = EI3``;
+    * spring B yields second (at ``d2``) and is perfectly plastic (``H_B = 0``).
+
+    The combined slopes are ``EI1 = E_A + E_B``, ``EI2 = H_A + E_B``,
+    ``EI3 = H_A``, which solves to ``E_A = EI1 − EI2 + EI3``,
+    ``E_B = EI2 − EI3``.  The two ``Steel02`` springs use the
+    Giuffré–Menegotto–Pinto transition, which rounds the trilinear corners — the
+    analogue of the benchmark ``Nonlin12`` S-function's yield-index α
+    interpolation (absent from the sharp-break ``Hysteretic`` hinge).
+
+    Args:
+        ei1: Elastic flexural slope (moment per curvature), model units.
+        ei2: Post-yield flexural slope.
+        ei3: Hardening flexural slope (``0`` for perfectly-plastic beyond ``d2``).
+        d1: First (yield) break curvature.
+        d2: Second break curvature.
+
+    Returns:
+        ``(spring_a, spring_b)`` — ``Steel02`` parameter dicts with keys ``fy``
+        (yield moment), ``E0`` (initial tangent) and ``b`` (hardening ratio).
+
+    Raises:
+        ValueError: For a non-positive backbone, or one whose slopes cannot be
+            split into two positive springs (needs ``EI3 < EI2`` and
+            ``EI1 + EI3 > EI2``, i.e. a monotonic softening trilinear).
+    """
+    if ei1 <= 0.0 or ei2 <= 0.0 or d1 <= 0.0 or d2 <= d1:
+        raise ValueError(
+            f"trilinear backbone needs ei1>0, ei2>0, d1>0, d2>d1 "
+            f"(got ei1={ei1}, ei2={ei2}, d1={d1}, d2={d2})"
+        )
+    e_b = ei2 - ei3
+    e_a = ei1 - ei2 + ei3
+    if e_a <= 0.0 or e_b <= 0.0 or ei3 < 0.0:
+        raise ValueError(
+            f"trilinear backbone not decomposable into two positive springs "
+            f"(need 0 <= EI3 < EI2 and EI1 + EI3 > EI2; "
+            f"got EI1={ei1}, EI2={ei2}, EI3={ei3})"
+        )
+    return (
+        {"fy": e_a * d1, "E0": e_a, "b": ei3 / e_a},
+        {"fy": e_b * d2, "E0": e_b, "b": 0.0},
+    )
+
+
 class ElementMixin:
     """Frame/wall/shell element creation, brace selection, and lumped hinges."""
 
@@ -635,10 +690,9 @@ class ElementMixin:
         # elastic stiffness is the exact 6EI1/L.  The plastic hinge length
         # converts curvature to member-end rotation; the benchmark's
         # member-end rotation is θ = φ·L/6, so Lp = L/6 (hinge_length_fraction).
-        if (
-            self.config.get("hinge_model") == "beam_with_hinges"
-            and self.config.get("hinge_backbone") == "trilinear"
-        ):
+        if self.config.get("hinge_model") == "beam_with_hinges" and self.config.get(
+            "hinge_backbone"
+        ) in ("trilinear", "trilinear_steel02", "trilinear_clough"):
             _sec = self.mesh_model.sections.get(sec_name)
             _mat = self.mesh_model.materials.get(_sec.material) if _sec else None
             ei1 = getattr(_sec, "ei1", None) or 0.0
@@ -666,31 +720,67 @@ class ElementMixin:
                 self._bwh_tag_counter = (
                     max((v for v in self.section_tags.values()), default=0) + 500
                 )
-            _mat_tag = self._bwh_tag_counter
-            _sec_tag = self._bwh_tag_counter + 1
-            self._bwh_tag_counter += 2
-            ops.uniaxialMaterial(
-                "Hysteretic",
-                _mat_tag,
-                my_tri,
-                d1,
-                m2,
-                d2,
-                m3,
-                d3,
-                -my_tri,
-                -d1,
-                -m2,
-                -d2,
-                -m3,
-                -d3,
-                1.0,
-                1.0,
-                0.0,
-                0.0,
-                0.0,
-            )
-            ops.section("Uniaxial", _sec_tag, _mat_tag, "Mz")
+            if self.config.get("hinge_backbone") == "trilinear_steel02":
+                # Two Steel02 springs in parallel reproduce the trilinear M-φ
+                # backbone with a smooth Giuffré–Menegotto–Pinto transition —
+                # the analogue of the benchmark Nonlin12 S-function's yield-index
+                # α interpolation, which the sharp-break Hysteretic lacks.
+                _spring_a, _spring_b = _parallel_steel02_trilinear(
+                    ei1, ei2, ei3 or ei2 * 0.02, d1, d2
+                )
+                _mat_a = self._bwh_tag_counter
+                _mat_b = self._bwh_tag_counter + 1
+                _mat_par = self._bwh_tag_counter + 2
+                _sec_tag = self._bwh_tag_counter + 3
+                self._bwh_tag_counter += 4
+                ops.uniaxialMaterial(
+                    "Steel02",
+                    _mat_a,
+                    _spring_a["fy"],
+                    _spring_a["E0"],
+                    _spring_a["b"],
+                )
+                ops.uniaxialMaterial(
+                    "Steel02",
+                    _mat_b,
+                    _spring_b["fy"],
+                    _spring_b["E0"],
+                    _spring_b["b"],
+                )
+                ops.uniaxialMaterial("Parallel", _mat_par, _mat_a, _mat_b)
+                _hinge_mat = _mat_par
+            else:
+                # Hysteretic trilinear: sharp corners, symmetric reloading.
+                # The "clough" spelling adds unloading-stiffness degradation
+                # (beta) — the Clough/Takeda signature — which softens the
+                # cyclic force response at the same backbone and strength.
+                _mat_tag = self._bwh_tag_counter
+                _sec_tag = self._bwh_tag_counter + 1
+                self._bwh_tag_counter += 2
+                _beta = 0.5 if self.config.get("hinge_backbone") == "trilinear_clough" else 0.0
+                ops.uniaxialMaterial(
+                    "Hysteretic",
+                    _mat_tag,
+                    my_tri,
+                    d1,
+                    m2,
+                    d2,
+                    m3,
+                    d3,
+                    -my_tri,
+                    -d1,
+                    -m2,
+                    -d2,
+                    -m3,
+                    -d3,
+                    1.0,
+                    1.0,
+                    0.0,
+                    0.0,
+                    _beta,
+                )
+                _hinge_mat = _mat_tag
+            ops.section("Uniaxial", _sec_tag, _hinge_mat, "Mz")
             _L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
             _lp = float(self.config.get("hinge_length_fraction", 1.0 / 6.0)) * _L
             ops.element(

@@ -405,6 +405,9 @@ def uniaxialMaterial(mat_type: str, tag: int, *args: Any) -> None:
         # Steel02 (Menegotto-Pinto): Fy, E, b, R0, cR1, cR2
         uniaxialMaterial('Steel02', tag, 400e6, 200e9, 0.01, 18.5, 0.925, 0.15)
 
+        # Parallel (sums several uniaxial materials at a shared strain)
+        uniaxialMaterial('Parallel', tag, matTag1, matTag2, ...)
+
     Args:
         mat_type: ``'Steel01'``, ``'Concrete01'``, ``'Elastic'``, etc.
         tag: Material tag.

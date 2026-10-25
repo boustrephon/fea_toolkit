@@ -147,3 +147,105 @@ def test_beam_with_hinges_nltha_synthetic():
         assert res["peak_plastic_rotation"] > 0.0
     finally:
         wipe()
+
+
+def test_parallel_steel02_decomposes_trilinear_backbone():
+    """Two Steel02 springs in parallel reproduce the trilinear slopes exactly."""
+    from fea_toolkit.opensees._elements import _parallel_steel02_trilinear
+
+    ei1, ei2, ei3, d1, d2 = 2.8295e8, 2.5519e8, 8.4885e6, 9.2366e-3, 9.7244e-3
+    a, b = _parallel_steel02_trilinear(ei1, ei2, ei3, d1, d2)
+
+    e_a = a["E0"]
+    h_a = a["b"] * a["E0"]  # spring A's hardening slope
+    e_b = b["E0"]
+    # Combined slopes: EI1 = E_A + E_B, EI2 = H_A + E_B, EI3 = H_A.
+    assert e_a + e_b == pytest.approx(ei1)
+    assert h_a + e_b == pytest.approx(ei2)
+    assert h_a == pytest.approx(ei3)
+    # Yield moments at the break curvatures; spring B is perfectly plastic.
+    assert a["fy"] == pytest.approx(e_a * d1)
+    assert b["fy"] == pytest.approx(e_b * d2)
+    assert b["b"] == 0.0
+
+
+def test_parallel_steel02_rejects_non_decomposable_backbone():
+    """A hardening slope above the post-yield slope cannot be split positively."""
+    from fea_toolkit.opensees._elements import _parallel_steel02_trilinear
+
+    with pytest.raises(ValueError):
+        # EI3 > EI2 makes spring B's elastic stiffness negative.
+        _parallel_steel02_trilinear(2.8e8, 2.5e8, 2.6e8, 9.2e-3, 9.7e-3)
+
+
+def test_beam_with_hinges_steel02_builds_and_matches_elastic_period():
+    """``hinge_backbone='trilinear_steel02'`` keeps the exact elastic stiffness."""
+    from openseespy.opensees import wipe
+
+    wipe()
+    try:
+        b = sac.build_builder(
+            nonlinear=True, backbone="trilinear_steel02", hinge_model="beam_with_hinges"
+        )
+        t1 = float(b.run_modal_analysis(num_modes=1, print_results=False)["periods"][0])
+        assert len(b._hinge_tags) == 54
+        assert b._hinge_sections[:2] == [1, 6]
+        assert t1 == pytest.approx(1.01, rel=0.05)
+    finally:
+        wipe()
+
+
+def test_beam_with_hinges_steel02_nltha_synthetic():
+    """``trilinear_steel02`` converges and yields under a synthetic pulse."""
+    import math
+
+    import numpy as np
+    from openseespy.opensees import wipe
+
+    dt, n = 0.005, 300
+    t = np.arange(n) * dt
+    accel = np.zeros(n)
+    accel[:40] = 30.0 * np.sin(2.0 * math.pi * 1.0 * t[:40])
+
+    wipe()
+    try:
+        b = sac.build_builder(
+            nonlinear=True, backbone="trilinear_steel02", hinge_model="beam_with_hinges"
+        )
+        res = b.run_transient_analysis(accel, dt, direction="X", damping_ratio=0.02)
+        assert res["converged_steps"] > 0
+        assert np.isfinite(sac.peak_x(res))
+        assert res["num_yielded_hinges"] > 0
+        assert res["peak_plastic_rotation"] > 0.0
+    finally:
+        wipe()
+
+
+def test_beam_with_hinges_clough_builds_and_yields():
+    """``hinge_backbone='trilinear_clough'`` builds (exact elastic T1) and yields."""
+    import math
+
+    import numpy as np
+    from openseespy.opensees import wipe
+
+    wipe()
+    try:
+        b = sac.build_builder(
+            nonlinear=True, backbone="trilinear_clough", hinge_model="beam_with_hinges"
+        )
+        t1 = float(b.run_modal_analysis(num_modes=1, print_results=False)["periods"][0])
+        assert len(b._hinge_tags) == 54
+        # The Clough spelling only degrades unloading stiffness — the elastic
+        # tangent (hence T1) is unchanged from the plain trilinear hinge.
+        assert t1 == pytest.approx(1.01, rel=0.05)
+
+        dt, n = 0.005, 300
+        t = np.arange(n) * dt
+        accel = np.zeros(n)
+        accel[:40] = 30.0 * np.sin(2.0 * math.pi * 1.0 * t[:40])
+        res = b.run_transient_analysis(accel, dt, direction="X", damping_ratio=0.02)
+        assert res["converged_steps"] > 0
+        assert np.isfinite(sac.peak_x(res))
+        assert res["num_yielded_hinges"] > 0
+    finally:
+        wipe()

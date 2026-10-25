@@ -157,15 +157,35 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   (the benchmark's θ = φ·L/6 member-end rotation).  No "nearly rigid" spring,
   so the elastic stiffness is the exact 6EI1/L (T1 0.993 s vs elastic 0.994 s).
 
-  **Three-way El Centro 1.0 (3-story, dt=0.005)**, beamWithHinges / lumped /
-  elastic: roof 0.149 / 0.153 / 0.206 m (target 0.151), drift
-  0.0148 / 0.0155 / 0.0207 (target 0.0150), base shear ×2
-  12.03 / 10.75 / 20.81 MN (target 10.12), xdd 6.88 / 6.99 / 10.03 m/s²
-  (target 6.54), Nd 22 / 22 / 0 (target 22) — the beamWithHinges matches every
-  primary quantity to ≤5 % except base shear (+19 %).  The +19 % is the hinge
-  length Lp (not damping — the benchmark's Rayleigh is the same uncapped
-  a0·M + a1·K form), which lives in the non-redistributable ``Nonlin12``
-  S-function; a larger Lp would close it.  Run the full 10×3 matrix next.
+  **Four hinge formulations** now share the one transcribed trilinear backbone
+  (see `sac_trilinear_hinge_approaches.md`):
+
+  * `hinge_model='lumped'` + `hinge_backbone='trilinear'` — zero-length
+    rotational `Hysteretic` springs;
+  * `hinge_model='beam_with_hinges'` + `hinge_backbone='trilinear'` — the
+    one-component element with an end `Hysteretic` M-φ section;
+  * `hinge_model='beam_with_hinges'` + `hinge_backbone='trilinear_steel02'` —
+    the same element, but the end M-φ section is **two `Steel02` springs in
+    parallel** (the Giuffré–Menegotto–Pinto transition smooths the trilinear
+    corners);
+  * `hinge_model='beam_with_hinges'` + `hinge_backbone='trilinear_clough'` —
+    the same `Hysteretic` hinge with Clough/Takeda unloading-stiffness
+    degradation (β=0.5).
+
+  **El Centro 1.0 (3-story, dt=0.005)**, lumped / bwh+Hysteretic /
+  bwh+Steel02 / bwh+Clough (target in parentheses): roof 0.153 / 0.149 /
+  0.145 / 0.126 m (0.151), base shear ×2 10.75 / 12.03 / 11.55 / 11.91 MN
+  (10.12), xdd 6.99 / 6.88 / 6.47 / 6.89 m/s² (6.54), Nd 22 / 22 / 22 / 16
+  (22).  The Clough run is the decisive control: changing *only* the cyclic law
+  moves displacement and yielding (roof −17 %, Nd 16) but **not** the base
+  shear (+18 %), so the base shear is set by the **backbone / elastic
+  stiffness**, not the unloading/reloading rule.  The Lp hypothesis was
+  **retracted** (a L/10→L/3 sweep moved base shear <1 %), as was the
+  floor-diaphragm hypothesis (`equalDOF` added nothing — the rigid-axial beams
+  already tie the floors).  What remains is ``Nonlin12``'s yield-index α
+  interpolation, which smooths the elastic→plastic *transition* (a monotonic
+  backbone effect, not a cyclic one) and lowers the secant stiffness once a
+  member yields.  Run the full 10×3 matrix next.
 - **B4 — Phase-I base isolation — deferred.** Needs a base-isolation element
   path the toolkit does not have (friction pendulum / elastomeric isolator).
 

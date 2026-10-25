@@ -460,10 +460,13 @@ def load_model(
         nonlinear: When True, enrich for nonlinear use (plastic moduli for the
             bilinear hinge, or the trilinear backbone).  When False, return the
             bare elastic model (the T2/B1 modal anchor's input).
-        backbone: ``"bilinear"`` (default) or ``"trilinear"``.  With
-            ``"trilinear"``, also call :func:`enrich_trilinear` so the sections
-            carry the transcribed ``mat_tbl`` backbone consumed by the
-            ``hinge_backbone="trilinear"`` path.
+        backbone: ``"bilinear"`` (default), ``"trilinear"``,
+            ``"trilinear_steel02"`` or ``"trilinear_clough"``.  The three
+            trilinear spellings all call :func:`enrich_trilinear` so the
+            sections carry the transcribed ``mat_tbl`` backbone; they differ
+            only in the hinge material the builder emits (``Hysteretic``,
+            two-``Steel02``-in-parallel, or ``Hysteretic`` with
+            unloading-stiffness degradation).
 
     Raises:
         ValueError: For an unknown *building*.
@@ -480,7 +483,7 @@ def load_model(
     if nonlinear:
         if building == 3:
             enrich_nonlinear(md)
-        if backbone == "trilinear":
+        if backbone in ("trilinear", "trilinear_steel02", "trilinear_clough"):
             enrich_trilinear(md, building=building)
         elif building != 3:
             raise NotImplementedError(
@@ -500,8 +503,12 @@ def builder_config(backbone: str = "bilinear", hinge_model: str = "lumped") -> d
     ``mesh_model.panel_zones`` spec instead.
 
     Args:
-        backbone: ``"bilinear"`` (default, the M1/M2 Steel01 hinge) or
-            ``"trilinear"`` (the transcribed ``mat_tbl`` backbone).
+        backbone: ``"bilinear"`` (default, the M1/M2 Steel01 hinge),
+            ``"trilinear"`` (the transcribed ``mat_tbl`` backbone as a
+            ``Hysteretic`` hinge), ``"trilinear_steel02"`` (the same backbone
+            as two ``Steel02`` springs in parallel) or ``"trilinear_clough"``
+            (the same ``Hysteretic`` hinge with Clough/Takeda unloading-
+            stiffness degradation).
         hinge_model: ``"lumped"`` (default, zero-length rotational springs) or
             ``"beam_with_hinges"`` (the benchmark's own concentrated-plasticity
             ``beamWithHinges`` element — trilinear backbone only).
@@ -578,8 +585,12 @@ def build_builder(
             zone); ``False`` for M1.
         nonlinear: ``True`` for the nonlinear evaluation models (bilinear
             hinges); ``False`` for the elastic anchor.
-        backbone: ``"bilinear"`` (default, the M1/M2 Steel01 hinge) or
-            ``"trilinear"`` (the transcribed ``mat_tbl`` backbone).
+        backbone: ``"bilinear"`` (default, the M1/M2 Steel01 hinge),
+            ``"trilinear"`` (the transcribed ``mat_tbl`` backbone as a
+            ``Hysteretic`` hinge), ``"trilinear_steel02"`` (the same backbone
+            as two ``Steel02`` springs in parallel) or ``"trilinear_clough"``
+            (the same ``Hysteretic`` hinge with Clough/Takeda unloading-
+            stiffness degradation).
         hinge_model: ``"lumped"`` (default) or ``"beam_with_hinges"`` (the
             benchmark's own concentrated-plasticity element, trilinear only).
         fidelity: ``"simplified"`` (default) or ``"faithful"`` — 3-story only

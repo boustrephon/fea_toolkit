@@ -159,6 +159,7 @@ nav:
       - Shear-Building Benchmark (T2): shear_building_benchmark.md
       - SAC 3-Story Frame Benchmark (T2): sac_benchmark.md
       - SAC 3-Story Nonlinear Benchmark (T4): sac_nonlinear_benchmark.md
+      - SAC Trilinear Hinge — Four Approaches: sac_trilinear_hinge_approaches.md
       - Tcl Model Import: tcl_import.md
   - Tool-Specific Workflows:
       - Xara/OpenSeesRT Tcl Runtime: xara_tcl_runtime_guide.md
