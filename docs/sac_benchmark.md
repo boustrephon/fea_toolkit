@@ -88,8 +88,9 @@ stiffness *distribution* differs.  Closing this is a follow-up to the `fema355c`
 
 ## SAC widening roadmap
 
-See [benchmark_roadmap.md](benchmark_roadmap.md) §2 — B2 (9-story nonlinear
-NLTHA), B3 (20-story nonlinear NLTHA), B4 (Phase-I base isolation, deferred).
+See [benchmark_roadmap.md](benchmark_roadmap.md) §2 — the canonical A0–A4
+sequence: A1 (trilinear backbone), A2 (9/20-story models), A3 (NLTHA + peak
+extraction), A4 (comparison); B4 (Phase-I base isolation) is deferred.
 
 ## Implementation
 

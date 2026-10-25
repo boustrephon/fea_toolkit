@@ -114,8 +114,14 @@ plastic-hinge length (`Lp`) nor a yield-index (`α`) interpolation law**; both
 live in the compiled S-function and are second-order (they shape the
 elastic→plastic transition, not the backbone anchor points `My = EI1·d1` / `M2`).
 The faithful mapping is therefore OpenSees `beamWithHinges` (elastic interior
-`EI1` + trilinear M–κ end hinges), replacing the current `Steel01` bilinear
-hinge.
+`EI1` + trilinear M–κ end hinges).  A first pass is already implemented as a
+**lumped-hinge** `Hysteretic` (`hinge_backbone="trilinear"` via
+`enrich_trilinear`, 6EI/L κ→θ) — topology-consistent with the M1/M2 bilinear
+hinge and correct at the backbone anchor points (`My = EI1·d1`, `M2`), with only
+the elastic→plastic transition approximated (no `Lp`/α).  It is the chosen A1
+deliverable; `beamWithHinges` is deferred unless the A4 comparison drifts
+outside tolerance.  Wiring the trilinear variant into `build_builder` is tracked
+in `benchmark_roadmap.md` §2 A1 / P40.
 
 ![Bilinear hinge backbone](assets/sac3_hinge_backbone.png)
 

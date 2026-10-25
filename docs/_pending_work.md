@@ -146,26 +146,32 @@ warranted — `pushover_step_stride` and the per-block flags are the answer):
 
 #### P40 — trilinear hinge backbone option (`hinge_backbone="trilinear"`)
 
-Source: `docs/sac_nonlinear_benchmark.md`;
+Source: `docs/benchmark_roadmap.md` §2 A1 (canonical);
 `src/fea_toolkit/benchmarks/sac_member_data.py`;
 `src/fea_toolkit/opensees/_elements.py`.
 
-**What.**  `hinge_backbone` supports `"asce41"` (default) and `"bilinear"`
-(Steel01) only.  The Ohtori SAC benchmark's member hysteresis is trilinear —
-three flexural rigidities `EI1→EI2→EI3` with break curvatures `d1`/`d2`
-(`My = EI1·d1`), now transcribed in `benchmarks/sac_member_data.py`
-(`MAT_TBL_3/9/20`).  A `"trilinear"` branch is needed so the SAC model consumes
-those backbones.  **Resolved (2026-10-25):** the benchmark member is a
-concentrated-plasticity *one-component* model (Giberson 1967; Clough & Johnston
+**Status (2026-10-25).** The backbone *machinery* is landed: `sac.enrich_trilinear()`
+stamps the transcribed `MAT_TBL_3/9/20` backbones (`EI1/EI2/EI3`, `d1/d2`) onto
+the SAC sections, and `opensees/_elements.py` gained a `hinge_backbone="trilinear"`
+lumped-hinge `Hysteretic` branch (6EI/L κ→θ) beside `asce41`/`bilinear`
+(`tests/test_benchmark_sac_trilinear.py`).  **Resolved:** the benchmark member is
+a concentrated-plasticity *one-component* model (Giberson 1967; Clough & Johnston
 1966) — elastic interior + end hinges — and publishes **no plastic-hinge length
-and no yield-index (α) law** (both live in the compiled S-function).  The
-faithful mapping is OpenSees `beamWithHinges` (elastic interior `EI1` +
-trilinear M–κ end hinges), so the κ→θ conversion is the element's job, not a
-manual hinge length.  See `docs/sac_nonlinear_benchmark.md`.
+(`Lp`) and no yield-index (α) law** (both live in the compiled S-function).
 
-**Where.**  `opensees/_elements.py` (the `hinge_backbone` dispatch beside
-`asce41`/`bilinear`); `benchmarks/sac.py` (`enrich_nonlinear` / `builder_config`)
-to assign the transcribed backbones per member via the `element_tbl` assignment.
+**What remains.**  (1) **Wiring** — `builder_config()`/`build_builder()`/
+`load_model()` still hardcode `hinge_backbone="bilinear"`; add a
+`backbone="bilinear"|"trilinear"` parameter (bilinear M1/M2 path untouched) and
+an anchor test (trilinear elastic period ≈ M1, `My = EI1·d1` at W14×257).
+(2) **Element choice — settled: lumped-hinge trilinear is the A1 deliverable.**
+The `6EI/L` lumped-hinge approximation is topology-consistent with M1/M2 and
+correct at the backbone anchor points (`My = EI1·d1`, `M2`); `Lp`/α only shape
+the elastic→plastic transition.  The more faithful `beamWithHinges` (elastic
+interior `EI1` + trilinear M–κ end hinges, κ→θ done by the element) is **deferred**
+— escalate only if the A4 comparison drifts outside ±5–10 %.
+
+**Where.**  `opensees/_elements.py` (the `hinge_backbone` dispatch);
+`benchmarks/sac.py` (`enrich_trilinear` / `builder_config`).
 
 #### P41 — transient-runner peak extraction (velocity / acceleration / reactions / hinge damage)
 

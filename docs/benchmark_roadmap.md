@@ -76,8 +76,12 @@ through `preprocess_model → AnalysisBuilder → run_modal_analysis`.
 
 ## 2. Wider use of the SAC buildings — priority 2
 
-See [sac_benchmark.md](sac_benchmark.md) for the modal-gap findings and the
-detailed plan.  Summary:
+> **Canonical plan.** This §2 is the single source of truth for the A0–A4
+> widening; `_pending_work.md` P40/P41, `sac_benchmark.md` and
+> `sac_nonlinear_benchmark.md` reference it rather than restate it.
+
+See [sac_benchmark.md](sac_benchmark.md) for the modal-gap findings (B1).
+Summary:
 
 - **B1 — modal-anchor completion (done).** Assert the full published frequency
   set: 3-story (0.99/3.06/5.83 Hz), 9-story (5 modes), 20-story (10 modes).
@@ -87,17 +91,34 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
 - **A0 — record sourcing (done).** El Centro / Hachinohe / Northridge / Kobe
   extracted from `Files_bldg_full3.zip` into the ground-motion mirror,
   manifests registered, gated PGA test (`tests/test_benchmark_sac_records.py`).
-- **A1 — trilinear backbone (transcription done; implementation pending).**
+- **A1 — trilinear backbone (transcription ✅ · machinery ✅ · wiring pending).**
   `benchmarks/sac_member_data.py` transcribes `mat_tbl` from `struct3/9/20.m`
   (EI1/EI2/EI3 + EA/GA + break curvatures d1/d2 + splice rows), verified
-  byte-for-byte by `tests/test_benchmark_sac_member_data.py`.  The
-  `hinge_backbone="trilinear"` branch and switching the SAC model onto the
-  backbones are still to do (see P40 in `_pending_work.md`).
-- **A2 — 9/20-story models (not started).** Build the 9/20-story Ohtori models
-  from `struct9/20.m` (geometry, seismic masses, base fixity, rigid floors, and
-  the `element_tbl` member→backbone assignment).  The earlier "Zx/fy per
-  W-section" framing is superseded — the benchmark defines members by backbone
-  directly.
+  byte-for-byte by `tests/test_benchmark_sac_member_data.py`.  Landed
+  2026-10-25: `sac.enrich_trilinear()` stamps those backbones onto the sections,
+  and `opensees/_elements.py` gained a `hinge_backbone="trilinear"` lumped-hinge
+  `Hysteretic` branch (6EI/L κ→θ), tested by `tests/test_benchmark_sac_trilinear.py`.
+  **Remaining:** expose a first-class trilinear variant (`backbone=` on
+  `builder_config`/`build_builder`/`load_model`; the bilinear M1/M2 path stays
+  untouched) and add a modal/yield anchor test.  The lumped-hinge trilinear is
+  the chosen A1 deliverable (topology-consistent with M1/M2); the more faithful
+  `beamWithHinges` one-component mapping is deferred — escalate only if the A4
+  comparison drifts outside ±5–10 % (see P40).
+- **A2 — 9/20-story models (groundwork done; generators pending).** Build the
+  9/20-story Ohtori models from `struct9/20.m` (geometry, seismic masses, base
+  fixity, rigid floors, and the `element_tbl` member→backbone assignment).  The
+  earlier "Zx/fy per W-section" framing is superseded — the benchmark defines
+  members by backbone directly.  **Groundwork landed 2026-10-25:** in-code AISC
+  W/box tables (`model/steel_sections.py`), `fema355c` column splices 6 ft above
+  the floor centreline (2D + 3D), and `sac.enrich_display_sections()` +
+  `MAT_TO_SECTION_{9,20}` maps (display-only shapes), plus the `element_tbl`
+  transcribes already in `sac_member_data.py`.  **Remaining:** a
+  `build_sac(building=9|20)` generator (transcribe geometry/masses/fixity/rigid
+  floors — cite `local/257/_extract/*.m`, don't paste), generalise
+  `enrich_trilinear`'s 3-story area/inertia matching to the per-building
+  `element_tbl`, reuse `enrich_display_sections(building=…)` and the
+  `krawinkler_gupta` panel-zone path, and anchor by elastic modal periods (B1
+  already passes) before NLTHA.
 - **A3 — NLTHA + peak extraction (not started).** Reproduce settings exactly
   (Newmark β=1/4 γ=1/2, dt=0.005 s, 100/180 s; Rayleigh ζ=2 % at mode 1 +
   `nCutOff` — mode 2 for 3/9-story, mode 5 for 20-story) and add the seven peak
@@ -110,6 +131,12 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   full 10-case × 3-building matrix.
 - **B4 — Phase-I base isolation — deferred.** Needs a base-isolation element
   path the toolkit does not have (friction pendulum / elastomeric isolator).
+
+The 3-story panel-zone / plastic-modulus audit (2026-10-25) corrected the two
+AISC plastic moduli (W14×257 `Zx` 448→487 in³, W24×68 154→177 in³) and kept the
+column panel-zone `tw` as-is (~1/2 in ≈ 0.013 m over the bare web — a
+non-documented doubler plate), documented rather than "corrected".  See
+`sac_nonlinear_benchmark.md`.
 
 ## 3. Other benchmarks — priority 3 (mostly deferred)
 
