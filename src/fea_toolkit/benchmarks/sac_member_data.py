@@ -234,6 +234,20 @@ MAT_TBLS: dict[int, dict[int, MemberBackbone]] = {
     20: MAT_TBL_20,
 }
 
+#: ``element_tbl(:,3)`` member → ``Mat_no`` per building, keyed like ``MAT_TBLS``:
+#: ``COLUMN_MATERIALS[b][storey][line]`` and ``BEAM_MATERIALS[b][level][bay]``.
+COLUMN_MATERIALS: dict[int, list[list[int]]] = {
+    3: COLUMN_MATERIALS_3,
+    9: COLUMN_MATERIALS_9,
+    20: COLUMN_MATERIALS_20,
+}
+
+BEAM_MATERIALS: dict[int, list[list[int]]] = {
+    3: BEAM_MATERIALS_3,
+    9: BEAM_MATERIALS_9,
+    20: BEAM_MATERIALS_20,
+}
+
 
 # ── Mat_no → display section name (for visualisation) ──
 # Each backbone (Mat_no) maps to the physical W/box section it represents, so
@@ -309,9 +323,11 @@ MAT_TO_SECTION: dict[int, dict[int, str]] = {
 }
 
 __all__ = [
+    "BEAM_MATERIALS",
     "BEAM_MATERIALS_3",
     "BEAM_MATERIALS_9",
     "BEAM_MATERIALS_20",
+    "COLUMN_MATERIALS",
     "COLUMN_MATERIALS_3",
     "COLUMN_MATERIALS_9",
     "COLUMN_MATERIALS_20",

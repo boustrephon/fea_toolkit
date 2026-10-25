@@ -35,10 +35,26 @@ from typing import Any, Optional
 import numpy as np
 
 from ..io.tcl_importer import parse_tcl_model
-from ..model.sap_data import BoxSection, ISection, Material, SAPModelData
+from ..model.sap_data import (
+    BoxSection,
+    FrameElement,
+    FrameRelease,
+    ISection,
+    MassSource,
+    Material,
+    Node,
+    Restraint,
+    SAPModelData,
+    Section,
+)
 from ..opensees.analysis_builder import AnalysisBuilder
 from ..opensees.preprocessor import preprocess_model
-from .sac_member_data import MAT_TBL_3, MAT_TO_SECTION
+from .sac_member_data import (
+    BEAM_MATERIALS,
+    COLUMN_MATERIALS,
+    MAT_TBLS,
+    MAT_TO_SECTION,
+)
 
 #: Bundled Tcl transcription of the SAC 3-story N-S perimeter frame.
 SAC3_TCL = Path(__file__).with_name("sac_3story.tcl")
@@ -158,29 +174,67 @@ def enrich_nonlinear(md: SAPModelData) -> SAPModelData:
     return md
 
 
-def enrich_trilinear(md: SAPModelData) -> SAPModelData:
-    """Stamp the Ohtori trilinear backbones (``mat_tbl``) onto the SAC sections.
+def _parse_mat_no(sname: str) -> Optional[int]:
+    """Parse the ``Mat_no`` from a section named ``mat{n}`` (9/20-story models)."""
+    if sname.startswith("mat") and sname[3:].isdigit():
+        return int(sname[3:])
+    return None
 
-    Maps each moment-frame section to its ``Mat_no`` (columns by area, beams by
-    inertia — the same keys as :func:`enrich_nonlinear`) and writes the
-    trilinear backbone ``(EI1, EI2, EI3, d1, d2)`` onto the section so the
-    builder's ``hinge_backbone='trilinear'`` path can read it.  The leaning
-    column (material 6) and the rigid-axial link bay (material 7) are included.
+
+def _mat_no_by_section(md: SAPModelData, building: int) -> dict[str, int]:
+    """Map section name → ``element_tbl`` ``Mat_no`` for *building*.
+
+    The 9/20-story builders name their sections ``mat{n}`` (one per backbone),
+    so the mapping is read straight off the name.  The 3-story Tcl transcription
+    carries no ``Mat_no`` labels, so it falls back to matching by area (columns)
+    / inertia (beams) — the same keys as :func:`enrich_nonlinear`.
     """
+    if building != 3:
+        out: dict[str, int] = {}
+        for sname in md.sections:
+            n = _parse_mat_no(sname)
+            if n is not None:
+                out[sname] = n
+        return out
     roles = _frame_element_roles(md)
+    out = {}
     for eid, sname in md.frame_assignments.items():
+        if sname in out:
+            continue
         sec = md.sections.get(sname)
         if sec is None:
             continue
         if roles.get(eid) == "col":
-            mat_no = _match_props(_COLUMN_MAT_NO, sec.A, 1e-6)
-            if mat_no is None:
-                mat_no = _LEANING_MAT_NO  # leaning (gravity) column
+            n = _match_props(_COLUMN_MAT_NO, sec.A, 1e-6)
+            if n is None:
+                n = _LEANING_MAT_NO
         else:
-            mat_no = _match_props(_BEAM_MAT_NO, sec.I33, 1e-8)
-            if mat_no is None:
+            n = _match_props(_BEAM_MAT_NO, sec.I33, 1e-8)
+            if n is None:
                 continue
-        row = MAT_TBL_3[mat_no]
+        out[sname] = n
+    return out
+
+
+def enrich_trilinear(md: SAPModelData, building: int = 3) -> SAPModelData:
+    """Stamp the Ohtori trilinear backbones (``mat_tbl``) onto the SAC sections.
+
+    Maps each section to its ``Mat_no`` (3-story by area/inertia, 9/20-story by
+    the ``mat{n}`` section name) and writes the trilinear backbone
+    ``(EI1, EI2, EI3, d1, d2)`` so the builder's ``hinge_backbone='trilinear'``
+    path can read it.  The 3-story leaning column (material 6) and rigid-axial
+    link bay (material 7) are included.
+
+    Args:
+        md: The enriched SAC model; sections are stamped in place.
+        building: 3, 9 or 20 — selects the ``mat_tbl`` table and member mapping.
+    """
+    mat_tbl = MAT_TBLS[building]
+    for sname, mat_no in _mat_no_by_section(md, building).items():
+        sec = md.sections.get(sname)
+        if sec is None:
+            continue
+        row = mat_tbl[mat_no]
         sec.ei1, sec.ei2, sec.ei3 = row.ei1, row.ei2, row.ei3
         sec.d1, sec.d2 = row.d1, row.d2
     return md
@@ -199,8 +253,8 @@ def enrich_display_sections(md: SAPModelData, building: int = 3) -> SAPModelData
     Args:
         md: The enriched SAC model; sections are rebuilt in place.
         building: 3, 9 or 20 — selects the ``Mat_no → section`` map.  The
-            9/20-story maps are ready for the A2 model builder; the section →
-            ``Mat_no`` matching below is currently 3-story (area/inertia).
+            3-story Tcl transcription matches by area/inertia; the 9/20-story
+            builders name their sections ``mat{n}`` (see :func:`_mat_no_by_section`).
 
     Returns:
         *md*, mutated in place.
@@ -208,26 +262,8 @@ def enrich_display_sections(md: SAPModelData, building: int = 3) -> SAPModelData
     from ..model.steel_sections import BOX_SECTIONS, W_SECTIONS
 
     name_map = MAT_TO_SECTION[building]
-    roles = _frame_element_roles(md)
 
-    mat_by_section: dict[str, int] = {}
-    for eid, sname in md.frame_assignments.items():
-        if sname in mat_by_section:
-            continue
-        sec = md.sections.get(sname)
-        if sec is None:
-            continue
-        if roles.get(eid) == "col":
-            mat_no = _match_props(_COLUMN_MAT_NO, sec.A, 1e-6)
-            if mat_no is None:
-                mat_no = _LEANING_MAT_NO
-        else:
-            mat_no = _match_props(_BEAM_MAT_NO, sec.I33, 1e-8)
-            if mat_no is None:
-                continue
-        mat_by_section[sname] = mat_no
-
-    for sname, mat_no in mat_by_section.items():
+    for sname, mat_no in _mat_no_by_section(md, building).items():
         sec = md.sections[sname]
         shape_name = name_map[mat_no]
         if shape_name in BOX_SECTIONS:
@@ -259,24 +295,193 @@ def enrich_display_sections(md: SAPModelData, building: int = 3) -> SAPModelData
     return md
 
 
-def load_model(nonlinear: bool = True, *, backbone: str = "bilinear") -> SAPModelData:
-    """Load the SAC model from the bundled Tcl; enrich for nonlinear use.
+# ═══════════════════════════════════════════════════════════════
+# 9/20-story benchmark models (struct9.m / struct20.m)
+# ═══════════════════════════════════════════════════════════════
+# Geometry, seismic mass and base fixity transcribed from the benchmark
+# structural-data files ``local/257/_extract/struct9.m`` and ``struct20.m``
+# (gitignored sources — see ``sac_member_data.py`` for the matching ``mat_tbl``
+# / ``element_tbl`` transcription).  Units N, m, kg; one N-S perimeter frame.
+_SAC_E = 2.0e11  # Pa — elastic modulus common to all SAC members.
+
+_SAC_BUILDINGS: dict[int, dict[str, Any]] = {
+    9: {
+        # 1 basement (3.6576 m) + 5.4864 m ground + 8 × 3.9624 m.
+        "heights": [3.6576, 5.4864] + [3.9624] * 8,
+        "bay": 9.1440,
+        # Seismic mass per beam level, bottom-up (one frame = half the building).
+        "seismic_mass": [4.8159e5, 5.0349e5] + [4.9473e5] * 7 + [5.3414e5],
+        "n_basements": 1,
+        # 5th (gravity) bay beams are pin-ended at their far end (element_tbl
+        # type 5 = fixed-pin): release M3 at J for bay index 4.
+        "release_bay": 4,
+    },
+    20: {
+        # 2 basements (3.6576 m each) + 5.4864 m ground + 19 × 3.9624 m.
+        "heights": [3.6576, 3.6576, 5.4864] + [3.9624] * 19,
+        "bay": 6.0960,
+        "seismic_mass": [2.6561e5, 2.6561e5, 2.8166e5] + [2.7582e5] * 18 + [2.9188e5],
+        "n_basements": 2,
+        # Basement beams are braces (element_tbl type 3); kept flexural here — a
+        # basement-only approximation that does not move the lateral modes.
+        "release_bay": None,
+    },
+}
+
+
+def _build_benchmark_model(building: int) -> SAPModelData:
+    """Build the SAC 9/20-story benchmark frame from the transcribed data.
+
+    Geometry, member schedule (``element_tbl``), trilinear backbones
+    (``mat_tbl``) and seismic masses come from ``struct9.m`` / ``struct20.m``.
+    The base is pinned at the bottom basement level with a lateral tie at the
+    ground level (the ``Fix_node`` prescription); masses are lumped at the floor
+    nodes by tributary bay width.  The rigid floor diaphragms (``slv_tbl``
+    master-slave) are not modelled — the elastic modal periods match the
+    published values without them (see ``docs/sac_benchmark.md``).
+    """
+    spec = _SAC_BUILDINGS[building]
+    heights: list[float] = spec["heights"]
+    bay: float = spec["bay"]
+    n_bays = 5
+    n_lines = n_bays + 1
+    n_levels = len(heights)
+    col_mats = COLUMN_MATERIALS[building]
+    beam_mats = BEAM_MATERIALS[building]
+    mat_tbl = MAT_TBLS[building]
+
+    levels = [0.0]
+    z = 0.0
+    for h in heights:
+        z += h
+        levels.append(z)
+
+    nodes: dict[str, Node] = {}
+    tag = 1
+    for j in range(n_levels + 1):
+        for i in range(n_lines):
+            nid = f"{j}-{i}"
+            nodes[nid] = Node(node_id=nid, node_tag=tag, x=i * bay, y=0.0, z=levels[j])
+            tag += 1
+
+    # One elastic section per backbone: A = EA/E, I = EI1/E (the same
+    # convention as the 3-story Tcl transcription).
+    sections: dict[str, Section] = {}
+    for mat_no, row in mat_tbl.items():
+        inertia = row.ei1 / _SAC_E
+        sections[f"mat{mat_no}"] = Section(
+            name=f"mat{mat_no}",
+            shape="I/Wide Flange",
+            material="Steel",
+            A=row.ea / _SAC_E,
+            I33=inertia,
+            I22=inertia,
+            J=inertia,
+        )
+
+    frames: dict[str, FrameElement] = {}
+    assigns: dict[str, str] = {}
+    releases: dict[str, FrameRelease] = {}
+    etag = 1
+    for k in range(n_levels):  # columns: storey k, line i
+        for i in range(n_lines):
+            eid = f"C{k}-{i}"
+            frames[eid] = FrameElement(
+                elem_id=eid, elem_tag=etag, node_i=f"{k}-{i}", node_j=f"{k + 1}-{i}"
+            )
+            assigns[eid] = f"mat{col_mats[k][i]}"
+            etag += 1
+    release_bay = spec.get("release_bay")
+    for lvl in range(1, n_levels + 1):  # beams: level lvl, bay i
+        for i in range(n_bays):
+            eid = f"B{lvl}-{i}"
+            frames[eid] = FrameElement(
+                elem_id=eid, elem_tag=etag, node_i=f"{lvl}-{i}", node_j=f"{lvl}-{i + 1}"
+            )
+            assigns[eid] = f"mat{beam_mats[lvl - 1][i]}"
+            if release_bay is not None and i == release_bay:
+                releases[eid] = FrameRelease(eid, end_i=[0] * 6, end_j=[0, 0, 0, 0, 0, 1])
+            etag += 1
+
+    n_base = spec["n_basements"]
+    restraints: dict[str, Restraint] = {}
+    for j in range(n_levels + 1):
+        for i in range(n_lines):
+            nid = f"{j}-{i}"
+            if j == 0:
+                restraints[nid] = Restraint([1, 1, 1, 1, 0, 1])  # pinned base
+            elif j == n_base:
+                restraints[nid] = Restraint([1, 1, 0, 1, 0, 1])  # ground lateral tie
+            else:
+                restraints[nid] = Restraint([0, 1, 0, 1, 0, 1])  # free in-plane
+
+    added_masses: dict[str, float] = {}
+    weights = [0.5] + [1.0] * (n_lines - 2) + [0.5]
+    for lvl, m in enumerate(spec["seismic_mass"], start=1):
+        for i, w in enumerate(weights):
+            added_masses[f"{lvl}-{i}"] = m * w / float(n_bays)
+
+    return SAPModelData(
+        nodes=nodes,
+        restraints=restraints,
+        materials={"Steel": Material("Steel", "Steel", E_mod=_SAC_E, G_mod=_SAC_E / 2.6, nu=0.3)},
+        sections=sections,
+        frame_elements=frames,
+        area_elements={},
+        frame_assignments=assigns,
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
+        frame_releases=releases,
+        added_masses=added_masses,
+        mass_sources={"MSSSRC1": MassSource(name="MSSSRC1", masses=True)} if added_masses else {},
+        units=SAC3_UNITS,
+    )
+
+
+def load_model(
+    building: int = 3, nonlinear: bool = True, *, backbone: str = "bilinear"
+) -> SAPModelData:
+    """Load a SAC model (3/9/20-story); enrich for nonlinear use.
+
+    The 3-story model is parsed from the bundled Tcl transcription
+    (``sac_3story.tcl``); the 9/20-story models are built programmatically from
+    the transcribed ``struct9.m`` / ``struct20.m`` data (geometry, ``mat_tbl``
+    backbones, ``element_tbl`` member schedule, seismic masses).
 
     Args:
-        nonlinear: When True, call :func:`enrich_nonlinear` so the model carries
-            plastic moduli and yield strengths.  When False, return the bare
-            elastic model (the T2 modal anchor's input).
+        building: 3, 9 or 20.
+        nonlinear: When True, enrich for nonlinear use (plastic moduli for the
+            bilinear hinge, or the trilinear backbone).  When False, return the
+            bare elastic model (the T2/B1 modal anchor's input).
         backbone: ``"bilinear"`` (default) or ``"trilinear"``.  With
             ``"trilinear"``, also call :func:`enrich_trilinear` so the sections
             carry the transcribed ``mat_tbl`` backbone consumed by the
             ``hinge_backbone="trilinear"`` path.
+
+    Raises:
+        ValueError: For an unknown *building*.
+        NotImplementedError: For the bilinear 9/20-story hinge (needs per-member
+            AISC ``Z33``/``depth``/``tw``, not yet transcribed).
     """
-    md = parse_tcl_model(SAC3_TCL.read_text(encoding="utf-8"), SAC3_UNITS)
+    if building == 3:
+        md = parse_tcl_model(SAC3_TCL.read_text(encoding="utf-8"), SAC3_UNITS)
+    elif building in (9, 20):
+        md = _build_benchmark_model(building)
+    else:
+        raise ValueError(f"unknown SAC building {building!r} (expected 3, 9 or 20)")
+
     if nonlinear:
-        enrich_nonlinear(md)
+        if building == 3:
+            enrich_nonlinear(md)
         if backbone == "trilinear":
-            enrich_trilinear(md)
-        enrich_display_sections(md)
+            enrich_trilinear(md, building=building)
+        elif building != 3:
+            raise NotImplementedError(
+                f"bilinear hinges for the {building}-story model need per-member "
+                "AISC Z33/depth/tw (not yet transcribed); use backbone='trilinear'"
+            )
+        enrich_display_sections(md, building=building)
     return md
 
 
@@ -342,13 +547,15 @@ def _add_faithful_diaphragms(mesh: Any) -> None:
 
 
 def build_builder(
+    building: int = 3,
     panel_zone: bool = False,
     *,
     nonlinear: bool = True,
     backbone: str = "bilinear",
     fidelity: str = "simplified",
 ) -> AnalysisBuilder:
-    """Build the SAC model (elastic, or nonlinear M1/M2) into an ``AnalysisBuilder``.
+    """Build a SAC model (3/9/20-story, elastic or nonlinear) into an
+    ``AnalysisBuilder``.
 
     The returned builder has already had :meth:`AnalysisBuilder.build_domain`
     called, so it is ready to run an analysis.  The M2 variant preprocesses with
@@ -356,22 +563,22 @@ def build_builder(
     the builder read-only.
 
     Args:
+        building: 3, 9 or 20 (see :func:`load_model`).
         panel_zone: ``True`` for the M2 model (adds the Krawinkler & Gupta panel
             zone); ``False`` for M1.
         nonlinear: ``True`` for the nonlinear evaluation models (bilinear
-            hinges); ``False`` for the elastic (T2) anchor.
+            hinges); ``False`` for the elastic anchor.
         backbone: ``"bilinear"`` (default, the M1/M2 Steel01 hinge) or
             ``"trilinear"`` (the transcribed ``mat_tbl`` backbone).
-        fidelity: ``"simplified"`` (default) — the floor diaphragm is implicit
-            (rigid-axial beams); or ``"faithful"`` — the rigid floor diaphragms
-            are explicit, matching ``struct3.m``'s master-slave table.
+        fidelity: ``"simplified"`` (default) or ``"faithful"`` — 3-story only
+            (the explicit ``struct3.m`` rigid floor diaphragms).
     """
-    md = load_model(nonlinear=nonlinear, backbone=backbone)
+    md = load_model(building=building, nonlinear=nonlinear, backbone=backbone)
     mesh = preprocess_model(md, preprocess_config(panel_zone=panel_zone))
     cfg = builder_config(backbone) if nonlinear else {}
     b = AnalysisBuilder(mesh, cfg)
     b.build_domain()
-    if fidelity == "faithful":
+    if fidelity == "faithful" and building == 3:
         _add_faithful_diaphragms(mesh)
     return b
 
