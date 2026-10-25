@@ -37,6 +37,13 @@ from .sac_member_data import (
     MAT_TBLS,
     MemberBackbone,
 )
+from .sac_run import (
+    compute_metrics,
+    floor_levels,
+    run_case,
+    run_matrix,
+    write_manifest,
+)
 
 __all__ = [
     "BEAM",
@@ -53,10 +60,15 @@ __all__ = [
     "build_builder",
     "build_fema355c",
     "builder_config",
+    "compute_metrics",
     "enrich_nonlinear",
     "fema355c_schedules",
+    "floor_levels",
     "load_model",
     "peak_x",
     "preprocess_config",
+    "run_case",
+    "run_matrix",
+    "write_manifest",
     "write_snapshots",
 ]
