@@ -58,11 +58,15 @@ buildings, and the toolkit now asserts the full set for each (B1):
 | Building | Published natural frequencies (Hz) | Asserted |
 |---|---|---|
 | 3-story | 0.99, 3.06, 5.83 | ✅ 3 modes (`test_benchmark_sac3.py`) |
-| 9-story | 0.443, 1.18, 2.05, 3.09, 4.27 | ✅ 5 modes (`test_benchmark_fema355c_modal.py`) |
-| 20-story | 0.261, 0.753, 1.30, 1.83, 2.40, 2.44, 2.92, 3.01, 3.63, 3.68 | ✅ 10 modes (`test_benchmark_fema355c_modal.py`) |
+| 9-story | 0.443, 1.18, 2.05, 3.09, 4.27 | ✅ 5 modes (`test_benchmark_fema355c_modal.py`, `test_benchmark_sac920.py`) |
+| 20-story | 0.261, 0.753, 1.30, 1.83, 2.40, 2.44, 2.92, 3.01, 3.63, 3.68 | ✅ 10 modes (`test_benchmark_fema355c_modal.py`, `test_benchmark_sac920.py`) |
 
 The 9-story reproduces all five to within ±1 % and the 20-story all ten to
-within ±1.5 % (measured, `fullGenLapack`).  The 20-story's closely-spaced
+within ±1.5 % (measured, `fullGenLapack`).  The `element_tbl` / `mat_tbl`
+transcription in `sac.py` (A2) is tighter still — 9-story ≤ 0.4 % and 20-story
+≤ 0.25 % — because its elastic rigidities are the benchmark's own `EI1` rather
+than AISC `E·I` (`tests/test_benchmark_sac920.py`).  The 20-story's
+closely-spaced
 pairs (2.40/2.44, 2.92/3.01, 3.63/3.68 Hz) are **not** torsional 3D modes —
 the planar N-S frame reproduces them all, so they arise within the 2D frame
 itself (the benchmark evaluation models are 2D, `Num_DOF = 3 × Num_node`).

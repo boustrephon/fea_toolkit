@@ -91,34 +91,33 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
 - **A0 — record sourcing (done).** El Centro / Hachinohe / Northridge / Kobe
   extracted from `Files_bldg_full3.zip` into the ground-motion mirror,
   manifests registered, gated PGA test (`tests/test_benchmark_sac_records.py`).
-- **A1 — trilinear backbone (transcription ✅ · machinery ✅ · wiring pending).**
-  `benchmarks/sac_member_data.py` transcribes `mat_tbl` from `struct3/9/20.m`
-  (EI1/EI2/EI3 + EA/GA + break curvatures d1/d2 + splice rows), verified
-  byte-for-byte by `tests/test_benchmark_sac_member_data.py`.  Landed
-  2026-10-25: `sac.enrich_trilinear()` stamps those backbones onto the sections,
-  and `opensees/_elements.py` gained a `hinge_backbone="trilinear"` lumped-hinge
-  `Hysteretic` branch (6EI/L κ→θ), tested by `tests/test_benchmark_sac_trilinear.py`.
-  **Remaining:** expose a first-class trilinear variant (`backbone=` on
-  `builder_config`/`build_builder`/`load_model`; the bilinear M1/M2 path stays
-  untouched) and add a modal/yield anchor test.  The lumped-hinge trilinear is
-  the chosen A1 deliverable (topology-consistent with M1/M2); the more faithful
-  `beamWithHinges` one-component mapping is deferred — escalate only if the A4
-  comparison drifts outside ±5–10 % (see P40).
-- **A2 — 9/20-story models (groundwork done; generators pending).** Build the
-  9/20-story Ohtori models from `struct9/20.m` (geometry, seismic masses, base
-  fixity, rigid floors, and the `element_tbl` member→backbone assignment).  The
-  earlier "Zx/fy per W-section" framing is superseded — the benchmark defines
-  members by backbone directly.  **Groundwork landed 2026-10-25:** in-code AISC
-  W/box tables (`model/steel_sections.py`), `fema355c` column splices 6 ft above
-  the floor centreline (2D + 3D), and `sac.enrich_display_sections()` +
-  `MAT_TO_SECTION_{9,20}` maps (display-only shapes), plus the `element_tbl`
-  transcribes already in `sac_member_data.py`.  **Remaining:** a
-  `build_sac(building=9|20)` generator (transcribe geometry/masses/fixity/rigid
-  floors — cite `local/257/_extract/*.m`, don't paste), generalise
-  `enrich_trilinear`'s 3-story area/inertia matching to the per-building
-  `element_tbl`, reuse `enrich_display_sections(building=…)` and the
-  `krawinkler_gupta` panel-zone path, and anchor by elastic modal periods (B1
-  already passes) before NLTHA.
+- **A1 — trilinear backbone (done).** `benchmarks/sac_member_data.py` transcribes
+  `mat_tbl` from `struct3/9/20.m` (EI1/EI2/EI3 + EA/GA + break curvatures d1/d2 +
+  splice rows), verified byte-for-byte by `tests/test_benchmark_sac_member_data.py`.
+  `sac.enrich_trilinear()` stamps those backbones onto the sections, and
+  `opensees/_elements.py` gained a `hinge_backbone="trilinear"` lumped-hinge
+  `Hysteretic` branch (6EI/L κ→θ), tested by
+  `tests/test_benchmark_sac_trilinear.py`.  The trilinear variant is exposed as
+  `backbone="trilinear"` on `builder_config()` / `load_model()` / `build_builder()`
+  (the bilinear M1/M2 default is unchanged) with a modal/yield anchor test.  The
+  lumped-hinge trilinear is the chosen A1 deliverable (topology-consistent with
+  M1/M2); the more faithful `beamWithHinges` one-component mapping is deferred —
+  escalate only if the A4 comparison drifts outside ±5–10 % (see P40).
+- **A2 — 9/20-story models (done).** `load_model(building=9|20)` /
+  `build_builder(building=9|20)` build the Ohtori models programmatically from
+  `struct9/20.m` (geometry, seismic masses, and the base fixity — a pinned base
+  at the bottom basement level plus a lateral tie at the ground level), with
+  sections named `mat{n}` carrying `A = EA/E` / `I = EI1/E`.  `enrich_trilinear`
+  / `enrich_display_sections` are generalised to the per-building `element_tbl`;
+  `sac_member_data.py` gains `COLUMN_MATERIALS` / `BEAM_MATERIALS` index dicts.
+  Anchored by `tests/test_benchmark_sac920.py`: the 9-story reproduces all five
+  frequencies to ≤ 0.4 % and the 20-story all ten to ≤ 0.25 % (tighter than the
+  `fema355c` generator's B1 anchor, because the rigidities are the benchmark's
+  own `EI1`).  The rigid floor diaphragms (`slv_tbl` master-slave) are not
+  modelled — the periods match without them.  Left for the nonlinear comparison
+  (A3/A4): the `krawinkler_gupta` panel-zone path and the 9-story gravity-bay
+  pin under `hinge_model='lumped'` (the lumped hinges re-point the member ends
+  and win over the release).
 - **A3 — NLTHA + peak extraction (not started).** Reproduce settings exactly
   (Newmark β=1/4 γ=1/2, dt=0.005 s, 100/180 s; Rayleigh ζ=2 % at mode 1 +
   `nCutOff` — mode 2 for 3/9-story, mode 5 for 20-story) and add the seven peak
