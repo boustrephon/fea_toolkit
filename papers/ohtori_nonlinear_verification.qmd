@@ -159,6 +159,7 @@ manifest.
 
 ```{python}
 #| label: matrix-table
+#| output: asis
 #| warning: false
 import json
 
@@ -222,6 +223,8 @@ committed manifest.
 
 ```{python}
 #| label: tbl-fourway
+#| tbl-cap: "The four 3-story formulations across all ten cases — peak base shear and drift error vs `unctrl3.mat`."
+#| output: asis
 #| warning: false
 import json
 
@@ -254,9 +257,6 @@ for label, hm, bb in [
     print(f"| {label} | {conv}/10 | {min(ferr):+.0f}…{max(ferr):+.0f} % | {min(derr):+.0f}…{max(derr):+.0f} % |")
 ```
 
-: The four 3-story formulations across all ten cases — peak base shear and
-drift error vs `unctrl3.mat`. {#tbl-fourway}
-
 # 9- and 20-story frames {#sec-results-920}
 
 ## The taller frames run on the lumped hinge
@@ -283,6 +283,8 @@ ends and win over the release).
 
 ```{python}
 #| label: tbl-920
+#| tbl-cap: "The lumped-hinge peak response of the 9- and 20-story frames against the published targets."
+#| output: asis
 #| warning: false
 import json
 
@@ -310,9 +312,6 @@ for building in (9, 20):
             f"{r['N_d']} / {t['N_d']:g} |"
         )
 ```
-
-: The lumped-hinge peak response of the 9- and 20-story frames against the
-published targets. {#tbl-920}
 
 The lumped hinge reproduces the 9-story base shear to within −6 %/+12 % and
 drift to within ±13 % outside the Kobe 1.0 outlier (+51 %). For the 20-story
