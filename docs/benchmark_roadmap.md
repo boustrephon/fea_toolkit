@@ -207,6 +207,23 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   anchor periods are taken from the *elastic* model (ARPACK, milliseconds).
   The 9-story gravity-bay release is skipped under the lumped hinge (lumped
   hinges re-point the member ends and win over the release), as before.
+
+  **20-story base-shear fix — the ground lateral tie's mass.**  The 20-story
+  (and, to a lesser extent, the 9-story) base shear was over-predicted because
+  the transient runner summed ``Σ m·(a_rel + ag)`` over *every* node,
+  including the **ground lateral tie** level (the ``Fix_node`` prescription
+  ties the top-of-basement level laterally, ``n_basements=2``).  That level is
+  restrained in X, so its ``seismic_mass1`` (2.6561e5 kg) is anchored to the
+  support and its ``m·ag`` is carried by the support, not by the building's
+  lateral load path.  The runner now sums only over nodes with a free
+  excitation DOF (``_runner_dynamic._free_dof_node_tags``), which removes that
+  term: the 20-story base shear drops from +5…+52 % to −1…+29 % against the
+  targets, with drift and ``xdd_max`` unchanged (the fix only touches the base-
+  shear quantity).  The residual is concentrated at **Kobe 1.0** (+29 % base
+  shear alongside +44 % drift — the yielding/backbone behaviour, not the tie)
+  and, secondarily, the still-open ~10 % elastic-side over-response whose
+  acceleration signature (``xdd_max`` ~+10 % with a near-perfect drift) points
+  at the unmodelled rigid floor diaphragms rather than the hinge.
 - **B4 — Phase-I base isolation — deferred.** Needs a base-isolation element
   path the toolkit does not have (friction pendulum / elastomeric isolator).
 

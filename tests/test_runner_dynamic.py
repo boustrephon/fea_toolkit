@@ -129,3 +129,33 @@ def test_smoke_runs_and_returns_finite(builder):
     # displacement histories are populated.
     assert res["velocities"] == {}
     assert res["accelerations"] == {}
+
+
+class _NodeStub:
+    def __init__(self, node_id: str, node_tag: int):
+        self.node_id = node_id
+        self.node_tag = node_tag
+
+
+class _MeshStub:
+    def __init__(self):
+        self.nodes = {
+            "a": _NodeStub("a", 1),
+            "b": _NodeStub("b", 2),
+            "c": _NodeStub("c", 3),
+        }
+        self.restraints = {
+            "a": Restraint([1, 1, 1, 1, 1, 1]),  # fully fixed → X and Y restrained
+            "b": Restraint([0, 1, 0, 1, 0, 1]),  # X free, Y restrained
+            # "c" has no restraint entry → treated as free
+        }
+
+
+def test_free_dof_node_tags_excludes_fixed_excitation_dof():
+    """The base-shear node set drops mass whose excitation DOF is fixed."""
+    from fea_toolkit.opensees._runner_dynamic import _free_dof_node_tags
+
+    mesh = _MeshStub()
+    assert _free_dof_node_tags(mesh, 1) == {2, 3}  # X: "a" fixed → excluded
+    assert _free_dof_node_tags(mesh, 2) == {3}  # Y: "a" and "b" fixed → excluded
+    assert _free_dof_node_tags(mesh, 3) == {2, 3}  # Z: only "a" (fully fixed) restrained

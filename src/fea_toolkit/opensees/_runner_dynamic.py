@@ -11,6 +11,25 @@ import openseespy.opensees as ops
 logger = logging.getLogger(__name__)
 
 
+def _free_dof_node_tags(mesh_model: Any, dof: int) -> set[int]:
+    """Node tags whose excitation DOF is unrestrained.
+
+    A node whose ``dof`` is fixed (e.g. a lateral ground tie below a building)
+    has its mass anchored to the support: the support carries that node's
+    ``m·ag`` rigid-body force directly, not the structure's lateral load path,
+    so the node's mass must be excluded from the base-shear sum
+    ``Σ m·(a_rel + ag)``.  Models with no restraint table (or no restraint on
+    a given node) treat that node as free.
+    """
+    restraints = getattr(mesh_model, "restraints", None) or {}
+    free: set[int] = set()
+    for nd in mesh_model.nodes.values():
+        r = restraints.get(nd.node_id)
+        if r is None or int(r.dofs[dof - 1]) == 0:
+            free.add(int(nd.node_tag))
+    return free
+
+
 class TransientRunnerMixin:
     """Native Newmark transient analysis (ground-motion time history).
 
@@ -55,7 +74,8 @@ class TransientRunnerMixin:
             ``transient_record_kinematics`` is enabled, ``velocities`` /
             ``accelerations`` (same shape, else empty dicts), ``base_shear``
             (per-step total base shear via global equilibrium
-            ``Σ m·(a_rel + ag)`` over **all** nodes), ``peak_displacement``
+            ``Σ m·(a_rel + ag)`` over the nodes with a free excitation DOF),
+            ``peak_displacement``
             (m), ``peak_base_shear`` (N), ``peak_plastic_rotation`` (the
             maximum total hinge deformation — rad for lumped hinges, 1/m for
             ``beamWithHinges`` end-section curvature), ``max_dissipated_energy``
@@ -174,6 +194,9 @@ class TransientRunnerMixin:
 
         # Cache each node's mass once before the time loop.
         node_mass = {t: float(ops.nodeMass(t, dof)) for t in all_node_tags}
+        # Nodes whose excitation DOF is fixed carry their mass on the support
+        # (a lateral ground tie), so exclude them from the base-shear sum.
+        free_nodes = _free_dof_node_tags(self.mesh_model, dof) & set(all_node_tags)
 
         # Base shear via global equilibrium — the total nodal inertial force
         # Σ m·(a_rel + ag).  This is exact for a base-excited structure with no
@@ -213,11 +236,11 @@ class TransientRunnerMixin:
             # this step (sample index ``step + 1`` — ``accel[0]`` is t=0),
             # zero once that time is beyond the acceleration series.
             ag = float(accel[step + 1]) if step + 1 < len(accel) else 0.0
-            # Base shear via global equilibrium over *all* nodes, reusing the
-            # recorded acceleration where available (no duplicate nodeAccel call
-            # for the recorded subset).
+            # Base shear via global equilibrium over the free-DOF nodes, reusing
+            # the recorded acceleration where available (no duplicate nodeAccel
+            # call for the recorded subset).
             shear = 0.0
-            for t in all_node_tags:
+            for t in free_nodes:
                 if record_kinematics and t in accel_history:
                     a_rel = float(accel_history[t][step][dof - 1])
                 else:
