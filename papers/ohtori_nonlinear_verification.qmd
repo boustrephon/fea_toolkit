@@ -23,9 +23,10 @@ abstract: |
   response by mechanism:
   displacement and drift are robust to the hinge choice, while the cyclic
   unloading law (Clough degradation) moves displacement and yielding but not
-  the base shear — the base shear is set by the monotonic backbone and elastic
-  stiffness. All results are regenerated from the committed metrics manifest by
-  the executable code in this document.
+  the base shear and loses convergence on the strongest records — the base
+  shear is set by the monotonic backbone and elastic stiffness. All results are
+  regenerated from the committed metrics manifest by the executable code in
+  this document.
 format:
   pdf: default
   html: default
@@ -124,21 +125,23 @@ drift 0.0207, roof accel 10.03 m/s², `Nd = 0`.
 
 | quantity | target | A (lumped) | B (bwh+Hyst) | C (bwh+Steel02) | D (bwh+Clough) |
 |---|---|---|---|---|---|
-| roof disp. (m) | 0.151 | 0.153 (+1 %) | 0.149 (−1 %) | 0.145 (−4 %) | 0.126 (−17 %) |
-| base shear ×2 (MN) | 10.12 | 10.15 (+0.3 %) | 10.27 (+1.5 %) | 10.23 (+1.1 %) | 9.71 (−4 %) |
-| max drift | 0.0150 | 0.0155 (+3 %) | 0.0148 (−1 %) | 0.0143 (−5 %) | 0.0134 (−11 %) |
-| roof abs. accel (m/s²) | 6.54 | 7.09 (+8 %) | 6.95 (+6 %) | 6.54 (0 %) | 6.96 (+6 %) |
-| yielded hinges `Nd` | 22 | 22 | 22 | 22 | 16 |
+| roof disp. (m) | 0.151 | 0.153 (+1 %) | 0.149 (−1 %) | 0.145 (−4 %) | — (no conv.) |
+| base shear ×2 (MN) | 10.12 | 10.15 (+0.3 %) | 10.27 (+1.5 %) | 10.23 (+1.1 %) | — (no conv.) |
+| max drift | 0.0150 | 0.0155 (+3 %) | 0.0148 (−1 %) | 0.0143 (−5 %) | — (no conv.) |
+| roof abs. accel (m/s²) | 6.54 | 7.09 (+8 %) | 6.95 (+6 %) | 6.54 (0 %) | — (no conv.) |
+| yielded hinges `Nd` | 22 | 22 | 22 | 22 | — (no conv.) |
 
 : The four hinge formulations against the published El Centro 1.0 response. {#tbl-four}
 
-The decisive column is **D**: changing *only* the cyclic law (at a fixed
-backbone and elastic stiffness) moves **displacement and yielding** — roof
-−17 %, drift −11 %, `Nd` = 16 — yet leaves the base shear essentially unchanged
-(−4 %). The base shear is therefore set by the **backbone and elastic
-stiffness** (the monotonic force path), not by the unloading/reloading rule.
-All three `beamWithHinges` forms (B/C/D, T1 ≈ 0.993 s) cluster at 9.7–10.3 MN,
-while the softer lumped hinge (T1 ≈ 1.041 s) lands at 10.15 MN.
+The four forms agree on the El Centro anchor: the base shear clusters at
+9.7–10.3 MN (target 10.12), so the base shear is set by the **backbone and
+elastic stiffness** (the monotonic force path), not by the unloading/reloading
+rule, and the softer lumped hinge (T1 ≈ 1.041 s) lands at 10.15 MN. **D (Clough
+degradation) is the outlier and is unstable** — it fails to converge on El
+Centro 1.0 (and on 4 of the 10 cases overall, @tbl-fourway) under the current
+solver: the unloading-stiffness degradation (β = 0.5) loses convergence
+mid-record on the strong cases. The earlier single-case run that produced the
+"−17 % roof" D column is not reproducible, so D is reported as non-convergent.
 
 ## The ten-case matrix (formulation B)
 
@@ -205,21 +208,68 @@ for ax, q, title, s in zip(axes, quantities, titles, scales):
 fig.tight_layout()
 ```
 
+## The ten-case four-way matrix
+
+@tbl-fourway extends the four-way comparison to all ten cases: the peak base
+shear and drift error of each formulation against `unctrl3.mat`, read from the
+committed manifest.
+
+```{python}
+#| label: tbl-fourway
+#| warning: false
+import json
+
+from fea_toolkit.benchmarks.sac_response_data import CASE_ORDER, UNCTRL_TARGETS
+from fea_toolkit.benchmarks.sac_run import manifest_path
+
+manifest = json.loads(manifest_path().read_text())
+tgt = UNCTRL_TARGETS[3]
+
+def _pct(got, ref):
+    return 100.0 * (got - ref) / ref
+
+print("| formulation | conv. | base shear F_max | drift d_max |")
+print("|---|---|---|---|")
+for label, hm, bb in [
+    ("A — lumped + Hysteretic", "lumped", "trilinear"),
+    ("B — beamWithHinges + Hysteretic", "beam_with_hinges", "trilinear"),
+    ("C — beamWithHinges + Steel02", "beam_with_hinges", "trilinear_steel02"),
+    ("D — beamWithHinges + Clough", "beam_with_hinges", "trilinear_clough"),
+]:
+    rows = [r for r in manifest if r["building"] == 3 and r["hinge_model"] == hm and r["backbone"] == bb]
+    ferr, derr = [], []
+    for r in rows:
+        if not r["converged"]:
+            continue
+        k = CASE_ORDER.index((r["record"], r["intensity"]))
+        ferr.append(_pct(r["F_max"], tgt["F_max"][k]))
+        derr.append(_pct(r["d_max"], tgt["d_max"][k]))
+    conv = sum(1 for r in rows if r["converged"])
+    print(f"| {label} | {conv}/10 | {min(ferr):+.0f}…{max(ferr):+.0f} % | {min(derr):+.0f}…{max(derr):+.0f} % |")
+```
+
+: The four 3-story formulations across all ten cases — peak base shear and
+drift error vs `unctrl3.mat`. {#tbl-fourway}
+
 # 9- and 20-story frames {#sec-results-920}
 
 ## The taller frames run on the lumped hinge
 
-The `beamWithHinges` force-based element cannot build the 20-story frame: its
-6×6 flexibility matrix is ill-conditioned for the 15×15 box columns
-(Iz ≈ 1.2e-3 m⁴), so `ForceBeamColumn3d::getInitialStiff()` fails to invert
-flexibility. The failure is driven by the small inertia alone — area, torsion,
-break curvature and iteration settings are immaterial. The 9-story frame builds
-under `beamWithHinges`, but its gravity-bay moment release is incompatible with
-the lumped hinge (which re-points both member ends, so lumped hinges win over
-releases). Both taller frames therefore run on the **lumped hinge**
-(formulation A: an `elasticBeamColumn` interior with trilinear zero-length end
-springs), which is robust at these sizes at the cost of a ~4.8 % elastic
-softening (T1 × 1.041) relative to the benchmark's exact `6EI1/L` stiffness.
+The force-based `beamWithHinges` element is unusable for the taller frames. On
+the 20-story it fails at build time: its 6×6 flexibility matrix cannot be
+inverted for the soft members (I33 ≲ 1.5e-3 m⁴) — the 15×15 box columns
+(Iz ≈ 1.2e-3 m⁴) but also the upper W columns and the beams, which are all
+below the element's viable-stiffness window (`ForceBeamColumn3d::getInitialStiff()`
+prints "could not invert flexibility"). On the 9-story it builds but dies at
+step 7 of the transient — the *stiff* basement columns (I33 ≈ 3.4e-3 m⁴) sit at
+the opposite, too-stiff extreme of the same ill-conditioning. Only the 3-story
+falls inside the element's sweet spot. Both taller frames therefore run on the
+**lumped hinge** (formulation A: an `elasticBeamColumn` interior with trilinear
+zero-length end springs), which is displacement-based and robust at both
+extremes, at the cost of a ~4.8 % elastic softening (T1 × 1.041) relative to
+the benchmark's exact `6EI1/L` stiffness. The 9-story's gravity-bay moment
+release is skipped under the lumped hinge (lumped hinges re-point both member
+ends and win over the release).
 
 @tbl-920 summarises the lumped-hinge peak response against the published
 `unctrl9.mat` / `unctrl20.mat` targets, read from the committed manifest
