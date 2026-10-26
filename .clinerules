@@ -237,6 +237,23 @@ points.  See `docs/workflow_authoring.md` for the design record.
   must not grow a private code path for something a verb can express — at most
   it *presets* a step and runs the recipe (see anti-pattern 17).
 
+### 3.13 Modeling guidance (element & hinge choice)
+**Structural modeling decisions — element formulation, hinge/plasticity model,
+cyclic law, damping — follow `docs/modeling_guidance.md`.**  This is a distinct
+class of guidance (domain/engineering, not code-style); consult it before
+choosing elements or hinge formulations for a nonlinear model.
+
+- The core rule: **force-based elements (`beamWithHinges`, `forceBeamColumn`,
+  `nonlinearBeamColumn`) invert the element flexibility matrix and are
+  numerically ill-conditioned at both the too-soft and too-stiff extremes** of
+  member stiffness; the displacement-based **lumped hinge** (`elasticBeamColumn`
+  + `zeroLength` springs) is the robust default across the full stiffness range.
+  A force-based element that *builds* is not guaranteed to *run* — verify every
+  member survives the first load steps.
+- For steel frames prefer the trilinear `Hysteretic` cyclic law; avoid the
+  `Clough` degradation law (β = 0.5) for strong/long records (it loses
+  convergence).
+
 
 ## 4. Naming & Style Rules
 

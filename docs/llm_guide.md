@@ -284,6 +284,23 @@ already caused one frozen-animation bug by a guessed keyword.
 
 ## 5. Known OpenSeesPy Constraints
 
+### Nonlinear element choice (steel frames) — read `docs/modeling_guidance.md`
+
+The single most important modeling rule, distilled from the benchmark
+verification: **force-based elements (`beamWithHinges`, `forceBeamColumn`,
+`nonlinearBeamColumn`) invert the element flexibility matrix and fail at both
+the too-soft and too-stiff extremes of member stiffness**, while the
+displacement-based **lumped hinge** (`elasticBeamColumn` + `zeroLength`
+springs) is the robust default across the whole stiffness range. Before
+choosing elements or a hinge formulation for a nonlinear model, consult
+`docs/modeling_guidance.md` — it also covers the cyclic-law choice (`Hysteretic`
+robust, `Clough` degradation unstable on strong records), damping anchors, and
+a non-convergence debugging table.
+
+- Too soft (small `I`) → "could not invert flexibility" at **build**.
+- Too stiff (large `I`, base/foundation members) → the same message at a **load
+  step** (an element that builds is not guaranteed to run).
+
 ### Broken features
 - **8-argument trapezoidal `eleLoad`**: broken in OpenSeesPy 3.8.0.0.
   Toolkit decomposes non-uniform loads into 4 partial-span uniform segments.

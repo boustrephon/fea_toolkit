@@ -35,6 +35,11 @@ for automated cross-referencing.
   Tags: `loads`, `load-case`, `combination`, `analysis`, `results`
   Related: [Load Combinations](load_combinations.md) · [Analysis Helpers](analysis.md) · [Unified Results Schema](results_schema.md) · [Units Workflow (kN·m·s → kip·in Limit-State Analysis)](units_conversion.md) · [Desktop GUI](gui.md)
 
+- [Structural Modeling Guidance](modeling_guidance.md) — ✅ Complete
+  > Canonical guidance for choosing element formulations, hinge/plasticity models and cyclic laws when building nonlinear FEA models — distilled from the benchmark verification (SAC steel frames, RC walls).
+  Tags: `llm`, `guidance`, `modeling`, `nonlinear`, `element-choice`, `hinge`, `steel`, `damping`, `units`
+  Related: [LLM & AI Assistant Guide](llm_guide.md) · [SAC Trilinear Hinge — Four Modelling Approaches](sac_trilinear_hinge_approaches.md) · [SAC 3-Story Nonlinear Benchmark (T4)](sac_nonlinear_benchmark.md) · [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Units Workflow (kN·m·s → kip·in Limit-State Analysis)](units_conversion.md)
+
 - [SAP IDs vs OpenSees Tags](sap_ids_vs_tags.md) — ✅ Complete
   > The two distinct identifier systems (SAP2000 string IDs vs OpenSees integer tags), who creates each, NPZ storage conventions, and common pitfalls.
   Tags: `identifiers`, `sap2000`, `opensees`, `reference`, `architecture`
@@ -110,6 +115,11 @@ for automated cross-referencing.
   Tags: `capacity`, `gb50010`, `asce41`, `design`, `dcr`, `codes`, `unit-aware`
   Related: [RC Shear-Failure Modelling (MCFT Capacity + Nonlinear Shear Backbone)](shear_failure_modelling.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Analysis Workflow](workflow.md)
 
+- [CFT (concrete-filled steel tube) confinement — plan & recommendations](cft_confinement_plan.md) — ⚠️ Partial
+  > Design record for modelling the confined concrete core of concrete-filled steel tubes (CHS/RHS) in fiber sections: options, pros/cons, recommendations, and researched model choices.
+  Tags: `cft`, `confinement`, `fiber`, `composite`, `section`, `research`
+  Related: [Mander Confinement Model Validation](mander_confinement_validation.md) · [ETABS (.E2K / .$ET) import](e2k_import_plan.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md)
+
 - [Constraint Edge Detection](constraint_detection.md) — ✅ Complete
   > Detecting and applying edge constraints for shell element connectivity.
   Tags: `shell`, `meshing`, `constraints`, `edge-detection`
@@ -174,6 +184,11 @@ for automated cross-referencing.
   > SAP2000 → OpenSees fiber workflow for rectangular RC beam/column sections: parser defaults, promotion, Mander confinement, and user overrides.
   Tags: `rc`, `sections`, `fiber`, `mander`, `confinement`, `workflow`
   Related: [Element Classification](element_classification.md) · [Element Properties Configuration](element_properties_config.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Report Generation — Design Proposal](report_generation.md)
+
+- [Shell openings — exact cut-out and shell element-family selection](shell_openings.md) — ⚠️ Partial
+  > Plan for cutting exact holes in structured shell meshes without Gmsh, selecting thin/thick/nonlinear shell element families from the parsed CSI section type with a per-selection override, and boundary-node reuse.
+  Tags: `openings`, `shell`, `meshing`, `area-elements`, `geometry`, `boolean`, `element-type`, `csi`
+  Related: [Shell Element Support](shell_support.md) · [Constraint Edge Detection](constraint_detection.md) · [Element Splitting](element_splitting.md) · [Element Classification](element_classification.md) · [Element Properties Configuration](element_properties_config.md)
 
 - [Shell Element Support](shell_support.md) — ✅ Complete
   > Shell element types, meshing strategies, and layered shell support for nonlinear wall analysis.
@@ -312,6 +327,21 @@ for automated cross-referencing.
   Tags: `architecture`, `migration`, `planning`
   Related: [Layered Analysis Workflow for the v3 Architecture](layered_analysis_workflow.md) · [Analysis Workflow](workflow.md) · [Development Notes](dev_notes.md)
 
+- [Benchmark & Validation Model Register](benchmark_register.md) — ⚠️ Partial
+  > Master index of validation/benchmark models for fea_toolkit: structural-type × load-type coverage matrix, the benchmark tiers, per-type candidate sources (papers + datasets), the phased acquisition roadmap, and acceptance criteria.
+  Tags: `validation`, `benchmark`, `planning`, `pushover`, `nonlinear-dynamic`, `modal`, `response-spectrum`, `shear-wall`, `beam-column-joint`, `ground-motion`
+  Related: [Vecchio & Emara (1992) RC-Frame Pushover Benchmark](vecchio_emara_benchmark.md) · [Ground-Motion Data & Benchmark Sources](ground_motion_data.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md)
+
+- [Benchmark Roadmap — extended proposals](benchmark_roadmap.md) — ⚠️ Partial
+  > Extended proposals for closing the benchmark coverage gaps: the Chilean shear-wall benchmark (Hidalgo et al. 2005) and the wider use of the SAC buildings, plus the deferred VecTor / SeismoBuild / base-isolation candidates.
+  Tags: `validation`, `benchmark`, `planning`, `shear-wall`, `moment-frame`, `sac`, `nltha`, `modal`
+  Related: [Benchmark & Validation Model Register](benchmark_register.md) · [SAC 3-Story Frame Benchmark (T2)](sac_benchmark.md) · [MVLEM / SFI-MVLEM Shear-Wall Analysis](mvlem_wall_analysis.md) · [Shell Element Support](shell_support.md)
+
+- [Cantilever Benchmark (T1)](cantilever_benchmark.md) — ✅ Complete
+  > Closed-form vertical-cantilever benchmark: static tip deflection PL³/(3EI) against the Euler-Bernoulli cantilever.
+  Tags: `validation`, `benchmark`, `cantilever`, `static`, `closed-form`
+  Related: [Benchmark & Validation Model Register](benchmark_register.md) · [Vecchio & Emara (1992) RC-Frame Pushover Benchmark](vecchio_emara_benchmark.md)
+
 - [CSM Test Model Development Plan](csm_test_model_plan.md) — ✅ Complete
   > Development plan for the CSM test model - an RC frame in kN-m units with a three-material setup (C30/Rebar/Q355) exercising meaningful nonlinear ADRS response.
   Tags: `csm`, `test-model`, `planning`, `capacity-spectrum`
@@ -330,12 +360,17 @@ for automated cross-referencing.
   > Detailed design for unifying the four force-diagram plotting entry points into one unit-aware API.
   Tags: `planning`, `refactor`, `plotting`, `phase-b`
 
+- [Ground-Motion Data & Benchmark Sources](ground_motion_data.md) — ⚠️ Partial
+  > Ground-motion strategy for fea_toolkit validation: canonical units, the source catalogue (PEER NGA, FEMA P-695, K-NET/KiK-net, ESM, AFAD/TADAS, BHRC, CSMNC), PEER NGA access limitations, the GroundMotionManifest dataclass, the fetch workflow, and the CI strategy.
+  Tags: `ground-motion`, `validation`, `benchmark`, `nonlinear-dynamic`, `response-spectrum`, `licensing`, `ci`
+  Related: [Benchmark & Validation Model Register](benchmark_register.md) · [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md)
+
 - [Desktop GUI Roadmap](gui_roadmap.md) — 🚧 Draft
   > Framework decision and architecture for a Qt/PySide6 desktop application wrapping the import → view → query → analyse → results workflow.
   Tags: `gui`, `qt`, `pyside6`, `pyvistaqt`, `architecture`, `planning`, `roadmap`
   Related: [Visualisation Toolkit](viewer.md) · [Analysis Workflow](workflow.md) · [Unified Results Schema](results_schema.md) · [Rhino 3-D Export](rhino_export.md) · [Report Generation — Design Proposal](report_generation.md)
 
-- [Linting Fix Plan](linting_fix_plan.md) — 🚧 Draft
+- [Linting Fix Plan](linting_fix_plan.md) — ✅ Complete
   > Pyright error baseline and phased fix strategy for src/fea_toolkit (reference for cleanup work).
   Tags: `planning`, `linting`, `pyright`, `cleanup`
 
@@ -343,6 +378,31 @@ for automated cross-referencing.
   > Implementation plan and status for per-element pushover result recording (frame end forces, shell stress resultants, plasticity indicators) and nonlinear visualization.
   Tags: `pushover`, `results`, `storage`, `visualization`, `npz`, `planning`
   Related: [Unified Results Schema](results_schema.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Visualisation Toolkit](viewer.md)
+
+- [SAC 3-Story Frame Benchmark (T2)](sac_benchmark.md) — ✅ Complete
+  > SAC 3-story steel moment frame (Ohtori et al. 2004): elastic modal periods against the published evaluation-model frequencies.
+  Tags: `validation`, `benchmark`, `sac`, `moment-frame`, `modal`, `tcl`
+  Related: [Benchmark & Validation Model Register](benchmark_register.md) · [Tcl Model Import](tcl_import.md) · [Three-Storey Shear-Building Benchmark (T1)](shear_building_benchmark.md) · [SAC 3-Story Nonlinear Benchmark (T4)](sac_nonlinear_benchmark.md)
+
+- [SAC 3-Story Nonlinear Benchmark (T4)](sac_nonlinear_benchmark.md) — ✅ Complete
+  > SAC 3-story steel moment frame (Ohtori et al. 2004): nonlinear NLTHA — bilinear steel hinges, a Krawinkler & Gupta panel zone, and the M1 vs M2 evaluation-model comparison.
+  Tags: `validation`, `benchmark`, `sac`, `moment-frame`, `nonlinear`, `nltha`, `hinge`, `panel-zone`, `ground-motion`
+  Related: [Benchmark & Validation Model Register](benchmark_register.md) · [SAC 3-Story Frame Benchmark (T2)](sac_benchmark.md) · [Ground-Motion Data & Benchmark Sources](ground_motion_data.md) · [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md)
+
+- [SAC Trilinear Hinge — Four Modelling Approaches](sac_trilinear_hinge_approaches.md) — ✅ Complete
+  > Four OpenSees concentrated-plasticity formulations for the Ohtori et al. (2004) trilinear M-φ backbone — lumped Hysteretic, beamWithHinges + Hysteretic, beamWithHinges + two Steel02 springs in parallel, and beamWithHinges + Clough (degrading Hysteretic) — compared against the published unctrl3.mat El Centro 1.0 response.
+  Tags: `validation`, `benchmark`, `sac`, `moment-frame`, `nonlinear`, `nltha`, `hinge`, `trilinear`, `hysteretic`, `steel02`, `clough`, `beam-with-hinges`
+  Related: [Benchmark Roadmap — extended proposals](benchmark_roadmap.md) · [SAC 3-Story Frame Benchmark (T2)](sac_benchmark.md) · [SAC 3-Story Nonlinear Benchmark (T4)](sac_nonlinear_benchmark.md) · [Ground-Motion Data & Benchmark Sources](ground_motion_data.md)
+
+- [Three-Storey Shear-Building Benchmark (T1)](shear_building_benchmark.md) — ✅ Complete
+  > Przemieniecki/Paz three-DOF shear-building benchmark: modal periods and CQC response-spectrum base shear against the closed-form generalised eigenproblem.
+  Tags: `validation`, `benchmark`, `shear-building`, `modal`, `response-spectrum`, `cqc`, `closed-form`
+  Related: [Benchmark & Validation Model Register](benchmark_register.md) · [Modal Analysis Options](modal_analysis.md)
+
+- [Tcl Model Import](tcl_import.md) — ✅ Complete
+  > OpenSees Tcl → SAPModelData importer for SAC-style elastic plane frames, including the 2-D to planar-3-D lift.
+  Tags: `io`, `tcl`, `sac`, `import`, `benchmark`
+  Related: [Benchmark & Validation Model Register](benchmark_register.md) · [Ground-Motion Data & Benchmark Sources](ground_motion_data.md)
 
 - [Versioning & Release Plan](versioning.md) — ✅ Complete
   > How fea_toolkit is versioned (setuptools-scm, tag-driven), what major/minor/patch mean for this project, and the planned release path through the GUI work and toward 1.0.
@@ -358,6 +418,21 @@ for automated cross-referencing.
   Related: [Custom OpenSeesPy local build — swap recipe](openseespy_local_build.md) · [Rhino 3-D Export](rhino_export.md) · [Analysis Workflow](workflow.md)
 
 
+## 📦 Import
+
+- [ETABS (.E2K / .$ET) import](e2k_import_plan.md) — ⚠️ Partial
+  > Implemented ETABS text-export parser (geometry, sections, materials, restraints, loads, combinations, mass source) plus the deferred-geometry model it is built on; M6 auto-meshing remains open.
+  Tags: `etabs`, `e2k`, `io`, `parser`
+  Related: [JSON Serialization: Raw Tables vs Model Codec](json_serialization.md) · [SAP2000 Parser — Table & Keyword Coverage](parser_coverage.md) · [LLM & AI Assistant Guide](llm_guide.md) · [Desktop GUI Roadmap](gui_roadmap.md)
+
+
+## 📦 Uncategorised
+
+- [Fema355C Schedules](fema355c_schedules.md)
+
+- [Sd Sections](sd_sections.md)
+
+
 ---
 
 ## Tag Index
@@ -371,38 +446,49 @@ Tags across all documentation files:
 - **`analysis-type`** — [modal_analysis.md](modal_analysis.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [pushover_analysis.md](pushover_analysis.md), [storey_response.md](storey_response.md)
 - **`api-reference`** — [llm_guide.md](llm_guide.md)
 - **`architecture`** — [analysis.md](analysis.md), [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [builder_reference.md](builder_reference.md), [dev_notes.md](dev_notes.md), [gui_roadmap.md](gui_roadmap.md), [layered_analysis_workflow.md](layered_analysis_workflow.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [workflow.md](workflow.md), [workflow_authoring.md](workflow_authoring.md)
-- **`area-elements`** — [shell_support.md](shell_support.md)
+- **`area-elements`** — [shell_openings.md](shell_openings.md), [shell_support.md](shell_support.md)
 - **`asce41`** — [capacity.md](capacity.md)
 - **`attributes`** — [rhino_attributes.md](rhino_attributes.md)
 - **`backbone`** — [shear_failure_modelling.md](shear_failure_modelling.md)
+- **`beam-column-joint`** — [benchmark_register.md](benchmark_register.md)
+- **`beam-with-hinges`** — [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`beams`** — [element_classification.md](element_classification.md)
-- **`benchmark`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`benchmark`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [cantilever_benchmark.md](cantilever_benchmark.md), [ground_motion_data.md](ground_motion_data.md), [sac_benchmark.md](sac_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [shear_building_benchmark.md](shear_building_benchmark.md), [tcl_import.md](tcl_import.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`bilinearization`** — [csm_bilinearization.md](csm_bilinearization.md)
+- **`boolean`** — [shell_openings.md](shell_openings.md)
 - **`brace`** — [pushover_analysis.md](pushover_analysis.md)
 - **`braces`** — [element_classification.md](element_classification.md)
 - **`buckling`** — [model_review.md](model_review.md)
 - **`build`** — [openseespy_local_build.md](openseespy_local_build.md)
+- **`cantilever`** — [cantilever_benchmark.md](cantilever_benchmark.md)
 - **`capacity`** — [capacity.md](capacity.md), [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`capacity-spectrum`** — [csm_bilinearization.md](csm_bilinearization.md), [csm_test_model_plan.md](csm_test_model_plan.md)
 - **`cardinal-point`** — [member_offsets.md](member_offsets.md)
+- **`cft`** — [cft_confinement_plan.md](cft_confinement_plan.md)
 - **`checklist`** — [ETABS_checklist.md](ETABS_checklist.md), [ETABS_checklist_gb.md](ETABS_checklist_gb.md), [ETABS_checklist_hk.md](ETABS_checklist_hk.md), [ETABS_checklist_is.md](ETABS_checklist_is.md), [SAP2000_checklist_gb.md](SAP2000_checklist_gb.md), [SAP2000_checklist_hk.md](SAP2000_checklist_hk.md)
 - **`checks`** — [model_review.md](model_review.md)
+- **`ci`** — [ground_motion_data.md](ground_motion_data.md)
 - **`classification`** — [element_classification.md](element_classification.md)
 - **`cleanup`** — [deprecation_plan.md](deprecation_plan.md), [linting_fix_plan.md](linting_fix_plan.md)
 - **`cli`** — [model_review.md](model_review.md)
+- **`closed-form`** — [cantilever_benchmark.md](cantilever_benchmark.md), [shear_building_benchmark.md](shear_building_benchmark.md)
+- **`clough`** — [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`codes`** — [capacity.md](capacity.md)
 - **`columns`** — [element_classification.md](element_classification.md)
 - **`combination`** — [load_cases_and_combinations.md](load_cases_and_combinations.md), [load_combinations.md](load_combinations.md)
 - **`command`** — [workflow_palette.md](workflow_palette.md)
-- **`composite`** — [load_combinations.md](load_combinations.md)
+- **`composite`** — [cft_confinement_plan.md](cft_confinement_plan.md), [load_combinations.md](load_combinations.md)
 - **`config`** — [element_properties_config.md](element_properties_config.md)
-- **`confinement`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
+- **`confinement`** — [cft_confinement_plan.md](cft_confinement_plan.md), [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`connections`** — [member_releases.md](member_releases.md)
 - **`connectivity`** — [model_review.md](model_review.md)
 - **`constraints`** — [constraint_detection.md](constraint_detection.md), [diaphragm_constraints.md](diaphragm_constraints.md)
 - **`conversion`** — [units_conversion.md](units_conversion.md)
+- **`cqc`** — [shear_building_benchmark.md](shear_building_benchmark.md)
 - **`cracked-section`** — [stiffness_factors.md](stiffness_factors.md)
+- **`csi`** — [shell_openings.md](shell_openings.md)
 - **`csm`** — [csm_bilinearization.md](csm_bilinearization.md), [csm_test_model_plan.md](csm_test_model_plan.md), [pushover_analysis.md](pushover_analysis.md)
+- **`damping`** — [modeling_guidance.md](modeling_guidance.md)
 - **`data-model`** — [parser_coverage.md](parser_coverage.md)
 - **`dcr`** — [capacity.md](capacity.md)
 - **`declarative`** — [workflow_authoring.md](workflow_authoring.md)
@@ -419,41 +505,48 @@ Tags across all documentation files:
 - **`drift`** — [storey_response.md](storey_response.md)
 - **`duong`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`dynamic`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
+- **`e2k`** — [e2k_import_plan.md](e2k_import_plan.md)
 - **`edge-detection`** — [constraint_detection.md](constraint_detection.md)
 - **`eigen`** — [modal_analysis.md](modal_analysis.md)
 - **`eigenvalue`** — [modal_analysis.md](modal_analysis.md)
+- **`element-choice`** — [modeling_guidance.md](modeling_guidance.md)
 - **`element-properties`** — [element_properties_config.md](element_properties_config.md)
+- **`element-type`** — [shell_openings.md](shell_openings.md)
 - **`elements`** — [element_classification.md](element_classification.md), [element_splitting.md](element_splitting.md), [shell_support.md](shell_support.md)
 - **`elwood`** — [units_conversion.md](units_conversion.md)
 - **`end-to-end`** — [workflow.md](workflow.md)
 - **`environment`** — [llm_guide.md](llm_guide.md)
-- **`etabs`** — [ETABS_checklist.md](ETABS_checklist.md)
+- **`etabs`** — [ETABS_checklist.md](ETABS_checklist.md), [e2k_import_plan.md](e2k_import_plan.md)
 - **`execution`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`export`** — [rhino_export.md](rhino_export.md), [tcl_export.md](tcl_export.md)
 - **`fea-toolkit`** — [openseespy_local_build.md](openseespy_local_build.md)
-- **`fiber`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
+- **`fiber`** — [cft_confinement_plan.md](cft_confinement_plan.md), [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`fiber-section`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`force-controlled`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`frames`** — [member_offsets.md](member_offsets.md), [member_releases.md](member_releases.md)
 - **`fsam`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
 - **`gb50010`** — [capacity.md](capacity.md)
 - **`geomTransf`** — [member_offsets.md](member_offsets.md)
-- **`geometry`** — [rhino_export.md](rhino_export.md)
+- **`geometry`** — [rhino_export.md](rhino_export.md), [shell_openings.md](shell_openings.md)
 - **`gpl`** — [licence.md](licence.md)
 - **`gravity`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
-- **`ground-motion`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
+- **`ground-motion`** — [benchmark_register.md](benchmark_register.md), [ground_motion_data.md](ground_motion_data.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md)
 - **`gui`** — [gui.md](gui.md), [gui_roadmap.md](gui_roadmap.md), [project_bundle.md](project_bundle.md), [workflow_authoring.md](workflow_authoring.md), [workflow_palette.md](workflow_palette.md)
+- **`guidance`** — [modeling_guidance.md](modeling_guidance.md)
 - **`guide`** — [llm_guide.md](llm_guide.md)
 - **`hdf5`** — [model_stage_file.md](model_stage_file.md), [project_bundle.md](project_bundle.md), [report_generation.md](report_generation.md)
+- **`hinge`** — [modeling_guidance.md](modeling_guidance.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`hinges`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md)
 - **`html-export`** — [viewer.md](viewer.md)
+- **`hysteretic`** — [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`identifiers`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
+- **`import`** — [tcl_import.md](tcl_import.md)
 - **`insertion-point`** — [member_offsets.md](member_offsets.md)
 - **`integrity`** — [model_review.md](model_review.md)
 - **`interaction`** — [gui.md](gui.md)
 - **`interactive`** — [viewer.md](viewer.md)
 - **`internal`** — [parser_coverage.md](parser_coverage.md)
-- **`io`** — [json_serialization.md](json_serialization.md), [model_stage_file.md](model_stage_file.md), [pipeline_logging.md](pipeline_logging.md), [results_schema.md](results_schema.md)
+- **`io`** — [e2k_import_plan.md](e2k_import_plan.md), [json_serialization.md](json_serialization.md), [model_stage_file.md](model_stage_file.md), [pipeline_logging.md](pipeline_logging.md), [results_schema.md](results_schema.md), [tcl_import.md](tcl_import.md)
 - **`jntOffset`** — [member_offsets.md](member_offsets.md)
 - **`joint`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`json`** — [json_serialization.md](json_serialization.md)
@@ -461,9 +554,10 @@ Tags across all documentation files:
 - **`legal`** — [licence.md](licence.md)
 - **`lessons-learned`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`licence`** — [licence.md](licence.md)
+- **`licensing`** — [ground_motion_data.md](ground_motion_data.md)
 - **`limit-state`** — [units_conversion.md](units_conversion.md)
 - **`linting`** — [linting_fix_plan.md](linting_fix_plan.md)
-- **`llm`** — [llm_guide.md](llm_guide.md)
+- **`llm`** — [llm_guide.md](llm_guide.md), [modeling_guidance.md](modeling_guidance.md)
 - **`load-case`** — [load_cases_and_combinations.md](load_cases_and_combinations.md)
 - **`load-redistribution`** — [element_splitting.md](element_splitting.md)
 - **`loads`** — [load_cases_and_combinations.md](load_cases_and_combinations.md), [load_combinations.md](load_combinations.md)
@@ -472,35 +566,41 @@ Tags across all documentation files:
 - **`mander`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`mcft`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`mesh-model`** — [layered_analysis_workflow.md](layered_analysis_workflow.md)
-- **`meshing`** — [constraint_detection.md](constraint_detection.md), [element_splitting.md](element_splitting.md), [shell_support.md](shell_support.md)
+- **`meshing`** — [constraint_detection.md](constraint_detection.md), [element_splitting.md](element_splitting.md), [shell_openings.md](shell_openings.md), [shell_support.md](shell_support.md)
 - **`metadata`** — [rhino_attributes.md](rhino_attributes.md)
 - **`migration`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md)
-- **`modal`** — [modal_analysis.md](modal_analysis.md)
+- **`modal`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [modal_analysis.md](modal_analysis.md), [sac_benchmark.md](sac_benchmark.md), [shear_building_benchmark.md](shear_building_benchmark.md)
 - **`model`** — [load_combinations.md](load_combinations.md)
 - **`model-codec`** — [json_serialization.md](json_serialization.md)
 - **`model-review`** — [ETABS_checklist.md](ETABS_checklist.md), [ETABS_checklist_gb.md](ETABS_checklist_gb.md), [ETABS_checklist_hk.md](ETABS_checklist_hk.md), [ETABS_checklist_is.md](ETABS_checklist_is.md), [SAP2000_checklist_gb.md](SAP2000_checklist_gb.md), [SAP2000_checklist_hk.md](SAP2000_checklist_hk.md)
+- **`modeling`** — [modeling_guidance.md](modeling_guidance.md)
 - **`modifiers`** — [stiffness_factors.md](stiffness_factors.md)
+- **`moment-frame`** — [benchmark_roadmap.md](benchmark_roadmap.md), [sac_benchmark.md](sac_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`mvlem`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
-- **`nonlinear`** — [element_properties_config.md](element_properties_config.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [pushover_analysis.md](pushover_analysis.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
+- **`nltha`** — [benchmark_roadmap.md](benchmark_roadmap.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
+- **`nonlinear`** — [element_properties_config.md](element_properties_config.md), [modeling_guidance.md](modeling_guidance.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [pushover_analysis.md](pushover_analysis.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
+- **`nonlinear-dynamic`** — [benchmark_register.md](benchmark_register.md), [ground_motion_data.md](ground_motion_data.md)
 - **`notes`** — [dev_notes.md](dev_notes.md)
 - **`npz`** — [model_stage_file.md](model_stage_file.md), [project_bundle.md](project_bundle.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
 - **`offsets`** — [member_offsets.md](member_offsets.md)
+- **`openings`** — [shell_openings.md](shell_openings.md)
 - **`opensees`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [tcl_export.md](tcl_export.md)
 - **`openseespy`** — [licence.md](licence.md), [openseespy_local_build.md](openseespy_local_build.md)
 - **`openseesrt`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`orchestration`** — [analysis.md](analysis.md)
 - **`packaging`** — [versioning.md](versioning.md)
 - **`palette`** — [workflow_palette.md](workflow_palette.md)
-- **`parser`** — [json_serialization.md](json_serialization.md), [parser_coverage.md](parser_coverage.md)
+- **`panel-zone`** — [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md)
+- **`parser`** — [e2k_import_plan.md](e2k_import_plan.md), [json_serialization.md](json_serialization.md), [parser_coverage.md](parser_coverage.md)
 - **`partial-fixity`** — [member_releases.md](member_releases.md)
 - **`phase-b`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`pipeline`** — [pipeline_logging.md](pipeline_logging.md), [workflow.md](workflow.md)
-- **`planning`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [csm_test_model_plan.md](csm_test_model_plan.md), [deprecation_plan.md](deprecation_plan.md), [force_diagram_unification.md](force_diagram_unification.md), [gui_roadmap.md](gui_roadmap.md), [linting_fix_plan.md](linting_fix_plan.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [versioning.md](versioning.md)
+- **`planning`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [csm_test_model_plan.md](csm_test_model_plan.md), [deprecation_plan.md](deprecation_plan.md), [force_diagram_unification.md](force_diagram_unification.md), [gui_roadmap.md](gui_roadmap.md), [linting_fix_plan.md](linting_fix_plan.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [versioning.md](versioning.md)
 - **`plotting`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`post-processing`** — [storey_response.md](storey_response.md)
 - **`preprocessor`** — [builder_reference.md](builder_reference.md), [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`project`** — [project_bundle.md](project_bundle.md)
-- **`pushover`** — [csm_bilinearization.md](csm_bilinearization.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [pushover_analysis.md](pushover_analysis.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
+- **`pushover`** — [benchmark_register.md](benchmark_register.md), [csm_bilinearization.md](csm_bilinearization.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [pushover_analysis.md](pushover_analysis.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`pyright`** — [linting_fix_plan.md](linting_fix_plan.md)
 - **`pyside6`** — [gui.md](gui.md), [gui_roadmap.md](gui_roadmap.md)
 - **`pyvista`** — [viewer.md](viewer.md)
@@ -516,7 +616,8 @@ Tags across all documentation files:
 - **`report`** — [pipeline_logging.md](pipeline_logging.md)
 - **`reporter`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`reporting`** — [report_generation.md](report_generation.md)
-- **`response-spectrum`** — [model_review.md](model_review.md)
+- **`research`** — [cft_confinement_plan.md](cft_confinement_plan.md)
+- **`response-spectrum`** — [benchmark_register.md](benchmark_register.md), [ground_motion_data.md](ground_motion_data.md), [model_review.md](model_review.md), [shear_building_benchmark.md](shear_building_benchmark.md)
 - **`results`** — [load_cases_and_combinations.md](load_cases_and_combinations.md), [load_combinations.md](load_combinations.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
 - **`review`** — [ETABS_checklist.md](ETABS_checklist.md), [ETABS_checklist_gb.md](ETABS_checklist_gb.md), [ETABS_checklist_hk.md](ETABS_checklist_hk.md), [ETABS_checklist_is.md](ETABS_checklist_is.md), [SAP2000_checklist_gb.md](SAP2000_checklist_gb.md), [SAP2000_checklist_hk.md](SAP2000_checklist_hk.md), [model_review.md](model_review.md)
 - **`rhino`** — [model_stage_file.md](model_stage_file.md), [rhino_attributes.md](rhino_attributes.md), [rhino_export.md](rhino_export.md)
@@ -527,9 +628,11 @@ Tags across all documentation files:
 - **`round-trip`** — [model_stage_file.md](model_stage_file.md)
 - **`runtime`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`s2k`** — [model_review.md](model_review.md)
+- **`sac`** — [benchmark_roadmap.md](benchmark_roadmap.md), [sac_benchmark.md](sac_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [tcl_import.md](tcl_import.md)
 - **`sap2000`** — [ETABS_checklist.md](ETABS_checklist.md), [member_offsets.md](member_offsets.md), [member_releases.md](member_releases.md), [model_review.md](model_review.md), [parser_coverage.md](parser_coverage.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`schema`** — [results_schema.md](results_schema.md)
 - **`scripting`** — [tcl_export.md](tcl_export.md)
+- **`section`** — [cft_confinement_plan.md](cft_confinement_plan.md)
 - **`sections`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`selection`** — [gui.md](gui.md), [workflow_authoring.md](workflow_authoring.md)
 - **`self-weight`** — [model_review.md](model_review.md)
@@ -540,26 +643,32 @@ Tags across all documentation files:
 - **`settings`** — [gui.md](gui.md)
 - **`sfi-mvlem`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
 - **`shear`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [shear_failure_modelling.md](shear_failure_modelling.md), [storey_response.md](storey_response.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
-- **`shell`** — [constraint_detection.md](constraint_detection.md), [element_properties_config.md](element_properties_config.md), [shell_support.md](shell_support.md)
+- **`shear-building`** — [shear_building_benchmark.md](shear_building_benchmark.md)
+- **`shear-wall`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md)
+- **`shell`** — [constraint_detection.md](constraint_detection.md), [element_properties_config.md](element_properties_config.md), [shell_openings.md](shell_openings.md), [shell_support.md](shell_support.md)
 - **`si`** — [units_conversion.md](units_conversion.md)
 - **`slabs`** — [element_classification.md](element_classification.md)
 - **`solver`** — [modal_analysis.md](modal_analysis.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`splitting`** — [element_splitting.md](element_splitting.md)
+- **`static`** — [cantilever_benchmark.md](cantilever_benchmark.md)
+- **`steel`** — [modeling_guidance.md](modeling_guidance.md)
+- **`steel02`** — [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`steps`** — [workflow_authoring.md](workflow_authoring.md), [workflow_palette.md](workflow_palette.md)
 - **`stiffness`** — [stiffness_factors.md](stiffness_factors.md)
 - **`storage`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md)
 - **`storey`** — [diaphragm_constraints.md](diaphragm_constraints.md), [storey_response.md](storey_response.md)
-- **`tcl`** — [member_releases.md](member_releases.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [tcl_export.md](tcl_export.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md), [xara_pushover_workflow.md](xara_pushover_workflow.md), [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
+- **`tcl`** — [member_releases.md](member_releases.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [sac_benchmark.md](sac_benchmark.md), [tcl_export.md](tcl_export.md), [tcl_import.md](tcl_import.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md), [xara_pushover_workflow.md](xara_pushover_workflow.md), [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`test-model`** — [csm_test_model_plan.md](csm_test_model_plan.md)
 - **`theory`** — [mander_confinement_validation.md](mander_confinement_validation.md)
 - **`time-history`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
 - **`traceability`** — [parser_coverage.md](parser_coverage.md)
+- **`trilinear`** — [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`typed-results`** — [analysis.md](analysis.md)
 - **`unit-aware`** — [capacity.md](capacity.md)
-- **`units`** — [units_conversion.md](units_conversion.md)
+- **`units`** — [modeling_guidance.md](modeling_guidance.md), [units_conversion.md](units_conversion.md)
 - **`usage`** — [llm_guide.md](llm_guide.md)
 - **`userstrings`** — [rhino_attributes.md](rhino_attributes.md)
-- **`validation`** — [mander_confinement_validation.md](mander_confinement_validation.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [shear_failure_modelling.md](shear_failure_modelling.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`validation`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [cantilever_benchmark.md](cantilever_benchmark.md), [ground_motion_data.md](ground_motion_data.md), [mander_confinement_validation.md](mander_confinement_validation.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [sac_benchmark.md](sac_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [shear_building_benchmark.md](shear_building_benchmark.md), [shear_failure_modelling.md](shear_failure_modelling.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`verbs`** — [workflow_authoring.md](workflow_authoring.md)
 - **`versioning`** — [versioning.md](versioning.md)
 - **`viewer`** — [viewer.md](viewer.md)
