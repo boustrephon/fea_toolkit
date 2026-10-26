@@ -38,6 +38,7 @@ STATUS_BADGE = {
     "partial": "⚠️ Partial",
     "draft": "🚧 Draft",
     "placeholder": "🚧 Placeholder",
+    "guidance": "🧭 Guidance",
 }
 
 HEADER = """# Documentation Index

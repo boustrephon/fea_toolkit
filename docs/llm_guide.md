@@ -284,15 +284,17 @@ already caused one frozen-animation bug by a guessed keyword.
 
 ## 5. Known OpenSeesPy Constraints
 
-### Nonlinear element choice (steel frames) — read `docs/modeling_guidance.md`
+### Nonlinear element choice (steel frames) — `docs/modeling_guidance.md` (guidance, not rules)
 
-The single most important modeling rule, distilled from the benchmark
+The single most important modeling heuristic, distilled from the benchmark
 verification: **force-based elements (`beamWithHinges`, `forceBeamColumn`,
 `nonlinearBeamColumn`) invert the element flexibility matrix and fail at both
 the too-soft and too-stiff extremes of member stiffness**, while the
 displacement-based **lumped hinge** (`elasticBeamColumn` + `zeroLength`
-springs) is the robust default across the whole stiffness range. Before
-choosing elements or a hinge formulation for a nonlinear model, consult
+springs) has been the robust default across the whole stiffness range. This is
+**guidance, not rules** — we are still learning, and the benchmarks are evidence
+of what has *been considered* to work, not proof of optimality. Before choosing
+elements or a hinge formulation for a nonlinear model, consult
 `docs/modeling_guidance.md` — it also covers the cyclic-law choice (`Hysteretic`
 robust, `Clough` degradation unstable on strong records), damping anchors, and
 a non-convergence debugging table.

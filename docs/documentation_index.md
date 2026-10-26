@@ -35,7 +35,7 @@ for automated cross-referencing.
   Tags: `loads`, `load-case`, `combination`, `analysis`, `results`
   Related: [Load Combinations](load_combinations.md) · [Analysis Helpers](analysis.md) · [Unified Results Schema](results_schema.md) · [Units Workflow (kN·m·s → kip·in Limit-State Analysis)](units_conversion.md) · [Desktop GUI](gui.md)
 
-- [Structural Modeling Guidance](modeling_guidance.md) — ✅ Complete
+- [Structural Modeling Guidance](modeling_guidance.md) — 🧭 Guidance
   > Canonical guidance for choosing element formulations, hinge/plasticity models and cyclic laws when building nonlinear FEA models — distilled from the benchmark verification (SAC steel frames, RC walls).
   Tags: `llm`, `guidance`, `modeling`, `nonlinear`, `element-choice`, `hinge`, `steel`, `damping`, `units`
   Related: [LLM & AI Assistant Guide](llm_guide.md) · [SAC Trilinear Hinge — Four Modelling Approaches](sac_trilinear_hinge_approaches.md) · [SAC 3-Story Nonlinear Benchmark (T4)](sac_nonlinear_benchmark.md) · [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Units Workflow (kN·m·s → kip·in Limit-State Analysis)](units_conversion.md)

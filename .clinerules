@@ -237,22 +237,27 @@ points.  See `docs/workflow_authoring.md` for the design record.
   must not grow a private code path for something a verb can express — at most
   it *presets* a step and runs the recipe (see anti-pattern 17).
 
-### 3.13 Modeling guidance (element & hinge choice)
-**Structural modeling decisions — element formulation, hinge/plasticity model,
-cyclic law, damping — follow `docs/modeling_guidance.md`.**  This is a distinct
-class of guidance (domain/engineering, not code-style); consult it before
-choosing elements or hinge formulations for a nonlinear model.
+### 3.13 Modeling guidance — advisory, not rules
+Structural modeling decisions (element formulation, hinge/plasticity model,
+cyclic law, damping) are informed by `docs/modeling_guidance.md`.  Unlike the
+code-style rules above, that document is **guidance, not rules** — we are still
+learning, and it is revised as benchmark experience accumulates.  Consult it
+before choosing elements or hinge formulations for a nonlinear model, but treat
+it as current best-guess, not a binding specification; the benchmarks it draws
+on are themselves only evidence of *what has been considered to work*, not proof
+of optimality.
 
-- The core rule: **force-based elements (`beamWithHinges`, `forceBeamColumn`,
-  `nonlinearBeamColumn`) invert the element flexibility matrix and are
-  numerically ill-conditioned at both the too-soft and too-stiff extremes** of
-  member stiffness; the displacement-based **lumped hinge** (`elasticBeamColumn`
-  + `zeroLength` springs) is the robust default across the full stiffness range.
-  A force-based element that *builds* is not guaranteed to *run* — verify every
-  member survives the first load steps.
-- For steel frames prefer the trilinear `Hysteretic` cyclic law; avoid the
-  `Clough` degradation law (β = 0.5) for strong/long records (it loses
-  convergence).
+- Working rule of thumb: **force-based elements (`beamWithHinges`,
+  `forceBeamColumn`, `nonlinearBeamColumn`) invert the element flexibility
+  matrix and are numerically ill-conditioned at both the too-soft and too-stiff
+  extremes** of member stiffness; the displacement-based **lumped hinge**
+  (`elasticBeamColumn` + `zeroLength` springs) has been the robust default
+  across the full stiffness range.  A force-based element that *builds* is not
+  guaranteed to *run* — verify every member survives the first load steps.
+- For steel frames the trilinear `Hysteretic` cyclic law has been the most
+  robust so far; the `Clough` degradation law (β = 0.5) has lost convergence on
+  strong/long records.  Both are observations from the SAC benchmarks, not
+  prescriptions.
 
 
 ## 4. Naming & Style Rules

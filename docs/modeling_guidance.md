@@ -1,7 +1,7 @@
 ---
 title: "Structural Modeling Guidance"
 description: "Canonical guidance for choosing element formulations, hinge/plasticity models and cyclic laws when building nonlinear FEA models — distilled from the benchmark verification (SAC steel frames, RC walls)."
-status: "complete"
+status: "guidance"
 tags: [llm, guidance, modeling, nonlinear, element-choice, hinge, steel, damping, units]
 category: [core-pipeline]
 related: [llm_guide.md, sac_trilinear_hinge_approaches.md, sac_nonlinear_benchmark.md, nonlinear_dynamic_analysis.md, pushover_analysis.md, units_conversion.md]
@@ -9,12 +9,22 @@ related: [llm_guide.md, sac_trilinear_hinge_approaches.md, sac_nonlinear_benchma
 
 # Structural Modeling Guidance
 
-> **What this is.** A distilled set of *engineering* rules for choosing how to
-> model a structure. The *code* rules live in `.clinerules`; this is the
-> *domain* rules — read it before choosing an element formulation, a hinge /
+> **What this is.** A distilled set of *engineering* guidance for choosing how
+> to model a structure. The *code* rules live in `.clinerules`; this is the
+> *domain* guidance — read it before choosing an element formulation, a hinge /
 > plasticity model, or a cyclic law for a nonlinear model. It exists because the
 > benchmark verification kept hitting the same two failure modes, and they are
 > the kind of thing that wastes a session if you have to rediscover them.
+>
+> **Guidance, not rules.** We are still learning how to model these structures
+> well, and this document will be expanded and revised as our benchmark
+> experience grows. The benchmarks it draws on are themselves only *evidence of
+> what has been considered to work* — not proof of optimality, and a benchmark's
+> published "target" is not necessarily the best model either. Treat every
+> recommendation here as a current best-guess with a recorded reason, not a
+> fixed specification. When a new benchmark or model contradicts something here,
+> update this document (and its `.clinerules` §3.13 summary) rather than working
+> around it in a one-off script.
 
 ## 1. The rule that matters: force-based vs displacement-based elements
 
@@ -33,12 +43,12 @@ Displacement-based **lumped hinges** (`elasticBeamColumn` interior +
 stiffness range**, at a small accuracy cost (~4–5 % elastic softening vs the
 exact force-based element).
 
-> **Rule.** For any model that spans a wide stiffness range (tall frames, mixed
-> section sizes — box columns beside W columns, transfer members beside braces),
-> default to the displacement-based **lumped hinge**. Use a force-based element
-> only when you have confirmed that **every** member both builds *and* survives
-> the first load steps. A force-based element that *builds* is not guaranteed to
-> *run*.
+> **Working guidance.** For any model that spans a wide stiffness range (tall
+> frames, mixed section sizes — box columns beside W columns, transfer members
+> beside braces), default to the displacement-based **lumped hinge**. Use a
+> force-based element only when you have confirmed that **every** member both
+> builds *and* survives the first load steps. A force-based element that
+> *builds* is not guaranteed to *run*.
 
 ## 2. Element & hinge cheat-sheet
 
