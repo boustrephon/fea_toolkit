@@ -17,9 +17,9 @@ abstract: |
   1.0 anchor), and the interstorey drift to within ±15 % except one outlier.
   The 9- and 20-story frames run on the lumped hinge (the `beamWithHinges`
   force-based element cannot invert its flexibility on the 20-story's box
-  columns): the 9-story base shear lands within −4 %/+16 % and drift within
-  ±13 % (Kobe 1.0 +51 % excepted), while the 20-story base shear is
-  systematically high (+5 % to +52 %). The four 3-story formulations split the
+  columns): the 9-story base shear lands within −6 %/+12 % and drift within
+  ±13 % (Kobe 1.0 +51 % excepted), while the 20-story base shear is reproduced
+  to within −8 %/+9 % (drift ±13 %, Kobe 1.0 +44 % excepted). The four 3-story formulations split the
   response by mechanism:
   displacement and drift are robust to the hinge choice, while the cyclic
   unloading law (Clough degradation) moves displacement and yielding but not
@@ -28,8 +28,10 @@ abstract: |
   regenerated from the committed metrics manifest by the executable code in
   this document.
 format:
-  pdf: default
-  html: default
+  html:
+    code-fold: true
+  pdf:
+    echo: false
 number-sections: true
 bibliography: references.bib
 ---
@@ -82,6 +84,10 @@ sections by `sac.enrich_trilinear()`.
 * **`F_max` is the whole-building base shear.** `EvalNLBM.m`'s storey mass is
   exactly twice the per-frame `seismic_mass#` in `struct#.m` (`Num_MRF = 2`),
   so a single planar N–S frame's base shear is **doubled** to compare.
+* **`F_max` sums only the above-ground storeys.** `EvalNLBM.m`'s storey-mass
+  vector starts at the first floor above the ground tie, so the below-ground
+  basement levels (the 20-story's free B-1) are excluded from the base-shear
+  sum.
 * **`dt_cal = 0.005 s`.** `struct#.m` integrates at 0.005 s (Newmark β=1/4,
   γ=1/2), sub-stepping the records' native 0.01–0.02 s sampling; integrating at
   0.02 s inflated the base shear ~55 % and `xdd_max` ~25 %.
@@ -308,14 +314,15 @@ for building in (9, 20):
 : The lumped-hinge peak response of the 9- and 20-story frames against the
 published targets. {#tbl-920}
 
-The lumped hinge reproduces the 9-story base shear to within −4 %/+16 % and
+The lumped hinge reproduces the 9-story base shear to within −6 %/+12 % and
 drift to within ±13 % outside the Kobe 1.0 outlier (+51 %). For the 20-story
-the same hinge over-predicts the base shear systematically — +5 % on the weak
-records up to +52 % on Kobe 1.0 — while the drift again stays within ±13 %
-outside Kobe 1.0 (+44 %). The base-shear over-prediction grows with record
-intensity, so the lumped hinge's ~4.8 % elastic softening does not translate
-into a soft side on the taller frame; drift is robust to the hinge while the
-base shear is not, mirroring the 3-story finding.
+the same hinge reproduces the base shear to within −8 %/+9 % — no longer
+systematically high, once the below-ground basement storey is excluded from
+the ``F_max`` sum — while the drift again stays within ±13 % outside Kobe 1.0
+(+44 %). The base-shear error no longer grows with record intensity, and the
+lumped hinge's ~4.8 % elastic softening does not translate into a soft side on
+the taller frame; drift is robust to the hinge while the base shear is not,
+mirroring the 3-story finding.
 
 # Discussion
 
@@ -358,9 +365,9 @@ peak response of the SAC 3-story frame: base shear to within ±11 % across all
 ten cases (and +1.5 % on the El Centro anchor), drift to within ±15 % except
 one outlier, with a consistent (slightly conservative) yielded-hinge count. The
 9- and 20-story frames now run to completion on the lumped hinge: the 9-story
-base shear reproduces `unctrl9.mat` to within −4 %/+16 % and drift to ±13 %
-(Kobe 1.0 +51 % excepted), while the 20-story base shear is systematically
-over-predicted (+5 % to +52 %). The four hinge formulations
+base shear reproduces `unctrl9.mat` to within −6 %/+12 % and drift to ±13 %
+(Kobe 1.0 +51 % excepted), while the 20-story base shear is reproduced to
+within −8 %/+9 %. The four hinge formulations
 confirm that **the base shear is governed by the monotonic backbone and elastic
 stiffness, while displacement and yielding are governed by the cyclic law** —
 the modelling decision matters *where* it matters, and no single formulation is

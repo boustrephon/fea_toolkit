@@ -271,5 +271,6 @@ src/fea_toolkit/_version.py
 
 # Quarto render output — regenerated from the .qmd sources
 papers/*.html
+papers/*.pdf
 papers/*_files/
 papers/.quarto/
