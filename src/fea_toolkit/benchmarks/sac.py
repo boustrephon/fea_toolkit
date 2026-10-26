@@ -347,8 +347,9 @@ def _build_benchmark_model(building: int) -> SAPModelData:
     The base is pinned at the bottom basement level with a lateral tie at the
     ground level (the ``Fix_node`` prescription); masses are lumped at the floor
     nodes by tributary bay width.  The rigid floor diaphragms (``slv_tbl``
-    master-slave) are not modelled — the elastic modal periods match the
-    published values without them (see ``docs/sac_benchmark.md``).
+    master-slave) are applied only under ``fidelity="faithful"`` (see
+    :func:`build_builder`): the beam axial stiffness already ties each floor
+    near-rigidly, so the explicit tie moves the base shear by ~0.004 %.
     """
     spec = _SAC_BUILDINGS[building]
     heights: list[float] = spec["heights"]
@@ -564,33 +565,31 @@ def preprocess_config(panel_zone: bool = False) -> dict[str, Any]:
     return cfg
 
 
-def _add_faithful_diaphragms(mesh: Any) -> None:
-    """Emit the ``struct3.m`` master-slave rigid floor diaphragms.
+def _floor_ux_tie_groups(building: int) -> list[list[str]]:
+    """The ``slv_tbl`` horizontal floor ties for a SAC frame, as node-ID groups.
 
-    ``struct3.m``'s ``slv_tbl`` ties each floor's five nodes' horizontal (X) DOF
-    to the line-1 node (an ``equalDOF`` master-slave, not a full rigid
-    diaphragm).  Called after :meth:`AnalysisBuilder.build_domain`, before any
-    analysis runs.
+    ``struct#.m``'s ``slv_tbl`` ties every node at a floor level to that
+    level's master node in the horizontal (X) DOF only.  The 9/20-story models
+    lay their nodes out as ``{level}-{line}`` (``level`` 0 = base .. ``n_levels``
+    = roof, ``line`` 0..5), with the middle line (2) as the master.  The base
+    level (0) and the ground lateral-tie level (``n_basements``) are restrained
+    and therefore excluded — matching the benchmark's table (the 9-story ties
+    levels 2..10; the 20-story ties level 1 and levels 3..21).
 
-    Elastic-only: in the nonlinear (hinged) model the diaphragm's ``equalDOF``
-    chains with each lumped hinge's translation tie (``hinge.X → floor.X →
-    master.X``), which the ``Transformation`` handler mis-resolves — the same
-    failure class as the M2 panel-zone degeneracy.  The effect is small anyway:
-    the rigid-axial beams already approximate the diaphragm (faithful elastic T1
-    ≈ simplified T1 ≈ 0.99 s).
+    Returns:
+        One group per tied level, ``[master_id, slave_id, ...]``.
     """
-    import openseespy.opensees as ops
-
-    for group in _FAITHFUL_DIAPHRAGMS:
-        node_ids = group["nodes"]
-        master = mesh.nodes.get(node_ids[0])
-        if master is None:
+    spec = _SAC_BUILDINGS[building]
+    n_levels = len(spec["heights"])
+    n_base = spec["n_basements"]
+    groups: list[list[str]] = []
+    for j in range(1, n_levels + 1):
+        if j == n_base:  # ground lateral-tie level (ux already restrained)
             continue
-        for nid in node_ids[1:]:
-            nd = mesh.nodes.get(nid)
-            if nd is None:
-                continue
-            ops.equalDOF(master.node_tag, nd.node_tag, 1)
+        master = f"{j}-2"
+        slaves = [f"{j}-{i}" for i in range(6) if i != 2]
+        groups.append([master, *slaves])
+    return groups
 
 
 def build_builder(
@@ -627,16 +626,33 @@ def build_builder(
             stiffness degradation).
         hinge_model: ``"lumped"`` (default) or ``"beam_with_hinges"`` (the
             benchmark's own concentrated-plasticity element, trilinear only).
-        fidelity: ``"simplified"`` (default) or ``"faithful"`` — 3-story only
-            (the explicit ``struct3.m`` rigid floor diaphragms).
+        fidelity: ``"simplified"`` (default) or ``"faithful"`` — the explicit
+            ``struct#.m`` master-slave floor ties (``slv_tbl``).  Off by
+            default: the ties move the base shear by ~0.004 % (the beam axial
+            stiffness already ties each floor near-rigidly) while making the
+            transient ~35× slower under the ``Transformation`` handler.
     """
     md = load_model(building=building, nonlinear=nonlinear, backbone=backbone)
     mesh = preprocess_model(md, preprocess_config(panel_zone=panel_zone))
     cfg = builder_config(backbone, hinge_model) if nonlinear else {}
+    # The benchmark's ``slv_tbl`` horizontal floor ties, opt-in under
+    # ``fidelity="faithful"``.  Applied inside ``build_domain`` via the
+    # ``floor_ux_ties`` config, so they survive the transient runner's
+    # per-record domain rebuilds.  They are off by default: the beam axial
+    # stiffness already ties each floor near-rigidly, so the explicit tie moves
+    # the base shear by ~0.004% while the ``equalDOF`` constraints make the
+    # transient ~35× slower (the ``Transformation`` handler condenses each
+    # master-slave tie).
+    ties: list[list[str]] = []
+    if fidelity == "faithful":
+        if building == 3:
+            ties = [list(g["nodes"]) for g in _FAITHFUL_DIAPHRAGMS]
+        elif building in (9, 20):
+            ties = _floor_ux_tie_groups(building)
+    if ties:
+        cfg["floor_ux_ties"] = ties
     b = AnalysisBuilder(mesh, cfg)
     b.build_domain()
-    if fidelity == "faithful" and building == 3:
-        _add_faithful_diaphragms(mesh)
     return b
 
 

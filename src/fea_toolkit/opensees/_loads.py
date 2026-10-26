@@ -1076,6 +1076,41 @@ class LoadMixin:
                     continue
         return applied
 
+    def _apply_floor_ux_ties(self) -> int:
+        """Apply 1-DOF horizontal floor ties (``equalDOF`` on ux).
+
+        The SAC benchmark's ``slv_tbl`` is a **master-slave horizontal tie**
+        (direction 1 only), not a full rigid diaphragm: every node at a floor
+        level is tied to that level's master node in the lateral (X) DOF so the
+        floor translates as a rigid horizontal bar, while each node keeps its
+        own vertical and rotational DOFs.  The builder emits one
+        ``ops.equalDOF(master, slave, 1)`` per slave.
+
+        Driven by the ``floor_ux_ties`` config — a list of node-ID groups,
+        each ``[master_id, slave_id, ...]``.  Node IDs resolve to OpenSees tags
+        through ``mesh_model.nodes``; a group whose master is missing is
+        skipped.  Applied inside :meth:`build_domain`, so the ties survive the
+        transient runner's per-record domain rebuilds.
+
+        Returns:
+            Number of ``equalDOF`` ties applied.
+        """
+        groups = self.config.get("floor_ux_ties", None)
+        if not groups:
+            return 0
+        applied = 0
+        for group in groups:
+            master = self.mesh_model.nodes.get(group[0])
+            if master is None:
+                continue
+            for nid in group[1:]:
+                nd = self.mesh_model.nodes.get(nid)
+                if nd is None:
+                    continue
+                ops.equalDOF(master.node_tag, nd.node_tag, 1)
+                applied += 1
+        return applied
+
 
 # ── Standalone load-transform helpers ───────────────────────────────
 

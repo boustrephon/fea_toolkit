@@ -621,6 +621,7 @@ class AnalysisBuilder(
             self._create_elements()
             self._create_limit_state_columns()
             self._apply_rigid_diaphragms()
+            self._apply_floor_ux_ties()
             self._apply_rigid_bodies()
             return self
         finally:

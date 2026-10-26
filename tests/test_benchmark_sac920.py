@@ -69,3 +69,42 @@ def test_trilinear_builder_builds(building):
         assert m["periods"][0] > 0.0
     finally:
         wipe()
+
+
+@pytest.mark.parametrize(
+    "building,expected_levels",
+    [(9, 9), (20, 21)],
+)
+def test_floor_ux_tie_groups(building, expected_levels):
+    """The ``slv_tbl`` floor ties skip the base and ground-tie levels.
+
+    Each tied level yields one ``[master, *5 slaves]`` group with the middle
+    line (``{j}-2``) as master.  The 9-story ties 9 levels (2..10, skipping the
+    base 0 and ground-tie 1); the 20-story ties 21 levels (1 and 3..21, skipping
+    the base 0 and ground-tie 2) — matching ``struct#.m``'s master-slave table.
+    """
+    from fea_toolkit.benchmarks.sac import _floor_ux_tie_groups
+
+    groups = _floor_ux_tie_groups(building)
+    assert len(groups) == expected_levels
+    for group in groups:
+        assert len(group) == 6  # master + 5 slaves
+        master = group[0]
+        assert master.endswith("-2")  # middle line
+        slaves = group[1:]
+        assert len(set(slaves)) == 5
+        # every slave is at the same level as its master
+        for s in slaves:
+            assert s.split("-")[0] == master.split("-")[0]
+
+
+def test_faithful_fidelity_applies_floor_ties():
+    """``fidelity='faithful'`` wires the floor ties into the builder config."""
+    from openseespy.opensees import wipe
+
+    wipe()
+    try:
+        b = build_builder(building=20, backbone="trilinear", fidelity="faithful")
+        assert len(b.config.get("floor_ux_ties", [])) == 21
+    finally:
+        wipe()

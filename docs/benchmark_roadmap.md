@@ -113,11 +113,12 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   Anchored by `tests/test_benchmark_sac920.py`: the 9-story reproduces all five
   frequencies to ≤ 0.4 % and the 20-story all ten to ≤ 0.25 % (tighter than the
   `fema355c` generator's B1 anchor, because the rigidities are the benchmark's
-  own `EI1`).  The rigid floor diaphragms (`slv_tbl` master-slave) are not
-  modelled — the periods match without them.  Left for the nonlinear comparison
-  (A3/A4): the `krawinkler_gupta` panel-zone path and the 9-story gravity-bay
-  pin under `hinge_model='lumped'` (the lumped hinges re-point the member ends
-  and win over the release).
+  own `EI1`).  The rigid floor diaphragms (`slv_tbl` master-slave) are opt-in
+  under ``fidelity="faithful"`` — they move the base shear by ~0.004 % (the
+  beam axial stiffness already ties each floor) and are off by default.  Left
+  for the nonlinear comparison (A3/A4): the `krawinkler_gupta` panel-zone path
+  and the 9-story gravity-bay pin under `hinge_model='lumped'` (the lumped
+  hinges re-point the member ends and win over the release).
 - **A3 — NLTHA + peak extraction (recorders landed; P-Δ / Rayleigh confirmed).**
   `run_transient_analysis` now records the seven peak quantities — drift (from
   `displacements`), per-node velocity / acceleration, base shear (global
@@ -220,10 +221,23 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   term: the 20-story base shear drops from +5…+52 % to −1…+29 % against the
   targets, with drift and ``xdd_max`` unchanged (the fix only touches the base-
   shear quantity).  The residual is concentrated at **Kobe 1.0** (+29 % base
-  shear alongside +44 % drift — the yielding/backbone behaviour, not the tie)
-  and, secondarily, the still-open ~10 % elastic-side over-response whose
-  acceleration signature (``xdd_max`` ~+10 % with a near-perfect drift) points
-  at the unmodelled rigid floor diaphragms rather than the hinge.
+  shear alongside +44 % drift).
+
+  **Floor-diaphragm hypothesis — refuted.**  The benchmark's ``slv_tbl``
+  master-slave floor tie (a 1-DOF ``equalDOF`` on the horizontal X, not a full
+  rigid diaphragm) was implemented as an opt-in ``fidelity="faithful"`` path
+  (``_apply_floor_ux_ties`` / ``_floor_ux_tie_groups``) and tested on the
+  20-story: it moves the base shear by **~0.004 %** while making the transient
+  **~35× slower** (the ``Transformation`` handler condenses each of the 105
+  master-slave ties).  The beam axial stiffness (``EA`` from ``mat_tbl``)
+  already ties each floor near-rigidly, so the explicit tie is a second-order
+  effect — and the ARPACK modal solve hangs with the ties active.  The residual
+  at Kobe 1.0 therefore lies in the **nonlinear hinge/backbone behaviour at
+  high intensity** (the model yields harder: drift +44 % and base shear +29 %
+  together), not in the diaphragm, mass, damping or elastic stiffness — all of
+  which have now been individually ruled out.  The trilinear post-yield
+  segments (``EI2``/``EI3``) and yield moment (``My = EI1·d1``) at the 20-story
+  member scale are the next thing to scrutinise.
 - **B4 — Phase-I base isolation — deferred.** Needs a base-isolation element
   path the toolkit does not have (friction pendulum / elastomeric isolator).
 
