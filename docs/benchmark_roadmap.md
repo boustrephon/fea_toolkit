@@ -241,7 +241,12 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   (``seismic_mass1`` = 2.6561e5 kg, below the ground tie but unrestrained)
   still contributed its ``m·ag`` rigid-body term.  ``_free_dof_node_tags`` now
   also drops nodes at or below the highest excitation-fixed elevation, matching
-  the benchmark's above-ground-only definition.
+  the benchmark's above-ground-only definition.  Re-running the 20-story Kobe
+  cases: **base shear +28.7 % → +8.9 %** (Kobe 1.0) and −0.6 % → −5.9 % (Kobe
+  0.5) — the ~2.26e6 N B-1 rigid-body term accounted for ~20 % of the
+  benchmark's ``F_max``.  Drift and ``xdd_max`` are untouched (the fix only
+  changes the base-shear quantity), so the remaining Kobe-1.0 residual is a
+  genuine ~+9 % base-shear / ~+44 % drift nonlinear-behaviour gap.
 
   **Floor-diaphragm hypothesis — refuted.**  The benchmark's ``slv_tbl``
   master-slave floor tie (a 1-DOF ``equalDOF`` on the horizontal X, not a full
