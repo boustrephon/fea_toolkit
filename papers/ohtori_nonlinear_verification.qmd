@@ -1,25 +1,31 @@
 ---
-title: "Nonlinear Evaluation-Model Verification of the SAC 3-Story Benchmark with OpenSees"
-subtitle: "Four concentrated-plasticity hinge formulations against the published unctrl3.mat peak response"
+title: "Nonlinear Evaluation-Model Verification of the SAC 3-, 9- and 20-Story Benchmarks with OpenSees"
+subtitle: "Concentrated-plasticity hinge formulations against the published unctrl#.mat peak response"
 author:
   - name: "Andrew Mole"
     affiliation: "Gainbridge Limited (HK)"
-date: "2026-10-25"
+date: "2026-10-26"
 abstract: |
   We reproduce the nonlinear time-history (NLTHA) peak response of the SAC
-  3-story Los Angeles steel moment frame (Ohtori, Christenson, Spencer & Dyke,
-  2004) with four OpenSees concentrated-plasticity hinge formulations, all fed
-  by the same transcribed trilinear moment–curvature backbone, and compare
-  against the published `unctrl3.mat` targets for the ten benchmark ground-
-  motion cases. With the preferred `beamWithHinges` formulation, the
-  whole-building base shear reproduces the targets to within ±11 % across all
-  ten cases (and to +1.5 % on the El Centro 1.0 anchor), and the interstorey
-  drift to within ±15 % except one outlier. The four formulations split the
-  response by mechanism: displacement and drift are robust to the hinge choice,
-  while the cyclic unloading law (Clough degradation) moves displacement and
-  yielding but not the base shear — the base shear is set by the monotonic
-  backbone and elastic stiffness. All results are regenerated from the
-  committed metrics manifest by the executable code in this document.
+  3-, 9- and 20-story Los Angeles steel moment frames (Ohtori, Christenson,
+  Spencer & Dyke, 2004) with OpenSees concentrated-plasticity hinge
+  formulations, all fed by the same transcribed trilinear moment–curvature
+  backbones, and compare against the published `unctrl#.mat` targets for the
+  ten benchmark ground-motion cases. For the 3-story frame, with the preferred
+  `beamWithHinges` formulation, the whole-building base shear reproduces the
+  targets to within ±11 % across all ten cases (and to +1.5 % on the El Centro
+  1.0 anchor), and the interstorey drift to within ±15 % except one outlier.
+  The 9- and 20-story frames run on the lumped hinge (the `beamWithHinges`
+  force-based element cannot invert its flexibility on the 20-story's box
+  columns): the 9-story base shear lands within −4 %/+16 % and drift within
+  ±13 % (Kobe 1.0 +51 % excepted), while the 20-story base shear is
+  systematically high (+5 % to +52 %). The four 3-story formulations split the
+  response by mechanism:
+  displacement and drift are robust to the hinge choice, while the cyclic
+  unloading law (Clough degradation) moves displacement and yielding but not
+  the base shear — the base shear is set by the monotonic backbone and elastic
+  stiffness. All results are regenerated from the committed metrics manifest by
+  the executable code in this document.
 format:
   pdf: default
   html: default
@@ -41,11 +47,13 @@ acceptance target.
 
 This note reports the nonlinear step of the independent reproduction. We build
 the 3-story frame in `fea_toolkit` (an OpenSees-based toolkit) and compare its
-peak response against `unctrl3.mat`. Because OpenSees has no element that
-reproduces the benchmark member one-to-one, we ship **four** concentrated-
-plasticity formulations fed by the same transcribed backbone, and use the
-comparison to answer the question the package exists to answer: *which
-nonlinear-modelling choice moves which response quantity, and by how much.*
+peak response against `unctrl3.mat`; the 9- and 20-story frames are run on the
+lumped hinge and compared against `unctrl9.mat` / `unctrl20.mat`. Because
+OpenSees has no element that reproduces the benchmark member one-to-one, we
+ship **four** concentrated-plasticity formulations for the 3-story frame fed
+by the same transcribed backbone, and use the comparison to answer the
+question the package exists to answer: *which nonlinear-modelling choice moves
+which response quantity, and by how much.*
 
 # Benchmark model
 
@@ -197,6 +205,68 @@ for ax, q, title, s in zip(axes, quantities, titles, scales):
 fig.tight_layout()
 ```
 
+# 9- and 20-story frames {#sec-results-920}
+
+## The taller frames run on the lumped hinge
+
+The `beamWithHinges` force-based element cannot build the 20-story frame: its
+6×6 flexibility matrix is ill-conditioned for the 15×15 box columns
+(Iz ≈ 1.2e-3 m⁴), so `ForceBeamColumn3d::getInitialStiff()` fails to invert
+flexibility. The failure is driven by the small inertia alone — area, torsion,
+break curvature and iteration settings are immaterial. The 9-story frame builds
+under `beamWithHinges`, but its gravity-bay moment release is incompatible with
+the lumped hinge (which re-points both member ends, so lumped hinges win over
+releases). Both taller frames therefore run on the **lumped hinge**
+(formulation A: an `elasticBeamColumn` interior with trilinear zero-length end
+springs), which is robust at these sizes at the cost of a ~4.8 % elastic
+softening (T1 × 1.041) relative to the benchmark's exact `6EI1/L` stiffness.
+
+@tbl-920 summarises the lumped-hinge peak response against the published
+`unctrl9.mat` / `unctrl20.mat` targets, read from the committed manifest
+(@sec-reproducibility).
+
+```{python}
+#| label: tbl-920
+#| warning: false
+import json
+
+from fea_toolkit.benchmarks.sac_response_data import CASE_ORDER, UNCTRL_TARGETS
+from fea_toolkit.benchmarks.sac_run import manifest_path
+
+manifest = json.loads(manifest_path().read_text())
+
+def _pct(got, ref):
+    return 100.0 * (got - ref) / ref
+
+print("| building | case | d_max (got / tgt) | xdd (got / tgt, m/s²) | F_max ×2 (got / tgt, MN) | N_d (got / tgt) |")
+print("|---|---|---|---|---|---|")
+for building in (9, 20):
+    row = {f"{r['record']} {r['intensity']:g}": r for r in manifest if r["building"] == building}
+    targets = UNCTRL_TARGETS[building]
+    for rec, i in CASE_ORDER:
+        k = CASE_ORDER.index((rec, i))
+        r = row[f"{rec} {i:g}"]
+        t = {q: v[k] for q, v in targets.items()}
+        print(
+            f"| {building} | {rec} {i:g} | {r['d_max']:.4f} / {t['d_max']:.4f} ({_pct(r['d_max'], t['d_max']):+.0f} %) | "
+            f"{r['xdd_max']:.2f} / {t['xdd_max']:.2f} ({_pct(r['xdd_max'], t['xdd_max']):+.0f} %) | "
+            f"{r['F_max']/1e6:.2f} / {t['F_max']/1e6:.2f} ({_pct(r['F_max'], t['F_max']):+.0f} %) | "
+            f"{r['N_d']} / {t['N_d']:g} |"
+        )
+```
+
+: The lumped-hinge peak response of the 9- and 20-story frames against the
+published targets. {#tbl-920}
+
+The lumped hinge reproduces the 9-story base shear to within −4 %/+16 % and
+drift to within ±13 % outside the Kobe 1.0 outlier (+51 %). For the 20-story
+the same hinge over-predicts the base shear systematically — +5 % on the weak
+records up to +52 % on Kobe 1.0 — while the drift again stays within ±13 %
+outside Kobe 1.0 (+44 %). The base-shear over-prediction grows with record
+intensity, so the lumped hinge's ~4.8 % elastic softening does not translate
+into a soft side on the taller frame; drift is robust to the hinge while the
+base shear is not, mirroring the 3-story finding.
+
 # Discussion
 
 ## The base shear is now reproduced, not 6–19 % high
@@ -237,10 +307,14 @@ An independent OpenSees implementation reproduces the published `unctrl3.mat`
 peak response of the SAC 3-story frame: base shear to within ±11 % across all
 ten cases (and +1.5 % on the El Centro anchor), drift to within ±15 % except
 one outlier, with a consistent (slightly conservative) yielded-hinge count. The
-four hinge formulations confirm that **the base shear is governed by the
-monotonic backbone and elastic stiffness, while displacement and yielding are
-governed by the cyclic law** — the modelling decision matters *where* it
-matters, and no single formulation is best for every check.
+9- and 20-story frames now run to completion on the lumped hinge: the 9-story
+base shear reproduces `unctrl9.mat` to within −4 %/+16 % and drift to ±13 %
+(Kobe 1.0 +51 % excepted), while the 20-story base shear is systematically
+over-predicted (+5 % to +52 %). The four hinge formulations
+confirm that **the base shear is governed by the monotonic backbone and elastic
+stiffness, while displacement and yielding are governed by the cyclic law** —
+the modelling decision matters *where* it matters, and no single formulation is
+best for every check.
 
 # Reproducibility {#sec-reproducibility}
 
@@ -253,18 +327,18 @@ benchmark-relevant source files (so a case re-runs only when its inputs change):
 #| eval: false
 from fea_toolkit.benchmarks.sac_run import run_matrix, write_manifest
 
-rows = run_matrix(buildings=(3,), hinge_model="beam_with_hinges", backbone="trilinear")
+rows = []
+rows += run_matrix(buildings=(3,), hinge_model="beam_with_hinges", backbone="trilinear")
+rows += run_matrix(buildings=(9, 20), hinge_model="lumped", backbone="trilinear")
 write_manifest(rows)  # → docs/assets/sac_nltha/sac_nltha_metrics.json
 ```
 
 The four ground-motion records (El Centro, Hachinohe, Northridge, Kobe) are
 extracted from the SAC archive into the non-redistributable `data/ground_motion/`
 mirror (`scripts/fetch_ground_motions.py`); the targets are transcribed in
-`fea_toolkit.benchmarks.sac_response_data`. The 9- and 20-story nonlinear
-models build (their elastic anchors match Ohtori to ≤ 0.4 %) but their NLTHA is
-not yet converged — the 9-story gravity-bay release and the `beamWithHinges`
-flexibility on the taller frames are open refinements, so this note is scoped to
-the 3-story frame.
+`fea_toolkit.benchmarks.sac_response_data`. The 9- and 20-story frames run on
+the lumped hinge (@sec-results-920); their elastic anchors match Ohtori to
+≤ 0.4 %.
 
 # References {.unnumbered}
 
