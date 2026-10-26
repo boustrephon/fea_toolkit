@@ -186,22 +186,27 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   `Nonlin12` interpolation is needed.  The 3-story ten-case matrix is run (see
   `sac_trilinear_hinge_approaches.md` and the nonlinear paper).
 
-  **9/20-story NLTHA — `beamWithHinges` fails for the box columns; the lumped
-  hinge is the working path.**  The 20-story's corner columns are 15×15 box
-  tubes whose flexural inertia (Iz ≈ 1.2e-3 m⁴) is ~4× smaller than the W
-  columns'.  The force-based `beamWithHinges` element assembles its 6×6 element
-  flexibility from the hinge (`Uniaxial` Mz) plus the elastic interior, and for
-  that small Iz the matrix is ill-conditioned — `ForceBeamColumn3d::update()`
-  prints "could not invert flexibility" and the analysis dies.  The lumped
-  hinge (`elasticBeamColumn` + `zeroLength` spring) is displacement-based and
-  robust, so the 9/20-story matrix runs `hinge_model='lumped'` +
-  `backbone='trilinear'` (the ~4–5 % elastic softening vs the exact
-  `beamWithHinges` is acceptable for the taller frames).  The Rayleigh anchor
-  periods are still taken from the *elastic* model (the lumped model is ~3×
-  larger, making a `fullGenLapack` solve impractically slow; and the damping is
-  an elastic property).  The 9-story gravity-bay release is skipped under the
-  lumped hinge (lumped hinges re-point the member ends and win over the
-  release), as before.
+  **9/20-story NLTHA — `beamWithHinges` is unusable for the taller frames; the
+  lumped hinge is the working path.**  The force-based `beamWithHinges` element
+  inverts its 6×6 flexibility matrix, and that inversion is ill-conditioned at
+  *both* stiffness extremes: on the 20-story the **soft** members (I33 ≲ 1.5e-3
+  m⁴ — the 15×15 box columns but also the upper W columns and beams) fail at
+  build (`ForceBeamColumn3d::getInitialStiff()` prints "could not invert
+  flexibility"); on the 9-story the **stiff** basement columns (I33 ≈ 3.4e-3
+  m⁴) build but die at step 7 of the transient.  Only the 3-story sits in the
+  element's sweet spot.  The lumped hinge (`elasticBeamColumn` + `zeroLength`
+  spring) is displacement-based and robust at both extremes, so the 9/20-story
+  matrix runs `hinge_model='lumped'` + `backbone='trilinear'` (a ~4–5 % elastic
+  softening vs the exact `beamWithHinges`).  A "hybrid" (`beamWithHinges` for
+  the stiff members, lumped for the soft) was probed and abandoned — the
+  soft-member set is broad enough that it collapses to the full lumped path,
+  and the two hinge material-tag counters collide.  The 3-story **four-way
+  matrix** (lumped / bwh+Hysteretic / bwh+Steel02 / bwh+Clough) is now run: B
+  is the best (base shear −11…+7 %, drift −14…+48 %), and D (Clough, β = 0.5)
+  is unstable — it loses convergence on 4 of the 10 strong cases.  The Rayleigh
+  anchor periods are taken from the *elastic* model (ARPACK, milliseconds).
+  The 9-story gravity-bay release is skipped under the lumped hinge (lumped
+  hinges re-point the member ends and win over the release), as before.
 - **B4 — Phase-I base isolation — deferred.** Needs a base-isolation element
   path the toolkit does not have (friction pendulum / elastomeric isolator).
 
