@@ -238,6 +238,24 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   which have now been individually ruled out.  The trilinear post-yield
   segments (``EI2``/``EI3``) and yield moment (``My = EI1·d1``) at the 20-story
   member scale are the next thing to scrutinise.
+
+  **Material-model hypothesis — ruled out (kinematic + 3 % hardening, both).**
+  The Ohtori paper describes the member model verbatim as *"a bilinear
+  hysteresis model is used to characterize the nonlinear bending stiffness"* —
+  the standard **kinematic** (Bauschinger) steel model, not isotropic
+  hardening; the cyclic law itself lives in the compiled ``Nonlin12`` S-function
+  (unpublished source).  The published ``mat_tbl`` backbone is uniform across
+  every member: ``EI3/EI1 = 0.0300`` exactly (a **3 % work-hardening** slope
+  beyond ``d2``), ``EI2/EI1 ≈ 0.905`` (the near-elastic "rounding" knee over the
+  short ``d2/d1 ≈ 1.053`` range), and ``My = EI1·d1``.  The toolkit reproduces
+  this backbone byte-for-byte and emits it as a **kinematic** ``Hysteretic``
+  (Masing) or ``Steel02`` (Menegotto–Pinto) hinge with the same 3 % hardening —
+  so there is **no difference in hardening type or magnitude**.  The only
+  divergence is the *shape* of the yield transition (the benchmark's smooth
+  yield-index α interpolation vs the sharp ``Hysteretic`` corner), which the
+  ``Steel02`` formulation already smooths and which the 3-story four-way matrix
+  showed to be a ±4 % base-shear effect, not ±29 %.  The Kobe-1.0 residual is
+  therefore **not** the material model either.
 - **B4 — Phase-I base isolation — deferred.** Needs a base-isolation element
   path the toolkit does not have (friction pendulum / elastomeric isolator).
 
