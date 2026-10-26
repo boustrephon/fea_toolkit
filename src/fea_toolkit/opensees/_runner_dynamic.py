@@ -12,22 +12,39 @@ logger = logging.getLogger(__name__)
 
 
 def _free_dof_node_tags(mesh_model: Any, dof: int) -> set[int]:
-    """Node tags whose excitation DOF is unrestrained.
+    """Node tags whose mass contributes to the lateral base shear above ground.
 
-    A node whose ``dof`` is fixed (e.g. a lateral ground tie below a building)
-    has its mass anchored to the support: the support carries that node's
-    ``m·ag`` rigid-body force directly, not the structure's lateral load path,
-    so the node's mass must be excluded from the base-shear sum
-    ``Σ m·(a_rel + ag)``.  Models with no restraint table (or no restraint on
-    a given node) treat that node as free.
+    The benchmark base shear ``Σ m·(a_rel + ag)`` sums only the **above-ground**
+    storeys (the benchmark's ``EvalNLBM.m`` ``mi`` vector starts at the first
+    floor above the ground tie).  Two node sets are therefore excluded:
+
+    1. nodes whose excitation ``dof`` is fixed (a lateral ground tie) — their
+       mass is anchored to the support, which carries ``m·ag`` directly;
+    2. nodes at or below the *ground* elevation — the highest elevation at
+       which the excitation DOF is restrained — i.e. the below-ground
+       substructure (basements between the pinned base and the ground tie),
+       whose inertia is carried by the foundation rather than the lateral load
+       path.  This matters for buildings with more than one basement: the
+       20-story SAC frame has a **free** B-1 level below its ground tie, and its
+       ``m·ag`` rigid-body term must not enter the base-shear sum.
+
+    Models with no restraint table (or no restraint on a node) treat that node
+    as free; models with no excitation-fixed node apply no ground exclusion.
     """
     restraints = getattr(mesh_model, "restraints", None) or {}
-    free: set[int] = set()
+    free: list[tuple[int, float]] = []
+    fixed_z: list[float] = []
     for nd in mesh_model.nodes.values():
+        z = float(getattr(nd, "z", 0.0))
         r = restraints.get(nd.node_id)
         if r is None or int(r.dofs[dof - 1]) == 0:
-            free.add(int(nd.node_tag))
-    return free
+            free.append((int(nd.node_tag), z))
+        else:
+            fixed_z.append(z)
+    if not fixed_z:
+        return {tag for tag, _ in free}
+    ground_z = max(fixed_z)
+    return {tag for tag, z in free if z > ground_z}
 
 
 class TransientRunnerMixin:

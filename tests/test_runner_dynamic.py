@@ -132,30 +132,43 @@ def test_smoke_runs_and_returns_finite(builder):
 
 
 class _NodeStub:
-    def __init__(self, node_id: str, node_tag: int):
+    def __init__(self, node_id: str, node_tag: int, z: float = 0.0):
         self.node_id = node_id
         self.node_tag = node_tag
+        self.z = z
 
 
 class _MeshStub:
     def __init__(self):
         self.nodes = {
-            "a": _NodeStub("a", 1),
-            "b": _NodeStub("b", 2),
-            "c": _NodeStub("c", 3),
+            "base": _NodeStub("base", 1, 0.0),
+            "b1": _NodeStub("b1", 2, 3.0),
+            "ground": _NodeStub("ground", 3, 6.0),
+            "floor": _NodeStub("floor", 4, 10.0),
         }
         self.restraints = {
-            "a": Restraint([1, 1, 1, 1, 1, 1]),  # fully fixed → X and Y restrained
-            "b": Restraint([0, 1, 0, 1, 0, 1]),  # X free, Y restrained
-            # "c" has no restraint entry → treated as free
+            "base": Restraint([1, 1, 1, 1, 1, 1]),  # pinned base — all DOFs fixed
+            "b1": Restraint([0, 1, 0, 1, 0, 1]),  # below-ground basement — X free
+            "ground": Restraint([1, 1, 0, 1, 0, 1]),  # ground tie — X fixed
+            # "floor" has no restraint entry → treated as free
         }
 
 
-def test_free_dof_node_tags_excludes_fixed_excitation_dof():
-    """The base-shear node set drops mass whose excitation DOF is fixed."""
+def test_free_dof_node_tags_excludes_fixed_and_below_ground():
+    """The base-shear node set drops fixed DOFs *and* the below-ground basement.
+
+    Matches the benchmark's ``F_max = Σ mi·xdd``, which sums only the
+    above-ground storeys: the pinned base (fixed), the ground tie (fixed), and
+    the free B-1 basement below the ground tie all fall out, leaving only the
+    above-ground floor.
+    """
     from fea_toolkit.opensees._runner_dynamic import _free_dof_node_tags
 
     mesh = _MeshStub()
-    assert _free_dof_node_tags(mesh, 1) == {2, 3}  # X: "a" fixed → excluded
-    assert _free_dof_node_tags(mesh, 2) == {3}  # Y: "a" and "b" fixed → excluded
-    assert _free_dof_node_tags(mesh, 3) == {2, 3}  # Z: only "a" (fully fixed) restrained
+    # X (lateral): base + ground tie fixed; B-1 free but below ground → excluded.
+    assert _free_dof_node_tags(mesh, 1) == {4}
+    # Y: base, B-1 and ground all fixed in Y → only the floor survives.
+    assert _free_dof_node_tags(mesh, 2) == {4}
+    # Z: only the base is fixed in Z → B-1, ground and floor are all free
+    # and above the base (z=0).
+    assert _free_dof_node_tags(mesh, 3) == {2, 3, 4}
