@@ -220,8 +220,28 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   excitation DOF (``_runner_dynamic._free_dof_node_tags``), which removes that
   term: the 20-story base shear drops from +5…+52 % to −1…+29 % against the
   targets, with drift and ``xdd_max`` unchanged (the fix only touches the base-
-  shear quantity).  The residual is concentrated at **Kobe 1.0** (+29 % base
-  shear alongside +44 % drift).
+  shear quantity).
+
+  **Ground-motion records — verified byte-exact against the benchmark archive.**
+  The four signals (``ELCENTRO``/``HACHINOHE``/``NORTHRIDGE``/``KOBE``) were
+  compared to the benchmark's own ``*.mat`` files
+  (``Files_bldg_full3.zip → MATLAB_Utility/*.mat``): El Centro, Hachinohe and
+  Northridge are byte-identical; Kobe agrees to ~7 significant digits (the CSV
+  transcription rounds the last decimal — max |Δ| ≈ 3e-7 m/s² on a PGA of
+  8.18 m/s²).  ``dt`` (0.02 / 0.01), units (m/s²) and the linear intensity
+  scaling (``Run_NLBM.m``'s ``intensity`` gain, 0.5 / 1.0 / 1.5) all match; the
+  ``unctrl#.mat`` targets are transcribed byte-for-byte into
+  ``sac_response_data.py``.  The records and targets are therefore locked down.
+
+  **Below-ground basement mass — a second base-shear bug.**  ``EvalNLBM.m``'s
+  ``F_max = Σ mi·xdd_i`` sums only the **above-ground** storeys (its ``mi``
+  vector starts at the first floor above the ground tie), so the benchmark
+  excludes the below-ground substructure.  The earlier fix only dropped the
+  ux-fixed ground-tie nodes, so the 20-story's **free B-1 basement** level
+  (``seismic_mass1`` = 2.6561e5 kg, below the ground tie but unrestrained)
+  still contributed its ``m·ag`` rigid-body term.  ``_free_dof_node_tags`` now
+  also drops nodes at or below the highest excitation-fixed elevation, matching
+  the benchmark's above-ground-only definition.
 
   **Floor-diaphragm hypothesis — refuted.**  The benchmark's ``slv_tbl``
   master-slave floor tie (a 1-DOF ``equalDOF`` on the horizontal X, not a full
