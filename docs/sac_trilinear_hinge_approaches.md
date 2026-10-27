@@ -114,9 +114,9 @@ doubled (`Num_MRF = 2`); see `benchmark_roadmap.md` §2 A4.
 | quantity | target | A (lumped) | B (bwh+Hyst) | C (bwh+Steel02) | D (bwh+Clough) |
 |---|---|---|---|---|---|
 | roof disp. (m) | 0.151 | 0.153 (+1 %) | 0.149 (−1 %) | 0.145 (−4 %) | — (no conv.) |
-| base shear ×2 (MN) | 10.12 | 10.15 (+0.3 %) | 10.27 (+1.5 %) | 10.23 (+1.1 %) | — (no conv.) |
+| base shear ×2 (MN) | 10.12 | 10.14 (+0.2 %) | 10.27 (+1.5 %) | 10.23 (+1.1 %) | — (no conv.) |
 | max. drift | 0.0150 | 0.0155 (+3 %) | 0.0148 (−1 %) | 0.0143 (−5 %) | — (no conv.) |
-| roof abs. accel (m/s²) | 6.54 | 7.09 (+8 %) | 6.95 (+6 %) | 6.54 (0 %) | — (no conv.) |
+| roof abs. accel (m/s²) | 6.54 | 7.11 (+8.7 %) | 6.95 (+6 %) | 6.54 (0 %) | — (no conv.) |
 | yielded hinges `Nd` | 22 | 22 | 22 | 22 | — (no conv.) |
 
 **D (bwh + Clough) does not converge on El Centro 1.0** — its
@@ -131,8 +131,8 @@ drift 0.0207, roof accel 10.03 m/s², `Nd = 0`.
 
 The four formulations split the five quantities cleanly by mechanism:
 
-* **A (lumped)** is closest on **base shear** (+0.3 %) and roof (+1 %) but is
-  the softest elastically (T1 ≈ 1.041 s) and worst on roof acceleration (+8 %).
+* **A (lumped)** is closest on **base shear** (+0.2 %) and roof (+1 %) but is
+  the softest elastically (T1 ≈ 1.041 s) and worst on roof acceleration (+8.7 %).
 * **B (bwh + Hysteretic)** holds the exact elastic stiffness and is closest on
   **roof** (−1 %) and **drift** (−1 %), with base shear +1.5 %.
 * **C (bwh + Steel02)** keeps the exact elastic stiffness and is closest on
@@ -152,7 +152,7 @@ that the cyclic law does not affect base shear — only that the two changes
 together leave it within ±1.5 %.  The three converged formulations land within ±4 % of
 the published base shear — the two `beamWithHinges` forms (B/C, both T1 ≈
 0.993 s) cluster at 10.27 / 10.23 MN and the softer lumped hinge (T1 ≈ 1.041 s)
-at 10.15 MN.
+at 10.14 MN.
 
 ## The base shear is reproduced
 

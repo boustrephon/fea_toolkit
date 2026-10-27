@@ -156,7 +156,7 @@ nav:
       - Vecchio & Emara Benchmark: vecchio_emara_benchmark.md
       - Duong Shear-Critical Frame Benchmark: duong_benchmark.md
       - Cantilever Benchmark (T1): cantilever_benchmark.md
-      - Shear-Building Benchmark (T2): shear_building_benchmark.md
+      - Shear-Building Benchmark (T1): shear_building_benchmark.md
       - SAC 3-Story Frame Benchmark (T2): sac_benchmark.md
       - SAC 3-Story Nonlinear Benchmark (T4): sac_nonlinear_benchmark.md
       - SAC Trilinear Hinge — Four Approaches: sac_trilinear_hinge_approaches.md

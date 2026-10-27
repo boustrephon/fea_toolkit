@@ -42,7 +42,7 @@ same curve, with different extras:
 | C→D | `θpc` | negative-stiffness branch |
 | D (`b`) | `Mr = κ·My` | residual |
 | E | `θu` | collapse |
-| `c` (hardening) | `as_pos`/`as_neg` | post-yield hardening |
+| `c` (hardening) | `mc_my` (`FmaxFy`) | post-yield hardening (capping ratio) |
 
 The difference: **ASCE 41 is a monotonic backbone + acceptance criteria
 (IO/LS/CP)** for pushover evaluation — it has **no cyclic-deterioration law**.
@@ -175,9 +175,10 @@ Transcribed verbatim from Lignos' EPFL component tool
 
 `My = Zx·Fy` (nominal; the PEER 1.1 expected-strength factor is a caller
 option), `Mc = mc_my·My` (default 1.05), `Mr = κ·My` (default κ = 0.4),
-`θu = θp + θpc + 0.02` (default).  The hardening ratio `as = (mc_my − 1)·My/(K0·θp)`
-is derived in the hinge machinery so `Mc` is reproduced exactly regardless of
-the `K0` convention.
+`θu = θp + θpc + 0.02` (default).  ``mc_my`` maps directly to ``IMKBilin``'s
+``FmaxFy`` (capping ratio) and ``κ``/``res`` to ``FresFy`` (residual ratio);
+there is no derived hardening ratio ``as`` — the post-yield hardening is folded
+into the capping point ``(θp, Mc)``.
 
 ### Columns (transcribed — Lignos et al. 2019 / ASCE 41-17)
 

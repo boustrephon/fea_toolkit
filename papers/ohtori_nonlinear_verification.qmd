@@ -31,7 +31,8 @@ format:
   html:
     code-fold: true
   pdf:
-    echo: false
+    execute:
+      echo: false
 number-sections: true
 bibliography: references.bib
 ---
