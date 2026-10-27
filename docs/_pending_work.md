@@ -9,7 +9,7 @@ category: [planning]
 
 ## Strategy — the next steps
 
-> The register is the single source of truth; this section is the
+> This log is the single source of truth for pending work; this section is the
 > *sequencing layer* over it (maintained 2026-10-14).  The standalone plan
 > documents are historical records — `analysis_builder_migration_plan.md`,
 > `csm_test_model_plan.md`, `deprecation_plan.md` and `linting_fix_plan.md`
@@ -139,7 +139,8 @@ warranted — `pushover_step_stride` and the per-block flags are the answer):
 > Priority-ordered register of **open** work (maintained 2026-10-14).  Every
 > item is cross-referenced to its source document.  Completed work — the
 > Tier 1–2 physics items, the Tier 3 workflow/GUI batch (P20–P38), and the
-> deferred-housekeeping closures — is recorded in the DONE register below, so
+> deferred-housekeeping closures — is recorded in the
+> [`history/_done_log.md`](history/_done_log.md) archive, so
 > this list shows only what remains.
 
 ### Tier 3 — Feature gaps (placeholders / partial)
@@ -247,7 +248,7 @@ interaction became configurable: an `InteractionPolicy` (presets over knobs), th
 click-versus-drag gesture, a tighter picking region, node priority and the
 settings file.  The explicit Select / Orbit modes and modeless multi-select
 (Shift/Ctrl-click add/toggle, a marquee drag) landed 2026-09-30 with the
-multi-selection work (see the DONE register).  Two follow-ups remain:
+multi-selection work (see [`history/_done_log.md`](history/_done_log.md)).  Two follow-ups remain:
 
 1. **element-label display toggle** — `view.show_labels` is still greyed
    because nothing renders node/element labels; it needs a `labels` category
@@ -641,14 +642,13 @@ layers (Phases 1–4) are stable.
   wheel's PSUMAT is a stub and CSMM construction fails, so it stays inert
   until a full (non-restricted) build is available.  See
   `docs/shell_support.md` Options C/D1.
-- **Archive / retire the historical plan documents (2026-10-14).**  The
-  standalone plan docs that are now complete historical records
-  (`analysis_builder_migration_plan.md`, `deprecation_plan.md`,
-  `csm_test_model_plan.md`, `linting_fix_plan.md`) overlap with each other and
-  with the register's DONE entries.  Future cleanup: fold each one's unique
-  reconciliation content into the register's DONE log (or a dedicated archive
-  page), then either retire it from the nav or delete it — do **not** delete
-  without folding the unique tables first.  See the 2026-10-14 docs review.
+- **Archive / retire the historical plan documents (2026-10-14).**  ✅ **Done
+  2026-10-27** — the four complete plan docs (`analysis_builder_migration_plan.md`,
+  `deprecation_plan.md`, `csm_test_model_plan.md`, `linting_fix_plan.md`) are
+  tagged `category: [archive]`, moved to a dedicated "Archive (completed plans)"
+  nav section, and the "DONE" register was split out of this log into
+  [`history/_done_log.md`](history/_done_log.md).  The docs' unique tables are
+  preserved whole in the archived pages, so no further folding is required.
 
 #### P12 — LoadCombination table parsing (README §3 reconciliation)
 Source: repo-root `README.md` §3 "Load Combinations and Analysis Types";
@@ -802,7 +802,7 @@ with the method to re-derive it, is `docs/parser_coverage.md`.
 
 **Outline steps.** The items are independent; take them opportunistically.
 When one is wired up, delete its row from `docs/parser_coverage.md` and record
-the change in the DONE register below.
+the change in [`history/_done_log.md`](history/_done_log.md).
 
 **Tooling.** The *table*-level companion to this register is
 `docs/parser_coverage.md` § *Table coverage* +

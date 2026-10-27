@@ -8,7 +8,7 @@ related: [viewer.md, workflow.md, results_schema.md, rhino_export.md, report_gen
 ---
 # Desktop GUI Roadmap
 
-## Status: ⚠️ Partial — the application chrome and the workflow-modelling path are built.  For the current per-milestone / per-item status, see the [Pending Work Register](_pending_work.md): **P22** for the GUI roadmap and **P29–P36** for the workflow layer.
+## Status: ⚠️ Partial — the application chrome and the workflow-modelling path are built.  For the current per-milestone / per-item status, see the [Pending Work Log](_pending_work.md): **P22** for the GUI roadmap and **P29–P36** for the workflow layer.
 
 > **User-facing guide:** [`docs/gui.md`](gui.md) — what the application does
 > today, how to select, the camera and display controls, and the settings file.
@@ -19,7 +19,7 @@ This document records the **framework decision** and the **proposed
 architecture** for a native desktop GUI that wraps the workflow already
 implemented in the package.  Ten of its milestones have landed and an eleventh
 (**workflow authoring**, P29–P36) has begun; the remainder are tracked as **P22**
-and **P29**–**P36** in [Pending Work Register](_pending_work.md), and the workflow
+and **P29**–**P36** in [Pending Work Log](_pending_work.md), and the workflow
 layer itself is specified in [`workflow_authoring.md`](workflow_authoring.md).
 
 > **Where this sketch has diverged from the code.** The §6 tree below is the
@@ -475,7 +475,7 @@ The GUI must respect the existing architectural contracts:
 11. **Workflow authoring (P29–P36, added 2026-09-29).**  The `workflow` package
     (verbs, steps, recipes as data), the **Recipe dock**, the `&Recipe` menu,
     and the Model-menu items re-cast as **presets over the recipe**.  Per-phase
-    status lives in the [Pending Work Register](_pending_work.md) (P29–P36); the
+    status lives in the [Pending Work Log](_pending_work.md) (P29–P36); the
     phase → item → content map is in
     [`workflow_authoring.md`](workflow_authoring.md#roadmap).
 
@@ -653,7 +653,7 @@ class QtRenderBackend(RenderBackend):
 
 ### 9.6 Milestones with acceptance criteria
 
-> Per-milestone status is tracked in the [Pending Work Register](_pending_work.md);
+> Per-milestone status is tracked in the [Pending Work Log](_pending_work.md);
 > the ✅ / ⚠️ markers below are a historical snapshot.
 
 | # | Milestone | Acceptance criteria |

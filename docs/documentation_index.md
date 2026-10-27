@@ -95,7 +95,7 @@ for automated cross-referencing.
 - [RC Shear-Failure Modelling (MCFT Capacity + Nonlinear Shear Backbone)](shear_failure_modelling.md) — ✅ Complete
   > Two-layer RC shear-failure modelling: a simplified-MCFT member shear-capacity model and mode-of-failure reporter (ASCE 41 force-controlled check), plus a nonlinear shear backbone (SectionAggregator) for reproducing shear-critical frame failures. Validated against the Duong et al. (2007) frame.
   Tags: `validation`, `shear`, `mcft`, `capacity`, `backbone`, `duong`, `force-controlled`, `reporter`
-  Related: [Vecchio & Emara (1992) RC-Frame Pushover Benchmark](vecchio_emara_benchmark.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Deprecation Removal Plan](deprecation_plan.md)
+  Related: [Duong et al. (2007) Shear-Critical Frame Benchmark (T3)](duong_benchmark.md) · [Vecchio & Emara (1992) RC-Frame Pushover Benchmark](vecchio_emara_benchmark.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Deprecation Removal Plan](deprecation_plan.md)
 
 - [Storey-level Response Methodology](storey_response.md) — ✅ Complete
   > Storey displacement, drift, shear, and modal drift extraction and visualisation.

@@ -4,7 +4,7 @@ description: "Two-layer RC shear-failure modelling: a simplified-MCFT member she
 status: "complete"
 tags: [validation, shear, mcft, capacity, backbone, duong, force-controlled, reporter]
 category: [analysis-types]
-related: [vecchio_emara_benchmark.md, pushover_analysis.md, deprecation_plan.md]
+related: [duong_benchmark.md, vecchio_emara_benchmark.md, pushover_analysis.md, deprecation_plan.md]
 ---
 # RC Shear-Failure Modelling
 
@@ -33,6 +33,10 @@ Both layers share one physics module:
 ---
 
 ## The Duong et al. (2007) frame — why this benchmark
+
+> The canonical provenance/acceptance card is
+> [`duong_benchmark.md`](duong_benchmark.md); this section is the modelling
+> rationale behind it.
 
 Duong, Sheikh & Vecchio (2007), *ACI Structural Journal* 104(3) 304–313,
 tested a one-span, two-storey, deliberately **shear-critical** frame at the

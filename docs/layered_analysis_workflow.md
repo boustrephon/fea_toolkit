@@ -13,7 +13,7 @@ This note frames the analysis workflow as a layered system in which the SAP2000 
 > **Design record, not a status tracker.** This document is the *conceptual
 > design* of the v3 layered model.  Implementation status is tracked in
 > [`analysis_builder_migration_plan.md`](analysis_builder_migration_plan.md) (the
-> reconciliation record) and the [Pending Work Register](_pending_work.md); the
+> reconciliation record) and the [Pending Work Log](_pending_work.md); the
 > current two-stage reference is
 > [`builder_reference.md`](builder_reference.md) / [`workflow.md`](workflow.md).
 > **§11–16 below are the original implementation plan, retained for history —

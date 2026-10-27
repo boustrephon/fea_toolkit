@@ -409,8 +409,8 @@ group memberships (a node reports groups too):
 | Material | that section's material, e.g. `Steel` |
 | Groups | the groups the element belongs to, comma-joined |
 
-These are looked up from the model at click time (see the DONE register in
-`_pending_work.md` for why this is a scan, not a pre-built index).
+These are looked up from the model at click time (see `history/_done_log.md`
+for why this is a scan, not a pre-built index).
 
 
 
