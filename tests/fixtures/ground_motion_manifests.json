@@ -92,6 +92,7 @@
     "component": "N-S",
     "source_url": "https://datacenterhub.org/resources/257/HACHINOHE.csv",
     "licence": "historical Japanese strong-motion record (research use)",
+    "redistributable": false,
     "scale_factor": 1.0,
     "rotation": "as_recorded",
     "note": "Hachinohe 1968 N-S, extracted from the SAC benchmark archive (Files_bldg_full3.zip -> MATLAB_Utility/hachinhe.mat), dt=0.01 s, m/s^2"
@@ -104,6 +105,7 @@
     "component": "N-S",
     "source_url": "https://datacenterhub.org/resources/257/KOBE.csv",
     "licence": "historical Japanese strong-motion record (JMA; research use)",
+    "redistributable": false,
     "scale_factor": 1.0,
     "rotation": "as_recorded",
     "note": "Kobe 1995 JMA N-S, extracted from the SAC benchmark archive (Files_bldg_full3.zip -> MATLAB_Utility/kobe.mat), dt=0.02 s, m/s^2"
@@ -116,6 +118,7 @@
     "component": "N-S",
     "source_url": "https://datacenterhub.org/resources/257/NORTHRIDGE.csv",
     "licence": "historical US strong-motion record (CDMG/CSMIP; research use)",
+    "redistributable": false,
     "scale_factor": 1.0,
     "rotation": "as_recorded",
     "note": "Northridge 1994 Sylmar N-S, extracted from the SAC benchmark archive (Files_bldg_full3.zip -> MATLAB_Utility/northrdg.mat), dt=0.02 s, m/s^2"
