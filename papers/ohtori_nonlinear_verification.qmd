@@ -91,7 +91,8 @@ sections by `sac.enrich_trilinear()`.
 * **`dt_cal = 0.005 s`.** `struct#.m` integrates at 0.005 s (Newmark β=1/4,
   γ=1/2), sub-stepping the records' native 0.01–0.02 s sampling; integrating at
   0.02 s inflated the base shear ~55 % and `xdd_max` ~25 %.
-* **Rayleigh ζ = 2 %** at mode 1 + mode 2, no P-Δ (`geomTransf Linear`).
+* **Rayleigh ζ = 2 %** at mode 1 + mode 2 (mode 1 + mode 5 for the 20-story
+  frame, with `period_2` set explicitly to `T5`), no P-Δ (`geomTransf Linear`).
 * The transient solver uses `NewtonLineSearch` (plain Newton stalls at the
   trilinear yield corners).
 
@@ -167,7 +168,13 @@ from fea_toolkit.benchmarks.sac_response_data import CASE_ORDER, UNCTRL_TARGETS
 from fea_toolkit.benchmarks.sac_run import manifest_path
 
 manifest = json.loads(manifest_path().read_text())
-row = {f"{r['record']} {r['intensity']:g}": r for r in manifest if r["building"] == 3}
+row = {
+    f"{r['record']} {r['intensity']:g}": r
+    for r in manifest
+    if r["building"] == 3
+    and r["hinge_model"] == "beam_with_hinges"
+    and r["backbone"] == "trilinear"
+}
 targets = UNCTRL_TARGETS[3]
 
 def _pct(got, ref):
@@ -342,8 +349,10 @@ effect — is withdrawn.
 ## The four formulations split the response by mechanism
 
 * Displacement, drift and `Nd` are **robust to the hinge choice** (A/B/C within
-  ±5 % on drift) but **not to the cyclic law**: D's Clough degradation
-  over-softens the displacement (roof −17 %) and under-yields (`Nd` = 16).
+  ±5 % on drift).  The cyclic law is a separate lever — D's Clough degradation
+  diverges on the strongest records, so its peak displacement and `Nd` are not
+  comparable there; the hinge-choice comparison is therefore drawn from the
+  three formulations that converge on every case (A/B/C).
 * Base shear and roof acceleration are **insensitive to the cyclic law** but
   follow the elastic stiffness: the softer lumped hinge (A) is closest on base
   shear, while B/C hold the exact elastic stiffness.
@@ -385,6 +394,9 @@ from fea_toolkit.benchmarks.sac_run import run_matrix, write_manifest
 
 rows = []
 rows += run_matrix(buildings=(3,), hinge_model="beam_with_hinges", backbone="trilinear")
+rows += run_matrix(buildings=(3,), hinge_model="lumped", backbone="trilinear")
+rows += run_matrix(buildings=(3,), hinge_model="beam_with_hinges", backbone="trilinear_steel02")
+rows += run_matrix(buildings=(3,), hinge_model="beam_with_hinges", backbone="trilinear_clough")
 rows += run_matrix(buildings=(9, 20), hinge_model="lumped", backbone="trilinear")
 write_manifest(rows)  # → docs/assets/sac_nltha/sac_nltha_metrics.json
 ```
