@@ -463,8 +463,10 @@ class Section:
     # Trilinear flexural backbone (EI1/EI2/EI3 rigidities + break curvatures
     # d1/d2) for concentrated-plasticity members (the SAC/Ohtori benchmark).
     # ``None`` unless stamped by ``benchmarks.sac.enrich_trilinear``.  Kept
-    # after ``ecc_v3`` so positional construction of ``Section`` and its
-    # subclasses is unchanged.
+    # after ``ecc_v3`` so positional construction of the base ``Section`` class
+    # is unchanged; for *subclasses* the positional order shifts, because
+    # dataclass base fields precede the subclass fields (``ISection.depth``,
+    # ``BoxSection`` dimensions, etc. now follow ``d2``).
     ei1: Optional[float] = None
     ei2: Optional[float] = None
     ei3: Optional[float] = None

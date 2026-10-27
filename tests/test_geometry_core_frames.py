@@ -95,11 +95,13 @@ class TestSectionLibrary:
         assert hasattr(sec, "Z33")
 
 
-def test_section_library_builtin_fallback_converts_m_to_mm():
+def test_section_library_builtin_fallback_converts_m_to_mm(tmp_path):
     """The in-code AISC fallback (metre-based) converts to mm on enrichment."""
     from fea_toolkit.model.sections import SectionLibrary
 
-    lib = SectionLibrary(Path("/nonexistent/section_dict.pkl"), target_units="mm")
+    missing = tmp_path / "missing.pkl"
+    assert not missing.exists()
+    lib = SectionLibrary(missing, target_units="mm")
     sec = Section(
         name="W14X257",
         shape="I/Wide Flange",
