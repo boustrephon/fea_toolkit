@@ -26,9 +26,10 @@ verified and live in [references.bib](../papers/references.bib).
 | # | Cluster | Benchmarks | Tier / cell | Needs |
 |---|---|---|---|---|
 | 1 | **SAC-derived (steel frames)** | Krawinkler deterioration (§3); finish SAC 9/20-story A4 (§2) | T4 / moment frame | nothing new |
-| 2 | **RC frames** | DesignSafe infilled (bare → struts); E-Defense 10-storey (§4) | T4 / moment frame | diagonal-strut infill |
-| 3 | **RC shear walls** | FEMA P-695 / Marafi; SAFE/CASH squat (§5); Hidalgo buildings (§1) | T2–T4 / shear wall | none (MVLEM/fiber landed) |
+| 2 | **RC frames** | DesignSafe infilled (bare → struts); E-Defense 10- and 4-story (§4) | T4 / moment frame | diagonal-strut infill |
+| 3 | **RC shear walls** | UCSD 7-story; FEMA P-695 / Marafi; SAFE/CASH squat (§5); Hidalgo buildings (§1) | T2–T4 / shear wall | none (MVLEM/fiber landed) |
 | 4 | **Masonry / URM** | URM Benchmark Project BS1–BS6; URM shake-table database (§6) | T3–T4 / masonry | masonry/URM physics |
+| 5 | **New system types (deferred)** | PRESSS precast/PT; BRBF; CFT composite (§7) | T3–T4 / new rows | PT/self-centering, BRB, CFT section |
 
 **Cluster 1 — SAC-derived (Krawinkler first).**  Replace the ad-hoc `Clough`
 degradation hinge (β=0.5, loses convergence on 4/10 strong cases, §2 A4) with the
@@ -59,6 +60,14 @@ Beyer (2024) `10.1177/87552930241268214` (69 shake-table URM buildings).
 **Deferred.**  Li, Zuo, Zhai, Xu & Xie (2016) `10.1016/j.engstruct.2016.03.032`
 — 3-storey RC frame shake-table **collapse** test; needs contact/falling-debris
 and large-displacement physics.  Revisit after the collapse/IDA driver lands.
+
+**Component and new-type queue.**  The empty **beam-column-joint** cell is
+filled next by the Kim–LaFave–Song 341-subassemblage joint-shear database
+(`10.1680/macr.2008.00068`) and the Melo et al. full-scale joint series — see
+the register §3.  New system types (precast/PT, braced frame, composite CFT)
+are listed in §7 with their sources.  A 606 m mega-tall OpenSees model (Tian,
+Xie & Lu) is available as a cross-platform reference (modal + El Centro), not a
+CI target.
 
 ## 1. Chilean shear-wall benchmark — Hidalgo et al. (2005) — priority 3
 
@@ -398,6 +407,13 @@ first:
   RC frame+wall dual system, frame and wall directions, at E-Defense (Kang et
   al. 2023 describe the test).  Exercises lumped-plasticity frames + MVLEM walls
   + scissors joints — all already implemented — so it is a data + model task.
+- **E-Defense 2010 4-story RC + PT buildings.**  Nagae et al.; design and
+  instrumentation in PEER Report 2011/104; results in Nagae et al. (2012, WCEE)
+  and Tuna Değer et al. (2014), PURR DOI `10.4231/d33x83m2p`.  Full-scale 4-story
+  RC frame+wall and post-tensioned buildings shaken with JMA-Kobe to
+  near-collapse; blind-prediction study.  The RC building is replicable with
+  existing machinery; the PT variant needs post-tensioning/self-centering
+  materials.
 
 **Phasing.** bare-frame anchors → strut infill (equivalent-strut element, new) →
 E-Defense frame direction → wall direction.  The strut is the one new piece of
@@ -421,6 +437,12 @@ existing-element tasks (MVLEM_3D / SFI_MVLEM_3D and fiber walls are landed).
   tests); benchmark phases 1/2 Gallitre, Viallet, Szczesiak, Thénint & Fabre
   (2019), SMiRT-25 (benchmark-cash.org).  Squat-wall shear envelopes exercise
   the MVLEM shear spring (aspect ratio < 2).
+- **UCSD 7-story RC wall building slice.**  Panagiotou, Restrepo & Conte (2011),
+  *J. Struct. Eng.* 137(6), DOI `10.1061/(ASCE)ST.1943-541X.0000332` (Phase I
+  rectangular wall) and SSRP-07/08 (Phase II T-wall).  Full-scale 7-story
+  cantilever-wall slice under four California records incl. near-fault Sylmar;
+  published measured NLTHA response + a NEES/PCA blind-prediction contest.
+  Data: DesignSafe `NEES-2006-0203`, PURR DOI `10.4231/d35t3g04t`.
 
 ## 6. Masonry / URM — priority 4
 
@@ -452,6 +474,23 @@ does not have; revisit after the collapse/IDA driver lands.
   native, need transcription; the EC8 wall/frame models complement the Chilean
   set.
 - **NIST GCR 17-917-46v2** — reference only (ASCE 41 capacity models).
+- **PRESSS 5-story precast (precast / PT / self-centering)** — Priestley,
+  Sritharan, Conley & Pampanin (1999), *PCI Journal* 44(6):42–67, DOI
+  `10.15554/pcij.11011999.42.67`; full PCI Phase-3 reports (Vol 3-3 design /
+  instrumentation, 3-4 frame direction, 3-5 wall direction) at pci.org.  Needs
+  unbonded-PT + energy-dissipator materials.
+- **BRBF (braced frame)** — NIST First-Generation PBEE study Vol. 4 (pub 922024;
+  4/8/16-story archetypes) and the UT10 five-story BRBF hybrid benchmark
+  (Mojiri et al. 2021, *EESD*, DOI `10.1002/eqe.3508`).  Needs BRB truss
+  (Steel02/Hysteretic) + gusset modelling.
+- **CFT composite columns** — Denavit composite-column database
+  (mark.denavit.me/Composite-Column-Database/) and the 3,208-test CFST database
+  (Thai et al. 2020, DOI `10.82444/warw.33817750.v1`).  Needs a CFT section +
+  confined-concrete-in-tube material.
+- **606 m mega-tall building (reference model)** — Tian, Xie & Lu OpenSees TCL
+  models (luxinzheng.net), validated vs ETABS and MSC.Marc; ShellMITC4 walls +
+  coupling beams.  Cross-platform reference only (27k–81k nodes, too heavy for
+  CI).
 
 ## 8. Cross-cutting conventions
 

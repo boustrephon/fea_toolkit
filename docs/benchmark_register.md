@@ -2,7 +2,7 @@
 title: "Benchmark & Validation Model Register"
 description: "Master index of validation/benchmark models for fea_toolkit: structural-type × load-type coverage matrix, the benchmark tiers, per-type candidate sources (papers + datasets), the phased acquisition roadmap, and acceptance criteria."
 status: "partial"
-tags: [validation, benchmark, planning, pushover, nonlinear-dynamic, modal, response-spectrum, shear-wall, beam-column-joint, ground-motion, masonry, infill, collapse]
+tags: [validation, benchmark, planning, pushover, nonlinear-dynamic, modal, response-spectrum, shear-wall, beam-column-joint, ground-motion, masonry, infill, collapse, precast, braced-frame, composite]
 category: [planning]
 related: [vecchio_emara_benchmark.md, ground_motion_data.md, pushover_analysis.md, nonlinear_dynamic_analysis.md]
 ---
@@ -37,6 +37,9 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
 | Moment frame | ◐ | ◐ | ● SAC | ◐ | ● V&E, Duong | ● SAC | ○ |
 | Shear wall | ◐ | ◐ | ○ | ○ | ◐ | ○ | ○ |
 | Masonry / URM | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
+| Precast / post-tensioned | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
+| Braced frame | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
+| Composite (CFT) | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
 
 ## 3. Candidate sources by structural type
 
@@ -56,6 +59,16 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
 - **T1 anchor**: Park & Paulay (1975) joint-shear `Vjh`.
 - **Joint modelling** is a two-track workstream (see §5): rigid panel zones
   (steel + RC) *and* a full RC joint element.
+- **RC joint-shear database (Kim, LaFave & Song)** — 341 cyclic beam-column
+  joint subassemblages that failed in joint shear, with per-specimen geometry,
+  materials, axial load, loading protocol and measured joint shear
+  stress–strain.  Kim, LaFave & Song (2009), *Mag. Concr. Res.* 61(2):119–132,
+  DOI 10.1680/macr.2008.00068; Kim & LaFave (2008), *ACI Struct. J.*
+  105(6):770–780, DOI 10.14359/20105; full database in Kim (2007), Newmark
+  Report 020 (hdl.handle.net/2142/14281).
+- **Full-scale joint series** — Melo, Pohoryles, Rossetto & Varum (2021),
+  *MethodsX* 8 (PMC8374536) — full-scale cyclic beam-column joints with a
+  complete monitoring scheme and digitised load/deformation data.
 
 ### Moment frame (T4 + T2)
 
@@ -88,6 +101,11 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
 - **E-Defense 10-storey** — Janevski, Kang & Isaković (2023), DOI
   10.1007/s10518-023-01734-7 — full-scale 10-storey RC frame+wall dual system
   (frame and wall directions) tested at E-Defense; macro-model cross-code anchor.
+- **E-Defense 2010 4-story RC + PT buildings** — Nagae et al.; design and
+  instrumentation in PEER Report 2011/104; results in Nagae et al. (2012, WCEE)
+  and Tuna Değer et al. (2014), PURR DOI 10.4231/d33x83m2p.  Full-scale 4-story
+  RC frame+wall (and post-tensioned) buildings shaken with JMA-Kobe to
+  near-collapse; blind-prediction study.
 
 ### Shear wall (T3)
 
@@ -106,6 +124,12 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
   (12/15/20/22/28 storeys) with published fundamental periods (Table 1) — the
   building-level wall-system benchmark; see
   [benchmark_roadmap.md](benchmark_roadmap.md) §1.
+- **UCSD 7-story RC wall building slice** — Panagiotou, Restrepo & Conte
+  (2011), *J. Struct. Eng.* 137(6), DOI 10.1061/(ASCE)ST.1943-541X.0000332
+  (Phase I rectangular wall) and SSRP-07/08 (Phase II T-wall).  Full-scale
+  7-story cantilever-wall slice, four California records incl. near-fault
+  Sylmar; published measured NLTHA response + NEES/PCA blind-prediction
+  contest.  Data: DesignSafe `NEES-2006-0203`, PURR DOI 10.4231/d35t3g04t.
 - **UoA-UW RC Wall Database** — Shegay et al. (2021), DesignSafe DOI
   10.17603/ds2-r12q-t415 (142 walls).
 - **UCLA-RCWalls** (Abdullah 2019) — 1100+ walls.
@@ -122,6 +146,36 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
 - **Deferred — Li et al. (2016) collapse test** — DOI
   10.1016/j.engstruct.2016.03.032, a 3-storey RC frame shake-table collapse;
   needs contact / large-displacement physics (see benchmark_roadmap.md §6).
+
+### Precast / post-tensioned / self-centering (T4)
+
+- **PRESSS 5-story precast concrete building** — Priestley, Sritharan, Conley &
+  Pampanin (1999), *PCI Journal* 44(6):42–67, DOI 10.15554/pcij.11011999.42.67.
+  60%-scale 5-story (2×2 bays): four ductile precast frame systems + a
+  post-tensioned "jointed" wall system, pseudodynamic histories to ~4.5 % drift,
+  self-centering response.  The PCI Phase-3 reports (Vol 3-3 design /
+  instrumentation, 3-4 frame direction, 3-5 wall direction) at pci.org give
+  geometry, materials, test procedures and measured response.
+
+### Braced frame (T4)
+
+- **BRBF — NIST First-Generation PBEE study, Vol. 4** — 4/8/16-story
+  buckling-restrained braced-frame archetypes (ASCE 7) with full design and
+  ASCE 41 nonlinear assessment.  URL:
+  https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=922024.
+- **BRBF — UT10 5-story hybrid benchmark** — Mojiri, Mortazavi, Kwon &
+  Christopoulos (2021), *Earthq. Eng. Struct. Dyn.*, DOI 10.1002/eqe.3508 —
+  multi-element pseudo-dynamic hybrid simulation of a 5-story BRBF with
+  published experimental benchmark results.
+
+### Composite — concrete-filled tube (T3)
+
+- **CFT / CFST column databases** — Denavit composite-column database
+  (mark.denavit.me/Composite-Column-Database/); Thai et al. (2020) CFST database
+  of 3,208 tests, DOI 10.82444/warw.33817750.v1; NEES-MAST full-scale CFT
+  beam-column series (Perea et al. 2010).  Full geometry, materials, cyclic
+  protocols and force–deformation data.  Needs a CFT section + confined-concrete
+  material (new physics).
 
 ### Modal + Response-spectrum closed-form anchors (T2)
 
@@ -148,8 +202,12 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
   (Ibarra–Medina–Krawinkler; Lignos–Krawinkler calibration) replaces the ad-hoc
   Clough hinge; finish the SAC 9/20-story A4 comparison.
 - **Phase 4 — RC frames, then walls, then masonry.**  DesignSafe bare → strut
-  infill and E-Defense; FEMA P-695/Marafi + SAFE/CASH + Hidalgo walls; URM
-  Benchmark Project + URM shake-table database.
+  infill and E-Defense (10- and 4-story); UCSD 7-story + FEMA P-695/Marafi +
+  SAFE/CASH + Hidalgo walls; the Kim–LaFave–Song joint database; URM Benchmark
+  Project + URM shake-table database.
+- **Phase 5 — new system types (deferred).**  PRESSS precast / PT, BRBF braced
+  frames, CFT composite columns — once PT/self-centering, BRB and CFT machinery
+  land.
 - **IDA — deferred.**  The IDA driver does not exist yet; gather the record-set
   manifest now (cheap) and validate once a driver lands.
 
