@@ -12,6 +12,7 @@ when one of its inputs changes.
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
 import json
 from pathlib import Path
 from typing import Any, Optional
@@ -37,23 +38,34 @@ def record_path(record_id: str) -> Path:
     return _repo_root() / "data" / "ground_motion" / "local" / f"{record_id}{_RECORD_EXT}"
 
 
-#: Benchmark-relevant source files whose bytes seed the cache fingerprint.  A
-#: change to any of them invalidates every cached case (prevents stale results).
-_CODE_FILES = (
-    "benchmarks/sac.py",
-    "benchmarks/sac_member_data.py",
-    "benchmarks/sac_response_data.py",
-    "benchmarks/sac_run.py",
-    "opensees/_elements.py",
-    "opensees/_runner_dynamic.py",
-)
+#: Package subpackages whose Python sources seed the cache fingerprint.  A
+#: change to any of them — including a rename or deletion — invalidates every
+#: cached case (prevents stale results).
+_CODE_DIRS = ("benchmarks", "opensees", "model", "io")
 
 
 def _code_fingerprint() -> str:
-    """``sha256`` of the benchmark-relevant source files."""
+    """``sha256`` over the benchmark-relevant sources and the OpenSeesPy version.
+
+    Walks the ``benchmarks``, ``opensees``, ``model`` and ``io`` subpackages,
+    hashing each Python file's stable package-relative path *and* its bytes (so
+    a rename or a deleted file also invalidates the cache), then folds in the
+    installed OpenSeesPy version so a solver upgrade re-runs every case.
+    """
+    pkg = _repo_root() / "src" / "fea_toolkit"
     h = hashlib.sha256()
-    for rel in _CODE_FILES:
-        h.update((_repo_root() / "src" / "fea_toolkit" / rel).read_bytes())
+    for dirname in _CODE_DIRS:
+        for path in sorted((pkg / dirname).rglob("*.py")):
+            h.update(path.relative_to(pkg).as_posix().encode())
+            h.update(b"\0")
+            h.update(path.read_bytes())
+            h.update(b"\0")
+    try:
+        ops_version = importlib.metadata.version("openseespy")
+    except importlib.metadata.PackageNotFoundError:
+        ops_version = "unavailable"
+    h.update(b"openseespy\0")
+    h.update(ops_version.encode())
     return h.hexdigest()
 
 
