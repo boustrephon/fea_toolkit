@@ -221,8 +221,7 @@ fig.tight_layout()
 
 @fig-modeshapes plots the first three normalised lateral mode shapes of each
 building against height; @fig-20story-modes shows the full ten-mode set of the
-20-story frame. The shapes confirm the mode ordering — the mode index equals
-the number of zero-crossings above ground — and show that the 20-story's
+20-story frame. The shapes confirm the mode ordering and show that the 20-story's
 closely-spaced pairs are distinct lateral modes, not torsional ones. (The tiny
 displacement reversal at the free basement level in the taller frames reflects
 the pinned-base / ground-tie restraint, and is invisible at the plotted scale.)

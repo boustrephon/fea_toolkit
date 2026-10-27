@@ -372,10 +372,10 @@ unloading/reloading stiffness) — calibrated from the **Lignos–Krawinkler ste
 component database** (>300 wide-flange beam/column tests).
 
 **Status (2026-10-27).** A1 machinery landed — `hinge_backbone="imk"` builds a
-`Bilin` (modified IMK, **bilinear** hysteretic — the *steel* variant; note
+`IMKBilin` (modified IMK, **bilinear** hysteretic — the *steel* variant; note
 `ModIMKPeakOriented` is the RC-flexure variant) strong-axis hinge in
 `opensees/_elements.py`, wired through `sac.builder_config`.  A0 landed —
-`lignos_krawinkler_2011()` computes the full `Bilin` set for **beams**
+`lignos_krawinkler_2011()` computes the full `IMKBilin` set for **beams**
 (Lignos–Krawinkler 2011, transcribed from Lignos' EPFL component tool +
 PEER/ATC-72-1 §3.2.2) and **columns** (Lignos et al. 2019, adopted in the
 ASCE 41-17 Errata; first-cycle envelope — the column cyclic-deterioration Λ is

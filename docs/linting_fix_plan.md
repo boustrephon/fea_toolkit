@@ -12,7 +12,7 @@ category: [archive]
 >
 > **Archived.**  The Phase 1/2 fixes below are landed; the surviving Phase 3
 > diagnostics are accepted as known-benign (`.clinerules` §11, and P9 triage in
-> `docs/_pending_work.md`).  Kept as a historical record only.
+> `docs/history/_done_log.md`).  Kept as a historical record only.
 >
 > **Status update (2026-08-21):** re-running `python -m pyright src/fea_toolkit/`
 > now reports **219 errors / 109 warnings** (down from 537).  The Phase 1 real

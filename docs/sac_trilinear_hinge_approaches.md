@@ -141,12 +141,15 @@ The four formulations split the five quantities cleanly by mechanism:
   it loses convergence on El Centro 1.0 (and on 4 of the 10 cases overall), so
   it has no reproducible El Centro peak to compare.
 
-The decisive comparison is now B versus C: changing *only* the cyclic law at a
-fixed backbone and elastic stiffness (the sharp `Hysteretic` corner → the smooth
-`Steel02` transition) moves the roof and drift by a few percent while leaving
-the base shear within ±1.5 %.  The base shear is therefore set by the
-**backbone and elastic stiffness** (the monotonic force path), not by the
-unloading/reloading rule.  The three converged formulations land within ±4 % of
+The decisive comparison is B versus C, which differ in two respects at once: the
+cyclic law (the sharp `Hysteretic` corner → the smooth `Steel02` transition)
+*and* the monotonic yield transition (`Steel02` rounds the trilinear corners
+that `Hysteretic` keeps sharp).  B versus C moves the roof −1 % → −4 %, the
+drift −1 % → −5 %, and leaves the base shear within ±1.5 % (10.27 → 10.23 MN).
+Because `Steel02` rounds the monotonic yield transition as well as changing the
+cyclic law, the comparison cannot isolate either effect, and so cannot establish
+that the cyclic law does not affect base shear — only that the two changes
+together leave it within ±1.5 %.  The three converged formulations land within ±4 % of
 the published base shear — the two `beamWithHinges` forms (B/C, both T1 ≈
 0.993 s) cluster at 10.27 / 10.23 MN and the softer lumped hinge (T1 ≈ 1.041 s)
 at 10.15 MN.

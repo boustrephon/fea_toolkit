@@ -69,8 +69,9 @@ The leaning column stays elastic (no plastic hinge).
 
 Each zero-length hinge is a `zeroLength` element carrying **all six DOFs** via
 `-mat`/`-dir`: a rigid `Elastic` spring on the retained DOFs (P, Vy, Vz, T) and
-the hinge material on the two rotational DOFs (dir 5 = strong-axis `Mz`, dir 6 =
-weak-axis `My`, oriented by `-orient (vx, vz)`).  No `equalDOF` is used, so the
+the hinge material on the two rotational DOFs (dir 5 = local-y rotation `My`, dir 6 =
+local-z rotation `Mz`; oriented by `-orient (vx, vz)` so dir 5 is the strong-axis
+hinge and dir 6 the weak-axis hinge).  No `equalDOF` is used, so the
 base node is only `fix`ed and `ops.nodeReaction` resolves correctly.  The base
 shear is still recovered by **global equilibrium** `Σ m·(a_rel + ag)` — exact
 for the base-excited, no-gravity benchmark — see `opensees/_runner_dynamic.py`.

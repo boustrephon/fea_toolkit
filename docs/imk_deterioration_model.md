@@ -175,7 +175,7 @@ Transcribed verbatim from Lignos' EPFL component tool
 
 `My = Zx·Fy` (nominal; the PEER 1.1 expected-strength factor is a caller
 option), `Mc = mc_my·My` (default 1.05), `Mr = κ·My` (default κ = 0.4),
-`θu = θp + θpc` (default).  The hardening ratio `as = (mc_my − 1)·My/(K0·θp)`
+`θu = θp + θpc + 0.02` (default).  The hardening ratio `as = (mc_my − 1)·My/(K0·θp)`
 is derived in the hinge machinery so `Mc` is reproduced exactly regardless of
 the `K0` convention.
 

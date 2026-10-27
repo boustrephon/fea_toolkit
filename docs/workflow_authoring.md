@@ -9,7 +9,8 @@ related: [gui.md, gui_roadmap.md, analysis.md, workflow.md, report_generation.md
 # Workflow Authoring — Steps and Recipes
 
 > **Status: ⚠️ Partial.** For the current per-phase status, see the
-> [Pending Work Log](_pending_work.md) (P29–P36).  This document is the
+> [Done Log](history/_done_log.md) (P29, P30, P32 — completed) and the
+> [Pending Work Log](_pending_work.md) (P31 — pending).  This document is the
 > *design / spec* — the phase → item → content map is in [Roadmap](#roadmap);
 > statuses themselves are not tracked here.
 
@@ -258,14 +259,15 @@ rather than mutating it; the recipe object stays the single source of truth.
 
 | Phase | Register item | Content |
 |---|---|---|
-| **A** | [P29](_pending_work.md) | the `workflow` package: steps, recipes, registry, and the four verbs |
-| **B** | [P29](_pending_work.md) | the Recipe panel, the `&Recipe` menu, the Model-menu presets |
-| **C** | **[P30](_pending_work.md)** | **computed results become visible** — the three model-check verbs (`check_connectivity`, `check_self_weight`, `check_brace_buckling`), a recipe's solved cases and combinations as result views, the `chart` verb (`storey_displacements`) plus the GUI's **first figure view** and a check-table view, the capacity checks (`member_shear_capacity`, `wall_shear_check`, `hinge_length`) plus the `mesh_checks` verb, and the other `plotting.report.*` charts (`storey_forces`, pushover, modal, CSM) |
+| **A** | [P29](history/_done_log.md) | the `workflow` package: steps, recipes, registry, and the four verbs |
+| **B** | [P29](history/_done_log.md) | the Recipe panel, the `&Recipe` menu, the Model-menu presets |
+| **C** | **[P30](history/_done_log.md)** | **computed results become visible** — the three model-check verbs (`check_connectivity`, `check_self_weight`, `check_brace_buckling`), a recipe's solved cases and combinations as result views, the `chart` verb (`storey_displacements`) plus the GUI's **first figure view** and a check-table view, the capacity checks (`member_shear_capacity`, `wall_shear_check`, `hinge_length`) plus the `mesh_checks` verb, and the other `plotting.report.*` charts (`storey_forces`, pushover, modal, CSM) |
 | **D** | **[P31](_pending_work.md)** | **authoring ergonomics** — the command palette (`Ctrl+K`) compiling a command string into a step, a command-echo log recording every action as its equivalent step, and importing a Python script back into a recipe |
-| **E** | **[P32](_pending_work.md)** | **the report pipeline joins the vocabulary** — the *analysis* verbs the reconciliation needs (`modal`, `response_spectrum`, `pushover`) and `generate_report` composing the same registry; the greyed `Analysis ▸ Modal / Response spectrum / Pushover` entries as recipe presets; see *Resolving the `generate_report` duality* below |
+| **E** | **[P32](history/_done_log.md)** | **the report pipeline joins the vocabulary** — the *analysis* verbs the reconciliation needs (`modal`, `response_spectrum`, `pushover`) and `generate_report` composing the same registry; the greyed `Analysis ▸ Modal / Response spectrum / Pushover` entries as recipe presets; see *Resolving the `generate_report` duality* below |
 
-> **Statuses are tracked in the [Pending Work Log](_pending_work.md); this
-> table is the phase → register-item → content map only.**
+> **Statuses are tracked in the [Done Log](history/_done_log.md) (P29/P30/P32)
+> and the [Pending Work Log](_pending_work.md) (P31); this table is the phase →
+> register-item → content map only.**
 
 **C, D and E are deliberately separate register items** (P30, P31, P32): C makes
 computed results *visible*, D makes authoring *fast*, and E reconciles an
@@ -298,7 +300,7 @@ scope and a different risk from "draw a result", so it is its own item.
 > keeping its own storage (NPZ/HDF5) and HTML-rendering stages — which are
 > *not* verbs.  The report's public signature was left untouched throughout,
 > and the `Analysis ▸ Modal / Response spectrum / Pushover` menu entries became
-> recipe presets over those verbs.  See `docs/_pending_work.md` → P32
+> recipe presets over those verbs.  See `docs/history/_done_log.md` → P32
 > (landed 2026-10-02).
 
 `generate_report(config)` is a fixed, complete pipeline with a stable public
