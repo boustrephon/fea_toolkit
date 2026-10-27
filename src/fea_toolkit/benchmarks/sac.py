@@ -269,6 +269,11 @@ def enrich_display_sections(md: SAPModelData, building: int = 3) -> SAPModelData
 
     Returns:
         *md*, mutated in place.
+
+    Raises:
+        KeyError: If a section's ``Mat_no`` maps to a shape with no geometry in
+            the steel-section catalogue (``BOX_SECTIONS`` / ``W_SECTIONS``), i.e.
+            ``MAT_TO_SECTION`` resolves to a shape name absent from both tables.
     """
     from ..model.steel_sections import BOX_SECTIONS, W_SECTIONS
 
@@ -771,6 +776,11 @@ def build_builder(
             default: the ties move the base shear by ~0.004 % (the beam axial
             stiffness already ties each floor near-rigidly) while making the
             transient ~35× slower under the ``Transformation`` handler.
+
+    Raises:
+        ValueError: For an unknown *fidelity*, or for ``panel_zone=True`` with
+            ``fidelity='faithful'`` (the faithful ``slv_tbl`` floor ties
+            conflict with panel-zone preprocessing).
     """
     if fidelity not in ("simplified", "faithful"):
         raise ValueError(f"unknown fidelity {fidelity!r} (expected 'simplified' or 'faithful')")
@@ -780,8 +790,8 @@ def build_builder(
             "slv_tbl floor ties reference the column (joint) node IDs, which "
             "panel-zone preprocessing re-points the beams away from (onto *_pz "
             "nodes); the resulting chained equalDOF constraints yield an incorrect "
-            "modal period (verified on the 3-story frame: T1 ≈ 7.2 Hz instead of "
-            "≈ 0.94 Hz)."
+            "fundamental frequency (verified on the 3-story frame: "
+            "f1 ≈ 7.2 Hz instead of ≈ 0.94 Hz)."
         )
     md = load_model(building=building, nonlinear=nonlinear, backbone=backbone)
     mesh = preprocess_model(md, preprocess_config(panel_zone=panel_zone))
