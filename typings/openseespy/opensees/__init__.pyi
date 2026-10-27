@@ -64,6 +64,30 @@ def nodeDisp(tag: int, *dofs: int) -> Union[float, Tuple[float, ...]]:
     """
     ...
 
+def nodeVel(tag: int, *dofs: int) -> Union[float, Tuple[float, ...]]:
+    """Return nodal velocities.
+
+    Args:
+        tag: Node tag.
+        *dofs: Optional DOF numbers to query (1-based). If omitted, all DOFs.
+    Returns:
+        Single velocity if one DOF requested, else tuple.
+    """
+    ...
+
+
+def nodeAccel(tag: int, *dofs: int) -> Union[float, Tuple[float, ...]]:
+    """Return nodal accelerations.
+
+    Args:
+        tag: Node tag.
+        *dofs: Optional DOF numbers to query (1-based). If omitted, all DOFs.
+    Returns:
+        Single acceleration if one DOF requested, else tuple.
+    """
+    ...
+
+
 def mass(tag: int, *values: float) -> None:
     """Assign mass to a node.
 

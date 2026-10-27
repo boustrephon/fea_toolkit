@@ -554,7 +554,7 @@ def _build_benchmark_model(building: int) -> SAPModelData:
 
 
 def load_model(
-    *, building: int = 3, nonlinear: bool = True, backbone: str = "bilinear"
+    nonlinear: bool = True, *, building: int = 3, backbone: str = "bilinear"
 ) -> SAPModelData:
     """Load a SAC model (3/9/20-story); enrich for nonlinear use.
 
@@ -563,8 +563,8 @@ def load_model(
     the transcribed ``struct9.m`` / ``struct20.m`` data (geometry, ``mat_tbl``
     backbones, ``element_tbl`` member schedule, seismic masses).
 
-    ``building`` is keyword-only, so the first positional argument selects
-    ``nonlinear`` (``load_model(True)`` / ``load_model(False)``).
+    ``building`` and ``backbone`` are keyword-only, so the first positional
+    argument selects ``nonlinear`` (``load_model(True)`` / ``load_model(False)``).
 
     Args:
         building: 3, 9 or 20.
@@ -723,10 +723,10 @@ def _floor_ux_tie_groups(building: int) -> list[list[str]]:
 
 
 def build_builder(
-    *,
-    building: int = 3,
     panel_zone: bool = False,
     nonlinear: bool = True,
+    *,
+    building: int = 3,
     backbone: str = "bilinear",
     hinge_model: str = "lumped",
     fidelity: str = "simplified",
@@ -739,8 +739,9 @@ def build_builder(
     ``panel_zone_model='krawinkler_gupta'`` (a separate ``MeshModel``), keeping
     the builder read-only.
 
-    ``building`` is keyword-only, so the first positional argument selects
-    ``panel_zone`` (``build_builder(True)`` / ``build_builder(False)``).
+    ``building`` (and the remaining arguments) are keyword-only, so the first
+    positional argument selects ``panel_zone`` and the second ``nonlinear``
+    (``build_builder(True)`` / ``build_builder(False, True)``).
 
     Args:
         building: 3, 9 or 20 (see :func:`load_model`).

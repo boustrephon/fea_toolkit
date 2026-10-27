@@ -119,6 +119,30 @@ def _parallel_steel02_trilinear(
     )
 
 
+def _validate_hinge_pairing(hinge_model: Optional[str], hinge_backbone: Optional[str]) -> None:
+    """Validate a ``hinge_model``/``hinge_backbone`` pairing before path selection.
+
+    Raises:
+        ValueError: When ``beam_with_hinges`` is paired with a backbone other
+            than the three it supports, or when ``lumped`` is paired with a
+            ``beamWithHinges``-only backbone (``trilinear_steel02`` /
+            ``trilinear_clough``) that would otherwise silently fall through to
+            the ASCE 41 lumped hinge.
+    """
+    if hinge_model == "beam_with_hinges":
+        allowed = ("trilinear", "trilinear_steel02", "trilinear_clough")
+        if hinge_backbone not in allowed:
+            raise ValueError(
+                f"hinge_model='beam_with_hinges' requires hinge_backbone in "
+                f"{allowed}; got {hinge_backbone!r}"
+            )
+    elif hinge_model == "lumped" and hinge_backbone in ("trilinear_steel02", "trilinear_clough"):
+        raise ValueError(
+            f"hinge_backbone={hinge_backbone!r} is a beamWithHinges-only "
+            "formulation; use hinge_model='beam_with_hinges' (not 'lumped')"
+        )
+
+
 def _imk_bilin_args(
     params: dict[str, float], k0: float, my_pos: float, my_neg: float
 ) -> tuple[float, ...]:
@@ -788,6 +812,8 @@ class ElementMixin:
         # elastic stiffness is the exact 6EI1/L.  The plastic hinge length
         # converts curvature to member-end rotation; the benchmark's
         # member-end rotation is θ = φ·L/6, so Lp = L/6 (hinge_length_fraction).
+        if self.config.get("hinge_model") == "beam_with_hinges":
+            _validate_hinge_pairing("beam_with_hinges", self.config.get("hinge_backbone"))
         if self.config.get("hinge_model") == "beam_with_hinges" and self.config.get(
             "hinge_backbone"
         ) in ("trilinear", "trilinear_steel02", "trilinear_clough"):
@@ -1075,6 +1101,7 @@ class ElementMixin:
         """
         if self.config.get("hinge_model") != "lumped":
             return
+        _validate_hinge_pairing("lumped", self.config.get("hinge_backbone"))
 
         # ── Idempotency: preserve canonical state on first call ────────
         # Save canonical endpoints on first call; restoration is handled

@@ -244,7 +244,6 @@ class TransientRunnerMixin:
         hinge_tags = list(getattr(self, "_hinge_tags", None) or [])
         hinge_theta_y = list(getattr(self, "_hinge_yield_rotations", None) or [])
         hinge_sections = list(getattr(self, "_hinge_sections", None) or [])
-        hinge_moment_signs = list(getattr(self, "_hinge_moment_signs", None) or [])
         n_hinges = len(hinge_tags)
         hinge_prev_theta = [0.0] * n_hinges
         hinge_prev_moment = [0.0] * n_hinges
@@ -282,15 +281,11 @@ class TransientRunnerMixin:
                 sec_num = hinge_sections[i] if hinge_sections else None
                 if sec_num is None:
                     deform = float(ops.eleResponse(tag, "deformation")[4])
-                    moment = float(ops.eleResponse(tag, "force")[4])
-                    # The zeroLength "force" response is the nodal moment at
-                    # node I, whose sign relative to the dir-5 material strain
-                    # flips with the -orient handedness (columns vs beams).
-                    # Apply the per-hinge sign so ``moment`` shares the local
-                    # frame/sign convention of ``deform``, keeping the M-θ
-                    # energy integral positive regardless of member orientation.
-                    if hinge_moment_signs and i < len(hinge_moment_signs):
-                        moment *= hinge_moment_signs[i]
+                    # ``basicForce`` is the zeroLength element's local/basic
+                    # force, so its dir-5 component shares the frame and sign
+                    # of the dir-5 ``deformation`` — no orientation sign fix is
+                    # needed (unlike the global ``force`` response).
+                    moment = float(ops.eleResponse(tag, "basicForce")[4])
                 else:
                     deform = float(ops.eleResponse(tag, "section", sec_num, "deformation")[0])
                     moment = float(ops.eleResponse(tag, "section", sec_num, "force")[0])
