@@ -901,6 +901,7 @@ class ElementMixin:
             self._hinge_sections.extend([1, 6])
             self._hinge_yield_rotations.extend([d1, d1])
             self._hinge_yield_moments.extend([my_tri, my_tri])
+            self._hinge_moment_signs.extend([1.0, 1.0])
             return
 
         # Element
@@ -1044,12 +1045,15 @@ class ElementMixin:
         ``beamWithHinges`` section number at that location (``None`` for a
         lumped zero-length hinge); ``_hinge_yield_rotations`` /
         ``_hinge_yield_moments`` hold the yield threshold (rotation for lumped,
-        curvature for ``beamWithHinges``) and yield moment.
+        curvature for ``beamWithHinges``) and yield moment; ``_hinge_moment_signs``
+        holds the ±1 sign that aligns each lumped hinge's nodal-moment response
+        with its dir-5 deformation (see ``_runner_dynamic``).
         """
         self._hinge_tags: list[int] = []
         self._hinge_sections: list = []
         self._hinge_yield_rotations: list[float] = []
         self._hinge_yield_moments: list[float] = []
+        self._hinge_moment_signs: list[float] = []
 
     def _create_lumped_hinges(self) -> None:
         """Replace frame elements with lumped plasticity hinges.
@@ -1343,16 +1347,26 @@ class ElementMixin:
                 # ``stiff_factor`` x 6EI/L so the elastic member carries the
                 # elastic deformation, matching the bilinear/trilinear
                 # lumped-hinge convention.
-                params = getattr(sec, "imk_params", None) or {}
+                params = getattr(sec, "imk_params", None)
                 stiff_factor = float(self.config.get("hinge_stiffness_factor", 10.0))
                 k0 = stiff_factor * 6.0 * E * max(I33, 1e-12) / max(L, 1e-12)
-                my_imk = float(params.get("My_pos", My))
-                my_imk_neg = float(params.get("My_neg", -my_imk))
-                ops.uniaxialMaterial(
-                    "IMKBilin",
-                    hinge_mat_tag + 1,
-                    *_imk_bilin_args(params, k0, my_imk, my_imk_neg),
-                )
+                if params:
+                    my_imk = float(params.get("My_pos", My))
+                    my_imk_neg = float(params.get("My_neg", -my_imk))
+                    ops.uniaxialMaterial(
+                        "IMKBilin",
+                        hinge_mat_tag + 1,
+                        *_imk_bilin_args(params, k0, my_imk, my_imk_neg),
+                    )
+                    hinge_theta_y = my_imk / max(k0, 1e-12)
+                    hinge_my = my_imk
+                else:
+                    # Section carries no IMK calibration (e.g. the elastic
+                    # leaning column) — keep the strong axis elastic at k0 and
+                    # report no yield for it.
+                    ops.uniaxialMaterial("Elastic", hinge_mat_tag + 1, k0)
+                    hinge_theta_y = float("inf")
+                    hinge_my = 0.0
                 # Weak-axis moment stays elastic (out-of-plane; the 2D frame
                 # carries all in-plane action on the strong axis).
                 ops.uniaxialMaterial(
@@ -1360,8 +1374,6 @@ class ElementMixin:
                     hinge_mat_tag + 2,
                     stiff_factor * 6.0 * E * max(I22, 1e-12) / max(L, 1e-12),
                 )
-                hinge_theta_y = my_imk / max(k0, 1e-12)
-                hinge_my = my_imk
             else:
                 # Strong-axis moment (ASCE 41 Hysteretic backbone)
                 ops.uniaxialMaterial(
@@ -1410,12 +1422,16 @@ class ElementMixin:
 
             hinge_mat_tag += 6
 
-            # Get local axes for element orientation
+            # Get local axes for element orientation and the strong-axis moment
+            # sign (the zeroLength nodal-moment sign flips with the -orient
+            # handedness between columns and beams — see _runner_dynamic).
             try:
                 vx, _vy, vz = self._get_local_axes(elem)
                 orient = (vx[0], vx[1], vx[2], vz[0], vz[1], vz[2])
+                sign = -float(vz[1])
             except Exception:
                 orient = None
+                sign = 1.0
 
             # --- Create zero-length hinge elements (zeroLength + -mat/-dir) ---
             # Retained DOFs (P, Vy, Vz, T) are rigid; the flexural hinges are
@@ -1485,6 +1501,7 @@ class ElementMixin:
             self._hinge_sections.extend([None, None])
             self._hinge_yield_rotations.extend([hinge_theta_y, hinge_theta_y])
             self._hinge_yield_moments.extend([hinge_my, hinge_my])
+            self._hinge_moment_signs.extend([sign, sign])
 
             # --- Shorten original element to span between hinge nodes ---
             elem.node_i = hinge_i_id

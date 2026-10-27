@@ -166,7 +166,7 @@ def test_beam_with_hinges_nltha_synthetic():
     try:
         b = sac.build_builder(nonlinear=True, backbone="trilinear", hinge_model="beam_with_hinges")
         res = b.run_transient_analysis(accel, dt, direction="X", damping_ratio=0.02)
-        assert res["converged_steps"] > 0
+        assert res["converged_steps"] == len(accel)
         assert np.isfinite(sac.peak_x(res))
         assert res["num_yielded_hinges"] > 0
         assert res["peak_plastic_rotation"] > 0.0
@@ -238,7 +238,7 @@ def test_beam_with_hinges_steel02_nltha_synthetic():
             nonlinear=True, backbone="trilinear_steel02", hinge_model="beam_with_hinges"
         )
         res = b.run_transient_analysis(accel, dt, direction="X", damping_ratio=0.02)
-        assert res["converged_steps"] > 0
+        assert res["converged_steps"] == len(accel)
         assert np.isfinite(sac.peak_x(res))
         assert res["num_yielded_hinges"] > 0
         assert res["peak_plastic_rotation"] > 0.0
@@ -269,7 +269,7 @@ def test_beam_with_hinges_clough_builds_and_yields():
         accel = np.zeros(n)
         accel[:40] = 30.0 * np.sin(2.0 * math.pi * 1.0 * t[:40])
         res = b.run_transient_analysis(accel, dt, direction="X", damping_ratio=0.02)
-        assert res["converged_steps"] > 0
+        assert res["converged_steps"] == len(accel)
         assert np.isfinite(sac.peak_x(res))
         assert res["num_yielded_hinges"] > 0
     finally:

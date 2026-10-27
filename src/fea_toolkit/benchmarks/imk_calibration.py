@@ -251,7 +251,9 @@ def lignos_2019_wide_flange_column(
         plastic_modulus_m3: Strong-axis plastic section modulus ``Zx`` (m³).
         axial_ratio: Gravity axial-load ratio ``Pg/Pye``.
         ry_factor: AISC expected-yield ratio ``Ry`` (default 1.1 for A992/A572-50).
-        theta_u: Ultimate rotation (rad); defaults to ``theta_p + theta_pc``.
+        theta_u: Ultimate rotation (rad); defaults to
+            ``theta_p + theta_pc + 0.02`` (a 0.02 rad residual plateau before the
+            strength drops to zero at ``du``).
 
     Note:
         Columns with ``Pg/Pye > 0.6`` are force-controlled (elastic) per ASCE 41;
@@ -340,7 +342,9 @@ def lignos_krawinkler_2011(
         column: True for a column (else a beam).
         mc_my: Capping-to-yield moment ratio (beams; default 1.05).
         kappa: Residual strength ratio ``Mr/My`` (beams; default 0.4).
-        theta_u: Ultimate rotation (rad); defaults to ``theta_p + theta_pc``.
+        theta_u: Ultimate rotation (rad); defaults to
+            ``theta_p + theta_pc + 0.02`` (a 0.02 rad residual plateau before the
+            strength drops to zero at ``du``).
     """
     if column:
         return lignos_2019_wide_flange_column(

@@ -78,7 +78,7 @@ def test_modal_periods_match_ohtori(builder):
     """The first five periods land on Ohtori's 9-story evaluation-model values.
 
     All five published frequencies (0.443 … 4.27 Hz) are reproduced to within
-    ±1 % (measured ≈ 2.242 / 0.845 / 0.485 / 0.320 / 0.233 s).
+    ±1 % (measured ≈ 2.261 / 0.849 / 0.490 / 0.324 / 0.236 s).
     """
     result = builder.run_modal_analysis(
         num_modes=5, print_results=False, eigen_solver="fullGenLapack"
@@ -86,7 +86,7 @@ def test_modal_periods_match_ohtori(builder):
     got = result["periods"][:5]
     assert len(got) == 5
     for g, r in zip(got, REF_PERIODS):
-        assert g == pytest.approx(r, rel=0.03), f"period {g:.4f} vs reference {r}"
+        assert g == pytest.approx(r, rel=0.01), f"period {g:.4f} vs reference {r}"
 
 
 def test_masses_only_mass_source_is_emitted():
@@ -114,7 +114,7 @@ def test_20story_modal_periods_match_ohtori():
     got = _periods(20, num_modes=10)
     assert len(got) == 10
     for g, r in zip(got, REF_PERIODS_20):
-        assert g == pytest.approx(r, rel=0.03), f"period {g:.4f} vs reference {r}"
+        assert g == pytest.approx(r, rel=0.015), f"period {g:.4f} vs reference {r}"
 
 
 def test_ground_lateral_restraint_bounds_the_period():

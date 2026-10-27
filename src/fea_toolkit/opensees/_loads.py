@@ -1088,9 +1088,10 @@ class LoadMixin:
 
         Driven by the ``floor_ux_ties`` config — a list of node-ID groups,
         each ``[master_id, slave_id, ...]``.  Node IDs resolve to OpenSees tags
-        through ``mesh_model.nodes``; a group whose master is missing is
-        skipped.  Applied inside :meth:`build_domain`, so the ties survive the
-        transient runner's per-record domain rebuilds.
+        through ``mesh_model.nodes``; a group with fewer than two node IDs, or
+        whose master is missing, is skipped with a warning (a missing slave is
+        also skipped with a warning).  Applied inside :meth:`build_domain`, so
+        the ties survive the transient runner's per-record domain rebuilds.
 
         Returns:
             Number of ``equalDOF`` ties applied.
@@ -1100,12 +1101,26 @@ class LoadMixin:
             return 0
         applied = 0
         for group in groups:
+            if len(group) < 2:
+                logger.warning(
+                    "floor_ux_ties group %r has fewer than two node IDs — skipped",
+                    group,
+                )
+                continue
             master = self.mesh_model.nodes.get(group[0])
             if master is None:
+                logger.warning(
+                    "floor_ux_ties master node ID %r not found — skipping group",
+                    group[0],
+                )
                 continue
             for nid in group[1:]:
                 nd = self.mesh_model.nodes.get(nid)
                 if nd is None:
+                    logger.warning(
+                        "floor_ux_ties slave node ID %r not found — skipped",
+                        nid,
+                    )
                     continue
                 ops.equalDOF(master.node_tag, nd.node_tag, 1)
                 applied += 1

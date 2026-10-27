@@ -573,7 +573,7 @@ def load_model(
             sections.
 
     Raises:
-        ValueError: For an unknown *building*.
+        ValueError: For an unknown *building* or *backbone*.
         NotImplementedError: For the bilinear 9/20-story hinge (needs per-member
             AISC ``Z33``/``depth``/``tw``, not yet transcribed).
     """
@@ -585,6 +585,17 @@ def load_model(
         raise ValueError(f"unknown SAC building {building!r} (expected 3, 9 or 20)")
 
     if nonlinear:
+        if backbone not in (
+            "bilinear",
+            "trilinear",
+            "trilinear_steel02",
+            "trilinear_clough",
+            "imk",
+        ):
+            raise ValueError(
+                f"unknown SAC backbone {backbone!r} (expected 'bilinear', "
+                "'trilinear', 'trilinear_steel02', 'trilinear_clough' or 'imk')"
+            )
         if building == 3:
             enrich_nonlinear(md)
         if backbone == "imk":
@@ -626,11 +637,12 @@ def builder_config(backbone: str = "bilinear", hinge_model: str = "lumped") -> d
             see ``benchmarks/imk_calibration.py``).
         hinge_model: ``"lumped"`` (default, zero-length rotational springs) or
             ``"beam_with_hinges"`` (the benchmark's own concentrated-plasticity
-            ``beamWithHinges`` element — trilinear backbone only).
+            ``beamWithHinges`` element — ``trilinear`` / ``trilinear_steel02`` /
+            ``trilinear_clough`` backbones).
 
     Raises:
         ValueError: For an unsupported ``hinge_model``/``backbone`` pairing
-            (only ``lumped`` + ``bilinear``/``trilinear``, and
+            (only ``lumped`` + ``bilinear``/``trilinear``/``imk``, and
             ``beam_with_hinges`` + ``trilinear``/``trilinear_steel02``/
             ``trilinear_clough`` are valid).
     """
@@ -735,8 +747,10 @@ def build_builder(
             stiffness degradation) or ``"imk"`` (the Lignos-Krawinkler
             ``IMKBilin`` hinge; ``imk_params`` must be stamped on the sections —
             see ``benchmarks/imk_calibration.py``).
-        hinge_model: ``"lumped"`` (default) or ``"beam_with_hinges"`` (the
-            benchmark's own concentrated-plasticity element, trilinear only).
+        hinge_model: ``"lumped"`` (default; ``backbone`` may be ``bilinear``,
+            ``trilinear`` or ``imk``) or ``"beam_with_hinges"`` (the benchmark's
+            own concentrated-plasticity element; ``backbone`` may be
+            ``trilinear``, ``trilinear_steel02`` or ``trilinear_clough``).
         fidelity: ``"simplified"`` (default) or ``"faithful"`` — the explicit
             ``struct#.m`` master-slave floor ties (``slv_tbl``).  Off by
             default: the ties move the base shear by ~0.004 % (the beam axial

@@ -267,7 +267,24 @@ class TargetRow(NamedTuple):
 
 
 def case_targets(building: int, case_index: int) -> TargetRow:
-    """Return the peak targets for one building and case (0-based index)."""
+    """Return the peak targets for one building and case (0-based index).
+
+    Args:
+        building: SAC building number (3, 9 or 20) — a key of
+            :data:`UNCTRL_TARGETS`.
+        case_index: Zero-based case index into :data:`CASE_ORDER`.
+
+    Returns:
+        The transcribed peak-response targets for that building and case.
+
+    Raises:
+        IndexError: If ``case_index`` is negative or not less than
+            ``len(CASE_ORDER)``.
+    """
+    if case_index < 0 or case_index >= len(CASE_ORDER):
+        raise IndexError(
+            f"case_index {case_index} out of range (expected 0..{len(CASE_ORDER) - 1})"
+        )
     rec, intensity = CASE_ORDER[case_index]
     row = UNCTRL_TARGETS[building]
     return TargetRow(

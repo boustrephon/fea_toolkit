@@ -209,7 +209,7 @@ def test_sac3_beam_with_hinges_elcentro(resolve_ground_motion_record):
         accel, dt = load_benchmark_record(record_path)
         b = build_builder(backbone="trilinear", hinge_model="beam_with_hinges")
         res = b.run_transient_analysis(accel, dt, direction="X", damping_ratio=0.02)
-        assert res["converged_steps"] > 0
+        assert res["converged_steps"] == len(accel)
         peak = peak_x(res)
         assert peak == pytest.approx(0.151, rel=0.10), (
             f"beamWithHinges El Centro peak {peak:.3f} m outside ±10% of 0.151 m"
