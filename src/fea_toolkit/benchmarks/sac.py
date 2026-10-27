@@ -636,6 +636,8 @@ def build_builder(
             stiffness already ties each floor near-rigidly) while making the
             transient ~35× slower under the ``Transformation`` handler.
     """
+    if fidelity not in ("simplified", "faithful"):
+        raise ValueError(f"unknown fidelity {fidelity!r} (expected 'simplified' or 'faithful')")
     md = load_model(building=building, nonlinear=nonlinear, backbone=backbone)
     mesh = preprocess_model(md, preprocess_config(panel_zone=panel_zone))
     cfg = builder_config(backbone, hinge_model) if nonlinear else {}
