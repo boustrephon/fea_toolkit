@@ -26,7 +26,7 @@ next SAC-derived step is the IMK deterioration model (§3).
 
 Re-ranked 2026-10-27 after source verification.  Four clusters, in build
 order; each later cluster needs progressively more new physics.  All DOIs are
-verified and live in [references.bib](../papers/references.bib).
+verified and live in [references.bib](https://github.com/boustrephon/fea_toolkit/blob/main/papers/references.bib).
 
 | # | Cluster | Benchmarks | Tier / cell | Needs |
 |---|---|---|---|---|
