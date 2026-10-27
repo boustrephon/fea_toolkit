@@ -29,6 +29,7 @@ CATEGORIES = [
     ("checklists", "📝 Model-Review Checklists"),
     ("tool-specific", "🛠️ Tool-Specific Workflows"),
     ("planning", "📋 Planning & Historical"),
+    ("archive", "🗄️ Archive — Completed Plans"),
     ("about", "📜 Licence & Legal"),
 ]
 

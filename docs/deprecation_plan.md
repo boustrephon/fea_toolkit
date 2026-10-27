@@ -3,7 +3,7 @@ title: "Deprecation Removal Plan"
 description: "Plan for removing deprecated APIs after the RC nonlinear static analysis release."
 status: "complete"
 tags: [planning, deprecation, cleanup]
-category: [planning]
+category: [archive]
 ---
 
 # Deprecation Removal Plan

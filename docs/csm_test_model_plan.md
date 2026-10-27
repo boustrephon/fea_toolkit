@@ -3,7 +3,7 @@ title: "CSM Test Model Development Plan"
 description: "Development plan for the CSM test model - an RC frame in kN-m units with a three-material setup (C30/Rebar/Q355) exercising meaningful nonlinear ADRS response."
 status: "complete"
 tags: [csm, test-model, planning, capacity-spectrum]
-category: [planning]
+category: [archive]
 related: [csm_bilinearization.md, pushover_analysis.md]
 ---
 # CSM Test Model Development Plan

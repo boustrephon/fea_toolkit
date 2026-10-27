@@ -3,15 +3,16 @@ title: "Linting Fix Plan"
 description: "Pyright error baseline and phased fix strategy for src/fea_toolkit (reference for cleanup work)."
 status: "complete"
 tags: [planning, linting, pyright, cleanup]
-category: [planning]
+category: [archive]
 ---
 # Linting Fix Plan — Pyright Errors (Jan 2026)
 
 > Generated from a full pyright run on `src/fea_toolkit/` on 2026-01-08.
 > **537 errors total**, across 35+ files.
 >
-> If starting a fresh task, read this document first — all line-level diagnostics
-> are reproduced below so you don't need to re-run pyright.
+> **Archived.**  The Phase 1/2 fixes below are landed; the surviving Phase 3
+> diagnostics are accepted as known-benign (`.clinerules` §11, and P9 triage in
+> `docs/_pending_work.md`).  Kept as a historical record only.
 >
 > **Status update (2026-08-21):** re-running `python -m pyright src/fea_toolkit/`
 > now reports **219 errors / 109 warnings** (down from 537).  The Phase 1 real

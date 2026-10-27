@@ -322,19 +322,14 @@ for automated cross-referencing.
 
 ## 📋 Planning & Historical
 
-- [AnalysisBuilder Migration Plan](analysis_builder_migration_plan.md) — ✅ Complete
-  > Migration plan for the two-stage pipeline, superseding monolithic OpenSeesBuilder.
-  Tags: `architecture`, `migration`, `planning`
-  Related: [Layered Analysis Workflow for the v3 Architecture](layered_analysis_workflow.md) · [Analysis Workflow](workflow.md) · [Development Notes](dev_notes.md)
-
 - [Benchmark & Validation Model Register](benchmark_register.md) — ⚠️ Partial
-  > Master index of validation/benchmark models for fea_toolkit: structural-type × load-type coverage matrix, the benchmark tiers, per-type candidate sources (papers + datasets), the phased acquisition roadmap, and acceptance criteria.
-  Tags: `validation`, `benchmark`, `planning`, `pushover`, `nonlinear-dynamic`, `modal`, `response-spectrum`, `shear-wall`, `beam-column-joint`, `ground-motion`
-  Related: [Vecchio & Emara (1992) RC-Frame Pushover Benchmark](vecchio_emara_benchmark.md) · [Ground-Motion Data & Benchmark Sources](ground_motion_data.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md)
+  > Master index of validation/benchmark models for fea_toolkit: benchmark tiers, the structural-type × load-type coverage matrix, the implemented-benchmark catalogue, reference collections, and acceptance criteria. Candidate sources and the ranked build order live in benchmark_roadmap.md.
+  Tags: `validation`, `benchmark`, `planning`, `pushover`, `nonlinear-dynamic`, `modal`, `response-spectrum`, `shear-wall`, `beam-column-joint`, `ground-motion`, `masonry`, `infill`, `collapse`, `precast`, `braced-frame`, `composite`
+  Related: [Benchmark Roadmap — extended proposals](benchmark_roadmap.md) · [Vecchio & Emara (1992) RC-Frame Pushover Benchmark](vecchio_emara_benchmark.md) · [Duong et al. (2007) Shear-Critical Frame Benchmark (T3)](duong_benchmark.md) · [Ground-Motion Data & Benchmark Sources](ground_motion_data.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md)
 
 - [Benchmark Roadmap — extended proposals](benchmark_roadmap.md) — ⚠️ Partial
-  > Extended proposals for closing the benchmark coverage gaps: the Chilean shear-wall benchmark (Hidalgo et al. 2005) and the wider use of the SAC buildings, plus the deferred VecTor / SeismoBuild / base-isolation candidates.
-  Tags: `validation`, `benchmark`, `planning`, `shear-wall`, `moment-frame`, `sac`, `nltha`, `modal`
+  > Canonical benchmark build plan: ranked order (SAC-derived first, then RC frames, RC walls, masonry/URM) with DOIs and prerequisites, plus the detailed workstreams and the component-level (T3) database inventory.
+  Tags: `validation`, `benchmark`, `planning`, `shear-wall`, `moment-frame`, `sac`, `nltha`, `modal`, `masonry`, `rc-frame`, `collapse`
   Related: [Benchmark & Validation Model Register](benchmark_register.md) · [SAC 3-Story Frame Benchmark (T2)](sac_benchmark.md) · [MVLEM / SFI-MVLEM Shear-Wall Analysis](mvlem_wall_analysis.md) · [Shell Element Support](shell_support.md)
 
 - [Cantilever Benchmark (T1)](cantilever_benchmark.md) — ✅ Complete
@@ -342,19 +337,15 @@ for automated cross-referencing.
   Tags: `validation`, `benchmark`, `cantilever`, `static`, `closed-form`
   Related: [Benchmark & Validation Model Register](benchmark_register.md) · [Vecchio & Emara (1992) RC-Frame Pushover Benchmark](vecchio_emara_benchmark.md)
 
-- [CSM Test Model Development Plan](csm_test_model_plan.md) — ✅ Complete
-  > Development plan for the CSM test model - an RC frame in kN-m units with a three-material setup (C30/Rebar/Q355) exercising meaningful nonlinear ADRS response.
-  Tags: `csm`, `test-model`, `planning`, `capacity-spectrum`
-  Related: [CSM Bilinearization](csm_bilinearization.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md)
-
-- [Deprecation Removal Plan](deprecation_plan.md) — ✅ Complete
-  > Plan for removing deprecated APIs after the RC nonlinear static analysis release.
-  Tags: `planning`, `deprecation`, `cleanup`
-
 - [Development Notes](dev_notes.md) — 🚧 Draft
   > Miscellaneous development notes, design decisions, and technical context.
   Tags: `architecture`, `development`, `notes`
   Related: [AnalysisBuilder Migration Plan](analysis_builder_migration_plan.md)
+
+- [Duong et al. (2007) Shear-Critical Frame Benchmark (T3)](duong_benchmark.md) — ✅ Complete
+  > End-to-end validation of the simplified-MCFT shear-failure modelling against the published Duong et al. (2007) shear-critical RC frame experiment, as re-analysed by Guner (2008) and Kotsovos & Zygouris (2019).
+  Tags: `validation`, `benchmark`, `shear`, `mcft`, `duong`, `rc-frame`, `pushover`, `shear-critical`
+  Related: [RC Shear-Failure Modelling (MCFT Capacity + Nonlinear Shear Backbone)](shear_failure_modelling.md) · [Vecchio & Emara (1992) RC-Frame Pushover Benchmark](vecchio_emara_benchmark.md) · [Benchmark & Validation Model Register](benchmark_register.md)
 
 - [Force-Diagram Unification (Phase B)](force_diagram_unification.md)
   > Detailed design for unifying the four force-diagram plotting entry points into one unit-aware API.
@@ -369,10 +360,6 @@ for automated cross-referencing.
   > Framework decision and architecture for a Qt/PySide6 desktop application wrapping the import → view → query → analyse → results workflow.
   Tags: `gui`, `qt`, `pyside6`, `pyvistaqt`, `architecture`, `planning`, `roadmap`
   Related: [Visualisation Toolkit](viewer.md) · [Analysis Workflow](workflow.md) · [Unified Results Schema](results_schema.md) · [Rhino 3-D Export](rhino_export.md) · [Report Generation — Design Proposal](report_generation.md)
-
-- [Linting Fix Plan](linting_fix_plan.md) — ✅ Complete
-  > Pyright error baseline and phased fix strategy for src/fea_toolkit (reference for cleanup work).
-  Tags: `planning`, `linting`, `pyright`, `cleanup`
 
 - [Pushover Results Storage & Nonlinear Visualization](pushover_results_storage_viz.md) — ⚠️ Partial
   > Implementation plan and status for per-element pushover result recording (frame end forces, shell stress resultants, plasticity indicators) and nonlinear visualization.
@@ -408,6 +395,27 @@ for automated cross-referencing.
   > How fea_toolkit is versioned (setuptools-scm, tag-driven), what major/minor/patch mean for this project, and the planned release path through the GUI work and toward 1.0.
   Tags: `versioning`, `release`, `semver`, `planning`, `packaging`
   Related: [Desktop GUI Roadmap](gui_roadmap.md) · [_pending_work.md](_pending_work.md) · [Development Notes](dev_notes.md)
+
+
+## 🗄️ Archive — Completed Plans
+
+- [AnalysisBuilder Migration Plan](analysis_builder_migration_plan.md) — ✅ Complete
+  > Migration plan for the two-stage pipeline, superseding monolithic OpenSeesBuilder.
+  Tags: `architecture`, `migration`, `planning`
+  Related: [Layered Analysis Workflow for the v3 Architecture](layered_analysis_workflow.md) · [Analysis Workflow](workflow.md) · [Development Notes](dev_notes.md)
+
+- [CSM Test Model Development Plan](csm_test_model_plan.md) — ✅ Complete
+  > Development plan for the CSM test model - an RC frame in kN-m units with a three-material setup (C30/Rebar/Q355) exercising meaningful nonlinear ADRS response.
+  Tags: `csm`, `test-model`, `planning`, `capacity-spectrum`
+  Related: [CSM Bilinearization](csm_bilinearization.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md)
+
+- [Deprecation Removal Plan](deprecation_plan.md) — ✅ Complete
+  > Plan for removing deprecated APIs after the RC nonlinear static analysis release.
+  Tags: `planning`, `deprecation`, `cleanup`
+
+- [Linting Fix Plan](linting_fix_plan.md) — ✅ Complete
+  > Pyright error baseline and phased fix strategy for src/fea_toolkit (reference for cleanup work).
+  Tags: `planning`, `linting`, `pyright`, `cleanup`
 
 
 ## 📜 Licence & Legal
@@ -453,10 +461,11 @@ Tags across all documentation files:
 - **`beam-column-joint`** — [benchmark_register.md](benchmark_register.md)
 - **`beam-with-hinges`** — [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`beams`** — [element_classification.md](element_classification.md)
-- **`benchmark`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [cantilever_benchmark.md](cantilever_benchmark.md), [ground_motion_data.md](ground_motion_data.md), [sac_benchmark.md](sac_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [shear_building_benchmark.md](shear_building_benchmark.md), [tcl_import.md](tcl_import.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`benchmark`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [cantilever_benchmark.md](cantilever_benchmark.md), [duong_benchmark.md](duong_benchmark.md), [ground_motion_data.md](ground_motion_data.md), [sac_benchmark.md](sac_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [shear_building_benchmark.md](shear_building_benchmark.md), [tcl_import.md](tcl_import.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`bilinearization`** — [csm_bilinearization.md](csm_bilinearization.md)
 - **`boolean`** — [shell_openings.md](shell_openings.md)
 - **`brace`** — [pushover_analysis.md](pushover_analysis.md)
+- **`braced-frame`** — [benchmark_register.md](benchmark_register.md)
 - **`braces`** — [element_classification.md](element_classification.md)
 - **`buckling`** — [model_review.md](model_review.md)
 - **`build`** — [openseespy_local_build.md](openseespy_local_build.md)
@@ -474,10 +483,11 @@ Tags across all documentation files:
 - **`closed-form`** — [cantilever_benchmark.md](cantilever_benchmark.md), [shear_building_benchmark.md](shear_building_benchmark.md)
 - **`clough`** — [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`codes`** — [capacity.md](capacity.md)
+- **`collapse`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md)
 - **`columns`** — [element_classification.md](element_classification.md)
 - **`combination`** — [load_cases_and_combinations.md](load_cases_and_combinations.md), [load_combinations.md](load_combinations.md)
 - **`command`** — [workflow_palette.md](workflow_palette.md)
-- **`composite`** — [cft_confinement_plan.md](cft_confinement_plan.md), [load_combinations.md](load_combinations.md)
+- **`composite`** — [benchmark_register.md](benchmark_register.md), [cft_confinement_plan.md](cft_confinement_plan.md), [load_combinations.md](load_combinations.md)
 - **`config`** — [element_properties_config.md](element_properties_config.md)
 - **`confinement`** — [cft_confinement_plan.md](cft_confinement_plan.md), [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`connections`** — [member_releases.md](member_releases.md)
@@ -503,7 +513,7 @@ Tags across all documentation files:
 - **`displacement`** — [storey_response.md](storey_response.md)
 - **`distribution`** — [licence.md](licence.md)
 - **`drift`** — [storey_response.md](storey_response.md)
-- **`duong`** — [shear_failure_modelling.md](shear_failure_modelling.md)
+- **`duong`** — [duong_benchmark.md](duong_benchmark.md), [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`dynamic`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
 - **`e2k`** — [e2k_import_plan.md](e2k_import_plan.md)
 - **`edge-detection`** — [constraint_detection.md](constraint_detection.md)
@@ -541,6 +551,7 @@ Tags across all documentation files:
 - **`hysteretic`** — [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`identifiers`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`import`** — [tcl_import.md](tcl_import.md)
+- **`infill`** — [benchmark_register.md](benchmark_register.md)
 - **`insertion-point`** — [member_offsets.md](member_offsets.md)
 - **`integrity`** — [model_review.md](model_review.md)
 - **`interaction`** — [gui.md](gui.md)
@@ -564,7 +575,8 @@ Tags across all documentation files:
 - **`logging`** — [pipeline_logging.md](pipeline_logging.md)
 - **`macos`** — [openseespy_local_build.md](openseespy_local_build.md)
 - **`mander`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
-- **`mcft`** — [shear_failure_modelling.md](shear_failure_modelling.md)
+- **`masonry`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md)
+- **`mcft`** — [duong_benchmark.md](duong_benchmark.md), [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`mesh-model`** — [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`meshing`** — [constraint_detection.md](constraint_detection.md), [element_splitting.md](element_splitting.md), [shell_openings.md](shell_openings.md), [shell_support.md](shell_support.md)
 - **`metadata`** — [rhino_attributes.md](rhino_attributes.md)
@@ -598,9 +610,10 @@ Tags across all documentation files:
 - **`planning`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [csm_test_model_plan.md](csm_test_model_plan.md), [deprecation_plan.md](deprecation_plan.md), [force_diagram_unification.md](force_diagram_unification.md), [gui_roadmap.md](gui_roadmap.md), [linting_fix_plan.md](linting_fix_plan.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [versioning.md](versioning.md)
 - **`plotting`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`post-processing`** — [storey_response.md](storey_response.md)
+- **`precast`** — [benchmark_register.md](benchmark_register.md)
 - **`preprocessor`** — [builder_reference.md](builder_reference.md), [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`project`** — [project_bundle.md](project_bundle.md)
-- **`pushover`** — [benchmark_register.md](benchmark_register.md), [csm_bilinearization.md](csm_bilinearization.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [pushover_analysis.md](pushover_analysis.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
+- **`pushover`** — [benchmark_register.md](benchmark_register.md), [csm_bilinearization.md](csm_bilinearization.md), [duong_benchmark.md](duong_benchmark.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [pushover_analysis.md](pushover_analysis.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`pyright`** — [linting_fix_plan.md](linting_fix_plan.md)
 - **`pyside6`** — [gui.md](gui.md), [gui_roadmap.md](gui_roadmap.md)
 - **`pyvista`** — [viewer.md](viewer.md)
@@ -608,6 +621,7 @@ Tags across all documentation files:
 - **`qa`** — [ETABS_checklist.md](ETABS_checklist.md), [ETABS_checklist_gb.md](ETABS_checklist_gb.md), [ETABS_checklist_hk.md](ETABS_checklist_hk.md), [ETABS_checklist_is.md](ETABS_checklist_is.md), [SAP2000_checklist_gb.md](SAP2000_checklist_gb.md), [SAP2000_checklist_hk.md](SAP2000_checklist_hk.md)
 - **`qt`** — [gui_roadmap.md](gui_roadmap.md)
 - **`rc`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`rc-frame`** — [benchmark_roadmap.md](benchmark_roadmap.md), [duong_benchmark.md](duong_benchmark.md)
 - **`recipe`** — [workflow_authoring.md](workflow_authoring.md), [workflow_palette.md](workflow_palette.md)
 - **`refactor`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`reference`** — [builder_reference.md](builder_reference.md), [mander_confinement_validation.md](mander_confinement_validation.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
@@ -642,8 +656,9 @@ Tags across all documentation files:
 - **`session`** — [project_bundle.md](project_bundle.md)
 - **`settings`** — [gui.md](gui.md)
 - **`sfi-mvlem`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
-- **`shear`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [shear_failure_modelling.md](shear_failure_modelling.md), [storey_response.md](storey_response.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`shear`** — [duong_benchmark.md](duong_benchmark.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [shear_failure_modelling.md](shear_failure_modelling.md), [storey_response.md](storey_response.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`shear-building`** — [shear_building_benchmark.md](shear_building_benchmark.md)
+- **`shear-critical`** — [duong_benchmark.md](duong_benchmark.md)
 - **`shear-wall`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md)
 - **`shell`** — [constraint_detection.md](constraint_detection.md), [element_properties_config.md](element_properties_config.md), [shell_openings.md](shell_openings.md), [shell_support.md](shell_support.md)
 - **`si`** — [units_conversion.md](units_conversion.md)
@@ -668,7 +683,7 @@ Tags across all documentation files:
 - **`units`** — [modeling_guidance.md](modeling_guidance.md), [units_conversion.md](units_conversion.md)
 - **`usage`** — [llm_guide.md](llm_guide.md)
 - **`userstrings`** — [rhino_attributes.md](rhino_attributes.md)
-- **`validation`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [cantilever_benchmark.md](cantilever_benchmark.md), [ground_motion_data.md](ground_motion_data.md), [mander_confinement_validation.md](mander_confinement_validation.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [sac_benchmark.md](sac_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [shear_building_benchmark.md](shear_building_benchmark.md), [shear_failure_modelling.md](shear_failure_modelling.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`validation`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [cantilever_benchmark.md](cantilever_benchmark.md), [duong_benchmark.md](duong_benchmark.md), [ground_motion_data.md](ground_motion_data.md), [mander_confinement_validation.md](mander_confinement_validation.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [sac_benchmark.md](sac_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [shear_building_benchmark.md](shear_building_benchmark.md), [shear_failure_modelling.md](shear_failure_modelling.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`verbs`** — [workflow_authoring.md](workflow_authoring.md)
 - **`versioning`** — [versioning.md](versioning.md)
 - **`viewer`** — [viewer.md](viewer.md)
