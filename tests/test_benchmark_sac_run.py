@@ -55,9 +55,10 @@ def test_compute_metrics_handles_early_break():
 
 
 class _Node:
-    def __init__(self, tag: int, z: float):
+    def __init__(self, tag: int, z: float, node_id: str = ""):
         self.node_tag = tag
         self.z = z
+        self.node_id = node_id
 
 
 class _Builder:
@@ -74,6 +75,19 @@ def test_floor_levels_picks_highest_tag_per_elevation():
     }
     levels = floor_levels(_Builder(nodes))
     assert levels == [(0.0, 3), (4.0, 2), (8.0, 4)]
+
+
+def test_floor_levels_excludes_hinge_and_bond_nodes():
+    """Coincident hinge / bond-slip nodes are skipped as floor representatives."""
+    nodes = {
+        1: _Node(1, 0.0),
+        2: _Node(2, 4.0),
+        3: _Node(3, 4.0, node_id="C1-0_hinge_j"),  # coincident hinge (higher tag)
+        4: _Node(4, 8.0, node_id="B2-1_bond_i"),  # bond-slip node (higher tag)
+        5: _Node(5, 8.0),
+    }
+    levels = floor_levels(_Builder(nodes))
+    assert levels == [(0.0, 1), (4.0, 2), (8.0, 5)]
 
 
 def test_write_manifest_roundtrips_and_omits_cache_keys(tmp_path):

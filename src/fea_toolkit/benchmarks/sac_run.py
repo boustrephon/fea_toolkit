@@ -93,16 +93,28 @@ def case_fingerprint(
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
+#: Node-ID suffixes the builder appends for coincident zero-length
+#: instrumentation nodes (lumped hinges, bond-slip springs).  These carry no
+#: floor mass and their coincident-node kinematics are ill-conditioned, so they
+#: must never be chosen as a floor's representative node.
+_NON_STRUCTURAL_NODE_SUFFIXES = ("_hinge_i", "_hinge_j", "_bond_i", "_bond_j")
+
+
 def floor_levels(builder: Any) -> list[tuple[float, int]]:
     """Sorted ``(z, representative_node_tag)`` per distinct storey elevation.
 
-    The representative node per elevation is the highest-tagged node there — a
-    deterministic choice (the rigid floor diaphragms / rigid-axial beams tie the
-    floor's X DOF, so any node at the elevation carries the floor's lateral
-    displacement).
+    The representative node per elevation is the highest-tagged *structural*
+    node there — the rigid floor diaphragms / rigid-axial beams tie the floor's
+    X DOF, so any structural node at the elevation carries the floor's lateral
+    kinematics.  Internal hinge / bond-slip nodes (``*_hinge_*``, ``*_bond_*``)
+    are excluded: they are coincident with a structural node but carry no floor
+    mass, and their coincident-node acceleration is ill-conditioned (which would
+    corrupt ``xdd_max``).
     """
     levels: dict[float, int] = {}
     for nd in builder.mesh_model.nodes.values():
+        if getattr(nd, "node_id", "").endswith(_NON_STRUCTURAL_NODE_SUFFIXES):
+            continue
         z = round(float(nd.z), 6)
         levels[z] = max(levels.get(z, -1), int(nd.node_tag))
     return sorted(levels.items())
