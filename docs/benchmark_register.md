@@ -191,6 +191,17 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
   Titanium "fixture" + eigen/static/transient decks); deferred — 3D solid, out of
   the frame/wall scope (notes in local/references/sandia/README.md).
 
+### Reference example-model collections
+
+- **OpenSeesPy docs + examples** — `zhuminjie/OpenSeesPyDoc` (the official
+  OpenSeesPy documentation; its `pyExamples/` tree covers structure, earthquake,
+  tsunami, geotech, thermal) — a large collection of runnable OpenSeesPy models.
+- **Namadchi's OpenSeesPy-Examples** (`AmirHosseinNamadchi/OpenSeesPy-Examples`,
+  MIT) — pythonic structural models: 2-story steel MRF (gravity/modal/pushover/
+  NLTHA), 1-story RC 3D frame, elastoplastic SDOF, response spectra, shallow
+  dome, arch snap-through.  Useful cross-code checks for model-building
+  conventions.
+
 ## 4. Phased roadmap
 
 > The ranked build order (SAC-derived → RC frames → RC walls → masonry/URM)
