@@ -516,9 +516,11 @@ def builder_config(backbone: str = "bilinear", hinge_model: str = "lumped") -> d
         backbone: ``"bilinear"`` (default, the M1/M2 Steel01 hinge),
             ``"trilinear"`` (the transcribed ``mat_tbl`` backbone as a
             ``Hysteretic`` hinge), ``"trilinear_steel02"`` (the same backbone
-            as two ``Steel02`` springs in parallel) or ``"trilinear_clough"``
+            as two ``Steel02`` springs in parallel), ``"trilinear_clough"``
             (the same ``Hysteretic`` hinge with Clough/Takeda unloading-
-            stiffness degradation).
+            stiffness degradation) or ``"imk"`` (the Lignos-Krawinkler
+            ``Bilin`` hinge; ``imk_params`` must be stamped on the sections —
+            see ``benchmarks/imk_calibration.py``).
         hinge_model: ``"lumped"`` (default, zero-length rotational springs) or
             ``"beam_with_hinges"`` (the benchmark's own concentrated-plasticity
             ``beamWithHinges`` element — trilinear backbone only).
@@ -530,7 +532,7 @@ def builder_config(backbone: str = "bilinear", hinge_model: str = "lumped") -> d
             ``trilinear_clough`` are valid).
     """
     _valid_backbones = {
-        "lumped": ("bilinear", "trilinear"),
+        "lumped": ("bilinear", "trilinear", "imk"),
         "beam_with_hinges": ("trilinear", "trilinear_steel02", "trilinear_clough"),
     }
     allowed = _valid_backbones.get(hinge_model)
@@ -538,7 +540,7 @@ def builder_config(backbone: str = "bilinear", hinge_model: str = "lumped") -> d
         raise ValueError(
             f"unsupported hinge_model/backbone combination: "
             f"hinge_model={hinge_model!r} with backbone={backbone!r}; "
-            f"valid pairings are lumped+{{bilinear,trilinear}} and "
+            f"valid pairings are lumped+{{bilinear,trilinear,imk}} and "
             f"beam_with_hinges+{{trilinear,trilinear_steel02,trilinear_clough}}"
         )
     return {
@@ -625,9 +627,11 @@ def build_builder(
         backbone: ``"bilinear"`` (default, the M1/M2 Steel01 hinge),
             ``"trilinear"`` (the transcribed ``mat_tbl`` backbone as a
             ``Hysteretic`` hinge), ``"trilinear_steel02"`` (the same backbone
-            as two ``Steel02`` springs in parallel) or ``"trilinear_clough"``
+            as two ``Steel02`` springs in parallel), ``"trilinear_clough"``
             (the same ``Hysteretic`` hinge with Clough/Takeda unloading-
-            stiffness degradation).
+            stiffness degradation) or ``"imk"`` (the Lignos-Krawinkler
+            ``Bilin`` hinge; ``imk_params`` must be stamped on the sections —
+            see ``benchmarks/imk_calibration.py``).
         hinge_model: ``"lumped"`` (default) or ``"beam_with_hinges"`` (the
             benchmark's own concentrated-plasticity element, trilinear only).
         fidelity: ``"simplified"`` (default) or ``"faithful"`` — the explicit

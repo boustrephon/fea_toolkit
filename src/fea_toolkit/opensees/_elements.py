@@ -119,6 +119,56 @@ def _parallel_steel02_trilinear(
     )
 
 
+def _imk_bilin_args(
+    params: dict[str, float], k0: float, my_pos: float, my_neg: float
+) -> tuple[float, ...]:
+    """Map a stamped ``imk_params`` dict to the ``Bilin`` material's positional args.
+
+    The ``Bilin`` (modified Ibarra–Krawinkler, bilinear hysteretic — **steel**)
+    signature is ``Bilin matTag K0 as_pos as_neg My_pos My_neg Lamda_S Lamda_C
+    Lamda_A Lamda_K c_S c_C c_A c_K theta_p_pos theta_p_neg theta_pc_pos
+    theta_pc_neg Res_pos Res_neg theta_u_pos theta_u_neg D_pos D_neg``.
+    ``Lamda_A`` / ``c_A`` (accelerated reloading) are not a deterioration mode
+    for a bilinear response and are forced to ``0.0`` / ``1.0``.  A missing
+    ``theta_u`` falls back to ``theta_p + theta_pc`` (rotation at residual).
+    """
+    theta_p_pos = float(params.get("theta_p_pos", 0.0))
+    theta_p_neg = float(params.get("theta_p_neg", 0.0))
+    theta_pc_pos = float(params.get("theta_pc_pos", 0.0))
+    theta_pc_neg = float(params.get("theta_pc_neg", 0.0))
+    theta_u_pos = float(params.get("theta_u_pos", 0.0))
+    theta_u_neg = float(params.get("theta_u_neg", 0.0))
+    if theta_u_pos <= 0.0:
+        theta_u_pos = theta_p_pos + theta_pc_pos
+    if theta_u_neg <= 0.0:
+        theta_u_neg = theta_p_neg + theta_pc_neg
+    return (
+        k0,
+        float(params.get("as_pos", 0.03)),
+        float(params.get("as_neg", 0.03)),
+        my_pos,
+        my_neg,
+        float(params.get("lamda_S", 0.0)),
+        float(params.get("lamda_C", 0.0)),
+        0.0,  # Lamda_A — unused for bilinear response
+        float(params.get("lamda_K", 0.0)),
+        float(params.get("c_S", 1.0)),
+        float(params.get("c_C", 1.0)),
+        1.0,  # c_A — unused for bilinear response
+        float(params.get("c_K", 1.0)),
+        theta_p_pos,
+        theta_p_neg,
+        theta_pc_pos,
+        theta_pc_neg,
+        float(params.get("res_pos", 0.0)),
+        float(params.get("res_neg", 0.0)),
+        theta_u_pos,
+        theta_u_neg,
+        float(params.get("D_pos", 1.0)),
+        float(params.get("D_neg", 1.0)),
+    )
+
+
 class ElementMixin:
     """Frame/wall/shell element creation, brace selection, and lumped hinges."""
 
@@ -1277,6 +1327,34 @@ class ElementMixin:
                     )
                 hinge_theta_y = theta_y
                 hinge_my = my_tri
+            elif self.config.get("hinge_backbone") == "imk":
+                # IMK steel hinge (Lignos-Krawinkler, collapse-level) — a
+                # ``Bilin`` uniaxial material on the strong axis with an
+                # energy-based cyclic-deterioration rule.  Parameters come from
+                # the section's stamped ``imk_params`` dict (see
+                # ``benchmarks/imk_calibration.py``).  K0 is the near-rigid
+                # ``stiff_factor`` x 6EI/L so the elastic member carries the
+                # elastic deformation, matching the bilinear/trilinear
+                # lumped-hinge convention.
+                params = getattr(sec, "imk_params", None) or {}
+                stiff_factor = float(self.config.get("hinge_stiffness_factor", 10.0))
+                k0 = stiff_factor * 6.0 * E * max(I33, 1e-12) / max(L, 1e-12)
+                my_imk = float(params.get("My_pos", My))
+                my_imk_neg = float(params.get("My_neg", -my_imk))
+                ops.uniaxialMaterial(
+                    "Bilin",
+                    hinge_mat_tag + 1,
+                    *_imk_bilin_args(params, k0, my_imk, my_imk_neg),
+                )
+                # Weak-axis moment stays elastic (out-of-plane; the 2D frame
+                # carries all in-plane action on the strong axis).
+                ops.uniaxialMaterial(
+                    "Elastic",
+                    hinge_mat_tag + 2,
+                    stiff_factor * 6.0 * E * max(I22, 1e-12) / max(L, 1e-12),
+                )
+                hinge_theta_y = my_imk / max(k0, 1e-12)
+                hinge_my = my_imk
             else:
                 # Strong-axis moment (ASCE 41 Hysteretic backbone)
                 ops.uniaxialMaterial(

@@ -159,6 +159,24 @@ dEj = E/(My·θ_y).
 (`_create_lumped_hinges` hinge instrumentation); tests
 `tests/test_benchmark_sac3_nltha.py` (`test_transient_recorders_*`).
 
+#### P42 — IMK calibration equations + A2/A3 (Krawinkler collapse)
+
+Source: `docs/benchmark_roadmap.md` §3 (canonical); `docs/imk_deterioration_model.md`.
+
+**Status (2026-10-27).** A1 machinery landed — `hinge_backbone="imk"` builds a
+`Bilin` steel hinge (energy-based cyclic deterioration) in `opensees/_elements.py`;
+A0 scaffolding (`benchmarks/imk_calibration.py`, `SteelIMKParams`) landed.
+**Remaining:**
+1. Transcribe the Lignos–Krawinkler (2011) θp/θpc/Λ regression equations
+   (beams RBS/non-RBS + columns) from the primary source, DOI
+   `10.1061/(ASCE)ST.1943-541X.0000376` — `lignos_krawinkler_2011()` currently
+   raises `NotImplementedError`.
+2. A2 single-member checks vs the component-database envelopes.
+3. A3 frame collapse (SAC 3/9/20 with IMK; IDA vs Ibarra–Krawinkler 2005).
+
+**Where.** `benchmarks/imk_calibration.py`; `opensees/_elements.py`
+(`hinge_backbone="imk"`); `tests/test_benchmark_sac_imk.py`.
+
 #### P25 — classic support symbols on top of the per-DOF glyphs
 
 Source: this register, *DONE — support restraints*; `docs/dev_notes.md` →
