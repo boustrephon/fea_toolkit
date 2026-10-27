@@ -183,6 +183,13 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
   applied to a three-story plane frame (El Centro 1940 N-S, 5% damping).  Build
   our own replica; cite CSI verification examples rather than reproducing their
   tables (see .clinerules §5.8).
+- **Sandia Sierra verification manuals** — Sierra/SolidMechanics (SAND2026-21931)
+  and Sierra/SD (SAND2025-12350) publish analytic closed-form structural-dynamics
+  problems (beam/plate natural frequencies, static deflections, transient) with
+  nightly-checked reference results — cite as cross-code T2 anchors.  The Sierra/SD
+  Example Problems Manual (SAND2025-12345) ships Exodus-based models (a TET10
+  Titanium "fixture" + eigen/static/transient decks); deferred — 3D solid, out of
+  the frame/wall scope (notes in local/references/sandia/README.md).
 
 ## 4. Phased roadmap
 
