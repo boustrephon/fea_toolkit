@@ -12,6 +12,7 @@ from fea_toolkit.benchmarks.imk_calibration import (
     IMK_PARAM_KEYS,
     SteelIMKParams,
     _beam_rotations,
+    lignos_2019_wide_flange_column,
     lignos_krawinkler_2011,
 )
 from fea_toolkit.opensees._elements import _imk_bilin_args
@@ -98,20 +99,78 @@ def test_lignos_krawinkler_2011_beam():
     assert set(p.to_dict()) == set(IMK_PARAM_KEYS)
 
 
-def test_lignos_krawinkler_2011_column_not_yet_transcribed():
-    with pytest.raises(NotImplementedError):
-        lignos_krawinkler_2011(
-            section_depth_m=0.5,
-            web_thickness_m=0.01,
-            flange_width_m=0.2,
-            flange_thickness_m=0.02,
-            radius_of_gyration_m=0.08,
-            unbraced_length_m=3.0,
-            member_length_m=6.0,
-            fy_pa=345e6,
-            plastic_modulus_m3=2.0e-3,
-            column=True,
-        )
+def test_lignos_2019_column_prefactor_and_caps():
+    # h/tw = 1, Lb/ry = 1, Pg/Pye = 0: each regression hits its prefactor/cap.
+    p = lignos_2019_wide_flange_column(
+        section_depth_m=0.5,
+        web_thickness_m=0.48,
+        flange_thickness_m=0.01,
+        radius_of_gyration_m=1.0,
+        unbraced_length_m=1.0,
+        fy_pa=345e6,
+        plastic_modulus_m3=2.0e-3,
+        axial_ratio=0.0,
+    )
+    assert p.mc_my == pytest.approx(9.5)  # a* (Eq. 7)
+    assert p.theta_p_pos == pytest.approx(0.10)  # 15 capped to 0.10 (Eq. 8)
+    assert p.theta_pc_pos == pytest.approx(0.10)  # 14 capped to 0.10 (Eq. 9)
+    assert p.res_pos == pytest.approx(0.4)  # 0.4 - 0 (Eq. 10)
+
+
+def test_lignos_2019_column_equations():
+    p = lignos_2019_wide_flange_column(
+        section_depth_m=0.5,
+        web_thickness_m=0.01,
+        flange_thickness_m=0.02,
+        radius_of_gyration_m=0.08,
+        unbraced_length_m=3.0,
+        fy_pa=345e6,
+        plastic_modulus_m3=2.0e-3,
+        axial_ratio=0.1,
+    )
+    # Eq. 6: My = 1.15·Z·Ry·Fy·(1 - Pg/Pye), Ry = 1.1 default, Pg/Pye <= 0.2
+    assert p.My_pos == pytest.approx(1.15 * 2.0e-3 * 1.1 * 345e6 * (1 - 0.1))
+    assert p.My_neg == -p.My_pos
+    assert p.mc_my >= 1.0
+    assert 0 < p.theta_p_pos <= 0.10
+    assert 0 < p.theta_pc_pos <= 0.10
+    assert p.res_pos == pytest.approx(0.4 - 0.4 * 0.1)
+    # No column cyclic-deterioration Lambda in the 2019 paper.
+    assert p.lamda_S == p.lamda_C == p.lamda_K == 0.0
+
+
+def test_lignos_2019_column_yield_moment_axial_gt_0_2():
+    p = lignos_2019_wide_flange_column(
+        section_depth_m=0.5,
+        web_thickness_m=0.01,
+        flange_thickness_m=0.02,
+        radius_of_gyration_m=0.08,
+        unbraced_length_m=3.0,
+        fy_pa=345e6,
+        plastic_modulus_m3=2.0e-3,
+        axial_ratio=0.3,
+    )
+    # Eq. 6 (Pg/Pye > 0.2): My = 1.15·Z·Ry·Fy·(9/8)(1 - Pg/Pye)
+    assert p.My_pos == pytest.approx(1.15 * 2.0e-3 * 1.1 * 345e6 * (9 / 8) * (1 - 0.3))
+
+
+def test_lignos_krawinkler_2011_column_delegates():
+    p = lignos_krawinkler_2011(
+        section_depth_m=0.5,
+        web_thickness_m=0.01,
+        flange_width_m=0.2,
+        flange_thickness_m=0.02,
+        radius_of_gyration_m=0.08,
+        unbraced_length_m=3.0,
+        member_length_m=6.0,
+        fy_pa=345e6,
+        plastic_modulus_m3=2.0e-3,
+        axial_ratio=0.1,
+        column=True,
+    )
+    assert p.res_pos == pytest.approx(0.4 - 0.4 * 0.1)
+    assert p.mc_my >= 1.0
+    assert p.lamda_S == 0.0
 
 
 def test_imk_hinge_builds():

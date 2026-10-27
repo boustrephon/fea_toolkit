@@ -11,10 +11,13 @@ page says it refers to Lignos & Krawinkler 2011), cross-checked against
 PEER/ATC-72-1 §3.2.2 (Eqs. 3-1 to 3-6).  ``lignos_krawinkler_2011()`` therefore
 works for *beams* — RBS and other-than-RBS, split at ``d = 533 mm``.
 
-**Column equations are not transcribed.**  PEER/ATC-72-1 §3.2.4 gives no column
-regression (it states the inelastic rotation parameters "are a matter of much
-judgment"), and the column regressions live in the paywalled 2011 paper (Table
-3).  The column path raises ``NotImplementedError``.
+**Column equations transcribed** from Lignos, Hartloper, Elkady, Deierlein &
+Hamburger (2019), "Proposed Updates to the ASCE 41 Nonlinear Modeling Parameters
+for Wide-Flange Steel Columns", DOI ``10.1061/(ASCE)ST.1943-541X.0002353`` (via
+the companion 2018 NCEE paper and the ASCE/SEI 41-17 Errata, which adopted them).
+These are the *first-cycle envelope* (ASCE 41) parameters; the cyclic-
+deterioration ``Λ`` of the monotonic backbone lives in the paywalled Lignos &
+Krawinkler (2011) paper (Table 3) and is left at 0.
 
 See ``docs/imk_deterioration_model.md`` for the design record.
 """
@@ -198,6 +201,97 @@ def _beam_rotations(
     return theta_p, theta_pc, lamda
 
 
+def lignos_2019_wide_flange_column(
+    *,
+    section_depth_m: float,
+    web_thickness_m: float,
+    flange_thickness_m: float,
+    radius_of_gyration_m: float,
+    unbraced_length_m: float,
+    fy_pa: float,
+    plastic_modulus_m3: float,
+    axial_ratio: float,
+    ry_factor: float = 1.1,
+    theta_u: Optional[float] = None,
+) -> SteelIMKParams:
+    """Wide-flange steel column ``Bilin`` parameters (Lignos et al. 2019 / ASCE 41-17).
+
+    Transcribes Eqs. 6–10 of Lignos, Hartloper, Elkady, Deierlein & Hamburger
+    (2019), DOI ``10.1061/(ASCE)ST.1943-541X.0002353`` (via the companion 2018
+    NCEE paper and the ASCE/SEI 41-17 Errata, which adopted them):
+
+    * ``My* = 1.15·Z·Ry·Fy·(1 − Pg/Pye)`` for ``Pg/Pye ≤ 0.20``; and
+      ``My* = 1.15·Z·Ry·Fy·(9/8)(1 − Pg/Pye)`` for ``Pg/Pye > 0.20``  (Eq. 6);
+    * ``a* = Mc/My = 9.5·(h/tw)^-0.4·(Lb/ry)^-0.16·(1 − Pg/Pye)^0.2 ≥ 1.0``  (Eq. 7);
+    * ``θp = 15·(h/tw)^-1.6·(Lb/ry)^-0.3·(1 − Pg/Pye)^2.3 ≤ 0.10``  (Eq. 8);
+    * ``θpc = 14·(h/tw)^-0.8·(Lb/ry)^-0.5·(1 − Pg/Pye)^3.2 ≤ 0.10``  (Eq. 9);
+    * ``Mr = (0.4 − 0.4·Pg/Pye)·My*``  (Eq. 10).
+
+    These are the *first-cycle envelope* (ASCE 41) parameters.  The cyclic-
+    deterioration ``Λ`` of the monotonic (``Bilin``) backbone is **not** given in
+    this paper (it lives in Lignos & Krawinkler 2011, Table 3), so ``lamda_*``
+    are set to ``0``.
+
+    Args:
+        section_depth_m: Overall section depth ``d`` (m).
+        web_thickness_m: Web thickness ``tw`` (m).
+        flange_thickness_m: Flange thickness ``tf`` (m) — used for the clear web
+            depth ``h = d − 2·tf``.
+        radius_of_gyration_m: Weak-axis radius of gyration ``ry`` (m).
+        unbraced_length_m: Unbraced length ``Lb`` (m).
+        fy_pa: Nominal yield strength (Pa).
+        plastic_modulus_m3: Strong-axis plastic section modulus ``Zx`` (m³).
+        axial_ratio: Gravity axial-load ratio ``Pg/Pye``.
+        ry_factor: AISC expected-yield ratio ``Ry`` (default 1.1 for A992/A572-50).
+        theta_u: Ultimate rotation (rad); defaults to ``theta_p + theta_pc``.
+
+    Note:
+        Columns with ``Pg/Pye > 0.6`` are force-controlled (elastic) per ASCE 41;
+        the caller should not assign a hinge in that case.
+    """
+    h = section_depth_m - 2.0 * flange_thickness_m
+    h_tw = h / web_thickness_m
+    lb_ry = unbraced_length_m / radius_of_gyration_m
+    one_minus_axial = 1.0 - axial_ratio
+
+    # Eq. 6 — effective yield moment (cyclic hardening + axial-load reduction).
+    if axial_ratio <= 0.20:
+        my = 1.15 * plastic_modulus_m3 * ry_factor * fy_pa * one_minus_axial
+    else:
+        my = 1.15 * plastic_modulus_m3 * ry_factor * fy_pa * (9.0 / 8.0) * one_minus_axial
+
+    # Eq. 7 — capping ratio (hardening) a* = Mc/My.
+    mc_my = 9.5 * h_tw**-0.4 * lb_ry**-0.16 * one_minus_axial**0.2
+    mc_my = max(mc_my, 1.0)
+
+    # Eqs. 8 & 9 — pre-/post-capping plastic rotations (capped at 0.10 rad).
+    theta_p = min(15.0 * h_tw**-1.6 * lb_ry**-0.3 * one_minus_axial**2.3, 0.10)
+    theta_pc = min(14.0 * h_tw**-0.8 * lb_ry**-0.5 * one_minus_axial**3.2, 0.10)
+
+    # Eq. 10 — residual strength ratio.
+    kappa = 0.4 - 0.4 * axial_ratio
+
+    if theta_u is None:
+        theta_u = theta_p + theta_pc
+
+    return SteelIMKParams(
+        My_pos=my,
+        My_neg=-my,
+        theta_p_pos=theta_p,
+        theta_p_neg=theta_p,
+        theta_pc_pos=theta_pc,
+        theta_pc_neg=theta_pc,
+        res_pos=kappa,
+        res_neg=kappa,
+        lamda_S=0.0,
+        lamda_C=0.0,
+        lamda_K=0.0,
+        mc_my=mc_my,
+        theta_u_pos=theta_u,
+        theta_u_neg=theta_u,
+    )
+
+
 def lignos_krawinkler_2011(
     *,
     section_depth_m: float,
@@ -218,8 +312,9 @@ def lignos_krawinkler_2011(
 ) -> SteelIMKParams:
     """Compute ``Bilin`` parameters from the Lignos–Krawinkler (2011) regressions (A0).
 
-    Implemented for **beams** (RBS and other-than-RBS).  **Columns** are not yet
-    supported.
+    Implemented for **beams** (RBS and other-than-RBS, Lignos–Krawinkler 2011);
+    **columns** delegate to :func:`lignos_2019_wide_flange_column` (Lignos et al.
+    2019, ASCE 41-17).
 
     Args:
         section_depth_m: Overall section depth ``d`` (m).
@@ -231,24 +326,24 @@ def lignos_krawinkler_2011(
         member_length_m: Member length ``L`` (m).
         fy_pa: Yield strength (Pa).
         plastic_modulus_m3: Strong-axis plastic section modulus ``Zx`` (m³).
-        axial_ratio: Column axial-load ratio ``P/Pye`` (columns only; unused here).
+        axial_ratio: Gravity axial-load ratio ``Pg/Pye`` (column path only).
         rbs: True for reduced-beam-section beams.
         column: True for a column (else a beam).
-        mc_my: Capping-to-yield moment ratio (default 1.05).
-        kappa: Residual strength ratio ``Mr/My`` (default 0.4).
+        mc_my: Capping-to-yield moment ratio (beams; default 1.05).
+        kappa: Residual strength ratio ``Mr/My`` (beams; default 0.4).
         theta_u: Ultimate rotation (rad); defaults to ``theta_p + theta_pc``.
-
-    Raises:
-        NotImplementedError: For columns — the column regression equations are not
-            transcribed (PEER/ATC-72-1 gives none; the 2011 paper is paywalled).
     """
     if column:
-        raise NotImplementedError(
-            "Lignos-Krawinkler (2011) column regressions are not yet transcribed. "
-            "PEER/ATC-72-1 §3.2.4 gives no column equations ('a matter of much "
-            "judgment'); the column regressions live in the paywalled 2011 paper "
-            "(DOI 10.1061/(ASCE)ST.1943-541X.0000376, Table 3). See "
-            "docs/imk_deterioration_model.md."
+        return lignos_2019_wide_flange_column(
+            section_depth_m=section_depth_m,
+            web_thickness_m=web_thickness_m,
+            flange_thickness_m=flange_thickness_m,
+            radius_of_gyration_m=radius_of_gyration_m,
+            unbraced_length_m=unbraced_length_m,
+            fy_pa=fy_pa,
+            plastic_modulus_m3=plastic_modulus_m3,
+            axial_ratio=axial_ratio,
+            theta_u=theta_u,
         )
 
     h = section_depth_m - 2.0 * flange_thickness_m  # clear web depth

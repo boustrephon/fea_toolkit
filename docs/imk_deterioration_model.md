@@ -98,7 +98,7 @@ From `benchmark_roadmap.md` §3 (priority 1):
 
 | Phase | What | Status |
 |---|---|---|
-| **A0 — backbone data** | Lignos–Krawinkler equations (θp, θpc, Λ) for RBS/non-RBS beams and columns | ✅ beams / 🚧 columns |
+| **A0 — backbone data** | Beams: Lignos–Krawinkler (2011) θp/θpc/Λ; Columns: Lignos et al. (2019) My/a*/θp/θpc/Mr | ✅ |
 | **A1 — material** | IMK (`Bilin`) uniaxial material behind `hinge_backbone="imk"` | ✅ landed |
 | **A2 — single-member checks** | M-θ loops vs the component-database envelopes | ⏳ pending |
 | **A3 — frame collapse** | SAC 3/9/20 matrices with IMK; IDA vs Ibarra–Krawinkler (2005) | ⏳ pending |
@@ -109,13 +109,12 @@ in `_create_lumped_hinges` — a `Bilin` strong-axis hinge reading a stamped
 near-rigid lumped-hinge convention).  `benchmarks/sac.builder_config` accepts
 `("imk", "lumped")`.  Tests: `tests/test_benchmark_sac_imk.py`.
 
-**A0 (beams landed).** `benchmarks/imk_calibration.py` defines `SteelIMKParams`
-and `lignos_krawinkler_2011(...)`, which now computes the full `Bilin`
-parameter set for **beams** (RBS and other-than-RBS, split at `d = 533 mm`),
-transcribed verbatim from Lignos' EPFL component tool and cross-checked against
-PEER/ATC-72-1 §3.2.2.  The **column** path still raises `NotImplementedError`
-(PEER/ATC-72-1 §3.2.4 gives no column equations; the regressions live in the
-paywalled 2011 paper, Table 3).
+**A0 (landed).** `benchmarks/imk_calibration.py` defines `SteelIMKParams` and
+`lignos_krawinkler_2011(...)`, which computes the full `Bilin` parameter set for
+**beams** (RBS and other-than-RBS, split at `d = 533 mm`; Lignos–Krawinkler
+2011) and **columns** (wide-flange; Lignos et al. 2019 / ASCE 41-17).  The
+column cyclic-deterioration `Λ` is not in the 2019 paper (first-cycle envelope
+only), so `lamda_*` is left at 0 for columns.
 
 ## 6. Calibration equations
 
@@ -139,12 +138,25 @@ option), `Mc = mc_my·My` (default 1.05), `Mr = κ·My` (default κ = 0.4),
 is derived in the hinge machinery so `Mc` is reproduced exactly regardless of
 the `K0` convention.
 
-### Columns (not yet transcribed)
+### Columns (transcribed — Lignos et al. 2019 / ASCE 41-17)
 
-PEER/ATC-72-1 §3.2.4 gives **no** column regression (it states the inelastic
-rotation parameters "are a matter of much judgment"); the column regressions
-are in the paywalled 2011 paper (Table 3).  Obtain that paper (or a column
-module of the EPFL/Lignos tool) before implementing the `column=True` path.
+Wide-flange steel columns, from Lignos, Hartloper, Elkady, Deierlein &
+Hamburger (2019), DOI `10.1061/(ASCE)ST.1943-541X.0002353` (Eqs. 6–10; adopted
+verbatim in the ASCE/SEI 41-17 Errata).  Variables: `h/tw = (d − 2tf)/tw`,
+`Lb/ry`, `Pg/Pye` (gravity axial load / expected axial yield).
+
+| Parameter | Equation |
+|---|---|
+| yield moment `My*` | `1.15·Z·Ry·Fy·(1 − Pg/Pye)` if `Pg/Pye ≤ 0.20`; `1.15·Z·Ry·Fy·(9/8)(1 − Pg/Pye)` otherwise |
+| capping ratio `a* = Mc/My` | `9.5 (h/tw)^-0.4 (Lb/ry)^-0.16 (1 − Pg/Pye)^0.2 ≥ 1.0` |
+| pre-capping `θp` | `15 (h/tw)^-1.6 (Lb/ry)^-0.3 (1 − Pg/Pye)^2.3 ≤ 0.10` |
+| post-capping `θpc` | `14 (h/tw)^-0.8 (Lb/ry)^-0.5 (1 − Pg/Pye)^3.2 ≤ 0.10` |
+| residual `Mr` | `(0.4 − 0.4·Pg/Pye)·My*` |
+
+`Ry` = AISC expected-yield ratio (1.1 for A992/A572-50).  These are the
+*first-cycle envelope* parameters; the column cyclic-deterioration `Λ` (for the
+monotonic `Bilin` backbone) is not in this paper — it lives in Lignos &
+Krawinkler (2011, Table 3), so `lamda_* = 0` for columns.
 
 ## 7. References
 
