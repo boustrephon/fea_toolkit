@@ -16,7 +16,7 @@ matrix and the implemented-benchmark catalogue.  The build order — re-ranked
 2026-10 after source verification — is **SAC-derived (Krawinkler deterioration)
 first, then RC frames, then RC shear walls, then masonry/URM**; the ranked
 sequence with DOIs and prerequisites is the section immediately below.  The
-SAC widening (§2) is largely landed (B1 modal anchors + A0–A3 nonlinear); the
+SAC widening (§2) is landed (B1 modal anchors + A0–A4 nonlinear); the
 next SAC-derived step is the IMK deterioration model (§3).
 
 ## Integrated ranked sequence — SAC-derived first
@@ -27,7 +27,7 @@ verified and live in [references.bib](../papers/references.bib).
 
 | # | Cluster | Benchmarks | Tier / cell | Needs |
 |---|---|---|---|---|
-| 1 | **SAC-derived (steel frames)** | Krawinkler deterioration (§3); finish SAC 9/20-story A4 (§2) | T4 / steel moment frame | nothing new |
+| 1 | **SAC-derived (steel frames)** | Krawinkler deterioration (§3) | T4 / steel moment frame | nothing new |
 | 2 | **RC frames** | DesignSafe infilled (bare → struts); E-Defense 10- and 4-story (§4) | T4 / RC moment frame | diagonal-strut infill |
 | 3 | **RC shear walls** | UCSD 7-story; FEMA P-695 / Marafi; SAFE/CASH squat (§5); Hidalgo buildings (§1) | T2–T4 / shear wall | none (MVLEM/fiber landed) |
 | 4 | **Masonry / URM** | URM Benchmark Project BS1–BS6; URM shake-table database (§6) | T3–T4 / masonry | masonry/URM physics |
@@ -39,7 +39,8 @@ degradation hinge (β=0.5, loses convergence on 4/10 strong cases, §2 A4) with 
 calibrated from the **Lignos–Krawinkler steel-component database** (>300
 beam/column tests).  Sources: Ibarra, Medina & Krawinkler (2005)
 `10.1002/eqe.495`; Lignos & Krawinkler (2011) `10.1061/(ASCE)ST.1943-541X.0000376`;
-Ibarra & Krawinkler (2005), PEER 2005/06.  Then finish the SAC A4 comparison (§2).
+Ibarra & Krawinkler (2005), PEER 2005/06.  (The SAC A4 comparison itself
+landed 2026-10-26; this cluster is now the deterioration model only.)
 
 **Cluster 2 — RC frames.**  Bhat & Singh (2024) `10.17603/ds2-4acg-tt80` ships
 OpenSees models + responses for infilled RC frame buildings — reproduce the
@@ -142,8 +143,8 @@ through `preprocess_model → AnalysisBuilder → run_modal_analysis`.
 ## 2. Wider use of the SAC buildings (Ohtori 2004) — priority 1
 
 > **Canonical plan.** This §2 is the single source of truth for the A0–A4
-> widening; `_pending_work.md` P40/P41, `sac_benchmark.md` and
-> `sac_nonlinear_benchmark.md` reference it rather than restate it.
+> widening; `sac_benchmark.md`, `sac_nonlinear_benchmark.md` and
+> `sac_trilinear_hinge_approaches.md` reference it rather than restate it.
 
 See [sac_benchmark.md](sac_benchmark.md) for the modal-gap findings (B1).
 Summary:
@@ -188,7 +189,7 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   `run_transient_analysis` now records the seven peak quantities — drift (from
   `displacements`), per-node velocity / acceleration, base shear (global
   equilibrium `Σ m·(a_rel + ag)`), and φmax / Emax / Nd from the lumped hinges
-  (see P41 in `_pending_work.md`).  Settings confirmed: Newmark β=1/4 γ=1/2,
+  (archived as P41 in `history/_done_log.md`).  Settings confirmed: Newmark β=1/4 γ=1/2,
   dt=0.005 s, Rayleigh ζ=2 % at mode 1 + `nCutOff` (mode 2 for 3/9-story, mode 5
   for 20-story — pass `period_2 = T5` explicitly); the benchmark applies **no
   P-Δ** (linear stiffness, `geomTransf Linear`).  The remaining piece is the A4

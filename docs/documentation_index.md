@@ -356,7 +356,7 @@ for automated cross-referencing.
   Tags: `ground-motion`, `validation`, `benchmark`, `nonlinear-dynamic`, `response-spectrum`, `licensing`, `ci`
   Related: [Benchmark & Validation Model Register](benchmark_register.md) · [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md)
 
-- [Desktop GUI Roadmap](gui_roadmap.md) — 🚧 Draft
+- [Desktop GUI Roadmap](gui_roadmap.md) — ⚠️ Partial
   > Framework decision and architecture for a Qt/PySide6 desktop application wrapping the import → view → query → analyse → results workflow.
   Tags: `gui`, `qt`, `pyside6`, `pyvistaqt`, `architecture`, `planning`, `roadmap`
   Related: [Visualisation Toolkit](viewer.md) · [Analysis Workflow](workflow.md) · [Unified Results Schema](results_schema.md) · [Rhino 3-D Export](rhino_export.md) · [Report Generation — Design Proposal](report_generation.md)

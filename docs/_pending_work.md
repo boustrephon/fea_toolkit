@@ -145,62 +145,17 @@ warranted — `pushover_step_stride` and the per-block flags are the answer):
 
 ### Tier 3 — Feature gaps (placeholders / partial)
 
-#### P40 — trilinear hinge backbone option (`hinge_backbone="trilinear"`)
-
-Source: `docs/benchmark_roadmap.md` §2 A1 (canonical);
-`src/fea_toolkit/benchmarks/sac_member_data.py`;
-`src/fea_toolkit/opensees/_elements.py`.
-
-**Status (2026-10-25).** The backbone *machinery* is landed: `sac.enrich_trilinear()`
-stamps the transcribed `MAT_TBL_3/9/20` backbones (`EI1/EI2/EI3`, `d1/d2`) onto
-the SAC sections, and `opensees/_elements.py` gained a `hinge_backbone="trilinear"`
-lumped-hinge `Hysteretic` branch (6EI/L κ→θ) beside `asce41`/`bilinear`
-(`tests/test_benchmark_sac_trilinear.py`).  **Resolved:** the benchmark member is
-a concentrated-plasticity *one-component* model (Giberson 1967; Clough & Johnston
-1966) — elastic interior + end hinges — and publishes **no plastic-hinge length
-(`Lp`) and no yield-index (α) law** (both live in the compiled S-function).
-
-**Done (2026-10-26).**  The A4 comparison itself has landed, alongside the
-wiring: `builder_config()` / `build_builder()` / `load_model()` all accept
-`backbone="bilinear"|"trilinear"|"trilinear_steel02"|"trilinear_clough"` (and
-`hinge_model="lumped"|"beam_with_hinges"`), and the four hinge formulations —
-lumped `Hysteretic`, `beamWithHinges` + `Hysteretic`, + two-`Steel02`-in-parallel,
-and + Clough — share the one transcribed backbone (see
-`docs/sac_trilinear_hinge_approaches.md`).  The `beamWithHinges` one-component
-mapping (elastic interior `EI1` + trilinear M–κ end hinges, κ→θ done by the
-element, `Lp = L/6`) is the **preferred** A4 hinge, not a deferred fallback.
-
-**Where.**  `opensees/_elements.py` (the `hinge_backbone` dispatch);
-`benchmarks/sac.py` (`enrich_trilinear` / `builder_config`).
-
-#### P41 — transient-runner peak extraction (velocity / acceleration / base shear / hinge damage)
+#### P41 — A4 damage normalization (φj = θ/θ_y, dEj = E/(My·θ_y))
 
 Source: `docs/sac_nonlinear_benchmark.md`;
 `src/fea_toolkit/opensees/_runner_dynamic.py`.
 
-**Status (2026-10-25).** Landed.  `run_transient_analysis` now records per-step
-`nodeVel` / `nodeAccel` histories, the base-shear history (global equilibrium
-`Σ m·(a_rel + ag)` — exact for the base-excited, no-gravity benchmark), and the
-lumped-hinge damage quantities
-(`peak_plastic_rotation` φmax, `max_dissipated_energy` Emax as the net work
-`∫M·dθ`, `num_yielded_hinges` Nd).  The lumped-hinge bending response is the
-`zeroLength` element's `deformation` / `force` index 4 (dir 5, the strong-axis
-in-plane hinge); the `beamWithHinges` path records the end-section
-`deformation` / `force` index 0 for sections 1 and 6.  `_create_lumped_hinges`
-stores the hinge tags + strong-axis yield rotation/moment for the damage
-post-pass.  The
-benchmark applies **no P-Δ** (linear stiffness, `geomTransf Linear`), and its
-Rayleigh ζ=2 % at mode 1 + `nCutOff` matches the runner's two-period formula —
-the 20-story needs `period_2 = T5` passed explicitly.
+**What.** The peak extraction and `.mat` comparison landed 2026-10-26 (see
+`history/_done_log.md`).  **Remaining:** the runner still returns the *raw*
+damage quantities — normalize them to the benchmark's φj = θ/θ_y and
+dEj = E/(My·θ_y).
 
-**Done (2026-10-26).**  The `.mat` comparison itself has landed — the runner's
-raw quantities feed the committed `docs/assets/sac_nltha/sac_nltha_metrics.json`
-peak comparison (see the nonlinear paper).
-
-**What remains.**  The A4 damage normalization (φj = θ/θ_y, dEj = E/(My·θ_y)) —
-the runner still returns the *raw* quantities.
-
-**Where.**  `opensees/_runner_dynamic.py`; `opensees/_elements.py`
+**Where.** `opensees/_runner_dynamic.py`; `opensees/_elements.py`
 (`_create_lumped_hinges` hinge instrumentation); tests
 `tests/test_benchmark_sac3_nltha.py` (`test_transient_recorders_*`).
 

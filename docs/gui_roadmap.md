@@ -1,7 +1,7 @@
 ---
 title: "Desktop GUI Roadmap"
 description: "Framework decision and architecture for a Qt/PySide6 desktop application wrapping the import → view → query → analyse → results workflow."
-status: "draft"
+status: "partial"
 tags: [gui, qt, pyside6, pyvistaqt, architecture, planning, roadmap]
 category: [planning]
 related: [viewer.md, workflow.md, results_schema.md, rhino_export.md, report_generation.md]

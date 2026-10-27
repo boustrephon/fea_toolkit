@@ -52,7 +52,10 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
 | SAC 3/9/20-story frame — NLTHA | steel moment frame · NLTHA | T4 | [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md) | `test_benchmark_sac3_nltha.py`, `test_benchmark_sac920.py` |
 | Vecchio & Emara (1992) frame | RC moment frame · pushover | T3 | [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md) | `test_rc_benchmark.py` |
 | Duong et al. (2007) shear-critical frame | RC moment frame · pushover | T3 | [duong_benchmark.md](duong_benchmark.md) | `test_duong_benchmark.py` |
-| RC wall pushover (LayeredShell + MVLEM) | shear wall · pushover | synthetic | [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [shell_support.md](shell_support.md) | `test_wall_pushover.py` |
+| RC wall pushover (LayeredShell + MVLEM) | shear wall · pushover | — | [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [shell_support.md](shell_support.md) | `test_wall_pushover.py` |
+
+> `—` = a synthetic exercise, not a T-tier benchmark (matrix cell ◐); its docs
+> are the feature pages rather than a `_benchmark.md`.
 
 Supporting code, not separate benchmarks: the SAC data generators
 (`benchmarks/fema355c.py`, `sac_member_data.py`, `sac_response_data.py`), the
