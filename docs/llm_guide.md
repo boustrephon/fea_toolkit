@@ -523,6 +523,11 @@ from fea_toolkit import SAP2000Parser  # now works from repo root
 # docs/llm_guide.md  ← you are here
 # docs/documentation_index.md ← full documentation index with tags
 # examples/README.md ← example scripts index
+# Planning spine (one owner per fact — .clinerules §7.4):
+#   benchmark_register.md = index/status
+#   benchmark_roadmap.md  = plan (build order + candidate sources)
+#   _pending_work.md      = sequencing/status (active work log)
+#   history/_done_log.md  = completed work (archive)
 ```
 
 ### OpenSeesPy not found

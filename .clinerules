@@ -580,6 +580,30 @@ agent commits*.
 - Self-contained, runnable scripts showing one workflow each.
 - Include an `examples/README.md` index.
 
+### 7.4 Planning-document spine (one owner per fact)
+
+The project's plans live in four linked documents; each fact has exactly **one
+owner**, so edits don't drift out of sync:
+
+| Document | Owner | Never |
+|---|---|---|
+| `docs/benchmark_register.md` | **Index / status** — tiers, coverage matrix, implemented catalogue | list candidates here |
+| `docs/benchmark_roadmap.md` | **Plan** — ranked build order, workstreams, candidate sources (DOIs) | report status here |
+| `docs/_pending_work.md` | **Sequencing / status** — `## Strategy` + open P-items | restate the plan here |
+| `docs/history/_done_log.md` | **Completed work** — relocated P-items; done standalone plans get `category: [archive]` | leave done items in the active log |
+
+- When work lands, update **all four in one pass**: relocate the P-item (or tag
+  the plan doc `category: [archive]`), tick the roadmap workstream, and mark the
+  register catalogue + matrix cell.
+- The `## Strategy` section in `_pending_work.md` carries a `(maintained …)`
+  date — bump it whenever the sequencing changes.
+- Re-run `docs/_generate_index.py` after **any frontmatter** change (`status`,
+  `title`, `tags`, `related`, `category`) — `documentation_index.md` is
+  generated, never hand-edited.
+- A document's frontmatter `status` must match its body's status badge
+  (`draft`/`partial`/`complete` → 🚧/⚠️/✅); a body that reads "⚠️ Partial" must
+  not carry `status: "draft"`.
+
 
 ## 8. Context Efficiency (guard against API errors)
 
