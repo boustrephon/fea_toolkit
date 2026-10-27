@@ -267,6 +267,11 @@ def _value_matches_hint(value: t.Any, hint: t.Any) -> bool:
         )
     if hint is bool:
         return isinstance(value, bool)
+    if t.get_origin(hint) is not None:
+        # Parameterized generic (``dict[str, float]``, ``list[int]``, …) —
+        # ``isinstance`` cannot test against a subscripted generic, so defer to
+        # the structural match performed by ``_encode_value``.
+        return True
     if isinstance(hint, type):
         return isinstance(value, hint)
     return True
