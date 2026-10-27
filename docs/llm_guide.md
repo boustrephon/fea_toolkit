@@ -307,6 +307,15 @@ a non-convergence debugging table.
 - **8-argument trapezoidal `eleLoad`**: broken in OpenSeesPy 3.8.0.0.
   Toolkit decomposes non-uniform loads into 4 partial-span uniform segments.
 - **`Corotational` geomTransf + `eleLoad`**: does not work in 3D. Warning emitted.
+- **`Bilin` uniaxial material is deprecated — use `IMKBilin`.**  OpenSees warns
+  ``DO NOT USE THE "Bilin" MATERIAL, IT HAS BEEN REPLACED. Use "IMKBilin" or
+  "HystereticSM" INSTEAD.``  The old `Bilin` argument list no longer works.
+  Target `IMKBilin`'s 21-arg signature
+  (``Ke dp_pos dpc_pos du_pos Fy_pos FmaxFy_pos FresFy_pos dp_neg dpc_neg du_neg
+  Fy_neg FmaxFy_neg FresFy_neg Lamda_S Lamda_C Lamda_K c_S c_C c_K D_pos D_neg``),
+  all strengths/deformations positive.  `IMKBilin`'s post-capping stiffness is
+  ``K_pc = −Fcap/dpc``, so map the calibrated ``θpc → dpc = mc_my·θpc/(mc_my−res)``.
+  See `docs/imk_deterioration_model.md` §4.
 
 ### Recommended brace modelling
 - **Static pushover**: `Truss` + `Hysteretic` (Approach B) — robust, asymmetric.

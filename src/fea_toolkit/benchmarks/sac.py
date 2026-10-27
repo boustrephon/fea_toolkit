@@ -29,6 +29,7 @@ the plastic moduli and yield strengths below are computed from AISC tables
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any, Optional
 
@@ -305,6 +306,97 @@ def enrich_display_sections(md: SAPModelData, building: int = 3) -> SAPModelData
     return md
 
 
+def enrich_imk(
+    md: SAPModelData,
+    building: int = 3,
+    column_axial_ratio: float = 0.0,
+    beam_unbraced_factor: float = 1.0,
+) -> SAPModelData:
+    """Stamp Lignos–Krawinkler ``IMKBilin`` hinge parameters onto the SAC sections.
+
+    Computes one :class:`~fea_toolkit.benchmarks.imk_calibration.SteelIMKParams`
+    per moment-frame section from the member's *physical* AISC geometry and
+    stamps the flattened ``imk_params`` dict onto the section, which the builder's
+    ``hinge_backbone="imk"`` path reads (see :func:`builder_config`).  Columns use
+    the Lignos et al. (2019) wide-flange equations with ``column_axial_ratio``
+    (``Pg/Pye``); beams use Lignos & Krawinkler (2011).  The leaning column stays
+    elastic (no ``imk_params``).
+
+    Geometry (``D``/``BF``/``TF``/``TW``/``Z33``/``I22``/``A``) is read from the
+    AISC table via :func:`fea_toolkit.model.steel_sections.get_section_properties`,
+    with ``ry = sqrt(I22/A)``.  The representative member length ``L`` is the
+    longest frame element assigned to the section (exact for the 3-story model,
+    whose members of one section share a length); the beam unbraced length is
+    ``beam_unbraced_factor * L`` (default 1.0 — no intermediate lateral bracing, a
+    conservative first cut).
+
+    Args:
+        md: SAC model, after :func:`enrich_display_sections` (the moment-frame
+            sections carry the ``SteelCol`` / ``SteelBeam`` material).
+        building: 3, 9 or 20.  Only 3 is wired today.
+        column_axial_ratio: Gravity axial-load ratio ``Pg/Pye`` for columns
+            (``0`` = pure flexure, the no-axial-load envelope; the per-column
+            value from a gravity run is an open A3 item).
+        beam_unbraced_factor: ``Lb / L`` for beams (default 1.0).
+
+    Raises:
+        NotImplementedError: For ``building`` != 3 (per-member unbraced lengths /
+            column axial loads not yet wired).
+
+    Returns:
+        *md*, mutated in place.
+    """
+    if building != 3:
+        raise NotImplementedError(
+            f"IMK hinges for the {building}-story model need per-member unbraced "
+            "lengths and column axial loads (not yet wired); use building=3"
+        )
+    from ..model.steel_sections import get_section_properties
+    from .imk_calibration import lignos_krawinkler_2011
+
+    # Representative (longest) member length per assigned section.
+    lengths: dict[str, float] = {}
+    for eid, sname in md.frame_assignments.items():
+        elem = md.frame_elements.get(eid)
+        if elem is None:
+            continue
+        ni = md.nodes.get(elem.node_i)
+        nj = md.nodes.get(elem.node_j)
+        if ni is None or nj is None:
+            continue
+        length = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
+        if length > lengths.get(sname, 0.0):
+            lengths[sname] = length
+
+    name_map = MAT_TO_SECTION[building]
+    for sname, mat_no in _mat_no_by_section(md, building).items():
+        sec = md.sections.get(sname)
+        if sec is None or sname not in lengths:
+            continue
+        is_col = sec.material == "SteelCol"
+        if not is_col and sec.material != "SteelBeam":
+            continue  # leaning column (elastic material) — no hinge
+        props = get_section_properties(name_map[mat_no])
+        if props is None:
+            continue
+        length = lengths[sname]
+        params = lignos_krawinkler_2011(
+            section_depth_m=props["D"],
+            web_thickness_m=props["TW"],
+            flange_width_m=props["BF"],
+            flange_thickness_m=props["TF"],
+            radius_of_gyration_m=float(np.sqrt(props["I22"] / props["A"])),
+            unbraced_length_m=length if is_col else beam_unbraced_factor * length,
+            member_length_m=length,
+            fy_pa=COLUMN_FY if is_col else BEAM_FY,
+            plastic_modulus_m3=props["Z33"],
+            axial_ratio=column_axial_ratio if is_col else 0.0,
+            column=is_col,
+        )
+        sec.imk_params = params.to_dict()
+    return md
+
+
 # ═══════════════════════════════════════════════════════════════
 # 9/20-story benchmark models (struct9.m / struct20.m)
 # ═══════════════════════════════════════════════════════════════
@@ -471,12 +563,14 @@ def load_model(
             bilinear hinge, or the trilinear backbone).  When False, return the
             bare elastic model (the T2/B1 modal anchor's input).
         backbone: ``"bilinear"`` (default), ``"trilinear"``,
-            ``"trilinear_steel02"`` or ``"trilinear_clough"``.  The three
-            trilinear spellings all call :func:`enrich_trilinear` so the
+            ``"trilinear_steel02"``, ``"trilinear_clough"`` or ``"imk"``.  The
+            three trilinear spellings all call :func:`enrich_trilinear` so the
             sections carry the transcribed ``mat_tbl`` backbone; they differ
             only in the hinge material the builder emits (``Hysteretic``,
             two-``Steel02``-in-parallel, or ``Hysteretic`` with
-            unloading-stiffness degradation).
+            unloading-stiffness degradation).  ``"imk"`` calls :func:`enrich_imk`
+            to stamp the Lignos-Krawinkler ``IMKBilin`` ``imk_params`` onto the
+            sections.
 
     Raises:
         ValueError: For an unknown *building*.
@@ -493,7 +587,14 @@ def load_model(
     if nonlinear:
         if building == 3:
             enrich_nonlinear(md)
-        if backbone in ("trilinear", "trilinear_steel02", "trilinear_clough"):
+        if backbone == "imk":
+            if building != 3:
+                raise NotImplementedError(
+                    f"IMK hinges for the {building}-story model need per-member "
+                    "unbraced lengths and column axial loads (not yet wired); "
+                    "use building=3"
+                )
+        elif backbone in ("trilinear", "trilinear_steel02", "trilinear_clough"):
             enrich_trilinear(md, building=building)
         elif building != 3:
             raise NotImplementedError(
@@ -501,6 +602,8 @@ def load_model(
                 "AISC Z33/depth/tw (not yet transcribed); use backbone='trilinear'"
             )
         enrich_display_sections(md, building=building)
+        if backbone == "imk":
+            enrich_imk(md, building=building)
     return md
 
 
@@ -712,6 +815,7 @@ __all__ = [
     "build_builder",
     "builder_config",
     "enrich_display_sections",
+    "enrich_imk",
     "enrich_nonlinear",
     "enrich_trilinear",
     "load_benchmark_record",

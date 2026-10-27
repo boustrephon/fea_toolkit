@@ -258,6 +258,15 @@ of optimality.
   robust so far; the `Clough` degradation law (β = 0.5) has lost convergence on
   strong/long records.  Both are observations from the SAC benchmarks, not
   prescriptions.
+- The collapse-level steel hinge material is **`IMKBilin`, never `Bilin`**.
+  `Bilin` is a deprecated OpenSees alias (it emits
+  ``WARNING: DO NOT USE THE "Bilin" MATERIAL, IT HAS BEEN REPLACED``) whose
+  argument list no longer matches the old documentation.  Target the 21-arg
+  `IMKBilin` signature ``(Ke dp dpc du Fy FmaxFy FresFy … Lamda_S/C/K c_S/C/K
+  D_pos D_neg)`` directly, with all strengths/deformations positive.  Note
+  `IMKBilin`'s post-capping stiffness is ``K_pc = −Fcap/dpc`` (not
+  ``(Fres−Fcap)/θpc``), so the calibrated ``θpc`` maps to
+  ``dpc = mc_my·θpc/(mc_my−res)``.  See `docs/imk_deterioration_model.md` §4.
 
 
 ## 4. Naming & Style Rules

@@ -1,16 +1,16 @@
 ---
-title: "IMK (Bilin) Steel Hinge — Deterioration Model"
-description: "The Ibarra–Medina–Krawinkler (IMK) deterioration model for steel moment frames: relationship to the ASCE 41 backbone and ETABS/SAP2000/Perform-3D, the OpenSees Bilin material, and the A0–A3 implementation plan and status."
+title: "IMK (IMKBilin) Steel Hinge — Deterioration Model"
+description: "The Ibarra–Medina–Krawinkler (IMK) deterioration model for steel moment frames: relationship to the ASCE 41 backbone and ETABS/SAP2000/Perform-3D, the OpenSees IMKBilin material, and the A0–A3 implementation plan and status."
 status: "partial"
-tags: [imk, ibarra-krawinkler, lignos-krawinkler, deterioration, collapse, hinge, bilin, steel, nonlinear-dynamic, moment-frame]
+tags: [imk, ibarra-krawinkler, lignos-krawinkler, deterioration, collapse, hinge, imkbilin, bilin, steel, nonlinear-dynamic, moment-frame]
 category: [planning]
 related: [benchmark_roadmap.md, sac_nonlinear_benchmark.md, sac_trilinear_hinge_approaches.md, modeling_guidance.md]
 ---
 
-# IMK (Bilin) Steel Hinge — Deterioration Model
+# IMK (IMKBilin) Steel Hinge — Deterioration Model
 
-⚠️ Partial — A1 machinery landed (2026-10-27); A0 calibration equations and
-A2/A3 validation pending.
+⚠️ Partial — A0/A1/A2 landed; A3 (frame collapse) in progress — first increment
+`enrich_imk` + 3-story `backbone="imk"` (2026-10-27).
 
 ## 1. What it is
 
@@ -63,14 +63,22 @@ modelling parameters from.
   spirit as IMK (collapse-oriented).
 - **OpenSees** implements IMK natively — which is what this project targets.
 
-## 4. The OpenSees material — `Bilin` (steel), not `ModIMKPeakOriented`
+## 4. The OpenSees material — `IMKBilin` (steel), not `ModIMKPeakOriented`
+
+> **⚠️ `Bilin` is deprecated — do not use it.**  OpenSees emits
+> ``WARNING: DO NOT USE THE "Bilin" MATERIAL, IT HAS BEEN REPLACED. Use "IMKBilin"
+> or "HystereticSM" INSTEAD.``  The current material is **`IMKBilin`** (a
+> rewrite of the same IMK-bilinear model, tagged ``IMK with Bilinear Response``
+> in `IMKBilin.cpp`); the old `Bilin` spelling is a warning-emitting stub whose
+> argument list no longer matches the old documentation.  **Always target
+> `IMKBilin`** with the 21-argument signature below — never `Bilin`.
 
 The modified IMK model has three OpenSees hysteretic variants, and the choice
 matters:
 
 | Material | Hysteresis | For |
 |---|---|---|
-| **`Bilin`** | bilinear | **steel** components (calibrated to >350 steel beam-column connections) |
+| **`IMKBilin`** (alias `Bilin`) | bilinear | **steel** components (calibrated to >350 steel beam-column connections) |
 | `ModIMKPeakOriented` / `IMKPeakOriented` | peak-oriented | **RC** flexural components |
 | `ModIMKPinching` / `IMKPinching` | pinching | RC shear, connections, wood |
 
@@ -101,22 +109,53 @@ From `benchmark_roadmap.md` §3 (priority 1):
 | Phase | What | Status |
 |---|---|---|
 | **A0 — backbone data** | Beams: Lignos–Krawinkler (2011) θp/θpc/Λ; Columns: Lignos et al. (2019) My/a*/θp/θpc/Mr | ✅ |
-| **A1 — material** | IMK (`Bilin`) uniaxial material behind `hinge_backbone="imk"` | ✅ landed |
+| **A1 — material** | IMK (`IMKBilin`) uniaxial material behind `hinge_backbone="imk"` | ✅ landed |
 | **A2 — single-member checks** | M-θ loops vs the component-database envelopes | ✅ landed (material-level) |
-| **A3 — frame collapse** | SAC 3/9/20 matrices with IMK; IDA vs Ibarra–Krawinkler (2005) | ⏳ pending |
+| **A3 — frame collapse** | SAC 3/9/20 matrices with IMK; IDA vs Ibarra–Krawinkler (2005) | 🚧 in progress |
 
 **A1 (landed).** `opensees/_elements.py` gained a `hinge_backbone="imk"` branch
-in `_create_lumped_hinges` — a `Bilin` strong-axis hinge reading a stamped
+in `_create_lumped_hinges` — a `IMKBilin` strong-axis hinge reading a stamped
 `imk_params` dict off each section, with `K0 = stiff_factor × 6EI/L` (the
 near-rigid lumped-hinge convention).  `benchmarks/sac.builder_config` accepts
 `("imk", "lumped")`.  Tests: `tests/test_benchmark_sac_imk.py`.
 
 **A0 (landed).** `benchmarks/imk_calibration.py` defines `SteelIMKParams` and
-`lignos_krawinkler_2011(...)`, which computes the full `Bilin` parameter set for
-**beams** (RBS and other-than-RBS, split at `d = 533 mm`; Lignos–Krawinkler
+`lignos_krawinkler_2011(...)`, which computes the full `IMKBilin` parameter set
+for **beams** (RBS and other-than-RBS, split at `d = 533 mm`; Lignos–Krawinkler
 2011) and **columns** (wide-flange; Lignos et al. 2019 / ASCE 41-17).  The
 column cyclic-deterioration `Λ` is not in the 2019 paper (first-cycle envelope
 only), so `lamda_*` is left at 0 for columns.
+
+**A3 (in progress).** The frame-collapse path.  First increment landed
+(2026-10-27): `benchmarks/sac.enrich_imk()` stamps per-section `imk_params` from
+each member's *physical* AISC geometry (read via
+`fea_toolkit.model.steel_sections.get_section_properties`, with
+`ry = sqrt(I22/A)`), wired into `load_model(..., backbone="imk")` for the
+3-story model.  Columns use Lignos et al. (2019) with `column_axial_ratio`
+(`Pg/Pye`); beams use Lignos–Krawinkler (2011); the leaning column stays elastic.
+Tests: `tests/test_benchmark_sac_imk_frame.py`.
+
+Open A3 items, in build order:
+
+1. **Column axial ratio.**  `enrich_imk` takes `column_axial_ratio` (default 0 —
+   pure flexure, the no-axial-load envelope).  Compute the per-column `Pg/Pye`
+   from a gravity run of the elastic model (tributary + member self-weight) so
+   the columns carry their real axial-load reduction.
+2. **Beam unbraced length.**  `beam_unbraced_factor` defaults to 1.0 (`Lb = L`,
+   no intermediate bracing).  The composite-slab bracing assumption (typically
+   `Lb ≈ L/2` for the bottom flange in negative moment) is a calibration choice;
+   sweep it against the benchmark response.
+3. **Column cyclic-deterioration Λ.**  `lamda_*` is 0 for columns (the 2019 paper
+   is first-cycle only).  Add the Lignos & Krawinkler (2011, Table 3) column Λ.
+4. **NLTHA convergence.**  Run the 3-story SAC ground-motion suite
+   (`SAC_DT_CAL = 0.005 s`) with `hinge_backbone="imk"` and confirm the IMKBilin
+   hinges converge under the strong records where the `Clough` trilinear hinge
+   failed.
+5. **9/20-story matrices.**  Wire `enrich_imk` for building 9/20 (per-member
+   unbraced lengths from the varying story heights; column splices).
+6. **IDA vs Ibarra–Krawinkler (2005).**  Incremental dynamic analysis over the
+   benchmark records; compare the median collapse capacity (`S_a(T1)`) against
+   Ibarra–Medina–Krawinkler (2005).
 
 ## 6. Calibration equations
 
@@ -157,7 +196,7 @@ verbatim in the ASCE/SEI 41-17 Errata).  Variables: `h/tw = (d − 2tf)/tw`,
 
 `Ry` = AISC expected-yield ratio (1.1 for A992/A572-50).  These are the
 *first-cycle envelope* parameters; the column cyclic-deterioration `Λ` (for the
-monotonic `Bilin` backbone) is not in this paper — it lives in Lignos &
+monotonic `IMKBilin` backbone) is not in this paper — it lives in Lignos &
 Krawinkler (2011, Table 3), so `lamda_* = 0` for columns.
 
 ## 7. References
@@ -165,5 +204,5 @@ Krawinkler (2011, Table 3), so `lamda_* = 0` for columns.
 - Ibarra, Medina & Krawinkler (2005), *Earthq. Eng. Struct. Dyn.* 34(12):1489–1511, DOI `10.1002/eqe.495`.
 - Lignos & Krawinkler (2011), *J. Struct. Eng.* 137(11):1291–1302, DOI `10.1061/(ASCE)ST.1943-541X.0000376`.
 - Ibarra & Krawinkler (2005), PEER Report 2005/06 (collapse methodology).
-- OpenSeesPy `Bilin` documentation (`openseespydoc.readthedocs.io`).
+- OpenSees `IMKBilin` material (`IMKBilin.cpp`; the deprecated alias is `Bilin`).
 

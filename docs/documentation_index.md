@@ -361,9 +361,9 @@ for automated cross-referencing.
   Tags: `gui`, `qt`, `pyside6`, `pyvistaqt`, `architecture`, `planning`, `roadmap`
   Related: [Visualisation Toolkit](viewer.md) · [Analysis Workflow](workflow.md) · [Unified Results Schema](results_schema.md) · [Rhino 3-D Export](rhino_export.md) · [Report Generation — Design Proposal](report_generation.md)
 
-- [IMK (Bilin) Steel Hinge — Deterioration Model](imk_deterioration_model.md) — ⚠️ Partial
-  > The Ibarra–Medina–Krawinkler (IMK) deterioration model for steel moment frames: relationship to the ASCE 41 backbone and ETABS/SAP2000/Perform-3D, the OpenSees Bilin material, and the A0–A3 implementation plan and status.
-  Tags: `imk`, `ibarra-krawinkler`, `lignos-krawinkler`, `deterioration`, `collapse`, `hinge`, `bilin`, `steel`, `nonlinear-dynamic`, `moment-frame`
+- [IMK (IMKBilin) Steel Hinge — Deterioration Model](imk_deterioration_model.md) — ⚠️ Partial
+  > The Ibarra–Medina–Krawinkler (IMK) deterioration model for steel moment frames: relationship to the ASCE 41 backbone and ETABS/SAP2000/Perform-3D, the OpenSees IMKBilin material, and the A0–A3 implementation plan and status.
+  Tags: `imk`, `ibarra-krawinkler`, `lignos-krawinkler`, `deterioration`, `collapse`, `hinge`, `imkbilin`, `bilin`, `steel`, `nonlinear-dynamic`, `moment-frame`
   Related: [Benchmark Roadmap — extended proposals](benchmark_roadmap.md) · [SAC 3-Story Nonlinear Benchmark (T4)](sac_nonlinear_benchmark.md) · [SAC Trilinear Hinge — Four Modelling Approaches](sac_trilinear_hinge_approaches.md) · [Structural Modeling Guidance](modeling_guidance.md)
 
 - [Pushover Results Storage & Nonlinear Visualization](pushover_results_storage_viz.md) — ⚠️ Partial
@@ -559,6 +559,7 @@ Tags across all documentation files:
 - **`ibarra-krawinkler`** — [imk_deterioration_model.md](imk_deterioration_model.md)
 - **`identifiers`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`imk`** — [imk_deterioration_model.md](imk_deterioration_model.md)
+- **`imkbilin`** — [imk_deterioration_model.md](imk_deterioration_model.md)
 - **`import`** — [tcl_import.md](tcl_import.md)
 - **`infill`** — [benchmark_register.md](benchmark_register.md)
 - **`insertion-point`** — [member_offsets.md](member_offsets.md)

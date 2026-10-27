@@ -170,7 +170,11 @@ A0 landed — beams (Lignos–Krawinkler 2011 θp/θpc/Λ) and columns (Lignos e
 **Remaining:**
 1. (Optional) Column cyclic-deterioration Λ — not in the 2019 paper (Lignos &
    Krawinkler 2011, Table 3; paywalled).  Columns currently use Λ = 0.
-2. A3 frame collapse (SAC 3/9/20 with IMK; IDA vs Ibarra–Krawinkler 2005).
+2. A3 frame collapse (SAC 3/9/20 with IMK; IDA vs Ibarra–Krawinkler 2005) —
+   first increment landed (`enrich_imk` + 3-story `backbone="imk"`); the
+   remaining sub-items (column axial ratio, beam unbraced length, column Λ,
+   NLTHA convergence, 9/20 matrices, IDA) are tracked in
+   `docs/imk_deterioration_model.md` §5.
 
 **Where.** `benchmarks/imk_calibration.py`; `opensees/_elements.py`
 (`hinge_backbone="imk"`); `tests/test_benchmark_sac_imk.py`.
