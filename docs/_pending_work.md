@@ -159,8 +159,8 @@ a concentrated-plasticity *one-component* model (Giberson 1967; Clough & Johnsto
 1966) — elastic interior + end hinges — and publishes **no plastic-hinge length
 (`Lp`) and no yield-index (α) law** (both live in the compiled S-function).
 
-**What remains.**  Only the A4 comparison itself.  The wiring is landed:
-`builder_config()` / `build_builder()` / `load_model()` all accept
+**Done (2026-10-26).**  The A4 comparison itself has landed, alongside the
+wiring: `builder_config()` / `build_builder()` / `load_model()` all accept
 `backbone="bilinear"|"trilinear"|"trilinear_steel02"|"trilinear_clough"` (and
 `hinge_model="lumped"|"beam_with_hinges"`), and the four hinge formulations —
 lumped `Hysteretic`, `beamWithHinges` + `Hysteretic`, + two-`Steel02`-in-parallel,
@@ -192,8 +192,12 @@ benchmark applies **no P-Δ** (linear stiffness, `geomTransf Linear`), and its
 Rayleigh ζ=2 % at mode 1 + `nCutOff` matches the runner's two-period formula —
 the 20-story needs `period_2 = T5` passed explicitly.
 
-**What remains.**  The A4 normalization (φj = θ/θ_y, dEj = E/(My·θ_y)) and the
-`.mat` comparison itself — the runner now returns the *raw* quantities.
+**Done (2026-10-26).**  The `.mat` comparison itself has landed — the runner's
+raw quantities feed the committed `docs/assets/sac_nltha/sac_nltha_metrics.json`
+peak comparison (see the nonlinear paper).
+
+**What remains.**  The A4 damage normalization (φj = θ/θ_y, dEj = E/(My·θ_y)) —
+the runner still returns the *raw* quantities.
 
 **Where.**  `opensees/_runner_dynamic.py`; `opensees/_elements.py`
 (`_create_lumped_hinges` hinge instrumentation); tests

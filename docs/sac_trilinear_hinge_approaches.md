@@ -113,11 +113,16 @@ doubled (`Num_MRF = 2`); see `benchmark_roadmap.md` §2 A4.
 
 | quantity | target | A (lumped) | B (bwh+Hyst) | C (bwh+Steel02) | D (bwh+Clough) |
 |---|---|---|---|---|---|
-| roof disp. (m) | 0.151 | 0.153 (+1 %) | 0.149 (−1 %) | 0.145 (−4 %) | 0.126 (−17 %) |
-| base shear ×2 (MN) | 10.12 | 10.15 (+0.3 %) | 10.27 (+1.5 %) | 10.23 (+1.1 %) | 9.71 (−4 %) |
-| max. drift | 0.0150 | 0.0155 (+3 %) | 0.0148 (−1 %) | 0.0143 (−5 %) | 0.0134 (−11 %) |
-| roof abs. accel (m/s²) | 6.54 | 7.09 (+8 %) | 6.95 (+6 %) | 6.54 (0 %) | 6.96 (+6 %) |
-| yielded hinges `Nd` | 22 | 22 | 22 | 22 | 16 |
+| roof disp. (m) | 0.151 | 0.153 (+1 %) | 0.149 (−1 %) | 0.145 (−4 %) | — (no conv.) |
+| base shear ×2 (MN) | 10.12 | 10.15 (+0.3 %) | 10.27 (+1.5 %) | 10.23 (+1.1 %) | — (no conv.) |
+| max. drift | 0.0150 | 0.0155 (+3 %) | 0.0148 (−1 %) | 0.0143 (−5 %) | — (no conv.) |
+| roof abs. accel (m/s²) | 6.54 | 7.09 (+8 %) | 6.95 (+6 %) | 6.54 (0 %) | — (no conv.) |
+| yielded hinges `Nd` | 22 | 22 | 22 | 22 | — (no conv.) |
+
+**D (bwh + Clough) does not converge on El Centro 1.0** — its
+unloading-stiffness degradation loses convergence mid-record — so its column is
+reported as non-convergent rather than with the earlier single-case peaks, which
+proved unreproducible.
 
 The elastic anchor, for reference: roof 0.206 m, base shear ×2 20.81 MN,
 drift 0.0207, roof accel 10.03 m/s², `Nd = 0`.
@@ -132,17 +137,19 @@ The four formulations split the five quantities cleanly by mechanism:
   **roof** (−1 %) and **drift** (−1 %), with base shear +1.5 %.
 * **C (bwh + Steel02)** keeps the exact elastic stiffness and is closest on
   **roof acceleration** (0 %), with base shear +1.1 %.
-* **D (bwh + Clough)** adds unloading-stiffness degradation and *over-softens*
-  the displacement — roof −17 %, drift −11 %, and under-yields (`Nd` = 16) —
-  **yet leaves the base shear essentially unchanged** (−4 % vs B's +1.5 %).
+* **D (bwh + Clough)** adds unloading-stiffness degradation and is **unstable**:
+  it loses convergence on El Centro 1.0 (and on 4 of the 10 cases overall), so
+  it has no reproducible El Centro peak to compare.
 
-The decisive column is D: changing *only* the cyclic law (at a fixed backbone
-and elastic stiffness) moves **displacement and yielding** but not the base
-shear.  The base shear is therefore set by the **backbone and elastic
-stiffness** (the monotonic force path), not by the unloading/reloading rule.
-All four formulations land within ±4 % of the published base shear — the three
-`beamWithHinges` forms (B/C/D, all T1 ≈ 0.993 s) cluster at 9.7–10.3 MN and the
-softer lumped hinge (T1 ≈ 1.041 s) at 10.15 MN.
+The decisive comparison is now B versus C: changing *only* the cyclic law at a
+fixed backbone and elastic stiffness (the sharp `Hysteretic` corner → the smooth
+`Steel02` transition) moves the roof and drift by a few percent while leaving
+the base shear within ±1.5 %.  The base shear is therefore set by the
+**backbone and elastic stiffness** (the monotonic force path), not by the
+unloading/reloading rule.  The three converged formulations land within ±4 % of
+the published base shear — the two `beamWithHinges` forms (B/C, both T1 ≈
+0.993 s) cluster at 10.27 / 10.23 MN and the softer lumped hinge (T1 ≈ 1.041 s)
+at 10.15 MN.
 
 ## The base shear is reproduced
 
@@ -167,20 +174,24 @@ simply not the cause, because there is no remaining gap to explain.
 
 2. **Displacement and force split by mechanism.**  Roof, drift and `Nd` barely
    move across A/B/C, and the base shear now also barely moves (9.7–10.3 MN).
-   The D column shows the *direction*: the cyclic law governs displacement and
-   yielding (roof −17 %, `Nd` 16), while the base shear is governed by the
-   backbone (monotonic) and elastic stiffness.
+   B versus C shows the direction: the cyclic law moves displacement (roof
+   −1 % → −4 %, drift −1 % → −5 %) while the base shear stays within ±1.5 % —
+   the base shear is governed by the backbone (monotonic) and elastic
+   stiffness.
 
-3. **The cyclic law is decisive for damage, not for force.**  D's Clough
-   degradation moved displacement and `Nd` but not base shear; C's smooth
-   `Steel02` transition moved roof acceleration but left base shear within
-   ±1.5 %.  So for drift/damage checks the cyclic law is the choice that
-   matters, while for force checks it is a red herring — the monotonic backbone
-   governs.
+3. **The cyclic law is decisive for damage, not for force.**  C's smooth
+   `Steel02` transition moved roof acceleration (0 % vs B's +6 %) but left base
+   shear within ±1.5 %; D's Clough degradation is unstable on the strong
+   records, so its displacement and `Nd` are not reliably comparable there.
+   For drift/damage checks the cyclic law is the choice that matters, while for
+   force checks it is a red herring — the monotonic backbone governs.
 
-4. **Practical consequence.**  For drift-based checks any of the four will do;
-   for force-based checks the cyclic law is a red herring — what matters is the
-   smoothness of the monotonic backbone transition, which a `Steel02` (or a
+4. **Practical consequence.**  For drift-based checks A/B/C are the appropriate
+   formulations — they converge on every case and match the El Centro drift to
+   within ±5 % — while **D (Clough, β = 0.5) is excluded**: it over-softens the
+   displacement and loses convergence on the strong records.  For force-based
+   checks the cyclic law is a red herring — what matters is the smoothness of
+   the monotonic backbone transition, which a `Steel02` (or a
    distributed-plasticity fibre section) approximates better than a sharp
    `Hysteretic`.
 

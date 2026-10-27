@@ -174,13 +174,13 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
     degradation (β=0.5).
 
   **El Centro 1.0 (3-story, dt=0.005)**, lumped / bwh+Hysteretic /
-  bwh+Steel02 / bwh+Clough (target in parentheses): roof 0.153 / 0.149 /
-  0.145 / 0.126 m (0.151), base shear ×2 10.15 / 10.27 / 10.23 / 9.71 MN
-  (10.12), xdd 7.09 / 6.95 / 6.54 / 6.96 m/s² (6.54), Nd 22 / 22 / 22 / 16
-  (22).  The Clough run is the decisive control: changing *only* the cyclic law
-  moves displacement and yielding (roof −17 %, Nd 16) but **not** the base
-  shear (−4 %), so the base shear is set by the **backbone / elastic
-  stiffness**, not the unloading/reloading rule.  An earlier +6–19 % base-shear
+  bwh+Steel02 (target in parentheses): roof 0.153 / 0.149 / 0.145 m (0.151),
+  base shear ×2 10.15 / 10.27 / 10.23 MN (10.12), xdd 7.09 / 6.95 / 6.54 m/s²
+  (6.54), Nd 22 / 22 / 22 (22).  The bwh+Clough variant (D) fails to converge
+  on El Centro 1.0 (and on 4 of the 10 cases overall), so it has no
+  reproducible peak to compare; the three converged A/B/C forms cluster within
+  ±4 % on base shear, which is set by the **backbone / elastic stiffness**, not
+  the unloading/reloading rule.  An earlier +6–19 % base-shear
   gap was an artefact of the transient runner (the ground acceleration in
   `Σ m·(a_rel + ag)` was sampled one step too early); with the sampling
   corrected the base shear reproduces the target to ±4 %, so no unpublished
@@ -259,13 +259,14 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   **~35× slower** (the ``Transformation`` handler condenses each of the 105
   master-slave ties).  The beam axial stiffness (``EA`` from ``mat_tbl``)
   already ties each floor near-rigidly, so the explicit tie is a second-order
-  effect — and the ARPACK modal solve hangs with the ties active.  The residual
-  at Kobe 1.0 therefore lies in the **nonlinear hinge/backbone behaviour at
-  high intensity** (the model yields harder: drift +44 % and base shear +29 %
-  together), not in the diaphragm, mass, damping or elastic stiffness — all of
-  which have now been individually ruled out.  The trilinear post-yield
-  segments (``EI2``/``EI3``) and yield moment (``My = EI1·d1``) at the 20-story
-  member scale are the next thing to scrutinise.
+  effect — and the ARPACK modal solve hangs with the ties active.  After the
+  basement-mass correction the residual at Kobe 1.0 is a modest **+8.9 % base
+  shear** against a **+44 % drift** — the drift, not the base shear, is the
+  dominant gap.  It therefore lies in the **nonlinear hinge/backbone behaviour
+  at high intensity**, not in the diaphragm, mass, damping or elastic
+  stiffness — all of which have now been individually ruled out.  The trilinear
+  post-yield segments (``EI2``/``EI3``) and yield moment (``My = EI1·d1``) at
+  the 20-story member scale remain the next thing to scrutinise.
 
   **Material-model hypothesis — ruled out (kinematic + 3 % hardening, both).**
   The Ohtori paper describes the member model verbatim as *"a bilinear
@@ -282,7 +283,7 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   divergence is the *shape* of the yield transition (the benchmark's smooth
   yield-index α interpolation vs the sharp ``Hysteretic`` corner), which the
   ``Steel02`` formulation already smooths and which the 3-story four-way matrix
-  showed to be a ±4 % base-shear effect, not ±29 %.  The Kobe-1.0 residual is
+  showed to be a ±4 % base-shear effect, not ±9 %.  The Kobe-1.0 residual is
   therefore **not** the material model either.
 - **B4 — Phase-I base isolation — deferred.** Needs a base-isolation element
   path the toolkit does not have (friction pendulum / elastomeric isolator).

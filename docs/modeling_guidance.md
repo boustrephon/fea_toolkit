@@ -66,7 +66,7 @@ exact force-based element).
 |---|---|---|
 | `Hysteretic` (trilinear, kinematic) | ✅ default | accurate and robust; use this first |
 | `Steel02` (Giuffré–Menegotto–Pinto) | ✅ good | smooth, slightly softer than `Hysteretic` |
-| `Clough` degradation (β = 0.5) | ⚠️ unstable | loses convergence on strong/long records; use a larger β or avoid |
+| `Clough` degradation (β = 0.5) | ⚠️ unstable | loses convergence on strong/long records; check a smaller β against the intended cyclic response, or avoid |
 
 ## 4. Damping
 
