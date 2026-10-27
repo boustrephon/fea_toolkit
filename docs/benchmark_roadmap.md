@@ -27,8 +27,8 @@ verified and live in [references.bib](../papers/references.bib).
 
 | # | Cluster | Benchmarks | Tier / cell | Needs |
 |---|---|---|---|---|
-| 1 | **SAC-derived (steel frames)** | Krawinkler deterioration (§3); finish SAC 9/20-story A4 (§2) | T4 / moment frame | nothing new |
-| 2 | **RC frames** | DesignSafe infilled (bare → struts); E-Defense 10- and 4-story (§4) | T4 / moment frame | diagonal-strut infill |
+| 1 | **SAC-derived (steel frames)** | Krawinkler deterioration (§3); finish SAC 9/20-story A4 (§2) | T4 / steel moment frame | nothing new |
+| 2 | **RC frames** | DesignSafe infilled (bare → struts); E-Defense 10- and 4-story (§4) | T4 / RC moment frame | diagonal-strut infill |
 | 3 | **RC shear walls** | UCSD 7-story; FEMA P-695 / Marafi; SAFE/CASH squat (§5); Hidalgo buildings (§1) | T2–T4 / shear wall | none (MVLEM/fiber landed) |
 | 4 | **Masonry / URM** | URM Benchmark Project BS1–BS6; URM shake-table database (§6) | T3–T4 / masonry | masonry/URM physics |
 | 5 | **New system types (deferred)** | PRESSS precast/PT; BRBF; CFT composite (§7) | T3–T4 / new rows | PT/self-centering, BRB, CFT section |
@@ -405,9 +405,9 @@ lands.
 
 ## 4. RC frames — priority 2
 
-Fills the RC moment-frame NLTHA cell (the moment-frame column currently anchors
-on steel SAC + Vecchio–Emara pushover).  Two cross-code (T4) benchmarks, bare
-first:
+Fills the RC moment-frame NLTHA cell (the RC moment-frame column currently
+anchors on Vecchio–Emara pushover; the steel moment-frame column anchors on
+SAC modal + NLTHA).  Two cross-code (T4) benchmarks, bare first:
 
 - **DesignSafe infilled RC frames (bare → struts).**  Bhat & Singh (2024),
   DesignSafe-CI DOI `10.17603/ds2-4acg-tt80`, ships OpenSees models + responses
