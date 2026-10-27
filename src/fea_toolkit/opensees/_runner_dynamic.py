@@ -11,22 +11,22 @@ import openseespy.opensees as ops
 logger = logging.getLogger(__name__)
 
 
-def _free_dof_node_tags(mesh_model: Any, dof: int) -> set[int]:
-    """Node tags whose mass contributes to the lateral base shear above ground.
+def _free_dof_node_tags(mesh_model: Any, dof: int, ground_exclusion: bool = False) -> set[int]:
+    """Node tags whose mass contributes to the lateral base shear.
 
-    The benchmark base shear ``Σ m·(a_rel + ag)`` sums only the **above-ground**
-    storeys (the benchmark's ``EvalNLBM.m`` ``mi`` vector starts at the first
-    floor above the ground tie).  Two node sets are therefore excluded:
+    Nodes whose excitation ``dof`` is fixed (a lateral ground tie) are always
+    excluded — their mass is anchored to the support, which carries ``m·ag``
+    directly.
 
-    1. nodes whose excitation ``dof`` is fixed (a lateral ground tie) — their
-       mass is anchored to the support, which carries ``m·ag`` directly;
-    2. nodes at or below the *ground* elevation — the highest elevation at
-       which the excitation DOF is restrained — i.e. the below-ground
-       substructure (basements between the pinned base and the ground tie),
-       whose inertia is carried by the foundation rather than the lateral load
-       path.  This matters for buildings with more than one basement: the
-       20-story SAC frame has a **free** B-1 level below its ground tie, and its
-       ``m·ag`` rigid-body term must not enter the base-shear sum.
+    When ``ground_exclusion`` is enabled (an opt-in, benchmark-specific
+    behaviour), nodes at or below the *ground* elevation — the highest elevation
+    at which the excitation DOF is restrained — are excluded as well, i.e. the
+    below-ground substructure (basements between the pinned base and the ground
+    tie) whose inertia is carried by the foundation rather than the lateral load
+    path.  This matters for buildings with more than one basement: the 20-story
+    SAC frame has a **free** B-1 level below its ground tie, and its ``m·ag``
+    rigid-body term must not enter the benchmark base-shear sum
+    (``Σ m·(a_rel + ag)`` starts at the first floor above the ground tie).
 
     Models with no restraint table (or no restraint on a node) treat that node
     as free; models with no excitation-fixed node apply no ground exclusion.
@@ -41,7 +41,7 @@ def _free_dof_node_tags(mesh_model: Any, dof: int) -> set[int]:
             free.append((int(nd.node_tag), z))
         else:
             fixed_z.append(z)
-    if not fixed_z:
+    if not ground_exclusion or not fixed_z:
         return {tag for tag, _ in free}
     ground_z = max(fixed_z)
     return {tag for tag, z in free if z > ground_z}
@@ -102,9 +102,11 @@ class TransientRunnerMixin:
         The builder ``config`` may set ``transient_algorithm`` (the solver
         algorithm; default ``"Newton"``), ``transient_record_node_tags`` (an
         iterable of node tags whose histories are recorded; default ``None`` =
-        every node) and ``transient_record_kinematics`` (a bool enabling
+        every node), ``transient_record_kinematics`` (a bool enabling
         velocity/acceleration recording for the selected nodes; default
-        ``False`` — only displacements are recorded).
+        ``False`` — only displacements are recorded) and
+        ``transient_exclude_below_ground`` (a bool that additionally excludes
+        below-ground free nodes from the base-shear sum; default ``False``).
         """
         accel = np.asarray(accel, dtype=float)
         if num_steps is None:
@@ -212,8 +214,19 @@ class TransientRunnerMixin:
         # Cache each node's mass once before the time loop.
         node_mass = {t: float(ops.nodeMass(t, dof)) for t in all_node_tags}
         # Nodes whose excitation DOF is fixed carry their mass on the support
-        # (a lateral ground tie), so exclude them from the base-shear sum.
-        free_nodes = _free_dof_node_tags(self.mesh_model, dof) & set(all_node_tags)
+        # (a lateral ground tie), so exclude them from the base-shear sum; also
+        # drop any massless free node (it contributes nothing).  The below-ground
+        # basement exclusion is opt-in via ``transient_exclude_below_ground``.
+        free_nodes = {
+            t
+            for t in _free_dof_node_tags(
+                self.mesh_model,
+                dof,
+                ground_exclusion=bool(self.config.get("transient_exclude_below_ground", False)),
+            )
+            & set(all_node_tags)
+            if node_mass[t] != 0.0
+        }
 
         # Base shear via global equilibrium — the total nodal inertial force
         # Σ m·(a_rel + ag).  This is exact for a base-excited structure with no

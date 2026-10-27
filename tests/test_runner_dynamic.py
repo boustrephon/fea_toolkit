@@ -154,8 +154,25 @@ class _MeshStub:
         }
 
 
-def test_free_dof_node_tags_excludes_fixed_and_below_ground():
-    """The base-shear node set drops fixed DOFs *and* the below-ground basement.
+def test_free_dof_node_tags_default_excludes_only_fixed_dof():
+    """By default, only nodes fixed in the excitation DOF are excluded.
+
+    The below-ground exclusion is opt-in (the SAC benchmark enables it), so a
+    general runner leaves the free B-1 basement in the base-shear node set.
+    """
+    from fea_toolkit.opensees._runner_dynamic import _free_dof_node_tags
+
+    mesh = _MeshStub()
+    # X: base + ground tie fixed; the free B-1 basement and floor both survive.
+    assert _free_dof_node_tags(mesh, 1) == {2, 4}
+    # Y: base, B-1 and ground all fixed in Y → only the floor survives.
+    assert _free_dof_node_tags(mesh, 2) == {4}
+    # Z: only the base is fixed in Z → B-1, ground and floor are all free.
+    assert _free_dof_node_tags(mesh, 3) == {2, 3, 4}
+
+
+def test_free_dof_node_tags_ground_exclusion_drops_below_ground():
+    """The opt-in ground exclusion drops free nodes below the ground tie.
 
     Matches the benchmark's ``F_max = Σ mi·xdd``, which sums only the
     above-ground storeys: the pinned base (fixed), the ground tie (fixed), and
@@ -166,9 +183,9 @@ def test_free_dof_node_tags_excludes_fixed_and_below_ground():
 
     mesh = _MeshStub()
     # X (lateral): base + ground tie fixed; B-1 free but below ground → excluded.
-    assert _free_dof_node_tags(mesh, 1) == {4}
+    assert _free_dof_node_tags(mesh, 1, ground_exclusion=True) == {4}
     # Y: base, B-1 and ground all fixed in Y → only the floor survives.
-    assert _free_dof_node_tags(mesh, 2) == {4}
+    assert _free_dof_node_tags(mesh, 2, ground_exclusion=True) == {4}
     # Z: only the base is fixed in Z → B-1, ground and floor are all free
     # and above the base (z=0).
-    assert _free_dof_node_tags(mesh, 3) == {2, 3, 4}
+    assert _free_dof_node_tags(mesh, 3, ground_exclusion=True) == {2, 3, 4}

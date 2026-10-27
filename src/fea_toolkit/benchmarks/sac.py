@@ -549,6 +549,10 @@ def builder_config(backbone: str = "bilinear", hinge_model: str = "lumped") -> d
         # Newton stalls; the SAC transient runs opt in to the line search (the
         # default elsewhere is plain Newton).
         "transient_algorithm": "NewtonLineSearch",
+        # The benchmark base shear sums only the above-ground storeys, so opt in
+        # to the runner's below-ground exclusion (drops free basements below the
+        # ground tie).
+        "transient_exclude_below_ground": True,
     }
 
 
