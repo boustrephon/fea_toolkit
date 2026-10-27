@@ -902,25 +902,31 @@ class ElementMixin:
                 )
                 _hinge_mat = _mat_tag
             ops.section("Uniaxial", _sec_tag, _hinge_mat, "Mz")
+            _secE_tag = self._bwh_tag_counter
+            self._bwh_tag_counter += 1
+            _int_tag = tag + 10000
             _L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
             _lp = float(self.config.get("hinge_length_fraction", 1.0 / 6.0)) * _L
-            ops.element(
-                "beamWithHinges",
-                tag,
-                ni.node_tag,
-                nj.node_tag,
-                _sec_tag,
-                _lp,
-                _sec_tag,
-                _lp,
+            # Elastic interior (E, A, Iz, Iy, G, J) carried explicitly, as the
+            # legacy ``beamWithHinges`` command did.
+            ops.section(
+                "Elastic",
+                _secE_tag,
                 E,
                 max(A, 1e-6),
                 max(Iz, 1e-12),
                 max(Iy, 1e-12),
                 G,
                 max(J, 1e-12),
-                transf_tag,
             )
+            # ``HingeRadauTwo`` keeps every integration weight positive up to
+            # Lp = L/2, whereas the ``beamWithHinges`` command's ``HingeRadau``
+            # goes negative once Lp > L/8.  With the benchmark's Lp = L/6 those
+            # negative interior weights make the 6×6 flexibility matrix
+            # ill-conditioned ("could not invert flexibility" on Linux), so the
+            # equivalent ``forceBeamColumn`` + ``HingeRadauTwo`` is used here.
+            ops.beamIntegration("HingeRadauTwo", _int_tag, _sec_tag, _lp, _sec_tag, _lp, _secE_tag)
+            ops.element("forceBeamColumn", tag, ni.node_tag, nj.node_tag, transf_tag, _int_tag)
             # Damage recorders — the member's two end sections (1 = i-end,
             # 6 = j-end under the 6-point plastic-hinge integration).
             self._hinge_tags.extend([tag, tag])

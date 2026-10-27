@@ -226,6 +226,10 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   moment-*curvature* `Uniaxial` section (strong-axis Mz) at each end, Lp = L/6
   (the benchmark's θ = φ·L/6 member-end rotation).  No "nearly rigid" spring,
   so the elastic stiffness is the exact 6EI1/L (T1 0.993 s vs elastic 0.994 s).
+  Implemented as a `forceBeamColumn` under the `HingeRadauTwo` integration (the
+  `beamWithHinges` command's own `HingeRadau` scheme turns its interior weights
+  negative once Lp > L/8, which is what caused the Linux "could not invert
+  flexibility" failures).
 
   **Four hinge formulations** now share the one transcribed trilinear backbone
   (see `sac_trilinear_hinge_approaches.md`):
@@ -256,18 +260,18 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   `Nonlin12` interpolation is needed.  The 3-story ten-case matrix is run (see
   `sac_trilinear_hinge_approaches.md` and the nonlinear paper).
 
-  **9/20-story NLTHA — `beamWithHinges` is unusable for the taller frames; the
-  lumped hinge is the working path.**  The force-based `beamWithHinges` element
-  inverts its 6×6 flexibility matrix, and that inversion is ill-conditioned at
-  *both* stiffness extremes: on the 20-story the **soft** members (I33 ≲ 1.5e-3
-  m⁴ — the 15×15 box columns but also the upper W columns and beams) fail at
-  build (`ForceBeamColumn3d::getInitialStiff()` prints "could not invert
-  flexibility"); on the 9-story the **stiff** basement columns (I33 ≈ 3.4e-3
-  m⁴) build but die at step 7 of the transient.  Only the 3-story sits in the
-  element's sweet spot.  The lumped hinge (`elasticBeamColumn` + `zeroLength`
-  spring) is displacement-based and robust at both extremes, so the 9/20-story
-  matrix runs `hinge_model='lumped'` + `backbone='trilinear'` (a ~4–5 % elastic
-  softening vs the exact `beamWithHinges`).  A "hybrid" (`beamWithHinges` for
+  **9/20-story NLTHA — the taller frames now *build* under `beam_with_hinges`,
+  but the lumped hinge is still the working transient path.**  The force-based
+  element inverts its 6×6 flexibility matrix, and that inversion is
+  ill-conditioned at *both* stiffness extremes.  The build-time failure on the
+  20-story's **soft** members (I33 ≲ 1.5e-3 m⁴ — the 15×15 box columns and the
+  upper W columns and beams; `getInitialStiff()` printing "could not invert
+  flexibility") was the `HingeRadau` negative-weight issue and is fixed by the
+  `HingeRadauTwo` integration (above) — both the 9- and 20-story frames now
+  build.  The 9-story's **stiff** basement columns (I33 ≈ 3.4e-3 m⁴) build but
+  die at step 7 of the transient, so the 9/20-story matrix still runs
+  `hinge_model='lumped'` + `backbone='trilinear'` (a ~4–5 % elastic softening
+  vs the exact `beamWithHinges`).  A "hybrid" (`beamWithHinges` for
   the stiff members, lumped for the soft) was probed and abandoned — the
   soft-member set is broad enough that it collapses to the full lumped path,
   and the two hinge material-tag counters collide.  The 3-story **four-way
