@@ -7,6 +7,12 @@ acceleration, ``F_max`` whole-building base shear, ``N_d`` yielded hinges) and
 caches each run's result as an NPZ keyed on the case parameters, the record
 bytes and the benchmark-relevant source files — so a case is only re-executed
 when one of its inputs changes.
+
+The per-case cache NPZ is a **private, non-schema** format — flat scalar
+metrics plus a few history arrays — not a unified results archive.  It is
+read and written through the storage seam (``io.npz_reader`` /
+``io.npz_writer``) as a stop-gap; a first-class ``transient`` block in the
+unified results schema is tracked as **P43** in ``docs/_pending_work.md``.
 """
 
 from __future__ import annotations
@@ -19,11 +25,13 @@ from typing import Any, Optional
 
 import numpy as np
 
+from ..io.npz_reader import read_results_npz
+from ..io.npz_writer import save_results_arrays
 from . import sac
 from .sac_response_data import CASE_ORDER
 
-#: The four benchmark records live in the non-redistributable local mirror
-#: (``data/ground_motion/local/<id>.csv``), extracted by
+#: The four benchmark records live in the ground-motion mirror
+#: (``data/ground_motion/<public|local>/<id>.csv``), extracted by
 #: ``scripts/fetch_ground_motions.py`` — see ``ground_motion_data.md``.
 _RECORD_EXT = ".csv"
 
@@ -34,7 +42,15 @@ def _repo_root() -> Path:
 
 
 def record_path(record_id: str) -> Path:
-    """Resolve a benchmark record's on-disk CSV path in the local mirror.
+    """Resolve a benchmark record's on-disk CSV path in the public or local mirror.
+
+    A record may live in either ``data/ground_motion/public`` (redistributable)
+    or ``data/ground_motion/local``.  The committed manifest registry records
+    each record's ``redistributable`` flag, so the preferred mirror is chosen
+    the same way the fetch workflow (and the ``needs_ground_motion`` test gate)
+    places records; both mirrors are then checked before defaulting to the
+    preferred one, so a public-domain record such as ``ELCENTRO`` is found even
+    when it was not placed under ``local``.
 
     Args:
         record_id: Benchmark record identifier (a key of
@@ -42,13 +58,30 @@ def record_path(record_id: str) -> Path:
             ``"ELCENTRO"``).
 
     Returns:
-        Absolute path to the record's CSV in the non-redistributable local
-        mirror (``data/ground_motion/local/<record_id>.csv``).
+        Absolute path to the record's CSV
+        (``data/ground_motion/<sub>/<record_id>.csv``).
     """
-    return _repo_root() / "data" / "ground_motion" / "local" / f"{record_id}{_RECORD_EXT}"
+    root = _repo_root() / "data" / "ground_motion"
+    order = ["local", "public"]
+    try:
+        from ..io.ground_motion import load_manifest_registry
+
+        registry = _repo_root() / "tests" / "fixtures" / "ground_motion_manifests.json"
+        for manifest in load_manifest_registry(str(registry)):
+            if manifest.record_id == record_id:
+                preferred = "public" if manifest.redistributable else "local"
+                order = [preferred, *[s for s in order if s != preferred]]
+                break
+    except (OSError, ValueError):
+        pass
+    for sub in order:
+        path = root / sub / f"{record_id}{_RECORD_EXT}"
+        if path.exists():
+            return path
+    return root / order[0] / f"{record_id}{_RECORD_EXT}"
 
 
-#: Package subpackages whose Python sources seed the cache fingerprint.  A
+#: Package subpackages whose source files seed the cache fingerprint.  A
 #: change to any of them — including a rename or deletion — invalidates every
 #: cached case (prevents stale results).
 _CODE_DIRS = ("benchmarks", "opensees", "model", "io")
@@ -58,14 +91,15 @@ def _code_fingerprint() -> str:
     """``sha256`` over the benchmark-relevant sources and the OpenSeesPy version.
 
     Walks the ``benchmarks``, ``opensees``, ``model`` and ``io`` subpackages,
-    hashing each Python file's stable package-relative path *and* its bytes (so
-    a rename or a deleted file also invalidates the cache), then folds in the
-    installed OpenSeesPy version so a solver upgrade re-runs every case.
+    hashing each Python/Tcl file's stable package-relative path *and* its bytes
+    (so a rename or a deleted file also invalidates the cache), then folds in
+    the installed OpenSeesPy version so a solver upgrade re-runs every case.
     """
     pkg = _repo_root() / "src" / "fea_toolkit"
     h = hashlib.sha256()
     for dirname in _CODE_DIRS:
-        for path in sorted((pkg / dirname).rglob("*.py")):
+        paths = [*(pkg / dirname).rglob("*.py"), *(pkg / dirname).rglob("*.tcl")]
+        for path in sorted(paths):
             h.update(path.relative_to(pkg).as_posix().encode())
             h.update(b"\0")
             h.update(path.read_bytes())
@@ -205,10 +239,11 @@ def compute_metrics(
 
     roof_disp = float(np.max(np.abs(u[:, -1]))) if n else 0.0
     d_max = 0.0
-    for i in range(1, u.shape[1]):
-        h = zs[i] - zs[i - 1]
-        if h > 0.0:
-            d_max = max(d_max, float(np.max(np.abs(u[:, i] - u[:, i - 1])) / h))
+    if n:
+        for i in range(1, u.shape[1]):
+            h = zs[i] - zs[i - 1]
+            if h > 0.0:
+                d_max = max(d_max, float(np.max(np.abs(u[:, i] - u[:, i - 1])) / h))
     xdd_max = float(np.max(np.abs(xdd))) if n else 0.0
 
     return {
@@ -310,9 +345,13 @@ def run_case(
     out_path = _case_path(building, record_id, intensity, hinge_model, backbone)
 
     if not force and out_path.exists():
-        with np.load(out_path, allow_pickle=False) as data:
-            if str(data["_fingerprint"].item()) == fingerprint:
-                return _metrics_from_npz(data)
+        # Stop-gap (P43): this per-case cache is a private, non-schema NPZ
+        # (flat scalar metrics + a few histories), not a unified results
+        # archive.  It still reads through the storage seam so ``np.load``
+        # stays confined to ``io/`` — see ``docs/_pending_work.md``.
+        data = read_results_npz(str(out_path))
+        if str(data["_fingerprint"].item()) == fingerprint:
+            return _metrics_from_npz(data)
 
     from openseespy.opensees import wipe
 
@@ -411,7 +450,8 @@ def _save_npz(
     ]
     arrays["base_shear"] = np.asarray(res.get("base_shear", np.zeros(n)))[:n]
     arrays["roof_tag"] = np.array(roof_tag)
-    np.savez(path, **arrays)
+    # Stop-gap (P43): write through the seam — see the read site in run_case().
+    save_results_arrays(str(path), arrays)
 
 
 def run_matrix(

@@ -179,6 +179,61 @@ A0 landed — beams (Lignos–Krawinkler 2011 θp/θpc/Λ) and columns (Lignos e
 **Where.** `benchmarks/imk_calibration.py`; `opensees/_elements.py`
 (`hinge_backbone="imk"`); `tests/test_benchmark_sac_imk.py`.
 
+#### P43 — Transient (time-history) results block in the unified NPZ schema
+
+Source: `docs/results_schema.md`; `docs/dev_notes.md` → *Results repository
+and the NumPy-typed seam*; `docs/nonlinear_dynamic_analysis.md`; P7.
+
+**What.**  `AnalysisBuilder.run_transient_analysis()` (and
+`analysis/nonlinear_dynamic.py`) return an in-process time-history result —
+``times``, per-node ``displacements`` / ``velocities`` / ``accelerations``
+(``{node_tag: (n, 3)}``), ``base_shear`` (n,), and the peak reductions
+(``peak_displacement`` / ``peak_base_shear`` / ``peak_plastic_rotation`` /
+``max_dissipated_energy`` / ``num_yielded_hinges``) plus Rayleigh
+``period_1`` / ``period_2`` — but **no unified writer serialises it**: the
+schema's ``analysis_types`` covers only ``static`` / ``modal`` / ``rs`` /
+``pushover``.  Transient results are therefore "homeless" in the canonical
+exchange format.
+
+**Stop-gap already in place (2026-10-27).**  `benchmarks/sac_run.py`'s
+content-addressed NLTHA cache writes a *private, non-schema* flat NPZ (peak
+scalars + ``times`` / ``roof_disp_hist`` / ``base_shear``) and now reads and
+writes it through the storage seam (``io.npz_reader.read_results_npz`` /
+``io.npz_writer.save_results_arrays``) — this only satisfies
+`tests/test_storage_seam.py`; it does **not** promote the cache into the
+unified schema, and it must not.
+
+**What is required (schema v4).**
+1. Add ``"transient"`` to the ``analysis_types`` discriminator and bump
+   ``results_schema.SCHEMA_VERSION`` 3 → 4 (with the same "old files still
+   read" note as the 2→3 bump).
+2. Define a ``transient/<case>/...`` block.  Candidate layout: ``time`` (N_t,),
+   recorded ``node_tags`` (N_rec,) with dense ``node_dx`` / ``node_dy`` /
+   ``node_dz`` (N_t × N_rec) — or a ragged encoding if the recorded node set
+   differs per case — plus ``base_shear`` (N_t,), the peak scalars (0-d), and
+   Rayleigh ``period_1`` / ``period_2``; carry ``force_unit`` / ``length_unit``
+   / ``time_unit`` metadata like the static block.
+3. Add ``TRANSIENT_ARRAYS`` to ``io/results_schema.py`` and extend
+   ``validate_npz`` / ``npz_reader.describe_results_npz`` (mirroring how ``rs``
+   and ``pushover`` were added).
+4. Add a ``collect_transient_arrays`` / ``write_transient_results`` producer
+   and wire it into ``unified_writer.write_results`` and
+   ``stage_writer.write_model_stages``.
+5. Extend ``ResultsRepository`` / ``NpzResultsRepository`` to list and serve
+   transient cases so the GUI / report / Rhino can consume them through the
+   seam.
+6. Drive the block with a **real consumer** — NLTHA animation in the viewer
+   and per-node / per-element histories in the report and Rhino — not the
+   benchmark cache.  Only then migrate `benchmarks/sac_run.py` to read its
+   peak scalars from a unified transient archive (optional follow-on, not a
+   prerequisite).
+
+**Where.** `io/results_schema.py`, `io/npz_writer.py`, `io/unified_writer.py`,
+`io/stage_writer.py`, `io/npz_reader.py`, `io/results_repository.py`,
+`opensees/_runner_dynamic.py`, `analysis/nonlinear_dynamic.py`,
+`benchmarks/sac_run.py` (stop-gap only).  Tests: `tests/test_storage_seam.py`,
+`tests/test_stage_file.py` (schema coverage), `tests/test_runner_dynamic.py`.
+
 #### P25 — classic support symbols on top of the per-DOF glyphs
 
 Source: this register, *DONE — support restraints*; `docs/dev_notes.md` →
