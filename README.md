@@ -565,7 +565,7 @@ Key implementation details:
   backbone materials.  ``hinge_backbone`` selects the rotational law:
 
   | ``hinge_backbone`` | Rotational law |
-  |---|---|---|
+  |---|---|
   | ``"asce41"`` (default) | ``Hysteretic`` matched to ASCE 41 rotation limits |
   | ``"bilinear"`` | ``Steel01`` (yield ``My = Z·fy``, ``hardening_ratio``) |
   | ``"trilinear"`` | ``Hysteretic`` (Ohtori ``mat_tbl`` EI1/EI2/EI3 + d1/d2) |

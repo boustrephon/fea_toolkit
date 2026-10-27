@@ -83,27 +83,36 @@ def record_path(record_id: str) -> Path:
 
 #: Package subpackages whose source files seed the cache fingerprint.  A
 #: change to any of them — including a rename or deletion — invalidates every
-#: cached case (prevents stale results).
-_CODE_DIRS = ("benchmarks", "opensees", "model", "io")
+#: cached case (prevents stale results).  Top-level modules (``utils.py``,
+#: ``_unit_scaling.py``, …) are hashed separately in :func:`_code_fingerprint`.
+_CODE_DIRS = ("benchmarks", "opensees", "model", "io", "capacity", "analysis")
 
 
 def _code_fingerprint() -> str:
     """``sha256`` over the benchmark-relevant sources and the OpenSeesPy version.
 
-    Walks the ``benchmarks``, ``opensees``, ``model`` and ``io`` subpackages,
-    hashing each Python/Tcl file's stable package-relative path *and* its bytes
-    (so a rename or a deleted file also invalidates the cache), then folds in
-    the installed OpenSeesPy version so a solver upgrade re-runs every case.
+    Walks the ``benchmarks``, ``opensees``, ``model``, ``io``, ``capacity`` and
+    ``analysis`` subpackages plus the top-level package modules (``utils.py``,
+    ``_unit_scaling.py``, ``spectrum.py``, …), hashing each Python/Tcl file's
+    stable package-relative path *and* its bytes (so a rename or a deleted file
+    also invalidates the cache), then folds in the installed OpenSeesPy version
+    so a solver upgrade re-runs every case.
     """
     pkg = _repo_root() / "src" / "fea_toolkit"
     h = hashlib.sha256()
+
+    def _hash(path: Path) -> None:
+        h.update(path.relative_to(pkg).as_posix().encode())
+        h.update(b"\0")
+        h.update(path.read_bytes())
+        h.update(b"\0")
+
     for dirname in _CODE_DIRS:
         paths = [*(pkg / dirname).rglob("*.py"), *(pkg / dirname).rglob("*.tcl")]
         for path in sorted(paths):
-            h.update(path.relative_to(pkg).as_posix().encode())
-            h.update(b"\0")
-            h.update(path.read_bytes())
-            h.update(b"\0")
+            _hash(path)
+    for path in sorted(pkg.glob("*.py")):
+        _hash(path)
     try:
         ops_version = importlib.metadata.version("openseespy")
     except importlib.metadata.PackageNotFoundError:

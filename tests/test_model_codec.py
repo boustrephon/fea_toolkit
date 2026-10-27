@@ -1,6 +1,7 @@
 """Tests for the dataclass ⟷ JSON codec (``fea_toolkit.io.model_codec``)."""
 
 import dataclasses
+import typing as t
 import warnings
 
 import pytest
@@ -12,6 +13,7 @@ from fea_toolkit.io.model_codec import (
     MODEL_SCHEMA_VERSION,
     SCHEMA_KEY,
     TUPLE_FIELDS,
+    _encode_value,
     check_round_trip_types,
     dict_to_model,
     json_to_model,
@@ -50,6 +52,15 @@ class TestRoundTripGuard:
         """Dataclasses nested 2+ levels deep resolve without a fallback warning."""
         assert "LoadCombinationEntry" in _CLASS_REGISTRY
         assert "StressStrainCurve" in _CLASS_REGISTRY
+
+
+def test_union_mixed_container_skips_nonmatching_arm():
+    """A list value against ``Union[dict[str, float], list[int]]`` encodes via the
+    list arm — ``_value_matches_hint`` must not return ``True`` for a non-matching
+    parameterized generic, or the dict arm would be chosen and crash on ``.items()``."""
+    hint = t.Union[dict[str, float], list[int]]
+    assert _encode_value([1, 2, 3], hint) == [1, 2, 3]
+    assert _encode_value({"a": 1.0}, hint) == {"a": 1.0}
 
 
 # ═══════════════════════════════════════════════════════════════════

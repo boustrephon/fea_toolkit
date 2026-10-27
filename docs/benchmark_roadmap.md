@@ -9,6 +9,9 @@ related: [benchmark_register.md, sac_benchmark.md, mvlem_wall_analysis.md, shell
 
 # Benchmark Roadmap — extended proposals
 
+> **Status: ⚠️ Partial.** The ranked build order and per-workstream phasing
+> are complete; the candidate inventory keeps growing as sources are verified.
+
 Canonical build plan for benchmark work: the ranked order, per-workstream
 phasing and the candidate inventory (with DOIs) live here.  The
 [benchmark register](benchmark_register.md) keeps the tiers, the coverage
@@ -192,9 +195,9 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   (archived as P41 in `history/_done_log.md`).  Settings confirmed: Newmark β=1/4 γ=1/2,
   dt=0.005 s, Rayleigh ζ=2 % at mode 1 + `nCutOff` (mode 2 for 3/9-story, mode 5
   for 20-story — pass `period_2 = T5` explicitly); the benchmark applies **no
-  P-Δ** (linear stiffness, `geomTransf Linear`).  The remaining piece is the A4
-  comparison itself.
-- **A4 — comparison (preferred `beamWithHinges` hinge landed; matrix can resume).**
+  P-Δ** (linear stiffness, `geomTransf Linear`).  The A4 comparison itself is now complete — the ten-case and four-formulation
+  matrices are run below.
+- **A4 — comparison (done — preferred `beamWithHinges` hinge landed; ten-case + four-formulation matrices below).**
   The ``unctrl#.mat`` targets are transcribed
   (`benchmarks/sac_response_data.py`; ``tests/test_benchmark_sac_response_data.py``),
   and the case ordering is resolved (``Run_NLBM.m``: El Centro 0.5/1.0/1.5,
@@ -524,7 +527,7 @@ does not have; revisit after the collapse/IDA driver lands.
   (Steel02/Hysteretic) + gusset modelling.
 - **CFT composite columns** — Denavit composite-column database
   (mark.denavit.me/Composite-Column-Database/) and the 3,208-test CFST database
-  (Thai et al. 2020, DOI `10.82444/warw.33817750.v1`).  Needs a CFT section +
+  (Thai et al. 2020, DOI `10.17632/j3f5cx9yjh.1`).  Needs a CFT section +
   confined-concrete-in-tube material.
 - **606 m mega-tall building (reference model)** — Tian, Xie & Lu OpenSees TCL
   models (luxinzheng.net), validated vs ETABS and MSC.Marc; ShellMITC4 walls +

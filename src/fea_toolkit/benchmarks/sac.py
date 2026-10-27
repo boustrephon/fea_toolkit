@@ -282,6 +282,11 @@ def enrich_display_sections(md: SAPModelData, building: int = 3) -> SAPModelData
         else:
             cls, shape = ISection, "I/Wide Flange"
         row = BOX_SECTIONS.get(shape_name) or W_SECTIONS.get(shape_name)
+        if row is None:
+            raise KeyError(
+                f"no section geometry for shape {shape_name!r} "
+                f"(building {building}); check MAT_TO_SECTION_{building}"
+            )
         _, _, _, _, d, bf, tf, tw, _, _ = row
         md.sections[sname] = cls(
             name=sname,
@@ -769,6 +774,15 @@ def build_builder(
     """
     if fidelity not in ("simplified", "faithful"):
         raise ValueError(f"unknown fidelity {fidelity!r} (expected 'simplified' or 'faithful')")
+    if panel_zone and fidelity == "faithful":
+        raise ValueError(
+            "panel_zone=True is incompatible with fidelity='faithful': the faithful "
+            "slv_tbl floor ties reference the column (joint) node IDs, which "
+            "panel-zone preprocessing re-points the beams away from (onto *_pz "
+            "nodes); the resulting chained equalDOF constraints yield an incorrect "
+            "modal period (verified on the 3-story frame: T1 ≈ 7.2 Hz instead of "
+            "≈ 0.94 Hz)."
+        )
     md = load_model(building=building, nonlinear=nonlinear, backbone=backbone)
     mesh = preprocess_model(md, preprocess_config(panel_zone=panel_zone))
     cfg = builder_config(backbone, hinge_model) if nonlinear else {}

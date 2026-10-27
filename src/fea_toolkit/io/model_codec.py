@@ -267,10 +267,15 @@ def _value_matches_hint(value: t.Any, hint: t.Any) -> bool:
         )
     if hint is bool:
         return isinstance(value, bool)
-    if t.get_origin(hint) is not None:
-        # Parameterized generic (``dict[str, float]``, ``list[int]``, …) —
-        # ``isinstance`` cannot test against a subscripted generic, so defer to
-        # the structural match performed by ``_encode_value``.
+    origin = t.get_origin(hint)
+    if origin is not None:
+        # Parameterized container generic (``dict[str, float]``, ``list[int]``,
+        # …) — ``isinstance`` cannot test a subscripted generic, but the runtime
+        # value must at least match the *origin* (``dict`` vs ``list`` vs
+        # ``tuple`` vs ``set``) so a non-matching Union arm is skipped instead of
+        # being mis-encoded.
+        if origin in (list, tuple, set, dict):
+            return isinstance(value, origin)
         return True
     if isinstance(hint, type):
         return isinstance(value, hint)

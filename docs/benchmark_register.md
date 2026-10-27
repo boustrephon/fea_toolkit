@@ -57,10 +57,14 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
 > `—` = a synthetic exercise, not a T-tier benchmark (matrix cell ◐); its docs
 > are the feature pages rather than a `_benchmark.md`.
 
-Supporting code, not separate benchmarks: the SAC data generators
-(`benchmarks/fema355c.py`, `sac_member_data.py`, `sac_response_data.py`), the
-SAC record/response manifests, and the Elwood column limit-state checks
-(`test_limit_state_columns.py`).
+Supporting code, not separate benchmarks:
+
+- `benchmarks/fema355c.py` — the FEMA 355C model-builder generator (LA /
+  Seattle / Boston × 3 / 9 / 20-story), which builds the 9- and 20-story
+  benchmark models.
+- the SAC data generators (`sac_member_data.py`, `sac_response_data.py`),
+  the SAC record/response manifests, and the Elwood column limit-state
+  checks (`test_limit_state_columns.py`).
 
 ## 4. Candidate sources & build order
 

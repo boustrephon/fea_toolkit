@@ -56,10 +56,10 @@ frames — but differ in height, member schedule and base condition.
 |---|---|---|---|
 | Stories above grade | 3 | 9 | 20 |
 | Basement levels | 0 | 1 | 2 |
-| Bay width (m) | 9.144 | 9.144 | 9.144 |
+| Bay width (m) | 9.144 | 9.144 | 6.096 |
 | Base | fixed | pinned + ground tie | pinned + ground tie |
-| Column schedule | W14×257 / W14×311 | W14×233…W14×500 | W14×233…W14×500 |
-| Beam schedule | W33×118 / W30×116 / W24×68 | per-level W30/W36 | per-level W30/W36 |
+| Column schedule | W14×257 / W14×311 | W14×233…W14×500 | box corner 15×15 + W24 interior |
+| Beam schedule | W33×118 / W30×116 / W24×68 | W36 / W30 / W27 / W24 | W30 / W27 / W24 / W21 |
 
 The member schedules are transcribed from FEMA 355C [@fema355c] and the
 benchmark data files (`struct3.m`, `struct9.m`, `struct20.m`); the seismic
