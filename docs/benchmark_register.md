@@ -2,7 +2,7 @@
 title: "Benchmark & Validation Model Register"
 description: "Master index of validation/benchmark models for fea_toolkit: structural-type × load-type coverage matrix, the benchmark tiers, per-type candidate sources (papers + datasets), the phased acquisition roadmap, and acceptance criteria."
 status: "partial"
-tags: [validation, benchmark, planning, pushover, nonlinear-dynamic, modal, response-spectrum, shear-wall, beam-column-joint, ground-motion]
+tags: [validation, benchmark, planning, pushover, nonlinear-dynamic, modal, response-spectrum, shear-wall, beam-column-joint, ground-motion, masonry, infill, collapse]
 category: [planning]
 related: [vecchio_emara_benchmark.md, ground_motion_data.md, pushover_analysis.md, nonlinear_dynamic_analysis.md]
 ---
@@ -36,6 +36,7 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
 | Beam-column joint | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
 | Moment frame | ◐ | ◐ | ● SAC | ◐ | ● V&E, Duong | ● SAC | ○ |
 | Shear wall | ◐ | ◐ | ○ | ○ | ◐ | ○ | ○ |
+| Masonry / URM | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
 
 ## 3. Candidate sources by structural type
 
@@ -60,23 +61,47 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
 
 - **SAC steel frames (3/9/20-story)** — Ohtori et al. (2004), ASCE J. Eng. Mech.
   130(4):366, DOI 10.1061/(ASCE)0733-9399(2004)130:4(366); design by Krawinkler &
-  Gupta (1998).  Publishes natural frequencies (modal T2 anchor) + NLTHA + pushover.
+  Gupta (1998), reported in full in Gupta & Krawinkler (1999), Stanford Blume
+  Report TR-132 (`local/references/SAC/TR132_Gupta (Krawinkler).pdf`).  Publishes
+  natural frequencies (modal T2 anchor) + NLTHA + pushover.
   Implemented as the elastic [SAC modal anchor](sac_benchmark.md) — full frequency
   sets asserted for all three buildings — and the nonlinear
   [SAC NLTHA benchmark](sac_nonlinear_benchmark.md) (bilinear hinges + K&G panel
   zone, M1 vs M2).  The 9/20-story nonlinear NLTHA widening is tracked in
   [benchmark_roadmap.md](benchmark_roadmap.md) §2.
+- **SAC-derived — Krawinkler deterioration (IMK)** — Ibarra, Medina & Krawinkler
+  (2005), DOI 10.1002/eqe.495; Lignos & Krawinkler (2011), DOI
+  10.1061/(ASCE)ST.1943-541X.0000376; Ibarra & Krawinkler (2005), PEER 2005/06.
+  The canonical backbone + energy-based cyclic-deterioration model (IMK) and its
+  steel-component calibration database (>300 beam/column tests) — the next
+  SAC-derived step toward collapse (see benchmark_roadmap.md §3).
 - **Haselton & Deierlein (2007) / SP3 Risk** — sp3risk.com — 30+ RC SMF OpenSees
   models (1–20 stories) with pushover / NLTHA / IDA.
 - **SPEAR project RC frame** (Eurocode 8) — alternative RC NLTHA benchmark.
 - **Vecchio & Emara (1992)** and **Duong et al. (2007)** — already implemented
   (see vecchio_emara_benchmark.md and shear_failure_modelling.md).
+- **DesignSafe infilled RC frames** — Bhat & Singh (2024), DesignSafe-CI DOI
+  10.17603/ds2-4acg-tt80 — OpenSees models + responses for fly-ash-brick and
+  AAC-block masonry-infilled RC frame buildings; reproduce the bare frame first,
+  then add the diagonal-strut infill (Bhat, Singh & Agarwal 2024, DOI
+  10.1016/j.engstruct.2024.118695).
+- **E-Defense 10-storey** — Janevski, Kang & Isaković (2023), DOI
+  10.1007/s10518-023-01734-7 — full-scale 10-storey RC frame+wall dual system
+  (frame and wall directions) tested at E-Defense; macro-model cross-code anchor.
 
 ### Shear wall (T3)
 
 - **Thomsen & Wallace RW2** — canonical OpenSees wall benchmark (3.66 m tall,
   102 mm, 1.22 m web); parameters tabulated in the OpenSees Days 2014 concrete
   walls workshop.
+- **FEMA P-695 / Marafi RC wall archetypes** — Gogus & Wallace (2015), DOI
+  10.1061/(ASCE)ST.1943-541X.0001221 (20 special + 20 ordinary walls, pushover +
+  IDA) and Marafi's `nassermarafi/SRCSWArchetypes` OpenSees generator (69
+  archetypes, 4–40 storeys, Seattle).
+- **SAFE/CASH squat walls** — 13 pseudodynamic squat RC walls (JRC Ispra); Bisch
+  & Coin (2006), DOI 10.1007/s10518-006-9014-1; benchmark phases 1/2 Gallitre et
+  al. (2019), SMiRT-25 (benchmark-cash.org).  Squat-wall shear envelopes for the
+  MVLEM shear spring.
 - **Hidalgo et al. (2005) Chilean shear-wall buildings** — 50 RC wall buildings
   (12/15/20/22/28 storeys) with published fundamental periods (Table 1) — the
   building-level wall-system benchmark; see
@@ -84,6 +109,19 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
 - **UoA-UW RC Wall Database** — Shegay et al. (2021), DesignSafe DOI
   10.17603/ds2-r12q-t415 (142 walls).
 - **UCLA-RCWalls** (Abdullah 2019) — 1100+ walls.
+
+### Masonry / unreinforced masonry — URM (T3 + T4)
+
+- **URM Benchmark Project** — Cattari & Magenes (2021), Bull. Earthquake Eng.
+  20:1901–1936, DOI 10.1007/s10518-021-01078-0.  Six benchmark structures
+  (BS1–BS6) with detailed input data for nonlinear static assessment
+  (equivalent-frame and continuum models).
+- **URM shake-table database** — Haindl, Smith & Beyer (2024), Earthquake
+  Spectra, DOI 10.1177/87552930241268214.  69 shake-table URM buildings
+  (≥1:4 scale): drifts, failure modes, dynamic-property evolution.
+- **Deferred — Li et al. (2016) collapse test** — DOI
+  10.1016/j.engstruct.2016.03.032, a 3-storey RC frame shake-table collapse;
+  needs contact / large-displacement physics (see benchmark_roadmap.md §6).
 
 ### Modal + Response-spectrum closed-form anchors (T2)
 
@@ -94,9 +132,10 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
 
 ## 4. Phased roadmap
 
-> The extended proposals (Chilean shear-wall benchmark, SAC 9/20-story widening,
-> VecTor / SeismoBuild candidates) are tracked in
-> [benchmark_roadmap.md](benchmark_roadmap.md).
+> The ranked build order (SAC-derived → RC frames → RC walls → masonry/URM)
+> lives in [benchmark_roadmap.md](benchmark_roadmap.md); the detailed
+> workstreams (SAC widening, Krawinkler deterioration, RC frames, walls,
+> masonry) are in its later sections.
 
 - **Phase 1 — one benchmark per cell (anchors).**  Euler/`PL³/(3EI)` cantilever,
   Przemieniecki/Paz 3-story modal + CQC RS, one PEER column, SAC 3-story (modal
@@ -105,6 +144,12 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
   models.
 - **Phase 2 — widen nonlinear cells to 3–5.**  Additional PEER columns, joint
   subassemblages, 9-story SAC / SP3 RC SMF, and 2–4 walls across aspect ratios.
+- **Phase 3 — collapse-level steel (SAC-derived).**  IMK deterioration backbone
+  (Ibarra–Medina–Krawinkler; Lignos–Krawinkler calibration) replaces the ad-hoc
+  Clough hinge; finish the SAC 9/20-story A4 comparison.
+- **Phase 4 — RC frames, then walls, then masonry.**  DesignSafe bare → strut
+  infill and E-Defense; FEMA P-695/Marafi + SAFE/CASH + Hidalgo walls; URM
+  Benchmark Project + URM shake-table database.
 - **IDA — deferred.**  The IDA driver does not exist yet; gather the record-set
   manifest now (cheap) and validate once a driver lands.
 
@@ -112,7 +157,8 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
 
 - **Track 1 — rigid panel zones** (steel + RC): rigid offsets at beam/column
   faces + optional panel-zone shear stiffness.  Benchmark: SAC M1 vs M2
-  (Krawinkler & Gupta 1998) — M2 models the panel zone explicitly.
+  (Krawinkler & Gupta 1998; Gupta & Krawinkler 1999, TR-132) — M2 models the
+  panel zone explicitly.
 - **Track 2 — RC joint element**: the Lowes–Altoontash joint (OpenSees
   `beamColumnJoint`), with a data model for its calibration parameters.
   Benchmark: Lowes & Altoontash (2003) subassemblages.

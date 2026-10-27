@@ -1,8 +1,8 @@
 ---
 title: "Benchmark Roadmap — extended proposals"
-description: "Extended proposals for closing the benchmark coverage gaps: the Chilean shear-wall benchmark (Hidalgo et al. 2005) and the wider use of the SAC buildings, plus the deferred VecTor / SeismoBuild / base-isolation candidates."
+description: "Ranked benchmark build order (SAC-derived Krawinkler deterioration first, then RC frames, RC walls, masonry/URM) with DOIs and prerequisites, plus the detailed workstreams (SAC widening, Chilean walls, deferred candidates)."
 status: "partial"
-tags: [validation, benchmark, planning, shear-wall, moment-frame, sac, nltha, modal]
+tags: [validation, benchmark, planning, shear-wall, moment-frame, sac, nltha, modal, masonry, rc-frame, collapse]
 category: [planning]
 related: [benchmark_register.md, sac_benchmark.md, mvlem_wall_analysis.md, shell_support.md]
 ---
@@ -10,14 +10,57 @@ related: [benchmark_register.md, sac_benchmark.md, mvlem_wall_analysis.md, shell
 # Benchmark Roadmap — extended proposals
 
 Living plan for the next benchmark work, expanding on
-[benchmark_register.md](benchmark_register.md).  Two workstreams are the
-priority: the **Chilean shear-wall benchmark** (a building-level wall-system
-benchmark) and the **wider use of the SAC buildings** (higher modes + nonlinear
-NLTHA for the 9- and 20-story frames).  The first implemented slice is the SAC
-modal-anchor completion (B1), in `tests/test_benchmark_sac3.py` and
-`tests/test_benchmark_fema355c_modal.py`.
+[benchmark_register.md](benchmark_register.md).  The build order — re-ranked
+2026-10 after source verification — is **SAC-derived (Krawinkler deterioration)
+first, then RC frames, then RC shear walls, then masonry/URM**; the ranked
+sequence with DOIs and prerequisites is the section immediately below.  The
+SAC widening (§2) is largely landed (B1 modal anchors + A0–A3 nonlinear); the
+next SAC-derived step is the IMK deterioration model (§3).
 
-## 1. Chilean shear-wall benchmark — Hidalgo et al. (2005) — priority 1
+## Integrated ranked sequence — SAC-derived first
+
+Re-ranked 2026-10-27 after source verification.  Four clusters, in build
+order; each later cluster needs progressively more new physics.  All DOIs are
+verified and live in [references.bib](../papers/references.bib).
+
+| # | Cluster | Benchmarks | Tier / cell | Needs |
+|---|---|---|---|---|
+| 1 | **SAC-derived (steel frames)** | Krawinkler deterioration (§3); finish SAC 9/20-story A4 (§2) | T4 / moment frame | nothing new |
+| 2 | **RC frames** | DesignSafe infilled (bare → struts); E-Defense 10-storey (§4) | T4 / moment frame | diagonal-strut infill |
+| 3 | **RC shear walls** | FEMA P-695 / Marafi; SAFE/CASH squat (§5); Hidalgo buildings (§1) | T2–T4 / shear wall | none (MVLEM/fiber landed) |
+| 4 | **Masonry / URM** | URM Benchmark Project BS1–BS6; URM shake-table database (§6) | T3–T4 / masonry | masonry/URM physics |
+
+**Cluster 1 — SAC-derived (Krawinkler first).**  Replace the ad-hoc `Clough`
+degradation hinge (β=0.5, loses convergence on 4/10 strong cases, §2 A4) with the
+**Ibarra–Medina–Krawinkler (IMK)** backbone + energy-based cyclic deterioration,
+calibrated from the **Lignos–Krawinkler steel-component database** (>300
+beam/column tests).  Sources: Ibarra, Medina & Krawinkler (2005)
+`10.1002/eqe.495`; Lignos & Krawinkler (2011) `10.1061/(ASCE)ST.1943-541X.0000376`;
+Ibarra & Krawinkler (2005), PEER 2005/06.  Then finish the SAC A4 comparison (§2).
+
+**Cluster 2 — RC frames.**  Bhat & Singh (2024) `10.17603/ds2-4acg-tt80` ships
+OpenSees models + responses for infilled RC frame buildings — reproduce the
+**bare frame** first (no new physics), then the diagonal-strut infill (Bhat,
+Singh & Agarwal 2024 `10.1016/j.engstruct.2024.118695`).  Janevski, Kang &
+Isaković (2023) `10.1007/s10518-023-01734-7` is the E-Defense 10-storey RC
+frame+wall dual system (frame and wall directions).
+
+**Cluster 3 — RC shear walls.**  Gogus & Wallace (2015)
+`10.1061/(ASCE)ST.1943-541X.0001221` (20 special + 20 ordinary walls) and
+Marafi's `nassermarafi/SRCSWArchetypes` (69 archetypes, 4–40 storeys).  Squat
+walls: 13 SAFE pseudodynamic walls (JRC Ispra), Bisch & Coin (2006)
+`10.1007/s10518-006-9014-1`, CASH benchmark Gallitre et al. (2019).  Hidalgo
+buildings stay the building-level anchor (§1).
+
+**Cluster 4 — Masonry / URM.**  Cattari & Magenes (2021)
+`10.1007/s10518-021-01078-0` (BS1–BS6 with full input data) and Haindl, Smith &
+Beyer (2024) `10.1177/87552930241268214` (69 shake-table URM buildings).
+
+**Deferred.**  Li, Zuo, Zhai, Xu & Xie (2016) `10.1016/j.engstruct.2016.03.032`
+— 3-storey RC frame shake-table **collapse** test; needs contact/falling-debris
+and large-displacement physics.  Revisit after the collapse/IDA driver lands.
+
+## 1. Chilean shear-wall benchmark — Hidalgo et al. (2005) — priority 3
 
 **Source.** Hidalgo, Gelmi, Nuñez & Magna (2005), *IX Chilean Conference on
 Seismology* — `local/references/SAC/NA04-03 (Chile Shear Wall Models).pdf`.
@@ -74,7 +117,7 @@ mirrors `fema355c.py`): `build_chile_wall(...)`, `write_snapshots()`, a `MODELS`
 data table; tests `tests/test_benchmark_chile_wall.py` (+ `_nltha.py`) drive it
 through `preprocess_model → AnalysisBuilder → run_modal_analysis`.
 
-## 2. Wider use of the SAC buildings — priority 2
+## 2. Wider use of the SAC buildings (Ohtori 2004) — priority 1
 
 > **Canonical plan.** This §2 is the single source of truth for the A0–A4
 > widening; `_pending_work.md` P40/P41, `sac_benchmark.md` and
@@ -294,7 +337,113 @@ column panel-zone `tw` as-is (~1/2 in ≈ 0.013 m over the bare web — a
 non-documented doubler plate), documented rather than "corrected".  See
 `sac_nonlinear_benchmark.md`.
 
-## 3. Other benchmarks — priority 3 (mostly deferred)
+## 3. SAC-derived — Krawinkler deterioration models (collapse) — priority 1
+
+The SAC lineage ends at the trilinear `Hysteretic` hinge with an ad-hoc `Clough`
+degradation law (β=0.5), which loses convergence on 4 of the 10 strong cases
+(§2 A4).  The canonical replacement is the **Ibarra–Medina–Krawinkler (IMK)**
+phenomenological deterioration model — a monotonic backbone (yield, peak/capping,
+post-capping negative stiffness, residual) plus an energy-based rule for three
+cyclic-deterioration modes (basic strength, post-capping strength,
+unloading/reloading stiffness) — calibrated from the **Lignos–Krawinkler steel
+component database** (>300 wide-flange beam/column tests).
+
+Note: this "Krawinkler" thread (deterioration/collapse) is distinct from the
+SAC frame *design* thread — Gupta & Krawinkler (1999), Stanford Blume Report
+TR-132, the source of the SAC member schedules and the Krawinkler & Gupta
+panel-zone model already landed in §2 / `sac_nonlinear_benchmark.md`.
+
+**Sources.** Ibarra, Medina & Krawinkler (2005), *Earthq. Eng. Struct. Dyn.*
+34(12):1489–1511, DOI `10.1002/eqe.495` (the IMK model); Lignos & Krawinkler
+(2011), *J. Struct. Eng.* 137(11):1291–1302, DOI
+`10.1061/(ASCE)ST.1943-541X.0000376` (modified-IK + RBS / non-RBS calibration
+equations); Ibarra & Krawinkler (2005), PEER Report 2005/06 (collapse
+methodology and SDOF/MDOF collapse capacities).
+
+**Why first.**  No new topology or element: only a backbone + cyclic-deterioration
+uniaxial material and a per-member calibration table — the shape of the existing
+`sac_member_data.py` backbones.  It upgrades the steel-frame NLTHA cell from "no
+deterioration" to "collapse-level", and unlocks the IDA cell when that driver
+lands.
+
+**Phasing.**
+
+- **A0 — backbone data.** Transcribe the Lignos–Krawinkler calibration equations
+  (θp precapping, θpc post-capping, Λ cyclic deterioration, My, Mr, κ) for RBS
+  and non-RBS beams and columns.
+- **A1 — material.** An IMK uniaxial material behind the existing
+  `hinge_backbone` switch.
+- **A2 — single-member / subassemblage checks.** Moment–rotation hysteretic loops
+  vs the component-database envelopes.
+- **A3 — frame collapse.** Re-run the SAC 3/9/20-story matrices with IMK; compare
+  collapse capacity / IDA to Ibarra–Krawinkler (2005).
+
+**Architecture.** Extend `sac_member_data.py` (backbones) + `opensees/_elements.py`
+(hinge branch); no preprocessor change.  Tests `tests/test_benchmark_sac_imk.py`.
+
+## 4. RC frames — priority 2
+
+Fills the RC moment-frame NLTHA cell (the moment-frame column currently anchors
+on steel SAC + Vecchio–Emara pushover).  Two cross-code (T4) benchmarks, bare
+first:
+
+- **DesignSafe infilled RC frames (bare → struts).**  Bhat & Singh (2024),
+  DesignSafe-CI DOI `10.17603/ds2-4acg-tt80`, ships OpenSees models + responses
+  for fly-ash-brick and AAC-block masonry-infilled RC frame buildings.  Step 1
+  reproduces the **bare frame** (modal + pushover + NLTHA — no new physics);
+  step 2 adds the diagonal-strut infill (Bhat, Singh & Agarwal 2024, *Eng.
+  Struct.*, DOI `10.1016/j.engstruct.2024.118695`).
+- **E-Defense 10-storey.**  Janevski, Kang & Isaković (2023), *Bull. Earthq.
+  Eng.* 21(15):6553–6584, DOI `10.1007/s10518-023-01734-7`.  Full-scale 10-storey
+  RC frame+wall dual system, frame and wall directions, at E-Defense (Kang et
+  al. 2023 describe the test).  Exercises lumped-plasticity frames + MVLEM walls
+  + scissors joints — all already implemented — so it is a data + model task.
+
+**Phasing.** bare-frame anchors → strut infill (equivalent-strut element, new) →
+E-Defense frame direction → wall direction.  The strut is the one new piece of
+physics.
+
+## 5. RC shear walls — additional sources — priority 3
+
+Complements the Chilean building-level benchmark (§1).  Both are data +
+existing-element tasks (MVLEM_3D / SFI_MVLEM_3D and fiber walls are landed).
+
+- **FEMA P-695 / Marafi archetypes.**  Gogus & Wallace (2015), *J. Struct.
+  Eng.*, DOI `10.1061/(ASCE)ST.1943-541X.0001221` — 20 special + 20 ordinary RC
+  walls, static pushover + IDA on 44 ground motions, published CMRs.  Marafi's
+  `nassermarafi/SRCSWArchetypes` generator emits OpenSees scripts for 69 special
+  RC wall archetypes (4–40 storeys, Seattle; ASCE 7-10/7-16), modelled per
+  Marafi, Ahmed, Lowes & Lehman (2019), DOI
+  `10.1061/(ASCE)ST.1943-541X.0002311`.  Native OpenSees models — direct
+  cross-code targets.
+- **SAFE/CASH squat walls.**  13 pseudodynamic squat RC walls (JRC Ispra); Bisch
+  & Coin (2006), *Bull. Earthq. Eng.*, DOI `10.1007/s10518-006-9014-1` (SAFE
+  tests); benchmark phases 1/2 Gallitre, Viallet, Szczesiak, Thénint & Fabre
+  (2019), SMiRT-25 (benchmark-cash.org).  Squat-wall shear envelopes exercise
+  the MVLEM shear spring (aspect ratio < 2).
+
+## 6. Masonry / URM — priority 4
+
+First masonry/URM coverage (a new matrix row).  Needs new masonry/URM physics
+(equivalent-frame macro-elements and/or smeared-crack continuum masonry), so it
+is deferred behind the RC tiers.
+
+- **URM Benchmark Project.**  Cattari & Magenes (2021), *Bull. Earthq. Eng.*
+  20:1901–1936, DOI `10.1007/s10518-021-01078-0` — six benchmark structures
+  (BS1–BS6) with detailed input data for nonlinear static assessment
+  (equivalent-frame and continuum models); blind-prediction companion results
+  across participating teams.
+- **URM shake-table database.**  Haindl, Smith & Beyer (2024), *Earthquake
+  Spectra*, DOI `10.1177/87552930241268214` — 69 shake-table URM buildings
+  (≥1:4 scale): drifts, failure modes, dynamic-property evolution (Zenodo
+  record 11093882).
+
+**Deferred.**  Li, Zuo, Zhai, Xu & Xie (2016), *Eng. Struct.*, DOI
+`10.1016/j.engstruct.2016.03.032` — a 3-storey RC frame shake-table **collapse**
+test.  Needs contact/falling-debris and large-displacement physics the toolkit
+does not have; revisit after the collapse/IDA driver lands.
+
+## 7. Other benchmarks — deferred
 
 - **VecTor family** — jp68/69 (Guner & Vecchio pushover) and jp74 (cyclic
   shear-critical frames) are the natural next additions after jp16 (done);
@@ -304,7 +453,7 @@ non-documented doubler plate), documented rather than "corrected".  See
   set.
 - **NIST GCR 17-917-46v2** — reference only (ASCE 41 capacity models).
 
-## 4. Cross-cutting conventions
+## 8. Cross-cutting conventions
 
 - Generators live in `src/fea_toolkit/benchmarks/…` (never `local/`); PDFs and
   `local/257/_extract/*.m` are provenance only, cited from docstrings/docs.

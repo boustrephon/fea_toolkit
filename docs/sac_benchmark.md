@@ -48,7 +48,8 @@ per-level (W33×118 / W30×116 / W24×68) with a lighter W21×44 fourth bay, the
 columns are W14×257 (exterior) / W14×311 (interior) with a leaning column, and
 the lateral model uses bare-steel beam inertia (the composite slab is a
 gravity-only effect).  This lands the first two periods on the published values
-(1.01 s / 0.327 s) to within ±3 %.
+(1.01 s / 0.327 s) to within ±3 %.  The underlying SAC frame design is Gupta &
+Krawinkler (1999), Stanford Blume Report TR-132.
 
 ## Modal anchor — full frequency set
 

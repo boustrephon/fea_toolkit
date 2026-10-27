@@ -12,6 +12,11 @@ values converted to SI, sourced from ``data/section_dict.pkl`` and hardcoded
 here so the module is self-contained; the box corner columns (LA 20-story,
 15x15x t) are computed from the square-box formulas.  ``E = 200 GPa``, steel.
 
+The FEMA 355C Appendix B schedules reproduce the SAC steel frame designs from
+Gupta & Krawinkler (1999), Stanford Blume Report TR-132
+(``local/references/SAC/TR132_Gupta (Krawinkler).pdf``) — the source cited as
+"TR132" in the inline gravity-column comments below.
+
 Units are SI (N, m, kg); materials are authored in SI (Pa) and used as-is
 (see the material-property convention in ``.clinerules`` section 4.6).
 

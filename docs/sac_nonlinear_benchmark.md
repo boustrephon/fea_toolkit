@@ -181,7 +181,9 @@ Kθ  = 0.95 ·  G · tp · dc · db
 ```
 
 where `dc` / `db` are the column / beam depths and `tp` the panel thickness
-(column web thickness); post-yield hardening is 3 %.
+(column web thickness); post-yield hardening is 3 %.  The backbone is the
+Krawinkler & Gupta panel-zone model (Gupta & Krawinkler 1999, Stanford Blume
+Report TR-132; summarized in Krawinkler & Gupta 1998).
 
 ![Panel-zone backbone](assets/sac3_panel_zone.png)
 
@@ -260,7 +262,9 @@ artifact (each only when its file is absent), writing into `docs/assets/`.
 - Ohtori et al. (2004) — https://doi.org/10.1061/(ASCE)0733-9399(2004)130:4(366)
 - Krawinkler (1978), "Shear in Beam-Column Joints in Seismic Design of Steel
   Frames", *AISC Engineering Journal* 15(3) — the panel-zone backbone.
-- Krawinkler & Gupta (1998) — SAC steel-frame design / panel-zone modelling.
+- Krawinkler & Gupta (1998) — SAC steel-frame design / panel-zone modelling
+  (summary); Gupta & Krawinkler (1999), Stanford Blume Report TR-132 — the full
+  report (`local/references/SAC/TR132_Gupta (Krawinkler).pdf`).
 - AISC *Steel Construction Manual* — the `Zx` tables behind the derived yield
   moments (W24×68, W30×116).
 - [Johnsonlijian/eesd-1060116-reproducibility-20261003](https://github.com/Johnsonlijian/eesd-1060116-reproducibility-20261003)
