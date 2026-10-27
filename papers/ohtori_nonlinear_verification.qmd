@@ -141,7 +141,7 @@ drift 0.0207, roof accel 10.03 m/s², `Nd = 0`.
 
 : The four hinge formulations against the published El Centro 1.0 response. {#tbl-four}
 
-The four forms agree on the El Centro anchor: the base shear clusters at
+The three converged forms (A, B and C) agree on the El Centro anchor: the base shear clusters at
 10.1–10.3 MN (target 10.12), so the base shear is set by the **backbone and
 elastic stiffness** (the monotonic force path), not by the unloading/reloading
 rule, and the softer lumped hinge (T1 ≈ 1.041 s) lands at 10.14 MN. **D (Clough
