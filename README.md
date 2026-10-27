@@ -561,9 +561,16 @@ Key implementation details:
 * **Coincident nodes** are created at each element end with the same coordinates.
 * **``zeroLength`` + ``-mat``/``-dir``** carries all six DOFs with no
   ``equalDOF``: rigid ``Elastic`` materials retain the retained DOFs
-  (P, Vy, Vz, T), while the two rotational DOFs are carried by ``Hysteretic``
-  (or ``Steel01`` for the bilinear hinge) backbone materials calibrated from
-  the section's yield moment and ASCE 41 rotation limits.
+  (P, Vy, Vz, T), while the two rotational DOFs are carried by the hinge
+  backbone materials.  ``hinge_backbone`` selects the rotational law:
+
+  | ``hinge_backbone`` | Rotational law |
+  |---|---|---|
+  | ``"asce41"`` (default) | ``Hysteretic`` matched to ASCE 41 rotation limits |
+  | ``"bilinear"`` | ``Steel01`` (yield ``My = Z·fy``, ``hardening_ratio``) |
+  | ``"trilinear"`` | ``Hysteretic`` (Ohtori ``mat_tbl`` EI1/EI2/EI3 + d1/d2) |
+  | ``"imk"`` | ``IMKBilin`` (Lignos-Krawinkler, collapse-level) |
+
 * **ASCE 41-17 §10.8 hinge length**: ``fea_toolkit.capacity.asce41.hinge_length``
   implements Eq 10-1 / 10-2 / ACI formulas for steel, brace, and RC
   members.
@@ -574,6 +581,18 @@ Configure with::
         'hinge_model': 'lumped',           # default: 'fiber'
         # ... other builder options ...
     }
+
+A separate concentrated-plasticity element, ``hinge_model: 'beam_with_hinges'``,
+replaces the zero-length hinge assembly with an elastic interior plus a
+trilinear moment-*curvature* ``Uniaxial`` (strong-axis ``Mz``) hinge section at
+each end — no "nearly rigid" spring, so the elastic stiffness is the exact
+``6EI1/L``.  The plastic hinge length ``hinge_length_fraction`` (default
+``1/6``) converts curvature to member-end rotation (θ = φ·L/6).  Supported
+``hinge_backbone`` values are ``"trilinear"`` (``Hysteretic``),
+``"trilinear_steel02"`` (two ``Steel02`` springs in parallel) and
+``"trilinear_clough"`` (``Hysteretic`` with Clough/Takeda unloading-stiffness
+degradation, β = 0.5).  See [`docs/modeling_guidance.md`](docs/modeling_guidance.md)
+for guidance on choosing a hinge formulation.
 
 #### 10.3 ASCE 41 Hinge Lengths
 

@@ -287,11 +287,18 @@ class AnalysisBuilder(
             "constraint_method": "spring",
             "hinge_model": "fiber",  # Distributed plasticity by default
             # ── Hinge backbones (hinge_model='lumped' or 'beam_with_hinges') ──
-            # "asce41" (default): Hysteretic backbone matched to ASCE 41
-            # rotation limits.  "bilinear": Steel01 bilinear hinge (yield
-            # moment My = Z·fy, hardening_ratio) for concentrated-plasticity
-            # steel moment frames (e.g. the SAC benchmark).  "trilinear": the
-            # Ohtori mat_tbl EI1/EI2/EI3 + d1/d2 backbone.
+            # Lumped (zeroLength) hinge backbones — "asce41" (default):
+            # Hysteretic backbone matched to ASCE 41 rotation limits.
+            # "bilinear": Steel01 bilinear hinge (yield moment My = Z·fy,
+            # hardening_ratio) for concentrated-plasticity steel moment frames
+            # (e.g. the SAC benchmark).  "trilinear": the Ohtori mat_tbl
+            # EI1/EI2/EI3 + d1/d2 backbone as a Hysteretic hinge.  "imk": the
+            # Lignos-Krawinkler IMKBilin steel hinge (collapse-level).
+            # beam_with_hinges backbones — "trilinear": a Hysteretic M-φ
+            # (Uniaxial, Mz) hinge section at each end.  "trilinear_steel02":
+            # the same backbone as two Steel02 springs in parallel.
+            # "trilinear_clough": the Hysteretic hinge with Clough/Takeda
+            # unloading-stiffness degradation (β = 0.5).
             "hinge_backbone": "asce41",
             "hardening_ratio": 0.02,
             # Elastic rotational stiffness of the bilinear (Steel01) hinge, as

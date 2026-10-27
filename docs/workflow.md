@@ -406,9 +406,20 @@ structural_node_i → hinge_i → elastic_mid → hinge_j → structural_node_j
 Coincident hinge nodes sit at the same coordinates.  Each hinge is a
 six-direction ``zeroLength`` element carrying all six DOFs via
 ``-mat``/``-dir`` (no ``equalDOF`` ties): rigid ``Elastic`` materials
-retain P/Vy/Vz/T, while the hinge materials (``Hysteretic`` or ``Steel01``)
-provide the two rotational DOFs.  Hinge backbones use ``Hysteretic`` material
-matched to ASCE 41 rotation limits.
+retain P/Vy/Vz/T, while the hinge materials provide the two rotational
+DOFs.  The ``hinge_backbone`` config key selects the rotational law:
+``"asce41"`` (default, ``Hysteretic`` matched to ASCE 41 rotation limits),
+``"bilinear"`` (``Steel01``), ``"trilinear"`` (``Hysteretic``, the Ohtori
+``mat_tbl`` EI1/EI2/EI3 + d1/d2 backbone) and ``"imk"`` (``IMKBilin``,
+Lignos-Krawinkler collapse-level).
+
+A separate concentrated-plasticity formulation, ``hinge_model =
+'beam_with_hinges'`` (built in `_create_elements`), uses an elastic
+interior with a trilinear moment-*curvature* ``Uniaxial`` (``Mz``) hinge
+section at each end (``hinge_length_fraction``, default ``1/6``), with
+``hinge_backbone`` of ``"trilinear"`` (``Hysteretic``),
+``"trilinear_steel02"`` (two ``Steel02`` springs in parallel) or
+``"trilinear_clough"`` (``Hysteretic`` with Clough/Takeda degradation).
 
 #### 2m — `_create_elements()`  *(Connectivity Check D)*
 
