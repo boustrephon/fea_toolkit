@@ -142,10 +142,13 @@ def _imk_bilin_args(
         theta_u_pos = theta_p_pos + theta_pc_pos
     if theta_u_neg <= 0.0:
         theta_u_neg = theta_p_neg + theta_pc_neg
+    mc_my = float(params.get("mc_my", 1.0))
+    as_pos = (mc_my - 1.0) * my_pos / (k0 * theta_p_pos) if theta_p_pos > 0.0 else 0.0
+    as_neg = (mc_my - 1.0) * (-my_neg) / (k0 * theta_p_neg) if theta_p_neg > 0.0 else 0.0
     return (
         k0,
-        float(params.get("as_pos", 0.03)),
-        float(params.get("as_neg", 0.03)),
+        as_pos,
+        as_neg,
         my_pos,
         my_neg,
         float(params.get("lamda_S", 0.0)),

@@ -374,11 +374,11 @@ component database** (>300 wide-flange beam/column tests).
 **Status (2026-10-27).** A1 machinery landed — `hinge_backbone="imk"` builds a
 `Bilin` (modified IMK, **bilinear** hysteretic — the *steel* variant; note
 `ModIMKPeakOriented` is the RC-flexure variant) strong-axis hinge in
-`opensees/_elements.py`, wired through `sac.builder_config`.  A0 scaffolding
-landed (`benchmarks/imk_calibration.py`: `SteelIMKParams` + the A0 entry
-point), but the **calibration equations are not yet transcribed** — the θp/θpc/Λ
-regression coefficients (and their exponent signs) must be read from the
-primary source; `lignos_krawinkler_2011()` raises `NotImplementedError`.
+`opensees/_elements.py`, wired through `sac.builder_config`.  A0 landed for
+**beams** — `lignos_krawinkler_2011()` computes the full `Bilin` set from the
+Lignos–Krawinkler regressions (transcribed from Lignos' EPFL component tool,
+cross-checked against PEER/ATC-72-1 §3.2.2); the **column** path still raises
+`NotImplementedError` (PEER/ATC-72-1 §3.2.4 gives no column equations).
 A2/A3 pending.  See `docs/imk_deterioration_model.md`.
 
 Note: this "Krawinkler" thread (deterioration/collapse) is distinct from the

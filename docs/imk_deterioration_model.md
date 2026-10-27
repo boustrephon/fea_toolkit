@@ -98,7 +98,7 @@ From `benchmark_roadmap.md` §3 (priority 1):
 
 | Phase | What | Status |
 |---|---|---|
-| **A0 — backbone data** | Lignos–Krawinkler equations (θp, θpc, Λ, My, Mr, κ) for RBS/non-RBS beams and columns | 🚧 scaffolding only |
+| **A0 — backbone data** | Lignos–Krawinkler equations (θp, θpc, Λ) for RBS/non-RBS beams and columns | ✅ beams / 🚧 columns |
 | **A1 — material** | IMK (`Bilin`) uniaxial material behind `hinge_backbone="imk"` | ✅ landed |
 | **A2 — single-member checks** | M-θ loops vs the component-database envelopes | ⏳ pending |
 | **A3 — frame collapse** | SAC 3/9/20 matrices with IMK; IDA vs Ibarra–Krawinkler (2005) | ⏳ pending |
@@ -109,28 +109,42 @@ in `_create_lumped_hinges` — a `Bilin` strong-axis hinge reading a stamped
 near-rigid lumped-hinge convention).  `benchmarks/sac.builder_config` accepts
 `("imk", "lumped")`.  Tests: `tests/test_benchmark_sac_imk.py`.
 
-**A0 (scaffolding only).** `benchmarks/imk_calibration.py` defines
-`SteelIMKParams` (the parameter container, with `to_dict()`/`as_bilin_args()`)
-and the `lignos_krawinkler_2011(...)` entry point — which currently raises
-`NotImplementedError`, because the regression coefficients must be transcribed
-from the primary source.
+**A0 (beams landed).** `benchmarks/imk_calibration.py` defines `SteelIMKParams`
+and `lignos_krawinkler_2011(...)`, which now computes the full `Bilin`
+parameter set for **beams** (RBS and other-than-RBS, split at `d = 533 mm`),
+transcribed verbatim from Lignos' EPFL component tool and cross-checked against
+PEER/ATC-72-1 §3.2.2.  The **column** path still raises `NotImplementedError`
+(PEER/ATC-72-1 §3.2.4 gives no column equations; the regressions live in the
+paywalled 2011 paper, Table 3).
 
-## 6. Calibration equations to transcribe
+## 6. Calibration equations
 
-From Lignos & Krawinkler (2011), DOI `10.1061/(ASCE)ST.1943-541X.0000376`
-(Table 2 / Eqs. 4–14), as functions of `h/tw` (clear web-depth ratio),
-`bf/(2·tf)` (flange slenderness), `Lb/ry` (unbraced length / weak-axis radius
-of gyration), `L/d` (member length / depth), `d` (depth), `Fy`, and `P/Pye`
-(columns).  Unit factors: `c1_unit = 1` for `d` in mm (×25.4 if inches),
-`c2_unit = 1` for `Fy` in MPa (×6.895 if ksi).
+### Beams (transcribed)
 
-- **θp (pre-capping)** — RBS beams; other-than-RBS beams; columns.
-- **θpc (post-capping)** — other-than-RBS (full set); other-than-RBS (d ≥ 533 mm); RBS.
-- **Λ (cyclic deterioration)** — beams; columns.
-- **`Mr = κ·My`** residual ratio and **`as`** hardening ratio conventions.
+Transcribed verbatim from Lignos' EPFL component tool
+(`resslabtools.epfl.ch/component/`) and cross-checked against PEER/ATC-72-1
+§3.2.2 (Eqs. 3-1–3-6).  Variables: `h/tw = (d − 2tf)/tw`, `bf/(2tf)`,
+`Lb/ry`, `L/(2d)` (the tool's double-curvature member-length term), `d` in mm,
+`Fy` in MPa.
 
-> The regression *signs* are unreliable in secondary OCR — transcribe from the
-> paper (or the EPFL `resslabtools.epfl.ch/component` tool), do not guess.
+| | θp (pre-capping) | θpc (post-capping) | Λ (cyclic deterioration) |
+|---|---|---|---|
+| **RBS** | `0.19 (h/tw)^-0.314 (bf/2tf)^-0.1 (Lb/ry)^-0.185 (L/2d)^0.113 (d/533)^-0.76 (Fy/355)^-0.07` | `9.52 (h/tw)^-0.513 (bf/2tf)^-0.863 (Lb/ry)^-0.108 (Fy/355)^-0.36` | `585 (h/tw)^-1.14 (bf/2tf)^-0.632 (Lb/ry)^-0.205 (Fy/355)^-0.391` |
+| **non-RBS, d < 533 mm** | `0.0865 (h/tw)^-0.365 (bf/2tf)^-0.14 (L/2d)^0.34 (d/533)^-0.721 (Fy/355)^-0.23` | `5.63 (h/tw)^-0.565 (bf/2tf)^-0.8 (d/533)^-0.28 (Fy/355)^-0.43` | `495 (h/tw)^-1.34 (bf/2tf)^-0.595 (Fy/355)^-0.36` |
+| **non-RBS, d ≥ 533 mm** | `0.318 (h/tw)^-0.55 (bf/2tf)^-0.345 (Lb/ry)^-0.023 (L/2d)^0.09 (d/533)^-0.33 (Fy/355)^-0.13` | `7.5 (h/tw)^-0.61 (bf/2tf)^-0.71 (Lb/ry)^-0.11 (d/533)^-0.161 (Fy/355)^-0.32` | `536 (h/tw)^-1.26 (bf/2tf)^-0.525 (Lb/ry)^-0.13 (Fy/355)^-0.291` |
+
+`My = Zx·Fy` (nominal; the PEER 1.1 expected-strength factor is a caller
+option), `Mc = mc_my·My` (default 1.05), `Mr = κ·My` (default κ = 0.4),
+`θu = θp + θpc` (default).  The hardening ratio `as = (mc_my − 1)·My/(K0·θp)`
+is derived in the hinge machinery so `Mc` is reproduced exactly regardless of
+the `K0` convention.
+
+### Columns (not yet transcribed)
+
+PEER/ATC-72-1 §3.2.4 gives **no** column regression (it states the inelastic
+rotation parameters "are a matter of much judgment"); the column regressions
+are in the paywalled 2011 paper (Table 3).  Obtain that paper (or a column
+module of the EPFL/Lignos tool) before implementing the `column=True` path.
 
 ## 7. References
 

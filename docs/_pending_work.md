@@ -164,13 +164,13 @@ dEj = E/(My·θ_y).
 Source: `docs/benchmark_roadmap.md` §3 (canonical); `docs/imk_deterioration_model.md`.
 
 **Status (2026-10-27).** A1 machinery landed — `hinge_backbone="imk"` builds a
-`Bilin` steel hinge (energy-based cyclic deterioration) in `opensees/_elements.py`;
-A0 scaffolding (`benchmarks/imk_calibration.py`, `SteelIMKParams`) landed.
+`Bilin` steel hinge (energy-based cyclic deterioration) in `opensees/_elements.py`.
+A0 landed for **beams** — `lignos_krawinkler_2011()` computes the θp/θpc/Λ set
+(transcribed from Lignos' EPFL component tool + PEER/ATC-72-1 §3.2.2).
 **Remaining:**
-1. Transcribe the Lignos–Krawinkler (2011) θp/θpc/Λ regression equations
-   (beams RBS/non-RBS + columns) from the primary source, DOI
-   `10.1061/(ASCE)ST.1943-541X.0000376` — `lignos_krawinkler_2011()` currently
-   raises `NotImplementedError`.
+1. Transcribe the Lignos–Krawinkler (2011) **column** regressions (paywalled
+   paper, Table 3) — the `column=True` path currently raises
+   `NotImplementedError`.
 2. A2 single-member checks vs the component-database envelopes.
 3. A3 frame collapse (SAC 3/9/20 with IMK; IDA vs Ibarra–Krawinkler 2005).
 
