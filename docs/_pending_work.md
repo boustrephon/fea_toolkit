@@ -170,8 +170,7 @@ A0 landed — beams (Lignos–Krawinkler 2011 θp/θpc/Λ) and columns (Lignos e
 **Remaining:**
 1. (Optional) Column cyclic-deterioration Λ — not in the 2019 paper (Lignos &
    Krawinkler 2011, Table 3; paywalled).  Columns currently use Λ = 0.
-2. A2 single-member checks vs the component-database envelopes.
-3. A3 frame collapse (SAC 3/9/20 with IMK; IDA vs Ibarra–Krawinkler 2005).
+2. A3 frame collapse (SAC 3/9/20 with IMK; IDA vs Ibarra–Krawinkler 2005).
 
 **Where.** `benchmarks/imk_calibration.py`; `opensees/_elements.py`
 (`hinge_backbone="imk"`); `tests/test_benchmark_sac_imk.py`.

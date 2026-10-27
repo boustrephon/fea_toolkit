@@ -1,8 +1,8 @@
-"""IMK (Bilin) steel-hinge machinery (A1) and the A0 beam calibration.
+"""IMK (IMKBilin) steel-hinge machinery (A1) and the A0 beam calibration.
 
 The Lignos-Krawinkler (2011) *beam* equations are transcribed (from Lignos'
 EPFL component tool); *column* equations are not yet transcribed.  These tests
-cover the ``SteelIMKParams`` -> ``Bilin`` argument mapping, the beam regression,
+cover the ``SteelIMKParams`` -> ``IMKBilin`` argument mapping, the beam regression,
 and the ``hinge_backbone='imk'`` lumped-hinge build.
 """
 
@@ -20,30 +20,25 @@ from fea_toolkit.opensees._elements import _imk_bilin_args
 
 def test_imk_bilin_args_order_and_defaults():
     args = _imk_bilin_args({}, k0=1e8, my_pos=500e3, my_neg=-500e3)
-    assert len(args) == 23
-    assert args[0] == 1e8  # K0
-    assert args[1] == 0.0  # as_pos: mc_my defaults to 1.0 -> no hardening
-    assert args[2] == 0.0  # as_neg
-    assert args[3] == 500e3  # My_pos
-    assert args[4] == -500e3  # My_neg (negative, per Bilin contract)
-    assert args[5] == 0.0  # lamda_S default
-    assert args[7] == 0.0  # lamda_A forced to 0 (unused for bilinear)
-    assert args[11] == 1.0  # c_A forced to 1.0
-    assert args[21] == 1.0  # D_pos
-    assert args[22] == 1.0  # D_neg
+    assert len(args) == 21
+    assert args[0] == 1e8  # Ke
+    assert args[4] == 500e3  # Fy_pos
+    assert args[5] == 1.0  # FmaxFy_pos (mc_my defaults to 1.0)
+    assert args[10] == 500e3  # Fy_neg (positive magnitude)
+    assert args[19] == 1.0  # D_pos
+    assert args[20] == 1.0  # D_neg
 
 
-def test_hardening_ratio_from_capping_ratio():
-    # Mc/My = 1.05, theta_p = 0.02, My = 500e3, K0 = 1e8
-    # -> as = (1.05 - 1) * 500e3 / (1e8 * 0.02) = 0.0125
+def test_capping_ratio_passed_directly():
+    # mc_my (FmaxFy) is passed straight through to IMKBilin — no derived 'as'.
     args = _imk_bilin_args(
         {"mc_my": 1.05, "theta_p_pos": 0.02, "theta_p_neg": 0.02},
         k0=1e8,
         my_pos=500e3,
         my_neg=-500e3,
     )
-    assert args[1] == pytest.approx(0.0125)
-    assert args[2] == pytest.approx(0.0125)
+    assert args[5] == pytest.approx(1.05)  # FmaxFy_pos
+    assert args[11] == pytest.approx(1.05)  # FmaxFy_neg
 
 
 def test_theta_u_falls_back_to_theta_p_plus_pc():
@@ -53,7 +48,7 @@ def test_theta_u_falls_back_to_theta_p_plus_pc():
         my_pos=500e3,
         my_neg=-500e3,
     )
-    assert args[19] == 0.10  # theta_u_pos falls back to theta_p + theta_pc
+    assert args[3] == 0.10  # du_pos falls back to theta_p + theta_pc
 
 
 def test_beam_rotations_prefactor_identity():
@@ -95,7 +90,7 @@ def test_lignos_krawinkler_2011_beam():
     assert p.theta_pc_pos > 0.0
     assert p.lamda_S == p.lamda_C == p.lamda_K > 0.0
     assert p.res_pos == pytest.approx(0.4)
-    assert p.theta_u_pos == pytest.approx(p.theta_p_pos + p.theta_pc_pos)
+    assert p.theta_u_pos == pytest.approx(p.theta_p_pos + p.theta_pc_pos + 0.02)
     assert set(p.to_dict()) == set(IMK_PARAM_KEYS)
 
 

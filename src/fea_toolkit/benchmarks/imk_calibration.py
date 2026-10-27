@@ -1,7 +1,7 @@
-"""Lignos–Krawinkler (2011) steel IMK (``Bilin``) calibration — A0.
+"""Lignos–Krawinkler (2011) steel IMK (``IMKBilin``) calibration — A0.
 
 The modified Ibarra–Medina–Krawinkler (IMK) deterioration model with *bilinear*
-hysteretic response is OpenSees' ``Bilin`` uniaxial material, calibrated for
+hysteretic response is OpenSees' ``IMKBilin`` uniaxial material, calibrated for
 steel beam-to-column connections by Lignos & Krawinkler (2011),
 DOI ``10.1061/(ASCE)ST.1943-541X.0000376``.
 
@@ -54,17 +54,18 @@ IMK_PARAM_KEYS: tuple[str, ...] = (
 
 @dataclass
 class SteelIMKParams:
-    """Parameters for a ``Bilin`` (modified IMK) steel hinge.
+    """Parameters for a ``IMKBilin`` (modified IMK) steel hinge.
 
     Rotation quantities are in radians; moments in the model's own force·length
     units; ``lamda_*`` are the Lignos–Krawinkler cyclic-deterioration parameters
     (reference energy ``E_t = Λ · My``, so ``Λ`` is in radians).  ``My_neg`` is
-    stored as a *negative* value (``Bilin`` expects a negative ``My_Neg``);
-    ``theta_p_neg`` / ``theta_pc_neg`` / ``res_neg`` / ``theta_u_neg`` are
-    *positive* magnitudes, as ``Bilin`` expects.  ``mc_my`` is the capping-to-
-    yield moment ratio; the hardening ratio ``as`` is *derived* from it (and the
-    spring's elastic stiffness ``k0``) so the capping moment ``Mc = mc_my · My``
-    is reproduced exactly regardless of the ``k0`` convention.
+    stored as a *negative* value (converted to the positive ``Fy_neg`` magnitude
+    by ``as_bilin_args``).  ``theta_p_neg`` / ``theta_pc_neg`` / ``res_neg`` /
+    ``theta_u_neg`` are *positive* magnitudes, as ``IMKBilin`` expects.
+    ``mc_my`` is the capping-to-yield ratio (``FmaxFy``) and ``res_*`` the
+    residual ratio (``FresFy``); ``as_bilin_args`` maps ``θpc`` to ``IMKBilin``'s
+    ``dpc = mc_my·θpc/(mc_my − res)`` so the post-capping slope matches the
+    calibrated Lignos–Krawinkler backbone.
     """
 
     My_pos: float
@@ -91,47 +92,54 @@ class SteelIMKParams:
         """Flatten to the ``imk_params`` dict stamped onto a section."""
         return {key: float(getattr(self, key)) for key in IMK_PARAM_KEYS}
 
-    @staticmethod
-    def _hardening_ratio(mc_my: float, my_mag: float, k0: float, theta_p: float) -> float:
-        """``as = (Mc - My) / (K0·θp)`` so the capping moment is exact."""
-        if theta_p <= 0.0 or k0 <= 0.0:
-            return 0.0
-        return (mc_my - 1.0) * my_mag / (k0 * theta_p)
-
     def as_bilin_args(self, k0: float) -> tuple[float, ...]:
-        """The 23 positional ``Bilin`` arguments (``matTag``/``nFactor`` excluded).
+        """The 21 positional ``IMKBilin`` arguments (``matTag`` excluded).
 
-        Order matches ``Bilin matTag K0 as_pos as_neg My_pos My_neg Lamda_S
-        Lamda_C Lamda_A Lamda_K c_S c_C c_A c_K theta_p_pos theta_p_neg
-        theta_pc_pos theta_pc_neg Res_pos Res_neg theta_u_pos theta_u_neg
-        D_pos D_neg``.  ``Lamda_A`` / ``c_A`` (accelerated reloading) are not a
-        deterioration mode for a bilinear response and are forced to ``0.0`` /
-        ``1.0``.
+        Order matches ``IMKBilin matTag Ke dp_pos dpc_pos du_pos Fy_pos FmaxFy_pos
+        FresFy_pos dp_neg dpc_neg du_neg Fy_neg FmaxFy_neg FresFy_neg Lamda_S
+        Lamda_C Lamda_K c_S c_C c_K D_pos D_neg``.  ``FmaxFy`` is the capping-to-
+        yield ratio (``mc_my``) and ``FresFy`` the residual ratio (``res``);
+        ``IMKBilin`` takes all strengths and deformations as positive magnitudes
+        (so ``Fy_neg`` is ``-My_neg``).  A zero ``theta_u`` falls back to
+        ``theta_p + theta_pc``.
         """
-        as_pos = self._hardening_ratio(self.mc_my, self.My_pos, k0, self.theta_p_pos)
-        as_neg = self._hardening_ratio(self.mc_my, -self.My_neg, k0, self.theta_p_neg)
+        theta_u_pos = (
+            self.theta_u_pos if self.theta_u_pos > 0.0 else self.theta_p_pos + self.theta_pc_pos
+        )
+        theta_u_neg = (
+            self.theta_u_neg if self.theta_u_neg > 0.0 else self.theta_p_neg + self.theta_pc_neg
+        )
+        # IMKBilin's post-capping stiffness is K_pc = -Fcap/dpc, whereas the
+        # Lignos-Krawinkler θpc is the rotation over which M drops Mc -> Mr
+        # (K_pc = (Fres-Fcap)/θpc).  Map θpc -> dpc so the calibrated slope matches.
+        denom_pos = self.mc_my - self.res_pos
+        dpc_pos = (
+            (self.mc_my * self.theta_pc_pos / denom_pos) if denom_pos > 0 else self.theta_pc_pos
+        )
+        denom_neg = self.mc_my - self.res_neg
+        dpc_neg = (
+            (self.mc_my * self.theta_pc_neg / denom_neg) if denom_neg > 0 else self.theta_pc_neg
+        )
         return (
             k0,
-            as_pos,
-            as_neg,
+            self.theta_p_pos,
+            dpc_pos,
+            theta_u_pos,
             self.My_pos,
-            self.My_neg,
+            self.mc_my,
+            self.res_pos,
+            self.theta_p_neg,
+            dpc_neg,
+            theta_u_neg,
+            -self.My_neg,
+            self.mc_my,
+            self.res_neg,
             self.lamda_S,
             self.lamda_C,
-            0.0,
             self.lamda_K,
             self.c_S,
             self.c_C,
-            1.0,
             self.c_K,
-            self.theta_p_pos,
-            self.theta_p_neg,
-            self.theta_pc_pos,
-            self.theta_pc_neg,
-            self.res_pos,
-            self.res_neg,
-            self.theta_u_pos,
-            self.theta_u_neg,
             self.D_pos,
             self.D_neg,
         )
@@ -214,7 +222,7 @@ def lignos_2019_wide_flange_column(
     ry_factor: float = 1.1,
     theta_u: Optional[float] = None,
 ) -> SteelIMKParams:
-    """Wide-flange steel column ``Bilin`` parameters (Lignos et al. 2019 / ASCE 41-17).
+    """Wide-flange steel column ``IMKBilin`` parameters (Lignos et al. 2019 / ASCE 41-17).
 
     Transcribes Eqs. 6–10 of Lignos, Hartloper, Elkady, Deierlein & Hamburger
     (2019), DOI ``10.1061/(ASCE)ST.1943-541X.0002353`` (via the companion 2018
@@ -228,7 +236,7 @@ def lignos_2019_wide_flange_column(
     * ``Mr = (0.4 − 0.4·Pg/Pye)·My*``  (Eq. 10).
 
     These are the *first-cycle envelope* (ASCE 41) parameters.  The cyclic-
-    deterioration ``Λ`` of the monotonic (``Bilin``) backbone is **not** given in
+    deterioration ``Λ`` of the monotonic (``IMKBilin``) backbone is **not** given in
     this paper (it lives in Lignos & Krawinkler 2011, Table 3), so ``lamda_*``
     are set to ``0``.
 
@@ -272,7 +280,8 @@ def lignos_2019_wide_flange_column(
     kappa = 0.4 - 0.4 * axial_ratio
 
     if theta_u is None:
-        theta_u = theta_p + theta_pc
+        # 0.02 rad residual plateau between the end of post-capping and fracture.
+        theta_u = theta_p + theta_pc + 0.02
 
     return SteelIMKParams(
         My_pos=my,
@@ -310,7 +319,7 @@ def lignos_krawinkler_2011(
     kappa: float = 0.4,
     theta_u: Optional[float] = None,
 ) -> SteelIMKParams:
-    """Compute ``Bilin`` parameters from the Lignos–Krawinkler (2011) regressions (A0).
+    """Compute ``IMKBilin`` parameters from the Lignos–Krawinkler (2011) regressions (A0).
 
     Implemented for **beams** (RBS and other-than-RBS, Lignos–Krawinkler 2011);
     **columns** delegate to :func:`lignos_2019_wide_flange_column` (Lignos et al.
@@ -358,7 +367,8 @@ def lignos_krawinkler_2011(
 
     my = fy_pa * plastic_modulus_m3
     if theta_u is None:
-        theta_u = theta_p + theta_pc
+        # 0.02 rad residual plateau between the end of post-capping and fracture.
+        theta_u = theta_p + theta_pc + 0.02
 
     return SteelIMKParams(
         My_pos=my,

@@ -379,7 +379,9 @@ component database** (>300 wide-flange beam/column tests).
 (Lignos–Krawinkler 2011, transcribed from Lignos' EPFL component tool +
 PEER/ATC-72-1 §3.2.2) and **columns** (Lignos et al. 2019, adopted in the
 ASCE 41-17 Errata; first-cycle envelope — the column cyclic-deterioration Λ is
-left at 0).  A2/A3 pending.  See `docs/imk_deterioration_model.md`.
+left at 0).  A2 landed (single-member cyclic M-θ checks —
+`tests/test_benchmark_sac_imk_cyclic.py`); A3 pending.  See
+`docs/imk_deterioration_model.md`.
 
 Note: this "Krawinkler" thread (deterioration/collapse) is distinct from the
 SAC frame *design* thread — Gupta & Krawinkler (1999), Stanford Blume Report

@@ -519,7 +519,7 @@ def builder_config(backbone: str = "bilinear", hinge_model: str = "lumped") -> d
             as two ``Steel02`` springs in parallel), ``"trilinear_clough"``
             (the same ``Hysteretic`` hinge with Clough/Takeda unloading-
             stiffness degradation) or ``"imk"`` (the Lignos-Krawinkler
-            ``Bilin`` hinge; ``imk_params`` must be stamped on the sections —
+            ``IMKBilin`` hinge; ``imk_params`` must be stamped on the sections —
             see ``benchmarks/imk_calibration.py``).
         hinge_model: ``"lumped"`` (default, zero-length rotational springs) or
             ``"beam_with_hinges"`` (the benchmark's own concentrated-plasticity
@@ -630,7 +630,7 @@ def build_builder(
             as two ``Steel02`` springs in parallel), ``"trilinear_clough"``
             (the same ``Hysteretic`` hinge with Clough/Takeda unloading-
             stiffness degradation) or ``"imk"`` (the Lignos-Krawinkler
-            ``Bilin`` hinge; ``imk_params`` must be stamped on the sections —
+            ``IMKBilin`` hinge; ``imk_params`` must be stamped on the sections —
             see ``benchmarks/imk_calibration.py``).
         hinge_model: ``"lumped"`` (default) or ``"beam_with_hinges"`` (the
             benchmark's own concentrated-plasticity element, trilinear only).

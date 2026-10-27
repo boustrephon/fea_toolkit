@@ -75,22 +75,24 @@ matters:
 | `ModIMKPinching` / `IMKPinching` | pinching | RC shear, connections, wood |
 
 > **Correction to the roadmap wording:** "IMK" for the SAC *steel* frames means
-> `Bilin`, not `ModIMKPeakOriented` (which is the RC-flexure variant). Verified
-> against the OpenSeesPy documentation and Lignos' own `Modified_IMK_Models`
-> README.
+> `IMKBilin` (the deprecated alias `Bilin`), not `ModIMKPeakOriented` (the
+> RC-flexure variant).  Verified against the OpenSees source (`IMKBilin.cpp`)
+> and Lignos' own `Modified_IMK_Models` README.
 
-`Bilin` signature (verified):
+`IMKBilin` signature (verified from the OpenSees source `IMKBilin.cpp`):
 
 ```
-uniaxialMaterial('Bilin', matTag, K0, as_pos, as_neg, My_pos, My_neg,
-    Lamda_S, Lamda_C, Lamda_A, Lamda_K, c_S, c_C, c_A, c_K,
-    theta_p_pos, theta_p_neg, theta_pc_pos, theta_pc_neg,
-    Res_pos, Res_neg, theta_u_pos, theta_u_neg, D_pos, D_neg, nFactor=0.0)
+uniaxialMaterial IMKBilin matTag Ke dp_pos dpc_pos du_pos Fy_pos FmaxFy_pos FresFy_pos
+    dp_neg dpc_neg du_neg Fy_neg FmaxFy_neg FresFy_neg
+    Lamda_S Lamda_C Lamda_K c_S c_C c_K D_pos D_neg
 ```
 
-`My_neg` is **negative**; `theta_p_neg`/`theta_pc_neg`/`Res_neg`/`theta_u_neg`
-are **positive** magnitudes; `Lamda_A`/`c_A` (accelerated reloading) are not a
-deterioration mode for a bilinear response (forced 0/1).
+All strengths and deformations are **positive** magnitudes; `FmaxFy` = capping
+ratio `Mc/My` (`mc_my`), `FresFy` = residual ratio `Mr/My` (`res`).  Two source
+conventions the hinge layer absorbs: the post-capping stiffness is
+`K_pc = −Fcap/dpc` (not `(Fres−Fcap)/θpc`), so the calibrated `θpc` is mapped to
+`dpc = mc_my·θpc/(mc_my−res)`; and `θu = θp + θpc + 0.02` (a 0.02 rad residual
+plateau before the strength drops to zero at `du`).
 
 ## 5. Implementation plan and status
 
@@ -100,7 +102,7 @@ From `benchmark_roadmap.md` §3 (priority 1):
 |---|---|---|
 | **A0 — backbone data** | Beams: Lignos–Krawinkler (2011) θp/θpc/Λ; Columns: Lignos et al. (2019) My/a*/θp/θpc/Mr | ✅ |
 | **A1 — material** | IMK (`Bilin`) uniaxial material behind `hinge_backbone="imk"` | ✅ landed |
-| **A2 — single-member checks** | M-θ loops vs the component-database envelopes | ⏳ pending |
+| **A2 — single-member checks** | M-θ loops vs the component-database envelopes | ✅ landed (material-level) |
 | **A3 — frame collapse** | SAC 3/9/20 matrices with IMK; IDA vs Ibarra–Krawinkler (2005) | ⏳ pending |
 
 **A1 (landed).** `opensees/_elements.py` gained a `hinge_backbone="imk"` branch

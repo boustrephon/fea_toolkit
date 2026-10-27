@@ -122,15 +122,15 @@ def _parallel_steel02_trilinear(
 def _imk_bilin_args(
     params: dict[str, float], k0: float, my_pos: float, my_neg: float
 ) -> tuple[float, ...]:
-    """Map a stamped ``imk_params`` dict to the ``Bilin`` material's positional args.
+    """Map a stamped ``imk_params`` dict to the ``IMKBilin`` material's positional args.
 
-    The ``Bilin`` (modified Ibarra–Krawinkler, bilinear hysteretic — **steel**)
-    signature is ``Bilin matTag K0 as_pos as_neg My_pos My_neg Lamda_S Lamda_C
-    Lamda_A Lamda_K c_S c_C c_A c_K theta_p_pos theta_p_neg theta_pc_pos
-    theta_pc_neg Res_pos Res_neg theta_u_pos theta_u_neg D_pos D_neg``.
-    ``Lamda_A`` / ``c_A`` (accelerated reloading) are not a deterioration mode
-    for a bilinear response and are forced to ``0.0`` / ``1.0``.  A missing
-    ``theta_u`` falls back to ``theta_p + theta_pc`` (rotation at residual).
+    The ``IMKBilin`` (modified Ibarra–Krawinkler, bilinear hysteretic — **steel**)
+    signature is ``IMKBilin matTag Ke dp_pos dpc_pos du_pos Fy_pos FmaxFy_pos
+    FresFy_pos dp_neg dpc_neg du_neg Fy_neg FmaxFy_neg FresFy_neg Lamda_S
+    Lamda_C Lamda_K c_S c_C c_K D_pos D_neg``.  ``FmaxFy`` = capping ratio
+    (``mc_my``), ``FresFy`` = residual ratio (``res``); all strengths and
+    deformations are positive (``Fy_neg`` = ``-my_neg``).  A missing ``theta_u``
+    falls back to ``theta_p + theta_pc``.
     """
     theta_p_pos = float(params.get("theta_p_pos", 0.0))
     theta_p_neg = float(params.get("theta_p_neg", 0.0))
@@ -143,30 +143,34 @@ def _imk_bilin_args(
     if theta_u_neg <= 0.0:
         theta_u_neg = theta_p_neg + theta_pc_neg
     mc_my = float(params.get("mc_my", 1.0))
-    as_pos = (mc_my - 1.0) * my_pos / (k0 * theta_p_pos) if theta_p_pos > 0.0 else 0.0
-    as_neg = (mc_my - 1.0) * (-my_neg) / (k0 * theta_p_neg) if theta_p_neg > 0.0 else 0.0
+    res_pos = float(params.get("res_pos", 0.0))
+    res_neg = float(params.get("res_neg", 0.0))
+    # IMKBilin's post-capping stiffness is K_pc = -Fcap/dpc; the calibrated θpc is
+    # the rotation over which M drops Mc -> Mr (K_pc = (Fres-Fcap)/θpc).  Map it.
+    denom_pos = mc_my - res_pos
+    dpc_pos = (mc_my * theta_pc_pos / denom_pos) if denom_pos > 0 else theta_pc_pos
+    denom_neg = mc_my - res_neg
+    dpc_neg = (mc_my * theta_pc_neg / denom_neg) if denom_neg > 0 else theta_pc_neg
     return (
         k0,
-        as_pos,
-        as_neg,
+        theta_p_pos,
+        dpc_pos,
+        theta_u_pos,
         my_pos,
-        my_neg,
+        mc_my,
+        res_pos,
+        theta_p_neg,
+        dpc_neg,
+        theta_u_neg,
+        -my_neg,  # Fy_neg (positive magnitude)
+        mc_my,
+        res_neg,
         float(params.get("lamda_S", 0.0)),
         float(params.get("lamda_C", 0.0)),
-        0.0,  # Lamda_A — unused for bilinear response
         float(params.get("lamda_K", 0.0)),
         float(params.get("c_S", 1.0)),
         float(params.get("c_C", 1.0)),
-        1.0,  # c_A — unused for bilinear response
         float(params.get("c_K", 1.0)),
-        theta_p_pos,
-        theta_p_neg,
-        theta_pc_pos,
-        theta_pc_neg,
-        float(params.get("res_pos", 0.0)),
-        float(params.get("res_neg", 0.0)),
-        theta_u_pos,
-        theta_u_neg,
         float(params.get("D_pos", 1.0)),
         float(params.get("D_neg", 1.0)),
     )
@@ -1332,7 +1336,7 @@ class ElementMixin:
                 hinge_my = my_tri
             elif self.config.get("hinge_backbone") == "imk":
                 # IMK steel hinge (Lignos-Krawinkler, collapse-level) — a
-                # ``Bilin`` uniaxial material on the strong axis with an
+                # ``IMKBilin`` uniaxial material on the strong axis with an
                 # energy-based cyclic-deterioration rule.  Parameters come from
                 # the section's stamped ``imk_params`` dict (see
                 # ``benchmarks/imk_calibration.py``).  K0 is the near-rigid
@@ -1345,7 +1349,7 @@ class ElementMixin:
                 my_imk = float(params.get("My_pos", My))
                 my_imk_neg = float(params.get("My_neg", -my_imk))
                 ops.uniaxialMaterial(
-                    "Bilin",
+                    "IMKBilin",
                     hinge_mat_tag + 1,
                     *_imk_bilin_args(params, k0, my_imk, my_imk_neg),
                 )
