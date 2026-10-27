@@ -275,8 +275,8 @@ The legacy single‑stage ``OpenSeesBuilder`` has been removed.
   2e  │ _create_sections()       │ ops.section('Elastic', tag, …)  │ includes ShellSections
   2f  │ _create_shell_elements() │ ops.element('ShellMITC4', …)    │
       │                          │ ops.section('ElasticMembranePlateSection', …)
-  2g  │ _create_lumped_hinges()  │ ops.element('zeroLength', …)    │ optional
-      │                          │ ops.uniaxialMaterial(…)         │
+  2g  │ _create_lumped_hinges()  │ ops.uniaxialMaterial(…)         │ optional
+      │                          │ ops.element('zeroLength', …)    │
   2h  │ _create_elements()       │ ops.element('elasticBeamColumn')│ 🔗 Check D
       │                          │ ops.geomTransf('Linear', …)     │
 ```
@@ -403,8 +403,11 @@ selected frame elements with a three‑part assembly:
 structural_node_i → hinge_i → elastic_mid → hinge_j → structural_node_j
 ```
 
-Coincident hinge nodes have translation DOFs tied with `equalDOF` so
-only rotations are released.  Hinge backbones use `Hysteretic` material
+Coincident hinge nodes sit at the same coordinates.  Each hinge is a
+six-direction ``zeroLength`` element carrying all six DOFs via
+``-mat``/``-dir`` (no ``equalDOF`` ties): rigid ``Elastic`` materials
+retain P/Vy/Vz/T, while the hinge materials (``Hysteretic`` or ``Steel01``)
+provide the two rotational DOFs.  Hinge backbones use ``Hysteretic`` material
 matched to ASCE 41 rotation limits.
 
 #### 2m — `_create_elements()`  *(Connectivity Check D)*
