@@ -254,10 +254,12 @@ def enrich_display_sections(md: SAPModelData, building: int = 3) -> SAPModelData
     :class:`BoxSection` for the 20-story box corners) carrying the physical
     section's flange dimensions (``bf``, ``tf``) so the visualiser can draw the
     cross-section.  The analysis properties (``A``, ``I33``, ``I22``, ``J``,
-    ``Z33``, ``Z22`` and the ``ei1/ei2/ei3/d1/d2`` backbone) and the panel-zone
-    ``depth``/``tw`` are preserved unchanged; the physical display depth and
-    web thickness go to the separate ``depth_disp``/``tw_disp`` fields so they
-    never feed the panel-zone computation.
+    ``Z33``, ``Z22`` and the ``ei1/ei2/ei3/d1/d2`` backbone), the panel-zone
+    ``depth``/``tw``, and the base ``Section`` metadata (``manufacturer``,
+    ``modifiers``, ``cg_offset_*``, ``ecc_v*``, ``imk_params``) are preserved
+    unchanged; the physical display depth and web thickness go to the separate
+    ``depth_disp``/``tw_disp`` fields so they never feed the panel-zone
+    computation.
 
     Args:
         md: The enriched SAC model; sections are rebuilt in place.
@@ -291,6 +293,12 @@ def enrich_display_sections(md: SAPModelData, building: int = 3) -> SAPModelData
             J=sec.J,
             Z33=sec.Z33,
             Z22=sec.Z22,
+            manufacturer=sec.manufacturer,
+            modifiers=sec.modifiers,
+            cg_offset_2=sec.cg_offset_2,
+            cg_offset_3=sec.cg_offset_3,
+            ecc_v2=sec.ecc_v2,
+            ecc_v3=sec.ecc_v3,
             depth=getattr(sec, "depth", None) or 0.0,
             bf=bf,
             tf=tf,
@@ -302,6 +310,7 @@ def enrich_display_sections(md: SAPModelData, building: int = 3) -> SAPModelData
             ei3=sec.ei3,
             d1=sec.d1,
             d2=sec.d2,
+            imk_params=getattr(sec, "imk_params", None),
         )
     return md
 
@@ -695,7 +704,7 @@ def _floor_ux_tie_groups(building: int) -> list[list[str]]:
     = roof, ``line`` 0..5), with the middle line (2) as the master.  The base
     level (0) and the ground lateral-tie level (``n_basements``) are restrained
     and therefore excluded — matching the benchmark's table (the 9-story ties
-    levels 2..10; the 20-story ties level 1 and levels 3..21).
+    levels 2..10; the 20-story ties level 1 and levels 3..22).
 
     Returns:
         One group per tied level, ``[master_id, slave_id, ...]``.

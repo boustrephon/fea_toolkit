@@ -95,54 +95,22 @@ class SteelIMKParams:
     def as_bilin_args(self, k0: float) -> tuple[float, ...]:
         """The 21 positional ``IMKBilin`` arguments (``matTag`` excluded).
 
-        Order matches ``IMKBilin matTag Ke dp_pos dpc_pos du_pos Fy_pos FmaxFy_pos
-        FresFy_pos dp_neg dpc_neg du_neg Fy_neg FmaxFy_neg FresFy_neg Lamda_S
-        Lamda_C Lamda_K c_S c_C c_K D_pos D_neg``.  ``FmaxFy`` is the capping-to-
-        yield ratio (``mc_my``) and ``FresFy`` the residual ratio (``res``);
-        ``IMKBilin`` takes all strengths and deformations as positive magnitudes
-        (so ``Fy_neg`` is ``-My_neg``).  A zero ``theta_u`` falls back to
-        ``theta_p + theta_pc``.
+        Delegates to :func:`fea_toolkit.opensees._elements._imk_bilin_args`,
+        the single implementation of the ``IMKBilin`` argument order, the
+        ``theta_u`` fallback and the ``θpc → dpc`` conversion.  ``My_neg`` is
+        passed as-is (negative); the delegate emits ``Fy_neg = -My_neg`` as the
+        positive magnitude ``IMKBilin`` expects.
+
+        Args:
+            k0: Initial (elastic) rotational stiffness ``Ke``.
+
+        Returns:
+            The 21 positional arguments (``matTag`` excluded) for
+            ``ops.uniaxialMaterial("IMKBilin", …)``.
         """
-        theta_u_pos = (
-            self.theta_u_pos if self.theta_u_pos > 0.0 else self.theta_p_pos + self.theta_pc_pos
-        )
-        theta_u_neg = (
-            self.theta_u_neg if self.theta_u_neg > 0.0 else self.theta_p_neg + self.theta_pc_neg
-        )
-        # IMKBilin's post-capping stiffness is K_pc = -Fcap/dpc, whereas the
-        # Lignos-Krawinkler θpc is the rotation over which M drops Mc -> Mr
-        # (K_pc = (Fres-Fcap)/θpc).  Map θpc -> dpc so the calibrated slope matches.
-        denom_pos = self.mc_my - self.res_pos
-        dpc_pos = (
-            (self.mc_my * self.theta_pc_pos / denom_pos) if denom_pos > 0 else self.theta_pc_pos
-        )
-        denom_neg = self.mc_my - self.res_neg
-        dpc_neg = (
-            (self.mc_my * self.theta_pc_neg / denom_neg) if denom_neg > 0 else self.theta_pc_neg
-        )
-        return (
-            k0,
-            self.theta_p_pos,
-            dpc_pos,
-            theta_u_pos,
-            self.My_pos,
-            self.mc_my,
-            self.res_pos,
-            self.theta_p_neg,
-            dpc_neg,
-            theta_u_neg,
-            -self.My_neg,
-            self.mc_my,
-            self.res_neg,
-            self.lamda_S,
-            self.lamda_C,
-            self.lamda_K,
-            self.c_S,
-            self.c_C,
-            self.c_K,
-            self.D_pos,
-            self.D_neg,
-        )
+        from ..opensees._elements import _imk_bilin_args
+
+        return _imk_bilin_args(self.to_dict(), k0, self.My_pos, self.My_neg)
 
 
 def _beam_rotations(

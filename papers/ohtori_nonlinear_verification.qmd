@@ -336,8 +336,8 @@ mirroring the 3-story finding.
 ## The base shear is now reproduced, not 6–19 % high
 
 The four-way comparison shows the base shear matching the target to within
-±4 % (A/B/C) — a decisive improvement over an earlier pass of this comparison
-that reported +6 % to +19 %. The earlier values were produced before the
+±4 % (A/B/C) on the El Centro 1.0 anchor — a decisive improvement over an
+earlier pass of this comparison that reported +6 % to +19 %. The earlier values were produced before the
 transient runner's base-shear computation was corrected: the ground
 acceleration was sampled one integration step too early, biasing the
 `Σ m·(a_rel + ag)` equilibrium sum. With the corrected sampling the base shear
@@ -349,8 +349,9 @@ effect — is withdrawn.
 
 ## The four formulations split the response by mechanism
 
-* Displacement, drift and `Nd` are **robust to the hinge choice** (A/B/C within
-  ±5 % on drift).  The cyclic law is a separate lever — D's Clough degradation
+* Displacement, drift and `Nd` are **robust to the hinge choice** — on the
+  El Centro 1.0 anchor A/B/C agree within ±5 % on drift.  The cyclic law is a
+  separate lever — D's Clough degradation
   diverges on the strongest records, so its peak displacement and `Nd` are not
   comparable there; the hinge-choice comparison is therefore drawn from the
   three formulations that converge on every case (A/B/C).

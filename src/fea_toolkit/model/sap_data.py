@@ -472,6 +472,12 @@ class Section:
     ei3: Optional[float] = None
     d1: Optional[float] = None
     d2: Optional[float] = None
+    # IMK (``IMKBilin``) hinge parameters for collapse-level steel members,
+    # stamped by ``benchmarks.sac.enrich_imk`` as a flattened ``dict[str, float]``
+    # (``benchmarks.imk_calibration.SteelIMKParams.to_dict``).  ``None`` unless a
+    # collapse-level hinge calibration has been applied.  Kept after ``d2`` so
+    # the positional order of the base ``Section`` class is unchanged.
+    imk_params: Optional[dict[str, float]] = None
 
     @property
     def shape_id(self) -> str:

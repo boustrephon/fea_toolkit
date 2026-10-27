@@ -73,20 +73,28 @@ def test_trilinear_builder_builds(building):
 
 @pytest.mark.parametrize(
     "building,expected_levels",
-    [(9, 9), (20, 21)],
+    [
+        (9, list(range(2, 11))),  # 2..10
+        (20, [1, *range(3, 23)]),  # 1 and 3..22
+    ],
+    ids=["9-story", "20-story"],
 )
 def test_floor_ux_tie_groups(building, expected_levels):
     """The ``slv_tbl`` floor ties skip the base and ground-tie levels.
 
     Each tied level yields one ``[master, *5 slaves]`` group with the middle
-    line (``{j}-2``) as master.  The 9-story ties 9 levels (2..10, skipping the
-    base 0 and ground-tie 1); the 20-story ties 21 levels (1 and 3..21, skipping
-    the base 0 and ground-tie 2) — matching ``struct#.m``'s master-slave table.
+    line (``{j}-2``) as master.  The 9-story ties levels 2..10 (skipping the
+    base 0 and ground-tie 1); the 20-story ties level 1 and levels 3..22
+    (skipping the base 0 and ground-tie 2) — matching ``struct#.m``'s
+    master-slave table.
     """
     from fea_toolkit.benchmarks.sac import _floor_ux_tie_groups
 
     groups = _floor_ux_tie_groups(building)
-    assert len(groups) == expected_levels
+    # Exact level set: the base (0) and ground lateral-tie level
+    # (``n_basements``) are excluded; every other above-ground storey is tied.
+    levels = [int(g[0].split("-")[0]) for g in groups]
+    assert levels == expected_levels
     for group in groups:
         assert len(group) == 6  # master + 5 slaves
         master = group[0]

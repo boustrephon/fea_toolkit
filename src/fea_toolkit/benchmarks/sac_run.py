@@ -34,7 +34,17 @@ def _repo_root() -> Path:
 
 
 def record_path(record_id: str) -> Path:
-    """Resolve a benchmark record's on-disk CSV path in the local mirror."""
+    """Resolve a benchmark record's on-disk CSV path in the local mirror.
+
+    Args:
+        record_id: Benchmark record identifier (a key of
+            :data:`~fea_toolkit.benchmarks.sac_response_data.CASE_ORDER`, e.g.
+            ``"ELCENTRO"``).
+
+    Returns:
+        Absolute path to the record's CSV in the non-redistributable local
+        mirror (``data/ground_motion/local/<record_id>.csv``).
+    """
     return _repo_root() / "data" / "ground_motion" / "local" / f"{record_id}{_RECORD_EXT}"
 
 
@@ -78,7 +88,21 @@ def case_fingerprint(
     dt: float,
     damping: float,
 ) -> str:
-    """``sha256`` over the case inputs (parameters + record bytes + code)."""
+    """``sha256`` over the case inputs (parameters + record bytes + code).
+
+    Args:
+        building: SAC building number (3, 9 or 20).
+        record_id: Benchmark record identifier.
+        intensity: Ground-motion intensity scale factor.
+        hinge_model: Concentrated-plasticity hinge formulation.
+        backbone: Hinge backbone label (``"trilinear"``, ``"imk"``, …).
+        dt: Integration time step (s).
+        damping: Rayleigh damping ratio.
+
+    Returns:
+        Hex ``sha256`` digest over the case parameters, the record bytes and
+        the benchmark-relevant source code.
+    """
     payload = {
         "building": building,
         "record_id": record_id,
@@ -110,6 +134,13 @@ def floor_levels(builder: Any) -> list[tuple[float, int]]:
     are excluded: they are coincident with a structural node but carry no floor
     mass, and their coincident-node acceleration is ill-conditioned (which would
     corrupt ``xdd_max``).
+
+    Args:
+        builder: An analysis builder whose ``mesh_model.nodes`` are scanned for
+            storey elevations.
+
+    Returns:
+        Sorted ``(elevation, representative_node_tag)`` pairs, one per storey.
     """
     levels: dict[float, int] = {}
     for nd in builder.mesh_model.nodes.values():
@@ -132,6 +163,25 @@ def compute_metrics(
     :func:`floor_levels`.  The absolute floor acceleration is reconstructed as
     ``a_rel + ag`` (``nodeAccel`` returns the *relative* acceleration under
     ``UniformExcitation``), matching the runner's base-shear convention.
+
+    ``res["displacements"]`` and ``res["accelerations"]`` are per-node history
+    dicts of shape ``{node_tag: (converged_steps, 3) ndarray}``; a missing node
+    falls back to zeros.  When ``transient_record_kinematics`` is disabled the
+    ``res["accelerations"]`` dict is empty, so the reconstructed absolute
+    acceleration is the ground acceleration alone and ``xdd_max`` reflects only
+    ``accel``.
+
+    Args:
+        res: Transient result dict from ``run_transient_analysis``.
+        accel: (Intensity-scaled) ground acceleration series sampled at the
+            integration step.
+        levels: Output of :func:`floor_levels` — ``(elevation, node_tag)`` pairs.
+
+    Returns:
+        Dict of peak-response metrics (``roof_disp``, ``d_max``, ``xdd_max``,
+        ``F_max_frame``, ``F_max``, ``N_d``, ``peak_plastic_rotation``,
+        ``max_dissipated_energy``, ``converged_steps``, ``num_steps``,
+        ``period_1``, ``period_2``).
     """
     n = int(res.get("converged_steps", 0))
     zs = np.array([z for z, _ in levels], dtype=float)
@@ -373,7 +423,15 @@ def run_matrix(
 ) -> list[dict[str, Any]]:
     """Run every benchmark case (in ``CASE_ORDER``) for the given buildings.
 
-    Returns the list of metric dicts (cached cases are loaded, not re-run).
+    Args:
+        buildings: SAC building numbers to run (default ``(3, 9, 20)``).
+        hinge_model: Concentrated-plasticity hinge formulation.
+        backbone: Hinge backbone label.
+        force: When True, re-run cases even when a cached result matches.
+
+    Returns:
+        The list of metric dicts, one per building and case (cached cases are
+        loaded, not re-run).
     """
     rows: list[dict[str, Any]] = []
     for building in buildings:
@@ -396,6 +454,13 @@ def write_manifest(rows: list[dict[str, Any]], path: Optional[str] = None) -> Pa
 
     Drops the per-case fingerprint (a cache detail) and the histories; the
     scalar metrics and provenance round-trip as plain JSON.
+
+    Args:
+        rows: List of metric dicts as returned by :func:`run_matrix`.
+        path: Optional output path; defaults to :func:`manifest_path`.
+
+    Returns:
+        The path the manifest was written to.
     """
     out = Path(path) if path else manifest_path()
     scalar_keys = [
