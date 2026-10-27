@@ -1,6 +1,6 @@
 ---
 title: "Benchmark Roadmap — extended proposals"
-description: "Ranked benchmark build order (SAC-derived Krawinkler deterioration first, then RC frames, RC walls, masonry/URM) with DOIs and prerequisites, plus the detailed workstreams (SAC widening, Chilean walls, deferred candidates)."
+description: "Canonical benchmark build plan: ranked order (SAC-derived first, then RC frames, RC walls, masonry/URM) with DOIs and prerequisites, plus the detailed workstreams and the component-level (T3) database inventory."
 status: "partial"
 tags: [validation, benchmark, planning, shear-wall, moment-frame, sac, nltha, modal, masonry, rc-frame, collapse]
 category: [planning]
@@ -9,8 +9,10 @@ related: [benchmark_register.md, sac_benchmark.md, mvlem_wall_analysis.md, shell
 
 # Benchmark Roadmap — extended proposals
 
-Living plan for the next benchmark work, expanding on
-[benchmark_register.md](benchmark_register.md).  The build order — re-ranked
+Canonical build plan for benchmark work: the ranked order, per-workstream
+phasing and the candidate inventory (with DOIs) live here.  The
+[benchmark register](benchmark_register.md) keeps the tiers, the coverage
+matrix and the implemented-benchmark catalogue.  The build order — re-ranked
 2026-10 after source verification — is **SAC-derived (Krawinkler deterioration)
 first, then RC frames, then RC shear walls, then masonry/URM**; the ranked
 sequence with DOIs and prerequisites is the section immediately below.  The
@@ -61,13 +63,24 @@ Beyer (2024) `10.1177/87552930241268214` (69 shake-table URM buildings).
 — 3-storey RC frame shake-table **collapse** test; needs contact/falling-debris
 and large-displacement physics.  Revisit after the collapse/IDA driver lands.
 
-**Component and new-type queue.**  The empty **beam-column-joint** cell is
-filled next by the Kim–LaFave–Song 341-subassemblage joint-shear database
-(`10.1680/macr.2008.00068`) and the Melo et al. full-scale joint series — see
-the register §3.  New system types (precast/PT, braced frame, composite CFT)
-are listed in §7 with their sources.  A 606 m mega-tall OpenSees model (Tian,
-Xie & Lu) is available as a cross-platform reference (modal + El Centro), not a
-CI target.
+**Component-level (T3) databases** — the anchors for the still-empty
+component cells, before the building-level workstreams below:
+
+- **PEER Structural Performance Database** — nisee.berkeley.edu/spd — 400+ cyclic
+  RC column tests (geometry, materials, rebar, axial load, force–displacement
+  history); reference PEER Report 2006/04 (Berry/Parrish/Eberhard).
+- **Beam-column joints.**  Lowes & Altoontash (2003), *ASCE J. Struct. Eng.*
+  129(12):1686, DOI `10.1061/(ASCE)0733-9445(2003)129:12(1686)` (companion PEER
+  2003-10) — interior/exterior subassemblages; the Kim–LaFave–Song 341-joint
+  shear database (Kim, LaFave & Song 2009, *Mag. Concr. Res.* 61(2):119–132, DOI
+  `10.1680/macr.2008.00068`; Kim & LaFave 2008, *ACI Struct. J.* 105(6):770–780;
+  Kim 2007, Newmark Report 020) and the Melo et al. (2021, *MethodsX* 8) full-scale
+  series.  **Two tracks:** (1) rigid panel zones — SAC M1 vs M2, §2; (2) the
+  Lowes–Altoontash `beamColumnJoint` RC joint element.
+
+**New system types** (precast/PT, braced frame, composite CFT) are listed in §7
+with their sources.  A 606 m mega-tall OpenSees model (Tian, Xie & Lu) is
+available as a cross-platform reference (modal + El Centro), not a CI target.
 
 ## 1. Chilean shear-wall benchmark — Hidalgo et al. (2005) — priority 3
 
@@ -415,6 +428,10 @@ first:
   existing machinery; the PT variant needs post-tensioning/self-centering
   materials.
 
+- **Haselton & Deierlein (2007) / SP3 Risk** — sp3risk.com — 30+ RC SMF OpenSees
+  models (1–20 stories) with pushover / NLTHA / IDA.
+- **SPEAR project RC frame** (Eurocode 8) — alternative RC NLTHA benchmark.
+
 **Phasing.** bare-frame anchors → strut infill (equivalent-strut element, new) →
 E-Defense frame direction → wall direction.  The strut is the one new piece of
 physics.
@@ -443,6 +460,13 @@ existing-element tasks (MVLEM_3D / SFI_MVLEM_3D and fiber walls are landed).
   cantilever-wall slice under four California records incl. near-fault Sylmar;
   published measured NLTHA response + a NEES/PCA blind-prediction contest.
   Data: DesignSafe `NEES-2006-0203`, PURR DOI `10.4231/d35t3g04t`.
+
+- **Thomsen & Wallace RW2** — canonical OpenSees wall benchmark (3.66 m tall,
+  102 mm, 1.22 m web); parameters tabulated in the OpenSees Days 2014 concrete
+  walls workshop.
+- **UoA-UW RC Wall Database** — Shegay et al. (2021), DesignSafe DOI
+  10.17603/ds2-r12q-t415 (142 walls).
+- **UCLA-RCWalls** (Abdullah 2019) — 1100+ walls.
 
 ## 6. Masonry / URM — priority 4
 
