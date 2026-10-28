@@ -740,7 +740,12 @@ def _build_benchmark_model(building: int) -> SAPModelData:
 
 
 def load_model(
-    nonlinear: bool = True, *, building: int = 3, backbone: str = "bilinear"
+    nonlinear: bool = True,
+    *,
+    building: int = 3,
+    backbone: str = "bilinear",
+    column_axial_ratios: Optional[dict[str, float]] = None,
+    derive_column_axial_ratio: bool = False,
 ) -> SAPModelData:
     """Load a SAC model (3/9/20-story); enrich for nonlinear use.
 
@@ -766,6 +771,12 @@ def load_model(
             unloading-stiffness degradation).  ``"imk"`` calls :func:`enrich_imk`
             to stamp the Lignos-Krawinkler ``IMKBilin`` ``imk_params`` onto the
             sections.
+        column_axial_ratios: Optional ``{section_name: Pg/Pye}`` passed to
+            :func:`enrich_imk` (``"imk"`` backbone only); see
+            :func:`derive_column_axial_ratios`.
+        derive_column_axial_ratio: When True (and ``backbone == "imk"``), derive
+            the per-section ``Pg/Pye`` from the FEMA 355C seismic weight via
+            :func:`derive_column_axial_ratios` before stamping.
 
     Raises:
         ValueError: For an unknown *building* or *backbone*.
@@ -809,7 +820,9 @@ def load_model(
             )
         enrich_display_sections(md, building=building)
         if backbone == "imk":
-            enrich_imk(md, building=building)
+            if derive_column_axial_ratio:
+                column_axial_ratios = derive_column_axial_ratios(md, building=building)
+            enrich_imk(md, building=building, column_axial_ratios=column_axial_ratios)
     return md
 
 
@@ -916,6 +929,8 @@ def build_builder(
     backbone: str = "bilinear",
     hinge_model: str = "lumped",
     fidelity: str = "simplified",
+    column_axial_ratios: Optional[dict[str, float]] = None,
+    derive_column_axial_ratio: bool = False,
 ) -> AnalysisBuilder:
     """Build a SAC model (3/9/20-story, elastic or nonlinear) into an
     ``AnalysisBuilder``.
@@ -952,6 +967,11 @@ def build_builder(
             default: the ties move the base shear by ~0.004 % (the beam axial
             stiffness already ties each floor near-rigidly) while making the
             transient ~35× slower under the ``Transformation`` handler.
+        column_axial_ratios: Optional ``{section_name: Pg/Pye}`` forwarded to
+            :func:`load_model` (``backbone == "imk"`` only).
+        derive_column_axial_ratio: When True (and ``backbone == "imk"``), derive
+            the per-section ``Pg/Pye`` from the FEMA 355C seismic weight before
+            stamping (see :func:`derive_column_axial_ratios`).
 
     Raises:
         ValueError: For an unknown *fidelity*, or for ``panel_zone=True`` with
@@ -969,7 +989,13 @@ def build_builder(
             "fundamental frequency (verified on the 3-story frame: "
             "f1 ≈ 7.2 Hz instead of ≈ 0.94 Hz)."
         )
-    md = load_model(building=building, nonlinear=nonlinear, backbone=backbone)
+    md = load_model(
+        building=building,
+        nonlinear=nonlinear,
+        backbone=backbone,
+        column_axial_ratios=column_axial_ratios,
+        derive_column_axial_ratio=derive_column_axial_ratio,
+    )
     mesh = preprocess_model(md, preprocess_config(panel_zone=panel_zone))
     cfg = builder_config(backbone, hinge_model) if nonlinear else {}
     # The benchmark's ``slv_tbl`` horizontal floor ties, opt-in under

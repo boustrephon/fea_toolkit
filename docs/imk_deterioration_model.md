@@ -139,7 +139,9 @@ Tests: `tests/test_benchmark_sac_imk_frame.py`.
 Second increment landed (2026-10-28): the column axial ratio (item 1) is now
 derived from the FEMA 355C seismic weight via `sac.derive_column_axial_ratios()`,
 with `sac.gravity_axial_ratios()` as the full-elastic-solve cross-check
-(agreement ≈ 0.15 %).
+(agreement ≈ 0.15 %).  Third increment landed (2026-10-28): NLTHA convergence
+(item 4) — `IMKBilin` converges on all four strong cases where the Clough
+trilinear hinge failed.
 
 Open A3 items, in build order:
 
@@ -162,10 +164,16 @@ Open A3 items, in build order:
    transcribes Lignos et al. (2019) Eq. 13 (`Λs` basic-strength deterioration,
    split at `Pg/Pye = 0.35`, capped at 3.0 rad; `Λc = Λk = 0.9·Λs`).  Remaining:
    validate the `≤ 3.0` cap and `0.9×` factor against the column test hysteresis.
-4. **NLTHA convergence.**  Run the 3-story SAC ground-motion suite
-   (`SAC_DT_CAL = 0.005 s`) with `hinge_backbone="imk"` and confirm the IMKBilin
-   hinges converge under the strong records where the `Clough` trilinear hinge
-   failed.
+4. **NLTHA convergence.**  ✅ **Landed 2026-10-28** — the 3-story SAC suite runs
+   with `hinge_backbone="imk"` (`IMKBilin`) and converges on all four strong
+   cases where the `Clough` trilinear hinge (β = 0.5) lost convergence
+   (`tests/test_benchmark_sac_imk_nltha.py`): El Centro ×1.5 (roof 0.184 m,
+   Fmax 9.84 MN), Hachinohe ×1.5 (0.188 m, 10.42 MN), Northridge ×1.0
+   (0.309 m, 13.27 MN), Kobe ×1.0 (0.267 m, 12.88 MN) — base shears within
+   ≈ 7–10 % of the Ohtori targets (the strength deterioration accounts for the
+   shortfall vs the hardening trilinear hinge).  Under an extreme monotonic
+   pulse the frame yields then reaches dynamic instability, as the deterioration
+   model intends.
 5. **9/20-story matrices.**  Wire `enrich_imk` for building 9/20 (per-member
    unbraced lengths from the varying story heights; column splices).
 6. **IDA vs Ibarra–Krawinkler (2005).**  Incremental dynamic analysis over the

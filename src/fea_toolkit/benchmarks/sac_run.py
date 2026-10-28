@@ -372,7 +372,11 @@ def run_case(
     wipe()
     try:
         builder = sac.build_builder(
-            building=building, nonlinear=True, backbone=backbone, hinge_model=hinge_model
+            building=building,
+            nonlinear=True,
+            backbone=backbone,
+            hinge_model=hinge_model,
+            derive_column_axial_ratio=(backbone == "imk"),
         )
         levels = floor_levels(builder)
         tags = [t for _, t in levels]
