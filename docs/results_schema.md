@@ -522,8 +522,10 @@ returns the sorted case labels, and `describe_results_npz()` reports them under
 > only.  An archive carrying no `static_case_*` arrays now reads as one group
 > per case instead of being paired by the `#1` / `#2` name convention.  The
 > marker is shared with the model-stage file by design, so
-> `write_model_stages()` stamps 3 as well although the stage-file array layout
-> did not change ([model stage file](model_stage_file.md)).
+> `write_model_stages()` stamped 3 at the time although the stage-file array
+> layout did not change ([model stage file](model_stage_file.md)).  This version
+> is **historical** — the shared marker is now version 4 (below), which
+> `write_model_stages()` stamps together with the results writers.
 
 > **Version 4 — the `transient` block.**  `analysis_types` may now contain
 > `"transient"`, and each `transient/<case>/...` carries the time-history

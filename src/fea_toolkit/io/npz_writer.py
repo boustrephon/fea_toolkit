@@ -1084,8 +1084,10 @@ def _transient_component_grid(
 ) -> np.ndarray:
     """Dense ``(n_t, n_rec)`` grid of one kinematic component over *node_tags*.
 
-    Nodes absent from *histories* are NaN-filled, so a reader can distinguish
-    "not recorded" from a genuine zero.
+    Every supplied history must be an ``(n_t, 3)`` array; a mismatch is rejected
+    rather than silently truncated or NaN-padded.  Only nodes absent from
+    *histories* are NaN-filled, so a reader can distinguish "not recorded" from
+    a genuine zero.
     """
     grid = np.full((n_t, n_rec), np.nan, dtype=float)
     for j, tag in enumerate(node_tags):
@@ -1093,8 +1095,12 @@ def _transient_component_grid(
         if hist is None:
             continue
         vals = np.asarray(hist, dtype=float)
-        if vals.ndim == 2 and vals.shape[1] > component:
-            grid[: min(n_t, vals.shape[0]), j] = vals[:n_t, component]
+        if vals.ndim != 2 or vals.shape[0] != n_t or vals.shape[1] != 3:
+            raise ValueError(
+                f"transient node history for node {tag!r} must be an "
+                f"(n_t={n_t}, 3) array, got shape {vals.shape}"
+            )
+        grid[:, j] = vals[:, component]
     return grid
 
 
@@ -1139,7 +1145,9 @@ def collect_transient_arrays(transient_results: dict[str, Any]) -> dict[str, np.
                 "case names become flat NPZ key segments"
             )
 
-        times = np.asarray(res.get("times", []), dtype=float)
+        if "times" not in res:
+            raise ValueError(f"transient case {case!r} is missing the required 'times' history")
+        times = np.asarray(res["times"], dtype=float)
         n_t = int(times.size)
 
         if "base_shear" not in res:
@@ -1147,12 +1155,15 @@ def collect_transient_arrays(transient_results: dict[str, Any]) -> dict[str, np.
                 f"transient case {case!r} is missing the required 'base_shear' history"
             )
 
+        if "direction" not in res:
+            raise ValueError(f"transient case {case!r} is missing the required 'direction'")
+
         arrays[make_transient_key(case, "transient/{case}/time")] = times
         arrays[make_transient_key(case, "transient/{case}/base_shear")] = np.asarray(
             res["base_shear"], dtype=float
         )
         arrays[make_transient_key(case, "transient/{case}/direction")] = np.asarray(
-            str(res.get("direction", "X")), dtype=str
+            str(res["direction"]), dtype=str
         )
 
         # ── Optional scalar / provenance fields (emitted only when present) ──

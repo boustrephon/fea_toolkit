@@ -59,7 +59,7 @@ markdown_extensions:
       subscript: false
   - pymdownx.arithmatex:
       generic: true
-      smart_dollar: false
+      smart_dollar: true
   - toc:
       permalink: true
 

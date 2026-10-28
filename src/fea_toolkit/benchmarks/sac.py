@@ -360,12 +360,14 @@ def enrich_imk(
             value from a gravity run is an open A3 item).
         beam_unbraced_factor: ``Lb / L`` for beams (default 1.0).
         theta_u: Explicit ``IMKBilin`` ultimate rotation (rad) override; ``None``
-            defers to *theta_u_model* (benchmark calibration).
+            defers to *theta_u_model* (benchmark calibration).  When given, the
+            effective selection is recorded on ``md.imk_theta_u_model`` as
+            ``"explicit:<value>"``.
         theta_u_model: Ultimate-rotation convention, one of
             :data:`~fea_toolkit.benchmarks.imk_calibration.THETA_U_MODELS`.
             Default ``"plateau"``.  Recorded on ``md.imk_theta_u_model`` as
-            run-level provenance (an explicit *theta_u* takes precedence over
-            the recorded convention).
+            run-level provenance when *theta_u* is ``None`` (an explicit
+            *theta_u* takes precedence and is recorded instead).
 
     Raises:
         NotImplementedError: For ``building`` != 3 (per-member unbraced lengths /
@@ -424,9 +426,13 @@ def enrich_imk(
             theta_u_model=theta_u_model,
         )
         sec.imk_params = params.to_dict()
-    # Run-level provenance: which ultimate-rotation convention produced ``θu``.
-    # An explicit ``theta_u`` override takes precedence over this convention.
-    md.imk_theta_u_model = theta_u_model
+    # Run-level provenance: the *effective* ultimate-rotation selection.  An
+    # explicit ``theta_u`` overrides the convention, so record it (with its
+    # value) rather than leaving the unused ``theta_u_model`` label behind.
+    if theta_u is None:
+        md.imk_theta_u_model = theta_u_model
+    else:
+        md.imk_theta_u_model = f"explicit:{theta_u:g}"
     return md
 
 

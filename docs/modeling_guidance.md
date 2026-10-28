@@ -38,8 +38,10 @@ ill-conditioned at **both** ends of the member-stiffness range:
 | **Too soft** (small `I`) | `ForceBeamColumn3d::getInitialStiff()` — "could not invert flexibility" | at **build** |
 | **Too stiff** (large `I`, typically base/foundation members) | `ForceBeamColumn3d::update()` — "could not invert flexibility" | at a **load step** |
 
-A third, hinge-fraction-specific cause of the same message — the `beamWithHinges`
-command's negative `HingeRadau` integration weights — is covered in §1.1 below.
+A third, hinge-fraction-specific cause of the same message — the negative
+`HingeRadau` integration weights of OpenSees' legacy `beamWithHinges` command
+(not `fea_toolkit`'s own `beam_with_hinges`, which uses `HingeRadauTwo`) — is
+covered in §1.1 below.
 
 Displacement-based **lumped hinges** (`elasticBeamColumn` interior +
 `zeroLength` end springs) are stiffness-formulated and **robust across the whole
@@ -55,10 +57,12 @@ exact force-based element).
 
 ### 1.1 The `beamWithHinges` integration trap (negative `HingeRadau` weights)
 
-The `beamWithHinges` command no longer creates the legacy `BeamWithHinges3d`
-element — it builds a `ForceBeamColumn3d` under the **`HingeRadau`** integration
-(six points: two hinge points plus four interior points).  `HingeRadau`'s two
-interior weights are
+OpenSees' legacy **`beamWithHinges` command** integrates its concentrated
+plastic hinges under the **`HingeRadau`** rule (six points: two hinge points
+plus four interior points).  This is *not* what `fea_toolkit` ships — the
+toolkit's `hinge_model='beam_with_hinges'` emits a `forceBeamColumn` under
+**`HingeRadauTwo`** (see the fix below).  `HingeRadau`'s two interior weights
+are
 
     w = 0.5 − 2·(lpI + lpJ)/L
 
@@ -89,6 +93,19 @@ The fix is the **`HingeRadauTwo`** integration, whose interior weights are
 `forceBeamColumn` under `HingeRadauTwo` — same elastic stiffness, same hinge
 recorder layout (sections 1 and 6) — which keeps the SAC 3-story model (and now
 the 9/20-story *builds*) working across platforms.
+
+The switch changes only the numerical conditioning of the element, not its
+**elastic** response — the elastic stiffness (exact `6EI1/L`) and the recorder
+sections (1 and 6) are unchanged.  The **post-yield** (softening) response,
+however, is governed by the plastic hinge length `Lp`, which converts the hinge
+section's moment-*curvature* backbone to the member-end rotation `θ = φ·Lp`.
+The toolkit does **not** rescale `Lp` for the switch, so to preserve the
+intended post-yield response users must keep `hinge_length_fraction` at the
+value the backbone was calibrated against — the default `1/6` reproduces the SAC
+benchmark's `θ = φ·L/6` member-end rotation.  (The `IMKBilin`/IMK calibration
+is a separate **lumped-hinge** (`zeroLength` spring) backbone and is not used on
+this `beam_with_hinges`/`HingeRadauTwo` path, so it neither compensates for nor
+is affected by the integration-rule softening length.)
 
 ## 2. Element & hinge cheat-sheet
 

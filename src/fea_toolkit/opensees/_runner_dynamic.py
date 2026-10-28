@@ -86,7 +86,8 @@ class TransientRunnerMixin:
             num_steps: Number of integration steps (default ``len(accel)``).
 
         Returns:
-            Dict with ``times`` (s), per-node ``displacements``
+            Dict with ``times`` (s), the excitation ``direction`` and the
+            integration ``dt`` (s), per-node ``displacements``
             (``{node_tag: (converged_steps, 3) ndarray}``) and, only when
             ``transient_record_kinematics`` is enabled, ``velocities`` /
             ``accelerations`` (same shape, else empty dicts), ``base_shear``
@@ -310,6 +311,8 @@ class TransientRunnerMixin:
 
         return {
             "times": times,
+            "direction": direction,
+            "dt": dt,
             "displacements": displacements,
             "velocities": velocities,
             "accelerations": accelerations,
