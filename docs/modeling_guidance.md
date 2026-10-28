@@ -67,9 +67,12 @@ plastic-hinge fraction of `Lp = L/6` per end (total `L/3`) — the SAC benchmark
 θ = φ·L/6 convention — therefore gives every member `w = 0.5 − 2/3 = −1/6`, i.e.
 two of its six integration weights are **negative**.
 
-Negative weights are *exact* for the Gauss–Radau rule, so the net flexibility —
-and with it the elastic stiffness, the periods and the nonlinear response — is
-still correct.  But they are numerically hazardous: the element's flexibility
+Negative weights are *exact* for the Gauss–Radau rule applied to the
+linear-elastic solution, so the net elastic flexibility — and with it the
+elastic stiffness and the periods — is still correct.  That exactness does not
+extend to the nonlinear response: post-yield accuracy depends on the section
+force–deformation behaviour and on the integration rule.  But they are
+numerically hazardous: the element's flexibility
 matrix is assembled by *adding* the positive-weight contributions and then
 *subtracting* the negative-weight ones, and subtracting pieces of a
 positive-definite matrix amplifies round-off.  The result can be a 6×6
