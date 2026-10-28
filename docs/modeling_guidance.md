@@ -38,6 +38,9 @@ ill-conditioned at **both** ends of the member-stiffness range:
 | **Too soft** (small `I`) | `ForceBeamColumn3d::getInitialStiff()` — "could not invert flexibility" | at **build** |
 | **Too stiff** (large `I`, typically base/foundation members) | `ForceBeamColumn3d::update()` — "could not invert flexibility" | at a **load step** |
 
+A third, hinge-fraction-specific cause of the same message — the `beamWithHinges`
+command's negative `HingeRadau` integration weights — is covered in §1.1 below.
+
 Displacement-based **lumped hinges** (`elasticBeamColumn` interior +
 `zeroLength` end springs) are stiffness-formulated and **robust across the whole
 stiffness range**, at a small accuracy cost (~4–5 % elastic softening vs the
@@ -49,6 +52,40 @@ exact force-based element).
 > force-based element only when you have confirmed that **every** member both
 > builds *and* survives the first load steps. A force-based element that
 > *builds* is not guaranteed to *run*.
+
+### 1.1 The `beamWithHinges` integration trap (negative `HingeRadau` weights)
+
+The `beamWithHinges` command no longer creates the legacy `BeamWithHinges3d`
+element — it builds a `ForceBeamColumn3d` under the **`HingeRadau`** integration
+(six points: two hinge points plus four interior points).  `HingeRadau`'s two
+interior weights are
+
+    w = 0.5 − 2·(lpI + lpJ)/L
+
+which is **negative once the total plastic-hinge length exceeds L/4**.  A
+plastic-hinge fraction of `Lp = L/6` per end (total `L/3`) — the SAC benchmark's
+θ = φ·L/6 convention — therefore gives every member `w = 0.5 − 2/3 = −1/6`, i.e.
+two of its six integration weights are **negative**.
+
+Negative weights are *exact* for the Gauss–Radau rule, so the net flexibility —
+and with it the elastic stiffness, the periods and the nonlinear response — is
+still correct.  But they are numerically hazardous: the element's flexibility
+matrix is assembled by *adding* the positive-weight contributions and then
+*subtracting* the negative-weight ones, and subtracting pieces of a
+positive-definite matrix amplifies round-off.  The result can be a 6×6
+flexibility matrix that is only marginally invertible, so the LU factorisation
+fails with `ForceBeamColumn3d::update() -- could not invert flexibility`.  The
+failure is platform-dependent — macOS's Accelerate LAPACK happens to digest the
+cancellation, the Linux LAPACK build does not — which is why the SAC 3-story
+`beam_with_hinges` model reproduced the benchmark on macOS but failed on the
+Linux CI.
+
+The fix is the **`HingeRadauTwo`** integration, whose interior weights are
+`0.5 − 0.5·(lpI + lpJ)/L` and stay **positive for any `Lp < L/2`**.
+`fea_toolkit` therefore builds `hinge_model='beam_with_hinges'` as a
+`forceBeamColumn` under `HingeRadauTwo` — same elastic stiffness, same hinge
+recorder layout (sections 1 and 6) — which keeps the SAC 3-story model (and now
+the 9/20-story *builds*) working across platforms.
 
 ## 2. Element & hinge cheat-sheet
 
