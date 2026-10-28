@@ -109,17 +109,40 @@ and general (it works for any column stack, spliced or not).
 preprocessing only because the SAC model is one-element-per-member (no
 splitting).
 
-**Proposal — treat the IMK hinge as a member-*end* property and keep it on the
-member.**
+**Proposal — attach the IMK hinge at *hinge-eligible* points; keep the interior
+elastic.**
 
-The IMK hinge is a zero-length spring at the member's joints; a member split for
-interior integration must **not** multiply hinges.  So for the benchmark
-(one element per member) the current `elem.imk_params` is correct and stays.  For
-general models, the rule is: calibrate per **member** (between joints), and
-forbid interior splitting for IMK-calibrated members — the `dataclasses.replace`
-used by the preprocessor silently drops `imk_params` on split children, so that
-combination must be rejected (or the params recomputed on the frozen
-`MeshModel`) before any general use.
+The IMK hinge is a zero-length spring at a point that can plastify.  A member's
+hinge-eligible points are:
+
+1. **Member ends** (its two joints) — always.
+2. **Framing points** — interior nodes where *another member frames in* (e.g. a
+   secondary beam landing on a girder at mid- or third-span).  That point
+   carries the framing member's end moment/shear, so the girder can hinge there
+   too.  These are the ``AtJoints`` split nodes — SAP/ETABS auto-mesh a member
+   at a secondary member's end node, and ``split_elements`` already records
+   them as ``parent_id`` children.
+3. **Pure discretization points** — never.  A sub-element created only for
+   distributed-load resolution or P-Δ (no framing member) must stay elastic.
+
+Consequence — the IMK calibration unit is the **segment between consecutive
+hinge-eligible points**, not the full member: a girder with a secondary beam at
+third-span is *three* segments, each calibrated with its own length (``Lb``,
+``L/2d``).  This is the ``elasticBeamColumn + zeroLength`` equivalent of
+OpenSees' ``beamWithHinges -subdivide`` (elastic interior, hinges at the ends),
+extended to also permit hinges at framing points.
+
+Implementation shape (open):
+
+1. Carry the member identity through the split — children already carry
+   ``parent_id``; propagate ``imk_params`` (or resolve it through the parent
+   chain) so the builder can find the member's hinge parameters.
+2. Teach ``_create_lumped_hinges`` to place the IMK spring at hinge-eligible
+   points (member ends + framing nodes) and emit **elastic** interior elements
+   everywhere else.
+3. Recompute ``imk_params`` per segment (segment length, not member length) when
+   a member is split at a framing point; distinguish framing points from pure
+   discretization (record the split reason, or use node connectivity).
 
 ## (d) Special members (brace / fixed-pin)
 
@@ -160,5 +183,6 @@ time — a separate release-honouring issue, tracked apart from the type column.
    braces.)*
 4. ✅ Extend the axial ratio to per-member (b), keeping the base-section value as
    the reported summary.  *(Landed: `derive_column_axial_ratios_by_member`.)*
-5. Keep `elem.imk_params` on the member for the benchmark; document/reject the
-   splitting hazard (c) rather than solve it now.
+5. Attach IMK hinges at hinge-eligible points (member ends + framing points) and
+   keep the interior elastic (c) — carry the member identity through the split
+   and recompute parameters per segment.  *(Design refined 2026-10-28; open.)*
