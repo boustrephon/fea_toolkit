@@ -21,10 +21,13 @@ Two goals govern this work, and they do not fully align:
 2. **Be general** — identify role and member type programmatically, for arbitrary
    models, not just the SAC frames.
 
-The ideal is a **single programmatic rule that happens to reproduce the
-benchmark's choices**. Where the two diverge, the benchmark's own data wins for
-the benchmark models, and the general rule is *validated against* that data (a
-test asserting agreement) rather than left as an un-checked heuristic.
+The preferred direction is **analytical first, override second**: the general
+classifier is the *primary* derivation of role/type, and a study's own choices
+are applied as an **override on top** — with a **warning wherever the override
+disagrees with the analytical result**.  The warning is the signal that either
+the analytical rule needs refining, or the study made a genuinely idiosyncratic
+choice worth recording — so study-specific quirks are never silently baked into
+the universal rule, and a divergence from the study is never silently ignored.
 
 ## Background
 
@@ -45,24 +48,28 @@ test asserting agreement) rather than left as an un-checked heuristic.
 
 ## (a) Role & type derivation
 
-**Proposal — transcribe the `element_tbl` type column and act on it.**
+**Proposal — analytical first, then a study override with a warning.**
 
-`COLUMN_MATERIALS` / `BEAM_MATERIALS` already give the role implicitly (columns
-and beams are separate tables), but not the type.  Transcribe the type column as
-`MEMBER_TYPES_3/9/20` (or fold it into the `element_tbl` transcription), and let
-`enrich_imk` consume it:
+Three steps, applied in order:
 
-| Type | Treatment for the IMK model |
-|---|---|
-| moment (1) | IMK hinge at both member ends |
-| brace (3) | axial-only — **no** flexural IMK hinge |
-| fixed-pin (5) | IMK hinge at the moment end only; the released end has none |
+1. **Analytical.** The general `frame_element_types` classifier derives the role
+   (`beam`/`column`/`brace`) from section type + geometry, and member releases
+   derive pinned ends — no benchmark data involved.
+2. **Override.** Transcribe the `element_tbl` type column as a study override
+   table (`MEMBER_TYPES_3/9/20`: `moment`/`brace`/`fixed-pin`).
+3. **Reconcile.** Map the analytical result onto the study taxonomy, compare, and
+   **`warnings.warn` on every mismatch**; the override wins.
 
-The general path is the existing `frame_element_types` classifier.  The
-reconciliation is: use the **transcribed type for the SAC models** (benchmark
-matching), and add a **test that the general classifier reproduces the
-transcribed type** for every SAC member — so the "universal" rule is checked
-against the "benchmark" data rather than trusted.
+| Analytical (general) | Study type (override) | IMK treatment |
+|---|---|---|
+| brace section / truss | brace (3) | axial-only — **no** flexural IMK hinge |
+| beam or column, no release | moment (1) | IMK hinge at both member ends |
+| beam or column, pinned end | fixed-pin (5) | IMK hinge at the moment end only |
+
+Mismatches are expected and informative — they are exactly the members where the
+study diverges from the analytical rule (see (d)).  A test asserts the **set** of
+mismatches per SAC model, so the warnings are a checked invariant rather than
+noise.
 
 ## (b) Per-member axial ratio
 
@@ -111,18 +118,23 @@ differently:
 | 20-story basement beams | brace (`type 3`) | flexural beams |
 | 9-story gravity-bay beams (bay 4) | fixed-pin (`type 5`, M3 released at far end) | release transcribed but **skipped** under `hinge_model='lumped'` |
 
-These fold into (a): once the type column is transcribed, `enrich_imk` stops
-placing a collapse-level moment hinge on a brace or a pin end.  The 9-story
-pin additionally needs the lumped-hinge path to honour the release (or a
-gravity-bay treatment) — tracked separately from the type column.
+These are the members the reconcile step in (a) distinguishes.  The 3-story link
+bay and the 20-story basement beams are **classification overrides**: the study
+tags them brace while the analytical rule (an I-section, horizontal, no release)
+would call them a moment beam — so the warning fires and the override wins,
+removing the flexural hinge.  The 9-story gravity-bay is *not* a classification
+mismatch: "beam + pin release" already maps to `fixed-pin` analytically, but the
+lumped-hinge build currently **skips the release**, so the pin is lost at build
+time — a separate release-honouring issue, tracked apart from the type column.
 
 ## Decisions (proposed order)
 
-1. Transcribe the `element_tbl` member-type column; make `enrich_imk` act on it
-   (moment / brace / fixed-pin) — resolves (a) and (d) together.
-2. Add a test that `frame_element_types` (the general classifier) reproduces the
-   transcribed SAC types — the "universal rule matches the benchmark" check.
-3. Extend the axial ratio to per-member (b), keeping the base-section value as
+1. Run the analytical `frame_element_types` classifier first (extend it, if
+   needed, to express the three study types via section + geometry + releases).
+2. Transcribe the `element_tbl` type column as a study override table.
+3. Reconcile: apply the override with a `warnings.warn` on every mismatch, and a
+   test asserting the expected mismatch set per SAC model — resolves (a) and (d).
+4. Extend the axial ratio to per-member (b), keeping the base-section value as
    the reported summary.
-4. Keep `elem.imk_params` on the member for the benchmark; document/reject the
+5. Keep `elem.imk_params` on the member for the benchmark; document/reject the
    splitting hazard (c) rather than solve it now.
