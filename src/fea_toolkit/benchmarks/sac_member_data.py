@@ -249,6 +249,75 @@ BEAM_MATERIALS: dict[int, list[list[int]]] = {
 }
 
 
+# ═══════════════════════════════════════════════════════════════
+# Member → type assignment (element_tbl(:,4))
+# ═══════════════════════════════════════════════════════════════
+# ``element_tbl(:,4)`` tags each member's type: ``1`` = moment column,
+# ``2`` = moment beam, ``3`` = brace (axial-only), ``5`` = fixed-pin
+# (gravity-bay beam — M3 released at its far end).  The source initialises
+# every column to type 1 and every beam to type 2, then overwrites the
+# special members:
+#   struct3.m:   ``element_tbl(Num_col+[4 8 12], 4) = 3``        (link bay)
+#   struct9.m:   ``element_tbl(Num_col+[5 10 15 20 25 30 35 40 45 50], 4) = 5``
+#   struct20.m:  ``element_tbl(Num_col+[1 2 3 4 5], 4) = 3``     (1st-basement braces)
+# Column type 1 is uniform, so only the beam table is transcribed verbatim.
+
+MOMENT_COLUMN = 1
+MOMENT_BEAM = 2
+BRACE = 3
+FIXED_PIN = 5
+
+BEAM_TYPES_3: list[list[int]] = [
+    [2, 2, 2, 3],  # 2nd floor — bay 3 is the rigid-axial link bay
+    [2, 2, 2, 3],  # 3rd floor
+    [2, 2, 2, 3],  # roof
+]
+
+BEAM_TYPES_9: list[list[int]] = [
+    [2, 2, 2, 2, 5],  # 1st floor — bay 4 is the fixed-pin gravity bay
+    [2, 2, 2, 2, 5],  # 2nd floor
+    [2, 2, 2, 2, 5],  # 3rd floor
+    [2, 2, 2, 2, 5],  # 4th floor
+    [2, 2, 2, 2, 5],  # 5th floor
+    [2, 2, 2, 2, 5],  # 6th floor
+    [2, 2, 2, 2, 5],  # 7th floor
+    [2, 2, 2, 2, 5],  # 8th floor
+    [2, 2, 2, 2, 5],  # 9th floor
+    [2, 2, 2, 2, 5],  # roof
+]
+
+BEAM_TYPES_20: list[list[int]] = [
+    [3, 3, 3, 3, 3],  # 1st basement — braces
+    [2, 2, 2, 2, 2],  # 1st floor
+    [2, 2, 2, 2, 2],  # 2nd floor
+    [2, 2, 2, 2, 2],  # 3rd floor
+    [2, 2, 2, 2, 2],  # 4th floor
+    [2, 2, 2, 2, 2],  # 5th floor
+    [2, 2, 2, 2, 2],  # 6th floor
+    [2, 2, 2, 2, 2],  # 7th floor
+    [2, 2, 2, 2, 2],  # 8th floor
+    [2, 2, 2, 2, 2],  # 9th floor
+    [2, 2, 2, 2, 2],  # 10th floor
+    [2, 2, 2, 2, 2],  # 11th floor
+    [2, 2, 2, 2, 2],  # 12th floor
+    [2, 2, 2, 2, 2],  # 13th floor
+    [2, 2, 2, 2, 2],  # 14th floor
+    [2, 2, 2, 2, 2],  # 15th floor
+    [2, 2, 2, 2, 2],  # 16th floor
+    [2, 2, 2, 2, 2],  # 17th floor
+    [2, 2, 2, 2, 2],  # 18th floor
+    [2, 2, 2, 2, 2],  # 19th floor
+    [2, 2, 2, 2, 2],  # 20th floor
+    [2, 2, 2, 2, 2],  # roof
+]
+
+BEAM_TYPES: dict[int, list[list[int]]] = {
+    3: BEAM_TYPES_3,
+    9: BEAM_TYPES_9,
+    20: BEAM_TYPES_20,
+}
+
+
 # ── Mat_no → display section name (for visualisation) ──
 # Each backbone (Mat_no) maps to the physical W/box section it represents, so
 # the visualiser can draw the cross-section shape.  Splice rows (weighted
@@ -327,10 +396,16 @@ __all__ = [
     "BEAM_MATERIALS_3",
     "BEAM_MATERIALS_9",
     "BEAM_MATERIALS_20",
+    "BEAM_TYPES",
+    "BEAM_TYPES_3",
+    "BEAM_TYPES_9",
+    "BEAM_TYPES_20",
+    "BRACE",
     "COLUMN_MATERIALS",
     "COLUMN_MATERIALS_3",
     "COLUMN_MATERIALS_9",
     "COLUMN_MATERIALS_20",
+    "FIXED_PIN",
     "MAT_TBLS",
     "MAT_TBL_3",
     "MAT_TBL_9",
@@ -339,5 +414,7 @@ __all__ = [
     "MAT_TO_SECTION_3",
     "MAT_TO_SECTION_9",
     "MAT_TO_SECTION_20",
+    "MOMENT_BEAM",
+    "MOMENT_COLUMN",
     "MemberBackbone",
 ]

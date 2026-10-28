@@ -29,30 +29,40 @@ def _split_by_material(md):
     return cols, beams, other
 
 
+def _brace_sections(md) -> set[str]:
+    """Section names used only by study braces (the 3-story link bay)."""
+    types = getattr(md, "imk_member_types", {})
+    return {md.frame_assignments[eid] for eid, t in types.items() if t == "brace"}
+
+
 def test_enrich_imk_stamps_only_moment_sections():
-    """Columns and beams carry imk_params; the elastic leaning column does not."""
+    """Moment columns + beams carry imk_params; the brace (link bay) and the
+    elastic leaning column do not."""
     wipe()
     md = sac.load_model(nonlinear=True, backbone="imk")
     cols, beams, other = _split_by_material(md)
-    assert cols and beams and other  # the 3-story model has all three kinds
-    for sname in cols + beams:
+    braces = _brace_sections(md)
+    assert cols and beams and other and braces  # the model has all four kinds
+    for sname in cols + [s for s in beams if s not in braces]:
         params = md.sections[sname].imk_params
         assert params["mc_my"] >= 1.0
         assert params["My_pos"] > 0.0
         assert params["My_neg"] < 0.0
         assert params["theta_p_pos"] > 0.0
         assert params["theta_pc_pos"] > 0.0
-    for sname in other:
+    for sname in set(other) | braces:
         assert not getattr(md.sections[sname], "imk_params", None)
 
 
 def test_enrich_imk_column_capping_exceeds_beam():
-    """Column capping ratio (Lignos 2019) > 1; beams keep the 1.05 default."""
+    """Column capping ratio (Lignos 2019) > 1; moment beams keep the 1.05 default."""
     wipe()
     md = sac.load_model(nonlinear=True, backbone="imk")
     cols, beams, _ = _split_by_material(md)
+    braces = _brace_sections(md)
+    moment_beams = [s for s in beams if s not in braces]
     col_mc = min(md.sections[s].imk_params["mc_my"] for s in cols)
-    beam_mc = max(md.sections[s].imk_params["mc_my"] for s in beams)
+    beam_mc = max(md.sections[s].imk_params["mc_my"] for s in moment_beams)
     assert col_mc > 1.0
     assert beam_mc == pytest.approx(1.05)
 

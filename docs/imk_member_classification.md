@@ -1,7 +1,7 @@
 ---
 title: "IMK Member Role & Type — Design Note"
 description: "How member role (column/beam) and member type (moment/brace/fixed-pin) are identified for the per-member IMK (IMKBilin) calibration, reconciling benchmark-matching with the general element-classification path."
-status: "draft"
+status: "partial"
 tags: [imk, ibarra-krawinkler, lignos-krawinkler, deterioration, hinge, element-classification, member-classification, benchmark, sac]
 category: [planning]
 related: [imk_deterioration_model.md, element_classification.md, benchmark_roadmap.md]
@@ -9,7 +9,11 @@ related: [imk_deterioration_model.md, element_classification.md, benchmark_roadm
 
 # IMK Member Role & Type — Design Note
 
-🚧 Draft — proposals only; no code has changed.
+⚠️ Partial — steps 1–3 landed (2026-10-28): the `element_tbl` type column is
+transcribed (`BEAM_TYPES`), `reconcile_member_types` applies the study override
+with a `UserWarning` on mismatch, and `enrich_imk` skips the study braces (the
+3-story link bay and the 20-story 1st-basement beams).  Items (b) (per-member
+axial ratio) and (c) (splitting hazard) remain open.
 
 ## Goals and the tension
 
@@ -139,16 +143,21 @@ time — a separate release-honouring issue, tracked apart from the type column.
 
 ## Decisions (proposed order)
 
-1. Run the analytical classifier first — geometry signal (`frame_element_types`)
-   + section-type signal, as in `element_classification.md` — extending it only
-   if needed to express the three study types (moment / brace / fixed-pin) via
-   section + geometry + releases.
-2. Transcribe the `element_tbl` type column as a study override table, applied
-   in the same spirit as `brace_sections` / `brace_selection` (authoritative).
-3. Reconcile in a helper in `benchmarks/sac.py` that wraps the general
+1. ✅ Run the analytical classifier first — geometry signal
+   (`frame_element_types`) + section-type signal, as in
+   `element_classification.md` — extending it only if needed to express the
+   three study types (moment / brace / fixed-pin) via section + geometry +
+   releases.  *(Landed: `_analytical_member_type` mirrors the geometry +
+   section + release signals.)*
+2. ✅ Transcribe the `element_tbl` type column as a study override table
+   (`BEAM_TYPES_3/9/20`), applied in the same spirit as `brace_sections` /
+   `brace_selection` (authoritative).  *(Landed.)*
+3. ✅ Reconcile in a helper in `benchmarks/sac.py` that wraps the general
    classifier: `warnings.warn(<f-string>, UserWarning)` on every mismatch
    (override wins), asserted with `pytest.warns(UserWarning, match=…)` — resolves
-   (a) and (d).
+   (a) and (d).  *(Landed: `reconcile_member_types` records
+   `md.imk_member_types` / `md.imk_member_type_mismatches`; `enrich_imk` skips
+   braces.)*
 4. Extend the axial ratio to per-member (b), keeping the base-section value as
    the reported summary.
 5. Keep `elem.imk_params` on the member for the benchmark; document/reject the

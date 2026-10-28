@@ -366,7 +366,7 @@ for automated cross-referencing.
   Tags: `imk`, `ibarra-krawinkler`, `lignos-krawinkler`, `deterioration`, `collapse`, `hinge`, `imkbilin`, `bilin`, `steel`, `nonlinear-dynamic`, `moment-frame`
   Related: [Benchmark Roadmap — extended proposals](benchmark_roadmap.md) · [SAC 3-Story Nonlinear Benchmark (T4)](sac_nonlinear_benchmark.md) · [SAC Trilinear Hinge — Four Modelling Approaches](sac_trilinear_hinge_approaches.md) · [Structural Modeling Guidance](modeling_guidance.md)
 
-- [IMK Member Role & Type — Design Note](imk_member_classification.md) — 🚧 Draft
+- [IMK Member Role & Type — Design Note](imk_member_classification.md) — ⚠️ Partial
   > How member role (column/beam) and member type (moment/brace/fixed-pin) are identified for the per-member IMK (IMKBilin) calibration, reconciling benchmark-matching with the general element-classification path.
   Tags: `imk`, `ibarra-krawinkler`, `lignos-krawinkler`, `deterioration`, `hinge`, `element-classification`, `member-classification`, `benchmark`, `sac`
   Related: [IMK (IMKBilin) Steel Hinge — Deterioration Model](imk_deterioration_model.md) · [Element Classification](element_classification.md) · [Benchmark Roadmap — extended proposals](benchmark_roadmap.md)

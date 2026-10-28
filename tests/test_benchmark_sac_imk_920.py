@@ -18,14 +18,18 @@ from fea_toolkit.benchmarks import sac
 
 @pytest.mark.parametrize("building", [9, 20], ids=["9-story", "20-story"])
 def test_imk_920_stamps_every_member(building):
-    """Every 9/20-story member carries ``imk_params`` (no leaning column)."""
+    """Every 9/20-story member carries ``imk_params`` except the study braces."""
     from openseespy.opensees import wipe
 
     wipe()
     try:
         md = sac.load_model(nonlinear=True, building=building, backbone="imk")
+        types = md.imk_member_types
         assert md.frame_elements, "empty model"
         for eid, elem in md.frame_elements.items():
+            if types.get(eid) == "brace":
+                assert elem.imk_params is None, f"{eid} (brace) should not carry imk_params"
+                continue
             assert elem.imk_params is not None, f"{eid} missing imk_params"
             params = elem.imk_params
             assert params["mc_my"] >= 1.0

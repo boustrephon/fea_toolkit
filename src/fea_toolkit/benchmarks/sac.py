@@ -53,9 +53,13 @@ from ..opensees.analysis_builder import AnalysisBuilder
 from ..opensees.preprocessor import preprocess_model
 from .sac_member_data import (
     BEAM_MATERIALS,
+    BEAM_TYPES,
+    BRACE,
     COLUMN_MATERIALS,
+    FIXED_PIN,
     MAT_TBLS,
     MAT_TO_SECTION,
+    MOMENT_BEAM,
 )
 
 #: Bundled Tcl transcription of the SAC 3-story N-S perimeter frame.
@@ -153,6 +157,94 @@ def _frame_element_roles(md: SAPModelData) -> dict[str, str]:
             continue
         roles[eid] = "col" if abs(nj.z - ni.z) > abs(nj.x - ni.x) else "beam"
     return roles
+
+
+# ── Member type: analytical vs study (element_tbl(:,4)) ───────────────────
+# The SAC benchmark tags each member with a type in ``element_tbl(:,4)``
+# (1 = moment column, 2 = moment beam, 3 = brace, 5 = fixed-pin).  The general
+# classifier (``element_classification.md``) derives role/type analytically; the
+# transcribed type column is a study *override* applied on top, warning wherever
+# it disagrees.  See ``docs/imk_member_classification.md``.
+
+_STUDY_TYPE_NAMES = {MOMENT_BEAM: "moment", BRACE: "brace", FIXED_PIN: "fixed-pin"}
+
+
+def _study_member_type(md: SAPModelData, building: int, eid: str, is_col: bool) -> str:
+    """The study's ``element_tbl(:,4)`` type for a member (``moment``/``brace``/``fixed-pin``).
+
+    Columns are uniformly type 1 (moment); beams are type 2 except the
+    transcribed ``BEAM_TYPES`` overrides — the 3-story link bay and the 20-story
+    1st-basement beams are braces, the 9-story gravity bay is a fixed-pin.
+    """
+    if is_col:
+        return "moment"
+    if building == 3:
+        # The Tcl transcription numbers beams as tags 16..27 in bay order; bay 3
+        # is the rigid-axial link bay (element_tbl(:,4) = 3).
+        bay = (md.frame_elements[eid].elem_tag - 16) % 4
+        return "brace" if bay == 3 else "moment"
+    # 9/20: element ids are ``B{level}-{bay}``.
+    level_str, bay_str = eid[1:].split("-")
+    return _STUDY_TYPE_NAMES[BEAM_TYPES[building][int(level_str) - 1][int(bay_str)]]
+
+
+def _analytical_member_type(md: SAPModelData, eid: str, is_col: bool, brace_ids: set[str]) -> str:
+    """Analytical member type (``moment``/``brace``/``fixed-pin``).
+
+    Mirrors the general classifier's two signals — the geometry role (via
+    :func:`_frame_element_roles`) and the section-type signal (``brace_ids`` from
+    ``Selection.from_brace_sections``) — plus the member release.  The SAC
+    frames have no diagonal members and no brace-shaped sections, so those
+    signals never yield ``'brace'``; the analytical result is ``'moment'``
+    (column/beam) or ``'fixed-pin'`` (a beam with a moment release at one end).
+    """
+    if eid in brace_ids:
+        return "brace"
+    if is_col:
+        return "moment"
+    rel = (md.frame_releases or {}).get(eid)
+    if rel is not None and any(rel.end_i[4:] + rel.end_j[4:]):  # M2/M3 released
+        return "fixed-pin"
+    return "moment"
+
+
+def reconcile_member_types(md: SAPModelData, building: int = 3) -> dict[str, str]:
+    """Reconcile analytical member types with the study's ``element_tbl(:,4)``.
+
+    The analytical type (geometry + section + release) is the default; the study
+    type (transcribed ``BEAM_TYPES``) is an override applied on top.  Wherever
+    the override disagrees, a ``UserWarning`` is emitted (the override wins), and
+    the mismatch list is recorded on ``md.imk_member_type_mismatches``.
+
+    Args:
+        md: SAC model.
+        building: 3, 9 or 20.
+
+    Returns:
+        ``{element_id: 'moment' | 'brace' | 'fixed-pin'}`` — the effective type.
+    """
+    import warnings
+
+    from ..model.selection import Selection
+
+    roles = _frame_element_roles(md)
+    brace_ids = set(Selection.from_brace_sections(md).get_frame_ids(md))
+    effective: dict[str, str] = {}
+    mismatches: list[str] = []
+    for eid in md.frame_elements:
+        is_col = roles.get(eid) == "col"
+        analytical = _analytical_member_type(md, eid, is_col, brace_ids)
+        study = _study_member_type(md, building, eid, is_col)
+        if study != analytical:
+            mismatches.append(
+                f"study member type {study!r} overrides analytical role {analytical!r} for {eid}"
+            )
+        effective[eid] = study  # override wins
+    for msg in mismatches:
+        warnings.warn(msg, UserWarning, stacklevel=2)
+    md.imk_member_type_mismatches = mismatches
+    md.imk_member_types = effective
+    return effective
 
 
 def enrich_nonlinear(md: SAPModelData) -> SAPModelData:
@@ -529,6 +621,7 @@ def enrich_imk(
     name_map = MAT_TO_SECTION[building]
     mat_no_by_sec = _mat_no_by_section(md, building)
     roles = _frame_element_roles(md)
+    effective_types = reconcile_member_types(md, building)
 
     def _axial(sname: str) -> float:
         if column_axial_ratios is not None:
@@ -588,6 +681,8 @@ def enrich_imk(
         is_col, is_moment = _member_role(eid, sname)
         if not is_moment:
             continue
+        if effective_types.get(eid) == "brace":
+            continue  # study brace (link bay / basement) — axial-only, no hinge
         params = _compute(sname, length, is_col, _axial(sname))
         if params is None:
             continue
@@ -599,6 +694,11 @@ def enrich_imk(
     # 9/20 sections may be both (e.g. ``mat8`` = W24x131 column *and* beam), so
     # only the per-member dict is authoritative for them.
     if building == 3:
+        brace_sections = {
+            md.frame_assignments[eid]
+            for eid, t in effective_types.items()
+            if t == "brace" and eid in md.frame_assignments
+        }
         lengths: dict[str, float] = {}
         for eid, sname in md.frame_assignments.items():
             elem = md.frame_elements.get(eid)
@@ -615,6 +715,8 @@ def enrich_imk(
             sec = md.sections.get(sname)
             if sec is None or sname not in lengths:
                 continue
+            if sname in brace_sections:
+                continue  # study brace (link bay) — no IMK hinge
             if sec.material == "SteelCol":
                 is_col = True
             elif sec.material == "SteelBeam":
@@ -1120,4 +1222,5 @@ __all__ = [
     "load_model",
     "peak_x",
     "preprocess_config",
+    "reconcile_member_types",
 ]

@@ -143,7 +143,11 @@ with `sac.gravity_axial_ratios()` as the full-elastic-solve cross-check
 (item 4) — `IMKBilin` converges on all four strong cases where the Clough
 trilinear hinge failed.  Fourth increment landed (2026-10-28): the 9/20-story
 matrices (item 5) — per-member `imk_params` from the varying storey heights,
-column splices, and per-base-section axial ratios.
+column splices, and per-base-section axial ratios.  Fifth increment landed
+(2026-10-28): member role/type reconcile — the transcribed `element_tbl` type
+column (moment/brace/fixed-pin) overrides the analytical role with a
+`UserWarning` on mismatch; the study braces (3-story link bay, 20-story
+1st-basement beams) no longer get collapse hinges.
 
 Open A3 items, in build order:
 
@@ -197,7 +201,8 @@ Open A3 items, in build order:
    A3/A4 refinement).  ``tests/test_benchmark_sac_imk_920.py``.
    The next refinement layer — member role/type from the transcribed
    ``element_tbl`` type column, per-member axial ratio, and brace/pin handling —
-   is designed in ``docs/imk_member_classification.md``.
+   is designed in ``docs/imk_member_classification.md``; steps 1–3 landed
+   2026-10-28.
 6. **IDA vs Ibarra–Krawinkler (2005).**  Incremental dynamic analysis over the
    benchmark records; compare the median collapse capacity (`S_a(T1)`) against
    Ibarra–Medina–Krawinkler (2005).
