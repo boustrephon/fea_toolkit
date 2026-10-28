@@ -35,6 +35,7 @@ from typing import Any, Optional
 
 import numpy as np
 
+from .._unit_scaling import g_from_units
 from ..io.tcl_importer import parse_tcl_model
 from ..model.sap_data import (
     BoxSection,
@@ -76,6 +77,11 @@ SAC_DT_CAL: float = 0.005
 # (EA = 1e10) for the floor diaphragm — the composite slab is gravity-only.
 COLUMN_FY = 345e6
 BEAM_FY = 248e6
+
+#: AISC expected-yield ratio ``Ry`` for the column axial-load ratio ``Pg/Pye``
+#: (1.1 for A992/A572-50 — matches ``lignos_2019_wide_flange_column``'s default
+#: ``ry_factor``).
+_COLUMN_RY = 1.1
 
 #: Moment-frame columns keyed by area (m²).  The far-line *leaning* column
 #: (models the interior gravity framing) is absent — it stays elastic.
@@ -325,10 +331,142 @@ def enrich_display_sections(md: SAPModelData, building: int = 3) -> SAPModelData
     return md
 
 
+def derive_column_axial_ratios(md: SAPModelData, building: int = 3) -> dict[str, float]:
+    """Per-section column gravity axial-load ratio ``Pg/Pye`` (tributary).
+
+    The SAC benchmark's ``struct#.m`` transient is base-excited and carries **no
+    gravity-load patterns**, so the operating axial load is derived from the
+    *seismic weight* — the FEMA 355C seismically-effective dead weight (dead +
+    reduced live + steel self-weight), which the model carries as ``added_masses``
+    lumped at the floor nodes by tributary bay width.  This matches the
+    benchmark's collapse-study convention that "seismic masses and gravity loads
+    have the same origin" (Lignos 2008, Stanford TR177 §5); the FEMA 355C dead /
+    reduced-live pressures are the same values transcribed in ``fema355c.py``.
+
+    ``Pg`` for a column line is ``g · Σ (tributary mass above the base)`` and
+    ``Pye = A · Ry · Fy`` (``Ry = 1.1``), so the ratio is the one the Lignos et
+    al. (2019) column backbone consumes as ``axial_ratio``.
+
+    Args:
+        md: The SAC model after :func:`enrich_nonlinear` (moment-frame columns
+            carry the ``SteelCol`` material; the leaning column stays elastic).
+        building: 3, 9 or 20.  Only 3 is wired today (9/20 need per-member
+            column splices).
+
+    Returns:
+        ``{section_name: Pg/Pye}`` for the moment-frame column sections, taking
+        the *maximum* ratio across the column lines that share a section (the
+        base column of each line is the critical member).
+
+    See :func:`gravity_axial_ratios` for the independent full-solve cross-check.
+    """
+    if building != 3:
+        raise NotImplementedError(
+            f"column axial ratios for the {building}-story model need per-member "
+            "column splices (not yet wired); use building=3"
+        )
+    g = g_from_units(md.units)
+    roles = _frame_element_roles(md)
+    nodes = md.nodes
+
+    # Column lines: key each vertical member by the (x, y) of its lower node,
+    # recording the section of the *lowest* segment (the base column — the one
+    # that carries the full accumulated axial load).
+    line_base: dict[tuple[float, float], tuple[float, str]] = {}
+    for eid, elem in md.frame_elements.items():
+        if roles.get(eid) != "col":
+            continue
+        ni = nodes[elem.node_i]
+        nj = nodes[elem.node_j]
+        bottom = ni if ni.z < nj.z else nj
+        key = (bottom.x, bottom.y)
+        if key not in line_base or bottom.z < line_base[key][0]:
+            line_base[key] = (bottom.z, md.frame_assignments.get(eid, ""))
+
+    # Accumulate the tributary mass above each column line and derive the ratio.
+    ratios: dict[str, float] = {}
+    for (x, y), (_, sname) in line_base.items():
+        sec = md.sections.get(sname)
+        if sec is None or getattr(sec, "material", None) != "SteelCol":
+            continue  # leaning column — no hinge
+        total_mass = 0.0
+        for nid, mass in (md.added_masses or {}).items():
+            nd = nodes.get(nid)
+            if nd is None:
+                continue
+            if abs(nd.x - x) < 1e-9 and abs(nd.y - y) < 1e-9:
+                total_mass += float(mass)
+        pye = sec.A * _COLUMN_RY * COLUMN_FY
+        ratios[sname] = max(ratios.get(sname, 0.0), g * total_mass / pye)
+    return ratios
+
+
+def gravity_axial_ratios(md: SAPModelData, building: int = 3) -> dict[str, float]:
+    """Per-section column ``Pg/Pye`` from a full elastic gravity solve (cross-check).
+
+    Independent of :func:`derive_column_axial_ratios`: applies the seismic weight
+    as nodal gravity loads (``mass × g`` downward) and runs a linear static
+    analysis, then reads each base column's axial force from its support
+    reaction.  The two must agree — the benchmark collapses "seismic mass" and
+    "gravity load" into one quantity, so the only difference is any moment-frame
+    gravity redistribution, which is zero for the symmetric planar frames.
+
+    Args:
+        md: The SAC model before preprocessing; ``added_masses`` are the FEMA
+            355C seismic weight lumped at the floor nodes.
+        building: 3, 9 or 20.  Only 3 is exercised today.
+
+    Returns:
+        ``{section_name: Pg/Pye}`` for the moment-frame column sections, taking
+        the maximum ratio across the base columns that share a section.
+    """
+    import openseespy.opensees as ops
+
+    g = g_from_units(md.units)
+    roles = _frame_element_roles(md)
+    nodes = md.nodes
+
+    mesh = preprocess_model(md, preprocess_config())
+    builder = AnalysisBuilder(mesh, {})
+    builder.build_domain()
+
+    # Apply the seismic weight as nodal gravity loads (downward −Z).
+    ops.timeSeries("Constant", 910001)
+    ops.pattern("Plain", 910002, 910001)
+    for nid, mass in (md.added_masses or {}).items():
+        nd = mesh.nodes.get(nid)
+        if nd is not None and mass:
+            ops.load(nd.node_tag, 0.0, 0.0, -float(mass) * g, 0.0, 0.0, 0.0)
+
+    res = builder.run_static_analysis(extract_reactions=True)
+    reactions: dict[str, dict[str, float]] = res.get("reactions", {})
+
+    ratios: dict[str, float] = {}
+    for eid, elem in md.frame_elements.items():
+        if roles.get(eid) != "col":
+            continue
+        ni = nodes[elem.node_i]
+        nj = nodes[elem.node_j]
+        bottom = ni if ni.z < nj.z else nj
+        if bottom.node_id not in (md.restraints or {}):
+            continue  # not a base (fixed) column
+        sname = md.frame_assignments.get(eid, "")
+        sec = md.sections.get(sname)
+        if sec is None or getattr(sec, "material", None) != "SteelCol":
+            continue  # leaning column
+        rxn = reactions.get(bottom.node_id)
+        if rxn is None:
+            continue
+        pye = sec.A * _COLUMN_RY * COLUMN_FY
+        ratios[sname] = max(ratios.get(sname, 0.0), abs(float(rxn.get("fz", 0.0))) / pye)
+    return ratios
+
+
 def enrich_imk(
     md: SAPModelData,
     building: int = 3,
     column_axial_ratio: float = 0.0,
+    column_axial_ratios: Optional[dict[str, float]] = None,
     beam_unbraced_factor: float = 1.0,
     theta_u: Optional[float] = None,
     theta_u_model: str = "plateau",
@@ -356,8 +494,14 @@ def enrich_imk(
             sections carry the ``SteelCol`` / ``SteelBeam`` material).
         building: 3, 9 or 20.  Only 3 is wired today.
         column_axial_ratio: Gravity axial-load ratio ``Pg/Pye`` for columns
-            (``0`` = pure flexure, the no-axial-load envelope; the per-column
-            value from a gravity run is an open A3 item).
+            (``0`` = pure flexure, the no-axial-load envelope).  Superseded
+            per-section by *column_axial_ratios* when that is given.
+        column_axial_ratios: Optional ``{section_name: Pg/Pye}`` override, applied
+            per section (wins over the scalar *column_axial_ratio* for any
+            section it names).  Typically :func:`derive_column_axial_ratios`
+            (the tributary FEMA 355C seismic-weight estimate) — the benchmark
+            matching convention — with :func:`gravity_axial_ratios` as the
+            independent full-solve cross-check.
         beam_unbraced_factor: ``Lb / L`` for beams (default 1.0).
         theta_u: Explicit ``IMKBilin`` ultimate rotation (rad) override; ``None``
             defers to *theta_u_model* (benchmark calibration).  When given, the
@@ -410,6 +554,9 @@ def enrich_imk(
         if props is None:
             continue
         length = lengths[sname]
+        axial = column_axial_ratio
+        if column_axial_ratios is not None:
+            axial = float(column_axial_ratios.get(sname, column_axial_ratio))
         params = lignos_krawinkler_2011(
             section_depth_m=props["D"],
             web_thickness_m=props["TW"],
@@ -420,7 +567,7 @@ def enrich_imk(
             member_length_m=length,
             fy_pa=COLUMN_FY if is_col else BEAM_FY,
             plastic_modulus_m3=props["Z33"],
-            axial_ratio=column_axial_ratio if is_col else 0.0,
+            axial_ratio=axial if is_col else 0.0,
             column=is_col,
             theta_u=theta_u,
             theta_u_model=theta_u_model,
@@ -433,6 +580,15 @@ def enrich_imk(
         md.imk_theta_u_model = theta_u_model
     else:
         md.imk_theta_u_model = f"explicit:{theta_u:g}"
+    # Run-level provenance for the column axial-load source: per-section ratios
+    # (from :func:`derive_column_axial_ratios` / a caller-supplied dict), a
+    # single explicit scalar, or none (the pure-flexure envelope).
+    if column_axial_ratios is not None:
+        md.imk_column_axial_source = "per-section"
+    elif column_axial_ratio != 0.0:
+        md.imk_column_axial_source = f"explicit:{column_axial_ratio:g}"
+    else:
+        md.imk_column_axial_source = "none"
     return md
 
 
@@ -882,10 +1038,12 @@ __all__ = [
     "SAC_DT_CAL",
     "build_builder",
     "builder_config",
+    "derive_column_axial_ratios",
     "enrich_display_sections",
     "enrich_imk",
     "enrich_nonlinear",
     "enrich_trilinear",
+    "gravity_axial_ratios",
     "load_benchmark_record",
     "load_model",
     "peak_x",

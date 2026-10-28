@@ -80,3 +80,47 @@ def test_imk_frame_builds_end_to_end():
         assert b is not None
     finally:
         wipe()
+
+
+def test_derive_column_axial_ratios():
+    """Tributary ``Pg/Pye`` matches the FEMA 355C seismic weight (half frame)."""
+    wipe()
+    md = sac.load_model(nonlinear=True, backbone="imk")
+    ratios = sac.derive_column_axial_ratios(md)
+    # Two moment-frame column sections.  The smaller W14x257 exterior section
+    # sits on the gravity-bay line and carries a *full* bay (≈0.195); the larger
+    # W14x311 interior section carries ≈0.162.  Both sit below the 0.20
+    # ASCE-41 force-controlled threshold.
+    assert len(ratios) == 2
+    assert max(ratios.values()) == pytest.approx(0.19536, rel=1e-3)
+    assert min(ratios.values()) == pytest.approx(0.16159, rel=1e-3)
+    assert all(0.0 < r < 0.35 for r in ratios.values())
+
+
+def test_gravity_axial_ratios_matches_tributary():
+    """The full elastic gravity solve agrees with the tributary estimate."""
+    wipe()
+    try:
+        md = sac.load_model(nonlinear=True, backbone="imk")
+        tributary = sac.derive_column_axial_ratios(md)
+        full = sac.gravity_axial_ratios(md)
+        assert set(full) == set(tributary)
+        for sname, r in tributary.items():
+            assert full[sname] == pytest.approx(r, rel=5e-3)
+    finally:
+        wipe()
+
+
+def test_enrich_imk_applies_column_axial_ratios():
+    """Per-section axial ratios reduce the column yield moment vs pure flexure."""
+    wipe()
+    md = sac.load_model(nonlinear=True, backbone="imk")  # baseline: ratio 0
+    cols, _, _ = _split_by_material(md)
+    baseline_my = {s: md.sections[s].imk_params["My_pos"] for s in cols}
+    assert md.imk_column_axial_source == "none"
+
+    ratios = sac.derive_column_axial_ratios(md)
+    sac.enrich_imk(md, building=3, column_axial_ratios=ratios)
+    assert md.imk_column_axial_source == "per-section"
+    for s in cols:
+        assert md.sections[s].imk_params["My_pos"] < baseline_my[s]

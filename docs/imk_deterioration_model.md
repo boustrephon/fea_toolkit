@@ -136,12 +136,24 @@ each member's *physical* AISC geometry (read via
 (`Pg/Pye`); beams use Lignos–Krawinkler (2011); the leaning column stays elastic.
 Tests: `tests/test_benchmark_sac_imk_frame.py`.
 
+Second increment landed (2026-10-28): the column axial ratio (item 1) is now
+derived from the FEMA 355C seismic weight via `sac.derive_column_axial_ratios()`,
+with `sac.gravity_axial_ratios()` as the full-elastic-solve cross-check
+(agreement ≈ 0.15 %).
+
 Open A3 items, in build order:
 
-1. **Column axial ratio.**  `enrich_imk` takes `column_axial_ratio` (default 0 —
-   pure flexure, the no-axial-load envelope).  Compute the per-column `Pg/Pye`
-   from a gravity run of the elastic model (tributary + member self-weight) so
-   the columns carry their real axial-load reduction.
+1. **Column axial ratio.**  ✅ **Landed 2026-10-28** — the benchmark collapses
+   "seismic mass" and "gravity load" into one quantity (Lignos 2008, Stanford
+   TR177 §5; the FEMA 355C dead + reduced-live + steel-self-weight seismic
+   weight, already lumped as `added_masses`), so `Pg/Pye` is derived from that
+   weight rather than a separate gravity load.  `sac.derive_column_axial_ratios()`
+   computes the per-section `Pg = g·Σ(tributary mass)` / `Pye = A·Ry·Fy` (Ry = 1.1),
+   and `sac.gravity_axial_ratios()` is the independent full elastic gravity solve
+   that cross-checks it (agreement ≈ 0.15 %).  `enrich_imk(..., column_axial_ratios=…)`
+   applies them per section; the 3-story governing ratios are W14x257 ≈ 0.195
+   (gravity-bay line, full tributary bay) and W14x311 ≈ 0.162, both below the
+   0.20 ASCE 41 force-controlled threshold.
 2. **Beam unbraced length.**  `beam_unbraced_factor` defaults to 1.0 (`Lb = L`,
    no intermediate bracing).  The composite-slab bracing assumption (typically
    `Lb ≈ L/2` for the bottom flange in negative moment) is a calibration choice;
