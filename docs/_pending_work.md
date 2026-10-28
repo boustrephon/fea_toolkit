@@ -207,21 +207,35 @@ writes it through the storage seam (``io.npz_reader.read_results_npz`` /
 unified schema, and it must not.
 
 **What is required (schema v4).**
-1. Add ``"transient"`` to the ``analysis_types`` discriminator and bump
+
+> **Status (2026-10-28).**  Items 1–4 landed as the first draft:
+> `"transient"` is in the discriminator, `SCHEMA_VERSION` is 4, the
+> `transient/<case>/...` block (``time`` / ``base_shear`` / ``direction`` +
+> recorded ``node_tag`` + dense ``node_disp_*`` / ``node_vel_*`` /
+> ``node_accel_*`` + the peak scalars and Rayleigh periods) is declared and
+> validated, `collect_transient_arrays()` is wired into
+> `write_results()` / `write_results_npz()`, `describe_results_npz()` reports
+> `transient_cases`, and `analysis/nonlinear_dynamic.py` now carries the full
+> payload so its `data` feeds the collector directly.  Two deliberate
+> deviations from the candidate layout: (a) `stage_writer.write_model_stages`
+> is **not** touched — a stage file holds geometry, not time-history results;
+> (b) the node kinematics use `node_disp_*` (matching the pushover block's
+> spelling) rather than `node_dx`.  Items 5–6 remain open.  Tests:
+> `tests/test_transient_schema.py`.
+
+1. ✅ Add ``"transient"`` to the ``analysis_types`` discriminator and bump
    ``results_schema.SCHEMA_VERSION`` 3 → 4 (with the same "old files still
    read" note as the 2→3 bump).
-2. Define a ``transient/<case>/...`` block.  Candidate layout: ``time`` (N_t,),
-   recorded ``node_tags`` (N_rec,) with dense ``node_dx`` / ``node_dy`` /
-   ``node_dz`` (N_t × N_rec) — or a ragged encoding if the recorded node set
-   differs per case — plus ``base_shear`` (N_t,), the peak scalars (0-d), and
-   Rayleigh ``period_1`` / ``period_2``; carry ``force_unit`` / ``length_unit``
-   / ``time_unit`` metadata like the static block.
-3. Add ``TRANSIENT_ARRAYS`` to ``io/results_schema.py`` and extend
+2. ✅ Define a ``transient/<case>/...`` block — ``time`` (N_t,), recorded
+   ``node_tag`` (N_rec,) with dense ``node_disp_*`` / ``node_vel_*`` /
+   ``node_accel_*`` (N_t × N_rec), ``base_shear`` (N_t,), the peak scalars
+   (0-d), and Rayleigh ``period_1`` / ``period_2``.
+3. ✅ Add ``TRANSIENT_*_ARRAYS`` to ``io/results_schema.py`` and extend
    ``validate_npz`` / ``npz_reader.describe_results_npz`` (mirroring how ``rs``
    and ``pushover`` were added).
-4. Add a ``collect_transient_arrays`` / ``write_transient_results`` producer
-   and wire it into ``unified_writer.write_results`` and
-   ``stage_writer.write_model_stages``.
+4. ✅ Add a ``collect_transient_arrays`` producer and wire it into
+   ``unified_writer.write_results`` and ``npz_writer.write_results_npz``
+   (``stage_writer`` is geometry-only, not a results archive).
 5. Extend ``ResultsRepository`` / ``NpzResultsRepository`` to list and serve
    transient cases so the GUI / report / Rhino can consume them through the
    seam.

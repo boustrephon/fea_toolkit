@@ -1080,6 +1080,7 @@ class StaticRunnerMixin:
         rs_results: Optional[dict[str, dict]] = None,
         rs_element_forces: Optional[dict[str, Any]] = None,
         rs_nodal_displacements: Optional[dict[int, tuple]] = None,
+        transient_results: Optional[dict[str, Any]] = None,
         fmt: str = "npz",
         model: Optional[SAPModelData] = None,
         expand_combinations: bool = False,
@@ -1100,6 +1101,10 @@ class StaticRunnerMixin:
             rs_element_forces: Dict from :meth:`extract_element_rs_forces`.
             rs_nodal_displacements: Dict from
                 :meth:`compute_rs_nodal_displacements`.
+            transient_results: Optional ``{case: result}`` mapping of
+                time-history runs (see
+                :meth:`run_transient_analysis`), written under the
+                ``transient/<case>/...`` block.
             fmt: ``"npz"`` (default) or ``"h5"``.
             model: Parsed ``SAPModelData`` — required when
                 *expand_combinations* is set, because the load combinations
@@ -1157,6 +1162,7 @@ class StaticRunnerMixin:
             rs_results=rs_results,
             rs_element_forces=rs_element_forces,
             rs_nodal_displacements=rs_nodal_displacements,
+            transient_results=transient_results,
             fmt=fmt,
             config=self.config,
             case_meta=case_meta,

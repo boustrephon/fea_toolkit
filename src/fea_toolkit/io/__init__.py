@@ -49,9 +49,21 @@ from .npz_reader import (
     read_results,
     read_results_npz,
 )
-from .npz_writer import results_arrays, save_results_arrays, write_results_npz
+from .npz_writer import (
+    collect_transient_arrays,
+    results_arrays,
+    save_results_arrays,
+    write_results_npz,
+)
 from .results_repository import NpzResultsRepository, ResultsRepository
-from .results_schema import SCHEMA_VERSION, SCHEMA_VERSION_LEGACY, make_static_key, validate_npz
+from .results_schema import (
+    SCHEMA_VERSION,
+    SCHEMA_VERSION_LEGACY,
+    make_static_key,
+    make_transient_key,
+    transient_case_names,
+    validate_npz,
+)
 from .s2k_parser import SAP2000Parser
 from .stage_reader import (
     flatten_stage,
@@ -146,6 +158,7 @@ __all__ = [
     "collect_modal_arrays",
     "collect_rs_arrays",
     "collect_static_arrays",
+    "collect_transient_arrays",
     "describe_results_npz",
     "flatten_stage",
     "format_linear_table",
@@ -154,6 +167,7 @@ __all__ = [
     "load_model_data",
     "load_pattern_totals",
     "make_static_key",
+    "make_transient_key",
     "material_summary",
     "modal_participation_df",
     "modal_table",
@@ -187,6 +201,7 @@ __all__ = [
     "summarise_load_patterns",
     "summarise_mass_sources",
     "table_coverage",
+    "transient_case_names",
     "unhandled_tables",
     "validate_npz",
     "write_combination_set",

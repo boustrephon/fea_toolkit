@@ -24,7 +24,13 @@ import numpy as np
 from ..model.sap_data import SAPModelData
 from ..model.tree_utils import get_root_parent
 from ..utils import force_unit_label, length_unit_label
-from .results_schema import SCHEMA_VERSION, case_meta_arrays, make_pushover_key, make_static_key
+from .results_schema import (
+    SCHEMA_VERSION,
+    case_meta_arrays,
+    make_pushover_key,
+    make_static_key,
+    make_transient_key,
+)
 
 if TYPE_CHECKING:
     from ..model.mesh_model import MeshModel
@@ -541,6 +547,7 @@ def results_arrays(
     length_unit: Optional[str] = None,
     forces_coordinate_system: str = "local",
     mesh_model: Optional["MeshModel"] = None,
+    transient_results: Optional[dict[str, Any]] = None,
     case_meta: Optional[dict[str, dict[str, str]]] = None,
 ) -> dict[str, np.ndarray]:
     """Assemble a results archive **in memory** — ``{array_name: np.ndarray}``.
@@ -577,6 +584,13 @@ def results_arrays(
             correct split/meshed topology for visualisation.
             Pass the same ``MeshModel`` that was passed to the
             ``AnalysisBuilder``.
+        transient_results: Optional ``{case: result}`` mapping of time-history
+            runs — the dict returned by
+            :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.run_transient_analysis`
+            (or the enriched ``data`` of
+            :func:`~fea_toolkit.analysis.nonlinear_dynamic.run_nonlinear_dynamic_analysis`).
+            Written under the ``transient/<case>/...`` block via
+            :func:`collect_transient_arrays` and listed in ``analysis_types``.
         case_meta: Optional ``{case: {"group": str, "family": str, "coords": str}}`` per-case
             metadata.  ``group`` names the load combination each case came from
             and ``kind`` its magnitude sense (``"+QE"`` / ``"-QE"``) where the
@@ -630,6 +644,9 @@ def results_arrays(
     if shell_forces:
         analysis_types.append("shell_forces")
         arrays.update(_collect_shell_forces(shell_forces))
+    if transient_results:
+        analysis_types.append("transient")
+        arrays.update(collect_transient_arrays(transient_results))
     # NOTE: Legacy flat aliases (shell_fx, shell_fy, ...) were previously
     # written here for backward compatibility.  As of 2026-07 all consumers
     # use the namespaced ``shell_forces/*`` keys or the geometry-native
@@ -660,6 +677,7 @@ def write_results_npz(
     length_unit: Optional[str] = None,
     forces_coordinate_system: str = "local",
     mesh_model: Optional["MeshModel"] = None,
+    transient_results: Optional[dict[str, Any]] = None,
     case_meta: Optional[dict[str, dict[str, str]]] = None,
 ) -> str:
     """Write a unified NPZ file with model geometry + analysis results.
@@ -682,6 +700,9 @@ def write_results_npz(
         forces_coordinate_system: Coordinate system of the recorded frame
             end-force arrays; ``"local"`` — see :func:`results_arrays`.
         mesh_model: Optional post-processed ``MeshModel`` supplying the geometry.
+        transient_results: Optional ``{case: result}`` mapping of time-history
+            runs — written under the ``transient/<case>/...`` block (see
+            :func:`collect_transient_arrays`).
         case_meta: Optional ``{case: {"group", "kind", "family", "coords"}}``.
 
     Returns:
@@ -704,6 +725,7 @@ def write_results_npz(
         length_unit=length_unit,
         forces_coordinate_system=forces_coordinate_system,
         mesh_model=mesh_model,
+        transient_results=transient_results,
         case_meta=case_meta,
     )
     return save_results_arrays(path, arrays)
@@ -1055,6 +1077,115 @@ def collect_pushover_arrays(
             ] = np.array(aligned_shear, dtype=float)
 
     return po_arrays
+
+
+def _transient_component_grid(
+    histories: dict, node_tags: list[int], n_t: int, n_rec: int, component: int
+) -> np.ndarray:
+    """Dense ``(n_t, n_rec)`` grid of one kinematic component over *node_tags*.
+
+    Nodes absent from *histories* are NaN-filled, so a reader can distinguish
+    "not recorded" from a genuine zero.
+    """
+    grid = np.full((n_t, n_rec), np.nan, dtype=float)
+    for j, tag in enumerate(node_tags):
+        hist = histories.get(tag)
+        if hist is None:
+            continue
+        vals = np.asarray(hist, dtype=float)
+        if vals.ndim == 2 and vals.shape[1] > component:
+            grid[: min(n_t, vals.shape[0]), j] = vals[:n_t, component]
+    return grid
+
+
+def collect_transient_arrays(transient_results: dict[str, Any]) -> dict[str, np.ndarray]:
+    """Collect a ``transient/<case>/...`` block for each named time-history run.
+
+    Consumes the in-process result of
+    :meth:`fea_toolkit.opensees.analysis_builder.AnalysisBuilder.run_transient_analysis`
+    (or the enriched ``data`` of
+    :func:`fea_toolkit.analysis.nonlinear_dynamic.run_nonlinear_dynamic_analysis`) —
+    ``times``, per-node ``displacements`` / ``velocities`` / ``accelerations``
+    (``{node_tag: (n, 3)}``), ``base_shear``, the peak reductions and the Rayleigh
+    ``period_1`` / ``period_2`` — and emits the arrays declared by
+    :data:`~fea_toolkit.io.results_schema.TRANSIENT_GLOBAL_ARRAYS` /
+    ``TRANSIENT_SCALAR_ARRAYS`` / ``TRANSIENT_NODE_ARRAYS``.
+
+    The recorded-node subset is the sorted union of the keys of
+    ``displacements`` (the runner records exactly those nodes); unrecorded
+    velocity / acceleration components are omitted entirely rather than
+    NaN-filled, so a reader can detect which kinematics were recorded.
+
+    Args:
+        transient_results: ``{case: result}`` mapping each ground-motion run's
+            label to its result dict.  ``None`` produces no transient arrays.
+
+    Returns:
+        Dict of ``{array_name: np.ndarray}`` keyed per the ``TRANSIENT_*_ARRAYS``
+        schema (empty when *transient_results* is ``None``).
+    """
+    arrays: dict[str, np.ndarray] = {}
+    if not transient_results:
+        return arrays
+
+    for case, res in transient_results.items():
+        times = np.asarray(res.get("times", []), dtype=float)
+        n_t = int(times.size)
+
+        arrays[make_transient_key(case, "transient/{case}/time")] = times
+        arrays[make_transient_key(case, "transient/{case}/base_shear")] = np.asarray(
+            res.get("base_shear", np.zeros(n_t)), dtype=float
+        )
+        arrays[make_transient_key(case, "transient/{case}/direction")] = np.asarray(
+            str(res.get("direction", "X")), dtype=str
+        )
+
+        # ── Optional scalar / provenance fields (emitted only when present) ──
+        scalar_dtypes = {
+            "dt": "float",
+            "gm_file": "str",
+            "peak_displacement": "float",
+            "peak_base_shear": "float",
+            "peak_plastic_rotation": "float",
+            "max_dissipated_energy": "float",
+            "num_yielded_hinges": "int",
+            "converged_steps": "int",
+            "period_1": "float",
+            "period_2": "float",
+        }
+        for field, dtype in scalar_dtypes.items():
+            if field in res:
+                arrays[make_transient_key(case, f"transient/{{case}}/{field}")] = np.asarray(
+                    res[field], dtype=dtype
+                )
+
+        # ── Node kinematics (dense N_t × N_rec over the recorded subset) ──
+        disp = res.get("displacements") or {}
+        node_tags = sorted(int(t) for t in disp)
+        if not node_tags:
+            continue
+        n_rec = len(node_tags)
+        arrays[make_transient_key(case, "transient/{case}/node_tag")] = np.array(
+            node_tags, dtype=int
+        )
+
+        for comp, key in enumerate(("node_disp_x", "node_disp_y", "node_disp_z")):
+            arrays[make_transient_key(case, f"transient/{{case}}/{key}")] = (
+                _transient_component_grid(disp, node_tags, n_t, n_rec, comp)
+            )
+
+        for prefix, kin in (
+            ("node_vel", res.get("velocities")),
+            ("node_accel", res.get("accelerations")),
+        ):
+            if not kin:
+                continue
+            for comp, key in enumerate((f"{prefix}_x", f"{prefix}_y", f"{prefix}_z")):
+                arrays[make_transient_key(case, f"transient/{{case}}/{key}")] = (
+                    _transient_component_grid(kin, node_tags, n_t, n_rec, comp)
+                )
+
+    return arrays
 
 
 def write_pushover_results_npz(

@@ -38,7 +38,14 @@ SCHEMA_VERSION_LEGACY = 1
 #:   convention, which is the incompatibility this version marks.  The
 #:   stage-file array layout is unchanged; the marker is shared with it by
 #:   design (see ``docs/model_stage_file.md``).
-SCHEMA_VERSION = 3
+#: * ``4`` — a first-class ``transient`` block for time-history results (P43).
+#:   ``analysis_types`` may now contain ``"transient"``; each
+#:   ``transient/<case>/...`` carries ``time`` / ``base_shear`` (``N_t``), a
+#:   recorded-node subset ``node_tag`` with dense ``node_disp_*`` / ``node_vel_*``
+#:   / ``node_accel_*`` (``N_t × N_rec``), the peak reductions and the Rayleigh
+#:   ``period_1`` / ``period_2``.  A ``3`` archive still reads — it simply has no
+#:   ``transient`` block, so ``"transient"`` is absent from its ``analysis_types``.
+SCHEMA_VERSION = 4
 
 # ── Required array names per result type ──────────────────────────────────
 
@@ -324,6 +331,44 @@ PUSHOVER_SECTION_ARRAYS: dict[str, tuple] = {
     ),
 }
 
+# ── Transient (time-history) results (case-keyed) ─────────────────────────
+# Each ``transient/<case>/...`` block is a single ground-motion run.  ``N_t``
+# is the number of converged time steps and ``N_rec`` the recorded-node subset
+# (the keys of the runner's ``displacements`` dict, sorted ascending).  The
+# node kinematics mirror the runner's per-node ``(N_t, 3)`` histories, so a
+# reader can animate any recorded node from ``node_tag`` without the geometry.
+TRANSIENT_GLOBAL_ARRAYS: dict[str, tuple] = {
+    "transient/{case}/time": ("N_t", "float"),
+    "transient/{case}/base_shear": ("N_t", "float"),
+    "transient/{case}/direction": ("", "str"),
+}
+
+TRANSIENT_SCALAR_ARRAYS: dict[str, tuple] = {
+    "transient/{case}/dt": ("", "float"),
+    "transient/{case}/gm_file": ("", "str"),
+    "transient/{case}/peak_displacement": ("", "float"),
+    "transient/{case}/peak_base_shear": ("", "float"),
+    "transient/{case}/peak_plastic_rotation": ("", "float"),
+    "transient/{case}/max_dissipated_energy": ("", "float"),
+    "transient/{case}/num_yielded_hinges": ("", "int"),
+    "transient/{case}/converged_steps": ("", "int"),
+    "transient/{case}/period_1": ("", "float"),
+    "transient/{case}/period_2": ("", "float"),
+}
+
+TRANSIENT_NODE_ARRAYS: dict[str, tuple] = {
+    "transient/{case}/node_tag": ("N_rec", "int"),
+    "transient/{case}/node_disp_x": ("N_t N_rec", "float"),
+    "transient/{case}/node_disp_y": ("N_t N_rec", "float"),
+    "transient/{case}/node_disp_z": ("N_t N_rec", "float"),
+    "transient/{case}/node_vel_x": ("N_t N_rec", "float"),
+    "transient/{case}/node_vel_y": ("N_t N_rec", "float"),
+    "transient/{case}/node_vel_z": ("N_t N_rec", "float"),
+    "transient/{case}/node_accel_x": ("N_t N_rec", "float"),
+    "transient/{case}/node_accel_y": ("N_t N_rec", "float"),
+    "transient/{case}/node_accel_z": ("N_t N_rec", "float"),
+}
+
 META_ARRAYS: dict[str, tuple] = {
     "force_unit": ("", "str"),
     "length_unit": ("", "str"),
@@ -451,6 +496,42 @@ def pushover_load_type(data: t.Mapping[str, t.Any], direction: str) -> str:
             f"{unique}.  The load type is ambiguous."
         )
     return unique[0]
+
+
+def make_transient_key(case: str, template: str) -> str:
+    """Build the NPZ key for a transient result array.
+
+    Args:
+        case: Transient case name (a ground-motion run label), e.g.
+            ``"NonlinearDynamic"`` or ``"ELCENTRO"``.
+        template: Key template containing ``{case}``.
+
+    Returns:
+        Formatted array name, e.g. ``transient/ELCENTRO/time``.
+    """
+    return template.format(case=case)
+
+
+def transient_case_names(data: t.Mapping[str, t.Any]) -> list[str]:
+    """Return the transient case names present in *data*, sorted.
+
+    A case is identified by its ``transient/<case>/time`` array (the required
+    anchor of each transient block).  Archives with no transient block return
+    an empty list.
+
+    Args:
+        data: Flat results dict (NPZ-style keys).
+
+    Returns:
+        Sorted list of case names, e.g. ``["ELCENTRO", "NonlinearDynamic"]``.
+    """
+    cases: set[str] = set()
+    for key in data:
+        if key.startswith("transient/") and key.endswith("/time"):
+            parts = key.split("/")
+            if len(parts) >= 3:
+                cases.add(parts[1])
+    return sorted(cases)
 
 
 def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
@@ -765,6 +846,45 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
                         if arr is None:
                             continue  # not recorded for this model
                         _check_shape(key, arr, shape_desc, dtype_str)
+        if "transient" in types:
+            for case in transient_case_names(data):
+                # ── Resolve per-case N_t / N_rec dims ──
+                # Clear the shared dims first so each case is validated only
+                # against its own arrays (mirrors the pushover per-direction
+                # handling above).
+                for dk in ("N_t", "N_rec"):
+                    dims.pop(dk, None)
+                time_arr = data.get(make_transient_key(case, "transient/{case}/time"))
+                if time_arr is not None:
+                    dims["N_t"] = len(time_arr)
+                node_tag_arr = data.get(make_transient_key(case, "transient/{case}/node_tag"))
+                if node_tag_arr is not None:
+                    dims["N_rec"] = len(node_tag_arr)
+
+                # ── Required: global arrays ──
+                for template, (shape_desc, dtype_str) in TRANSIENT_GLOBAL_ARRAYS.items():
+                    key = make_transient_key(case, template)
+                    arr = data.get(key)
+                    if arr is None:
+                        messages.append(f"Missing transient array: {key}")
+                        continue
+                    _check_shape(key, arr, shape_desc, dtype_str)
+
+                # ── Optional: peak scalars / provenance / Rayleigh periods ──
+                for template, (shape_desc, dtype_str) in TRANSIENT_SCALAR_ARRAYS.items():
+                    key = make_transient_key(case, template)
+                    arr = data.get(key)
+                    if arr is None:
+                        continue
+                    _check_shape(key, arr, shape_desc, dtype_str)
+
+                # ── Optional: node kinematics (only when recorded) ──
+                for template, (shape_desc, dtype_str) in TRANSIENT_NODE_ARRAYS.items():
+                    key = make_transient_key(case, template)
+                    arr = data.get(key)
+                    if arr is None:
+                        continue  # not recorded for this run
+                    _check_shape(key, arr, shape_desc, dtype_str)
 
     return messages
 

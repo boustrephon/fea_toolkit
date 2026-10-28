@@ -476,6 +476,7 @@ def write_results(
     rs_nodal_displacements: Optional[dict[int, tuple]] = None,
     rs_shell_forces: Optional[dict[str, Any]] = None,
     pushover_results: Optional[dict[str, tuple]] = None,
+    transient_results: Optional[dict[str, Any]] = None,
     fmt: str = "npz",
     config: Optional[dict] = None,
     force_unit: Optional[str] = None,
@@ -504,6 +505,10 @@ def write_results(
             ``pushover/{direction}/{load_type}/...`` via
             :func:`fea_toolkit.io.npz_writer.collect_pushover_arrays`
             (requires *mesh_model* for the node tags).
+        transient_results: Optional ``{case: result}`` mapping of time-history
+            runs — written under the ``transient/<case>/...`` block via
+            :func:`fea_toolkit.io.npz_writer.collect_transient_arrays` and
+            listed in ``analysis_types`` as ``"transient"``.
         fmt: ``"npz"`` (default) or ``"h5"``.
         config: Builder config dict (included in metadata).
         force_unit: Optional force-unit label override.  ``None`` derives
@@ -605,6 +610,12 @@ def write_results(
                         pushover_results=po_results,
                     )
                 )
+    # Transient (time-history) results, one block per named run
+    if transient_results:
+        from .npz_writer import collect_transient_arrays
+
+        arrays.update(collect_transient_arrays(transient_results))
+
     if static_results:
         analysis_types.append("static")
     if modal_result:
@@ -613,6 +624,8 @@ def write_results(
         analysis_types.append("rs")
     if pushover_results:
         analysis_types.append("pushover")
+    if transient_results:
+        analysis_types.append("transient")
     # Always written — an empty array for a geometry-only file, matching the
     # legacy ``write_results_npz`` manifest so ``describe_results_npz`` and
     # the review's archive summary read identically from either writer.

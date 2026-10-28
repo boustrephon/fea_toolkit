@@ -57,9 +57,15 @@ def run_nonlinear_dynamic_analysis(
             hand-off.
 
     Returns:
-        :class:`AnalysisResult` with ``times``, ``displacements``
-        (``{node_tag: (n_steps, 3) ndarray}``), ``peak_displacement`` and
-        ``converged_steps``.
+        :class:`AnalysisResult` whose ``data`` carries the full transient
+        payload — ``times``, per-node ``displacements`` / ``velocities`` /
+        ``accelerations`` (``{node_tag: (n_steps, 3) ndarray}``),
+        ``base_shear``, the peak reductions (``peak_displacement`` /
+        ``peak_base_shear`` / ``peak_plastic_rotation`` /
+        ``max_dissipated_energy`` / ``num_yielded_hinges``), ``period_1`` /
+        ``period_2``, ``converged_steps``, ``dt``, ``gm_file`` and
+        ``direction`` — so it can be handed straight to
+        :func:`fea_toolkit.io.npz_writer.collect_transient_arrays`.
     """
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
@@ -121,11 +127,21 @@ def run_nonlinear_dynamic_analysis(
         data={
             "times": res["times"],
             "displacements": res["displacements"],
-            "envelope": None,
+            "velocities": res["velocities"],
+            "accelerations": res["accelerations"],
+            "base_shear": res["base_shear"],
             "peak_displacement": res["peak_displacement"],
+            "peak_base_shear": res["peak_base_shear"],
+            "peak_plastic_rotation": res["peak_plastic_rotation"],
+            "max_dissipated_energy": res["max_dissipated_energy"],
+            "num_yielded_hinges": res["num_yielded_hinges"],
             "converged_steps": res["converged_steps"],
+            "period_1": res["period_1"],
+            "period_2": res["period_2"],
+            "dt": dt,
             "gm_file": ground_motion_file,
             "direction": direction,
+            "envelope": None,
         },
         metadata={
             "ground_motion_file": ground_motion_file,

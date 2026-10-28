@@ -458,11 +458,56 @@ declared array against the **correct** dimension: nodal arrays (`node_*`,
 `rs/elem_*`) against `N_frame`.  A *missing* required array is reported as
 `Missing … array`; optional arrays are only shape‑checked when present.
 
+### Transient (time-history) results
+
+The `transient/<case>/...` block gives an in-process Newmark time-history
+result a first-class home (schema **v4**, P43).  Each ground-motion run is
+keyed by its case label (`transient/<case>/...`), written by
+`collect_transient_arrays()` from the dict returned by
+`AnalysisBuilder.run_transient_analysis()` (or the enriched `data` of
+`run_nonlinear_dynamic_analysis()`), and wired through both
+`write_results()` and `write_results_npz()` via the `transient_results`
+argument (`{case: result}`).  `analysis_types` carries `"transient"`.
+
+| Array | Shape | dtype | Description |
+|---|---|---|---|
+| `transient/<case>/time` | `(N_t,)` | `float` | Time axis (one entry per converged step) |
+| `transient/<case>/base_shear` | `(N_t,)` | `float` | Whole-building base shear (global equilibrium `Σ m·(a_rel + ag)`) |
+| `transient/<case>/direction` | `()` | `str` | Excitation direction `"X"` / `"Y"` / `"Z"` |
+| `transient/<case>/node_tag` | `(N_rec,)` | `int` | Recorded-node subset (sorted ascending) |
+| `transient/<case>/node_disp_x` / `_y` / `_z` | `(N_t, N_rec)` | `float` | Dense per-node displacement histories (NaN where unrecorded) |
+| `transient/<case>/node_vel_x` / `_y` / `_z` | `(N_t, N_rec)` | `float` | **Optional** — recorded only when kinematics are captured |
+| `transient/<case>/node_accel_x` / `_y` / `_z` | `(N_t, N_rec)` | `float` | **Optional** — recorded only when kinematics are captured |
+
+**Optional scalar entries** (always written when the producer supplies them):
+
+| Array | Shape | dtype | Description |
+|---|---|---|---|
+| `transient/<case>/dt` | `()` | `float` | Time step (s) |
+| `transient/<case>/gm_file` | `()` | `str` | Ground-motion source (provenance) |
+| `transient/<case>/peak_displacement` | `()` | `float` | Peak absolute node displacement |
+| `transient/<case>/peak_base_shear` | `()` | `float` | Peak absolute base shear |
+| `transient/<case>/peak_plastic_rotation` | `()` | `float` | Peak hinge plastic rotation `φmax` |
+| `transient/<case>/max_dissipated_energy` | `()` | `float` | Max hinge dissipated energy `Emax` |
+| `transient/<case>/num_yielded_hinges` | `()` | `int` | Yielded-hinge count `N_d` |
+| `transient/<case>/converged_steps` | `()` | `int` | Number of converged steps (`N_t`) |
+| `transient/<case>/period_1` | `()` | `float` | First Rayleigh period (s) |
+| `transient/<case>/period_2` | `()` | `float` | Second Rayleigh period (s) |
+
+`N_t` and `N_rec` are resolved **per case** (like the pushover block's
+per-direction `N_step` / `N_recorded_*`): `N_t` from `time` and `N_rec` from
+`node_tag`.  The node kinematics are optional — a run with no recorded
+displacements emits only the global block, and velocity/acceleration arrays
+are omitted entirely when the runner did not capture them (so a reader can
+tell "not recorded" from a zero).  `transient_case_names()` returns the sorted
+case labels, and `describe_results_npz()` reports them under
+`transient_cases`.
+
 ### Metadata
 
 | Array | Shape | dtype | Description |
 |---|---|---|---|
-| `schema_version` | `()` | `int` | File-level results-layout version (`results_schema.SCHEMA_VERSION`, currently 3).  Absent in legacy files — read as `SCHEMA_VERSION_LEGACY` (1) via `fea_toolkit.io.get_schema_version()`. |
+| `schema_version` | `()` | `int` | File-level results-layout version (`results_schema.SCHEMA_VERSION`, currently 4).  Absent in legacy files — read as `SCHEMA_VERSION_LEGACY` (1) via `fea_toolkit.io.get_schema_version()`. |
 | `force_unit` | `()` | `str` | e.g. ``"kN"``, ``"N"`` |
 | `length_unit` | `()` | `str` | e.g. ``"m"``, ``"mm"`` |
 | `created` | `()` | `str` | ISO‑8601 timestamp |
@@ -477,6 +522,13 @@ declared array against the **correct** dimension: nodal arrays (`node_*`,
 > marker is shared with the model-stage file by design, so
 > `write_model_stages()` stamps 3 as well although the stage-file array layout
 > did not change ([model stage file](model_stage_file.md)).
+
+> **Version 4 — the `transient` block.**  `analysis_types` may now contain
+> `"transient"`, and each `transient/<case>/...` carries the time-history
+> result described above.  A version-3 archive still reads — it simply has no
+> `transient` block, so `"transient"` is absent from its `analysis_types` and
+> `transient_case_names()` returns `[]`.  The stage-file array layout is again
+> unchanged (a stage file holds geometry, not time-history results).
 
 ## Data contract and storage seam
 
