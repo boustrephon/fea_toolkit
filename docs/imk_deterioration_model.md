@@ -195,6 +195,9 @@ Open A3 items, in build order:
    gravity-bay pin release is still skipped under ``hinge_model='lumped'`` (the
    lumped hinges re-point the member ends and win over the release — a known
    A3/A4 refinement).  ``tests/test_benchmark_sac_imk_920.py``.
+   The next refinement layer — member role/type from the transcribed
+   ``element_tbl`` type column, per-member axial ratio, and brace/pin handling —
+   is designed in ``docs/imk_member_classification.md``.
 6. **IDA vs Ibarra–Krawinkler (2005).**  Incremental dynamic analysis over the
    benchmark records; compare the median collapse capacity (`S_a(T1)`) against
    Ibarra–Medina–Krawinkler (2005).

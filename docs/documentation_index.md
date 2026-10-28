@@ -343,7 +343,7 @@ for automated cross-referencing.
   Related: [AnalysisBuilder Migration Plan](analysis_builder_migration_plan.md)
 
 - [Duong et al. (2007) Shear-Critical Frame Benchmark (T3)](duong_benchmark.md) — ✅ Complete
-  > End-to-end validation of the simplified-MCFT shear-failure modelling against the published Duong et al. (2007) shear-critical RC frame experiment, as re-analysed by Guner (2008) and Kotsovos & Zygouris (2019).
+  > Capacity, failure-mode and peak-response checks of the simplified-MCFT shear model and the nonlinear shear backbone against the published Duong et al. (2007) shear-critical RC frame experiment, as re-analysed by Guner (2008) and Kotsovos & Zygouris (2019).
   Tags: `validation`, `benchmark`, `shear`, `mcft`, `duong`, `rc-frame`, `pushover`, `shear-critical`
   Related: [RC Shear-Failure Modelling (MCFT Capacity + Nonlinear Shear Backbone)](shear_failure_modelling.md) · [Vecchio & Emara (1992) RC-Frame Pushover Benchmark](vecchio_emara_benchmark.md) · [Benchmark & Validation Model Register](benchmark_register.md)
 
@@ -365,6 +365,11 @@ for automated cross-referencing.
   > The Ibarra–Medina–Krawinkler (IMK) deterioration model for steel moment frames: relationship to the ASCE 41 backbone and ETABS/SAP2000/Perform-3D, the OpenSees IMKBilin material, and the A0–A3 implementation plan and status.
   Tags: `imk`, `ibarra-krawinkler`, `lignos-krawinkler`, `deterioration`, `collapse`, `hinge`, `imkbilin`, `bilin`, `steel`, `nonlinear-dynamic`, `moment-frame`
   Related: [Benchmark Roadmap — extended proposals](benchmark_roadmap.md) · [SAC 3-Story Nonlinear Benchmark (T4)](sac_nonlinear_benchmark.md) · [SAC Trilinear Hinge — Four Modelling Approaches](sac_trilinear_hinge_approaches.md) · [Structural Modeling Guidance](modeling_guidance.md)
+
+- [IMK Member Role & Type — Design Note](imk_member_classification.md) — 🚧 Draft
+  > How member role (column/beam) and member type (moment/brace/fixed-pin) are identified for the per-member IMK (IMKBilin) calibration, reconciling benchmark-matching with the general element-classification path.
+  Tags: `imk`, `ibarra-krawinkler`, `lignos-krawinkler`, `deterioration`, `hinge`, `element-classification`, `member-classification`, `benchmark`, `sac`
+  Related: [IMK (IMKBilin) Steel Hinge — Deterioration Model](imk_deterioration_model.md) · [Element Classification](element_classification.md) · [Benchmark Roadmap — extended proposals](benchmark_roadmap.md)
 
 - [Pushover Results Storage & Nonlinear Visualization](pushover_results_storage_viz.md) — ⚠️ Partial
   > Implementation plan and status for per-element pushover result recording (frame end forces, shell stress resultants, plasticity indicators) and nonlinear visualization.
@@ -466,7 +471,7 @@ Tags across all documentation files:
 - **`beam-column-joint`** — [benchmark_register.md](benchmark_register.md)
 - **`beam-with-hinges`** — [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`beams`** — [element_classification.md](element_classification.md)
-- **`benchmark`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [cantilever_benchmark.md](cantilever_benchmark.md), [duong_benchmark.md](duong_benchmark.md), [ground_motion_data.md](ground_motion_data.md), [sac_benchmark.md](sac_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [shear_building_benchmark.md](shear_building_benchmark.md), [tcl_import.md](tcl_import.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`benchmark`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [cantilever_benchmark.md](cantilever_benchmark.md), [duong_benchmark.md](duong_benchmark.md), [ground_motion_data.md](ground_motion_data.md), [imk_member_classification.md](imk_member_classification.md), [sac_benchmark.md](sac_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [shear_building_benchmark.md](shear_building_benchmark.md), [tcl_import.md](tcl_import.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`bilin`** — [imk_deterioration_model.md](imk_deterioration_model.md)
 - **`bilinearization`** — [csm_bilinearization.md](csm_bilinearization.md)
 - **`boolean`** — [shell_openings.md](shell_openings.md)
@@ -512,7 +517,7 @@ Tags across all documentation files:
 - **`design`** — [capacity.md](capacity.md), [workflow_palette.md](workflow_palette.md)
 - **`design-proposal`** — [report_generation.md](report_generation.md)
 - **`desktop`** — [gui.md](gui.md)
-- **`deterioration`** — [imk_deterioration_model.md](imk_deterioration_model.md)
+- **`deterioration`** — [imk_deterioration_model.md](imk_deterioration_model.md), [imk_member_classification.md](imk_member_classification.md)
 - **`development`** — [dev_notes.md](dev_notes.md)
 - **`diagnostics`** — [model_review.md](model_review.md), [pipeline_logging.md](pipeline_logging.md)
 - **`diaphragm`** — [diaphragm_constraints.md](diaphragm_constraints.md)
@@ -527,6 +532,7 @@ Tags across all documentation files:
 - **`eigen`** — [modal_analysis.md](modal_analysis.md)
 - **`eigenvalue`** — [modal_analysis.md](modal_analysis.md)
 - **`element-choice`** — [modeling_guidance.md](modeling_guidance.md)
+- **`element-classification`** — [imk_member_classification.md](imk_member_classification.md)
 - **`element-properties`** — [element_properties_config.md](element_properties_config.md)
 - **`element-type`** — [shell_openings.md](shell_openings.md)
 - **`elements`** — [element_classification.md](element_classification.md), [element_splitting.md](element_splitting.md), [shell_support.md](shell_support.md)
@@ -552,13 +558,13 @@ Tags across all documentation files:
 - **`guidance`** — [modeling_guidance.md](modeling_guidance.md)
 - **`guide`** — [llm_guide.md](llm_guide.md)
 - **`hdf5`** — [model_stage_file.md](model_stage_file.md), [project_bundle.md](project_bundle.md), [report_generation.md](report_generation.md)
-- **`hinge`** — [imk_deterioration_model.md](imk_deterioration_model.md), [modeling_guidance.md](modeling_guidance.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
+- **`hinge`** — [imk_deterioration_model.md](imk_deterioration_model.md), [imk_member_classification.md](imk_member_classification.md), [modeling_guidance.md](modeling_guidance.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`hinges`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md)
 - **`html-export`** — [viewer.md](viewer.md)
 - **`hysteretic`** — [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
-- **`ibarra-krawinkler`** — [imk_deterioration_model.md](imk_deterioration_model.md)
+- **`ibarra-krawinkler`** — [imk_deterioration_model.md](imk_deterioration_model.md), [imk_member_classification.md](imk_member_classification.md)
 - **`identifiers`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
-- **`imk`** — [imk_deterioration_model.md](imk_deterioration_model.md)
+- **`imk`** — [imk_deterioration_model.md](imk_deterioration_model.md), [imk_member_classification.md](imk_member_classification.md)
 - **`imkbilin`** — [imk_deterioration_model.md](imk_deterioration_model.md)
 - **`import`** — [tcl_import.md](tcl_import.md)
 - **`infill`** — [benchmark_register.md](benchmark_register.md)
@@ -576,7 +582,7 @@ Tags across all documentation files:
 - **`lessons-learned`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`licence`** — [licence.md](licence.md)
 - **`licensing`** — [ground_motion_data.md](ground_motion_data.md)
-- **`lignos-krawinkler`** — [imk_deterioration_model.md](imk_deterioration_model.md)
+- **`lignos-krawinkler`** — [imk_deterioration_model.md](imk_deterioration_model.md), [imk_member_classification.md](imk_member_classification.md)
 - **`limit-state`** — [units_conversion.md](units_conversion.md)
 - **`linting`** — [linting_fix_plan.md](linting_fix_plan.md)
 - **`llm`** — [llm_guide.md](llm_guide.md), [modeling_guidance.md](modeling_guidance.md)
@@ -588,6 +594,7 @@ Tags across all documentation files:
 - **`mander`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`masonry`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md)
 - **`mcft`** — [duong_benchmark.md](duong_benchmark.md), [shear_failure_modelling.md](shear_failure_modelling.md)
+- **`member-classification`** — [imk_member_classification.md](imk_member_classification.md)
 - **`mesh-model`** — [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`meshing`** — [constraint_detection.md](constraint_detection.md), [element_splitting.md](element_splitting.md), [shell_openings.md](shell_openings.md), [shell_support.md](shell_support.md)
 - **`metadata`** — [rhino_attributes.md](rhino_attributes.md)
@@ -653,7 +660,7 @@ Tags across all documentation files:
 - **`round-trip`** — [model_stage_file.md](model_stage_file.md)
 - **`runtime`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`s2k`** — [model_review.md](model_review.md)
-- **`sac`** — [benchmark_roadmap.md](benchmark_roadmap.md), [sac_benchmark.md](sac_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [tcl_import.md](tcl_import.md)
+- **`sac`** — [benchmark_roadmap.md](benchmark_roadmap.md), [imk_member_classification.md](imk_member_classification.md), [sac_benchmark.md](sac_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [tcl_import.md](tcl_import.md)
 - **`sap2000`** — [ETABS_checklist.md](ETABS_checklist.md), [member_offsets.md](member_offsets.md), [member_releases.md](member_releases.md), [model_review.md](model_review.md), [parser_coverage.md](parser_coverage.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`schema`** — [results_schema.md](results_schema.md)
 - **`scripting`** — [tcl_export.md](tcl_export.md)

@@ -176,8 +176,9 @@ cyclic-deterioration `Λ` Eq. 13, 2026-10-28).
 2. A3 frame collapse (SAC 3/9/20 with IMK; IDA vs Ibarra–Krawinkler 2005) —
    first increment landed (`enrich_imk` + 3-story `backbone="imk"`); the
    column axial ratio, NLTHA convergence and the 9/20-story matrices all landed
-   2026-10-28.  The remaining sub-items (beam unbraced length, IDA) are tracked
-   in `docs/imk_deterioration_model.md` §5.
+   2026-10-28.  Remaining sub-items (beam unbraced length, IDA) tracked in
+   `docs/imk_deterioration_model.md` §5; the member role/type + per-member
+   axial-ratio design is `docs/imk_member_classification.md`.
 
 **Where.** `benchmarks/imk_calibration.py`; `opensees/_elements.py`
 (`hinge_backbone="imk"`); `tests/test_benchmark_sac_imk.py`.
