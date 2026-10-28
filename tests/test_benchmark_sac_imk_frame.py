@@ -107,6 +107,34 @@ def test_derive_column_axial_ratios():
     assert all(0.0 < r < 0.35 for r in ratios.values())
 
 
+def test_derive_column_axial_ratios_by_member():
+    """Per-member ratios decrease up the building; the base is the governing ratio."""
+    wipe()
+    md = sac.load_model(nonlinear=True, backbone="imk")
+    per = sac.derive_column_axial_ratios_by_member(md, 3)
+    per_sec = sac.derive_column_axial_ratios(md, 3)
+    # The base segment of the full-bay (gravity-bay) line carries the governing
+    # SEC1 ratio (within the transcribed-A vs AISC-catalogue-A tolerance ~0.03 %).
+    assert per["4"] == pytest.approx(per_sec["SEC1"], rel=1e-3)
+    # A single line's segments carry strictly less mass up the tower.
+    line0 = [per["1"], per["6"], per["11"]]  # corner line, storeys 0,1,2
+    assert line0[0] > line0[1] > line0[2]
+    # The corner line carries half a bay, so it is lighter than the full-bay line.
+    assert line0[0] < per["4"]
+
+
+def test_enrich_imk_applies_per_member_axial_ratios():
+    """``derive_column_axial_ratio_by_member`` stamps per-segment ratios."""
+    wipe()
+    md = sac.load_model(nonlinear=True, backbone="imk", derive_column_axial_ratio_by_member=True)
+    assert md.imk_column_axial_source == "per-member"
+    # Higher axial load reduces the yield moment, so the roof segment (light)
+    # yields at a higher moment than the base segment (heavily loaded).
+    my_base = md.frame_elements["1"].imk_params["My_pos"]
+    my_roof = md.frame_elements["11"].imk_params["My_pos"]
+    assert my_roof > my_base
+
+
 def test_gravity_axial_ratios_matches_tributary():
     """The full elastic gravity solve agrees with the tributary estimate."""
     wipe()

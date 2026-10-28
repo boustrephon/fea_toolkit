@@ -376,7 +376,7 @@ def run_case(
             nonlinear=True,
             backbone=backbone,
             hinge_model=hinge_model,
-            derive_column_axial_ratio=(backbone == "imk"),
+            derive_column_axial_ratio_by_member=(backbone == "imk"),
         )
         levels = floor_levels(builder)
         tags = [t for _, t in levels]

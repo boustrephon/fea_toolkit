@@ -491,6 +491,78 @@ def derive_column_axial_ratios(md: SAPModelData, building: int = 3) -> dict[str,
     return ratios
 
 
+def derive_column_axial_ratios_by_member(md: SAPModelData, building: int = 3) -> dict[str, float]:
+    """Per-column-*segment* gravity axial-load ratio ``Pg/Pye`` (tributary).
+
+    Each column segment carries the tributary mass *above it* — the FEMA 355C
+    seismic weight lumped at the floor nodes on its own column line, at its top
+    elevation and above — so ``Pg = g · Σ(mass above)`` decreases up the
+    building (the base segment carries the full accumulated load, the roof
+    segment only the roof).  ``Pye = A_physical · Ry · Fy`` uses the segment's
+    *own* physical section (the below-splice section for a splice row), so a
+    spliced column's ratio is per segment, not blended.
+
+    This is the benchmark-matching convention: the Lignos et al. (2019) column
+    backbone consumes ``Pg/Pye`` per member, so its branch splits at
+    ``0.20`` and ``0.35`` apply per segment.  :func:`derive_column_axial_ratios`
+    remains the per-section *summary* (the governing, base ratio).
+
+    Args:
+        md: The SAC model (moment-frame columns carry the ``SteelCol`` material
+            in the 3-story, ``Steel`` in 9/20).
+        building: 3, 9 or 20.
+
+    Returns:
+        ``{element_id: Pg/Pye}`` for the moment-frame column segments.
+    """
+    from ..model.steel_sections import get_section_properties
+
+    g = g_from_units(md.units)
+    roles = _frame_element_roles(md)
+    nodes = md.nodes
+    name_map = MAT_TO_SECTION[building]
+    mat_no_by_sec = _mat_no_by_section(md, building)
+
+    # Tributary masses per column line, keyed by (x, y) → [(z, mass), …].
+    line_masses: dict[tuple[float, float], list[tuple[float, float]]] = {}
+    for nid, mass in (md.added_masses or {}).items():
+        nd = nodes.get(nid)
+        if nd is None or not mass:
+            continue
+        key = (round(nd.x, 6), round(nd.y, 6))
+        line_masses.setdefault(key, []).append((nd.z, float(mass)))
+
+    ratios: dict[str, float] = {}
+    for eid, elem in md.frame_elements.items():
+        if roles.get(eid) != "col":
+            continue
+        sname = md.frame_assignments.get(eid, "")
+        sec = md.sections.get(sname)
+        if sec is None:
+            continue
+        if building == 3 and sec.material != "SteelCol":
+            continue  # 3-story leaning column — no hinge
+        ni = nodes[elem.node_i]
+        nj = nodes[elem.node_j]
+        if ni is None or nj is None:
+            continue
+        key = (round(ni.x, 6), round(ni.y, 6))
+        z_top = max(ni.z, nj.z)
+        total_mass = sum(m for z, m in line_masses.get(key, []) if z >= z_top - 1e-9)
+        mat_no = mat_no_by_sec.get(sname)
+        if mat_no is None:
+            continue
+        shape = name_map.get(mat_no)
+        if shape is None:
+            continue
+        props = get_section_properties(shape)
+        if props is None:
+            continue
+        pye = props["A"] * _COLUMN_RY * COLUMN_FY
+        ratios[eid] = g * total_mass / pye
+    return ratios
+
+
 def gravity_axial_ratios(md: SAPModelData, building: int = 3) -> dict[str, float]:
     """Per-section column ``Pg/Pye`` from a full elastic gravity solve (cross-check).
 
@@ -559,6 +631,7 @@ def enrich_imk(
     building: int = 3,
     column_axial_ratio: float = 0.0,
     column_axial_ratios: Optional[dict[str, float]] = None,
+    column_axial_ratios_by_member: Optional[dict[str, float]] = None,
     beam_unbraced_factor: float = 1.0,
     theta_u: Optional[float] = None,
     theta_u_model: str = "plateau",
@@ -601,6 +674,12 @@ def enrich_imk(
             (the tributary FEMA 355C seismic-weight estimate) — the benchmark
             matching convention — with :func:`gravity_axial_ratios` as the
             independent full-solve cross-check.
+        column_axial_ratios_by_member: Optional ``{element_id: Pg/Pye}`` override,
+            applied per column *segment* (wins over *column_axial_ratios* /
+            *column_axial_ratio* for any segment it names).  Typically
+            :func:`derive_column_axial_ratios_by_member` — the benchmark-matching
+            per-member convention, where each column segment carries only the
+            tributary mass above it.
         beam_unbraced_factor: ``Lb / L`` for beams (default 1.0).
         theta_u: Explicit ``IMKBilin`` ultimate rotation (rad) override; ``None``
             defers to *theta_u_model* (benchmark calibration).  When given, the
@@ -627,6 +706,11 @@ def enrich_imk(
         if column_axial_ratios is not None:
             return float(column_axial_ratios.get(sname, column_axial_ratio))
         return column_axial_ratio
+
+    def _axial_for(sname: str, eid: str) -> float:
+        if column_axial_ratios_by_member is not None:
+            return float(column_axial_ratios_by_member.get(eid, _axial(sname)))
+        return _axial(sname)
 
     def _compute(sname: str, length: float, is_col: bool, axial: float):
         mat_no = mat_no_by_sec.get(sname)
@@ -683,7 +767,7 @@ def enrich_imk(
             continue
         if effective_types.get(eid) == "brace":
             continue  # study brace (link bay / basement) — axial-only, no hinge
-        params = _compute(sname, length, is_col, _axial(sname))
+        params = _compute(sname, length, is_col, _axial_for(sname, eid))
         if params is None:
             continue
         elem.imk_params = params.to_dict()
@@ -736,7 +820,9 @@ def enrich_imk(
     # Run-level provenance for the column axial-load source: per-section ratios
     # (from :func:`derive_column_axial_ratios` / a caller-supplied dict), a
     # single explicit scalar, or none (the pure-flexure envelope).
-    if column_axial_ratios is not None:
+    if column_axial_ratios_by_member is not None:
+        md.imk_column_axial_source = "per-member"
+    elif column_axial_ratios is not None:
         md.imk_column_axial_source = "per-section"
     elif column_axial_ratio != 0.0:
         md.imk_column_axial_source = f"explicit:{column_axial_ratio:g}"
@@ -898,7 +984,9 @@ def load_model(
     building: int = 3,
     backbone: str = "bilinear",
     column_axial_ratios: Optional[dict[str, float]] = None,
+    column_axial_ratios_by_member: Optional[dict[str, float]] = None,
     derive_column_axial_ratio: bool = False,
+    derive_column_axial_ratio_by_member: bool = False,
 ) -> SAPModelData:
     """Load a SAC model (3/9/20-story); enrich for nonlinear use.
 
@@ -927,9 +1015,17 @@ def load_model(
         column_axial_ratios: Optional ``{section_name: Pg/Pye}`` passed to
             :func:`enrich_imk` (``"imk"`` backbone only); see
             :func:`derive_column_axial_ratios`.
+        column_axial_ratios_by_member: Optional ``{element_id: Pg/Pye}`` passed to
+            :func:`enrich_imk` (``"imk"`` backbone only); see
+            :func:`derive_column_axial_ratios_by_member`.
         derive_column_axial_ratio: When True (and ``backbone == "imk"``), derive
             the per-section ``Pg/Pye`` from the FEMA 355C seismic weight via
             :func:`derive_column_axial_ratios` before stamping.
+        derive_column_axial_ratio_by_member: When True (and ``backbone == "imk"``),
+            derive the per-member ``Pg/Pye`` via
+            :func:`derive_column_axial_ratios_by_member` (each column segment
+            carries only the mass above it) before stamping; the per-section
+            governing ratios are derived alongside as the summary.
 
     Raises:
         ValueError: For an unknown *building* or *backbone*.
@@ -968,9 +1064,19 @@ def load_model(
             )
         enrich_display_sections(md, building=building)
         if backbone == "imk":
-            if derive_column_axial_ratio:
+            if derive_column_axial_ratio_by_member:
+                column_axial_ratios_by_member = derive_column_axial_ratios_by_member(
+                    md, building=building
+                )
                 column_axial_ratios = derive_column_axial_ratios(md, building=building)
-            enrich_imk(md, building=building, column_axial_ratios=column_axial_ratios)
+            elif derive_column_axial_ratio:
+                column_axial_ratios = derive_column_axial_ratios(md, building=building)
+            enrich_imk(
+                md,
+                building=building,
+                column_axial_ratios=column_axial_ratios,
+                column_axial_ratios_by_member=column_axial_ratios_by_member,
+            )
     return md
 
 
@@ -1078,7 +1184,9 @@ def build_builder(
     hinge_model: str = "lumped",
     fidelity: str = "simplified",
     column_axial_ratios: Optional[dict[str, float]] = None,
+    column_axial_ratios_by_member: Optional[dict[str, float]] = None,
     derive_column_axial_ratio: bool = False,
+    derive_column_axial_ratio_by_member: bool = False,
 ) -> AnalysisBuilder:
     """Build a SAC model (3/9/20-story, elastic or nonlinear) into an
     ``AnalysisBuilder``.
@@ -1117,9 +1225,14 @@ def build_builder(
             transient ~35× slower under the ``Transformation`` handler.
         column_axial_ratios: Optional ``{section_name: Pg/Pye}`` forwarded to
             :func:`load_model` (``backbone == "imk"`` only).
+        column_axial_ratios_by_member: Optional ``{element_id: Pg/Pye}`` forwarded
+            to :func:`load_model` (``backbone == "imk"`` only).
         derive_column_axial_ratio: When True (and ``backbone == "imk"``), derive
             the per-section ``Pg/Pye`` from the FEMA 355C seismic weight before
             stamping (see :func:`derive_column_axial_ratios`).
+        derive_column_axial_ratio_by_member: When True (and ``backbone == "imk"``),
+            derive the per-member ``Pg/Pye`` before stamping (see
+            :func:`derive_column_axial_ratios_by_member`).
 
     Raises:
         ValueError: For an unknown *fidelity*, or for ``panel_zone=True`` with
@@ -1142,7 +1255,9 @@ def build_builder(
         nonlinear=nonlinear,
         backbone=backbone,
         column_axial_ratios=column_axial_ratios,
+        column_axial_ratios_by_member=column_axial_ratios_by_member,
         derive_column_axial_ratio=derive_column_axial_ratio,
+        derive_column_axial_ratio_by_member=derive_column_axial_ratio_by_member,
     )
     mesh = preprocess_model(md, preprocess_config(panel_zone=panel_zone))
     cfg = builder_config(backbone, hinge_model) if nonlinear else {}
@@ -1213,6 +1328,7 @@ __all__ = [
     "build_builder",
     "builder_config",
     "derive_column_axial_ratios",
+    "derive_column_axial_ratios_by_member",
     "enrich_display_sections",
     "enrich_imk",
     "enrich_nonlinear",

@@ -9,11 +9,12 @@ related: [imk_deterioration_model.md, element_classification.md, benchmark_roadm
 
 # IMK Member Role & Type — Design Note
 
-⚠️ Partial — steps 1–3 landed (2026-10-28): the `element_tbl` type column is
-transcribed (`BEAM_TYPES`), `reconcile_member_types` applies the study override
-with a `UserWarning` on mismatch, and `enrich_imk` skips the study braces (the
-3-story link bay and the 20-story 1st-basement beams).  Items (b) (per-member
-axial ratio) and (c) (splitting hazard) remain open.
+⚠️ Partial — steps 1–3 and (b) landed (2026-10-28): the `element_tbl` type column
+is transcribed (`BEAM_TYPES`), `reconcile_member_types` applies the study
+override with a `UserWarning` on mismatch, `enrich_imk` skips the study braces
+(the 3-story link bay and the 20-story 1st-basement beams), and the axial ratio
+is per member (`derive_column_axial_ratios_by_member`).  Item (c) (the splitting
+hazard) remains open.
 
 ## Goals and the tension
 
@@ -87,21 +88,20 @@ noise.
 
 ## (b) Per-member axial ratio
 
-**Proposal — `Pg/Pye` per column *segment*, not per base section.**
+**Landed (2026-10-28) — `Pg/Pye` per column *segment*, not per base section.**
 
 The benchmark's axial ratio decreases up the building (each column segment
-carries only the tributary mass *above* it).  Today
-`derive_column_axial_ratios` returns the governing **base** section and every
-upper column falls back to `axial = 0` (pure flexure).  Replace with a
-per-member ratio:
+carries only the tributary mass *above* it).  `derive_column_axial_ratios_by_member`
+computes the per-member ratio:
 
 * `Pg = g · Σ(tributary mass above the segment's base)`,
-* `Pye = A_physical · Ry · Fy` (the segment's own physical section).
+* `Pye = A_physical · Ry · Fy` (the segment's own physical section, below-splice
+  for a splice row).
 
-The base section keeps the reported governing (maximum) ratio; the Lignos-2019
-branch splits at `Pg/Pye = 0.20` and `0.35` then apply per member.  This is both
-benchmark-matching (each column segment has its own ratio) and general (it works
-for any column stack, spliced or not).
+`derive_column_axial_ratios` keeps the per-section (governing, base) summary;
+the Lignos-2019 branch splits at `Pg/Pye = 0.20` and `0.35` now apply per
+member.  This is both benchmark-matching (each column segment has its own ratio)
+and general (it works for any column stack, spliced or not).
 
 ## (c) Where the per-member parameters live
 
@@ -158,7 +158,7 @@ time — a separate release-honouring issue, tracked apart from the type column.
    (a) and (d).  *(Landed: `reconcile_member_types` records
    `md.imk_member_types` / `md.imk_member_type_mismatches`; `enrich_imk` skips
    braces.)*
-4. Extend the axial ratio to per-member (b), keeping the base-section value as
-   the reported summary.
+4. ✅ Extend the axial ratio to per-member (b), keeping the base-section value as
+   the reported summary.  *(Landed: `derive_column_axial_ratios_by_member`.)*
 5. Keep `elem.imk_params` on the member for the benchmark; document/reject the
    splitting hazard (c) rather than solve it now.

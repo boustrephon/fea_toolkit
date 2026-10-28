@@ -147,7 +147,10 @@ column splices, and per-base-section axial ratios.  Fifth increment landed
 (2026-10-28): member role/type reconcile — the transcribed `element_tbl` type
 column (moment/brace/fixed-pin) overrides the analytical role with a
 `UserWarning` on mismatch; the study braces (3-story link bay, 20-story
-1st-basement beams) no longer get collapse hinges.
+1st-basement beams) no longer get collapse hinges.  Sixth increment landed
+(2026-10-28): per-member column axial ratio — `derive_column_axial_ratios_by_member`
+gives each column segment its own `Pg/Pye` (decreasing up the building), so the
+Lignos-2019 branch splits apply per segment; `run_case` uses it.
 
 Open A3 items, in build order:
 
