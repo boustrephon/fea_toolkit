@@ -515,9 +515,9 @@ def make_transient_key(case: str, template: str) -> str:
 def transient_case_names(data: t.Mapping[str, t.Any]) -> list[str]:
     """Return the transient case names present in *data*, sorted.
 
-    A case is identified by its ``transient/<case>/time`` array (the required
-    anchor of each transient block).  Archives with no transient block return
-    an empty list.
+    A case is discovered from any ``transient/<case>/...`` key (not only the
+    ``time`` anchor), so a block missing its ``time`` array is still surfaced and
+    fails validation.  Archives with no transient block return an empty list.
 
     Args:
         data: Flat results dict (NPZ-style keys).
@@ -527,7 +527,7 @@ def transient_case_names(data: t.Mapping[str, t.Any]) -> list[str]:
     """
     cases: set[str] = set()
     for key in data:
-        if key.startswith("transient/") and key.endswith("/time"):
+        if key.startswith("transient/"):
             parts = key.split("/")
             if len(parts) >= 3:
                 cases.add(parts[1])
@@ -847,7 +847,12 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
                             continue  # not recorded for this model
                         _check_shape(key, arr, shape_desc, dtype_str)
         if "transient" in types:
-            for case in transient_case_names(data):
+            cases = transient_case_names(data)
+            if not cases:
+                messages.append(
+                    "analysis_types declares 'transient' but no transient case block exists"
+                )
+            for case in cases:
                 # ── Resolve per-case N_t / N_rec dims ──
                 # Clear the shared dims first so each case is validated only
                 # against its own arrays (mirrors the pushover per-direction
@@ -878,13 +883,30 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
                         continue
                     _check_shape(key, arr, shape_desc, dtype_str)
 
-                # ── Optional: node kinematics (only when recorded) ──
+                # ── Node kinematics ──
+                # ``node_tag`` (when present) anchors a required three-component
+                # displacement grid: all of ``node_disp_{x,y,z}`` must be present
+                # whenever ``node_tag`` is recorded, so a reader can always index
+                # the dense displacement history.  Velocity / acceleration grids
+                # are optional, but each group must be complete (all three
+                # components) whenever any one of its arrays is present.
                 for template, (shape_desc, dtype_str) in TRANSIENT_NODE_ARRAYS.items():
                     key = make_transient_key(case, template)
                     arr = data.get(key)
                     if arr is None:
-                        continue  # not recorded for this run
+                        if node_tag_arr is not None and "node_disp_" in template:
+                            messages.append(f"Missing transient array: {key}")
+                        continue
                     _check_shape(key, arr, shape_desc, dtype_str)
+                for prefix in ("node_vel", "node_accel"):
+                    comp_keys = [
+                        make_transient_key(case, f"transient/{{case}}/{prefix}_{c}")
+                        for c in ("x", "y", "z")
+                    ]
+                    if 0 < sum(1 for k in comp_keys if data.get(k) is not None) < 3:
+                        for k in comp_keys:
+                            if data.get(k) is None:
+                                messages.append(f"Missing transient array: {k}")
 
     return messages
 

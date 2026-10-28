@@ -474,10 +474,10 @@ argument (`{case: result}`).  `analysis_types` carries `"transient"`.
 | `transient/<case>/time` | `(N_t,)` | `float` | Time axis (one entry per converged step) |
 | `transient/<case>/base_shear` | `(N_t,)` | `float` | Whole-building base shear (global equilibrium `Σ m·(a_rel + ag)`) |
 | `transient/<case>/direction` | `()` | `str` | Excitation direction `"X"` / `"Y"` / `"Z"` |
-| `transient/<case>/node_tag` | `(N_rec,)` | `int` | Recorded-node subset (sorted ascending) |
-| `transient/<case>/node_disp_x` / `_y` / `_z` | `(N_t, N_rec)` | `float` | Dense per-node displacement histories (NaN where unrecorded) |
-| `transient/<case>/node_vel_x` / `_y` / `_z` | `(N_t, N_rec)` | `float` | **Optional** — recorded only when kinematics are captured |
-| `transient/<case>/node_accel_x` / `_y` / `_z` | `(N_t, N_rec)` | `float` | **Optional** — recorded only when kinematics are captured |
+| `transient/<case>/node_tag` | `(N_rec,)` | `int` | **Optional block** — recorded-node subset (sorted ascending); absent when no nodes were recorded |
+| `transient/<case>/node_disp_x` / `_y` / `_z` | `(N_t, N_rec)` | `float` | **Required whenever `node_tag` is present** — dense per-node displacement histories (NaN where unrecorded) |
+| `transient/<case>/node_vel_x` / `_y` / `_z` | `(N_t, N_rec)` | `float` | **Optional** — recorded only when kinematics are captured; all three components required when present |
+| `transient/<case>/node_accel_x` / `_y` / `_z` | `(N_t, N_rec)` | `float` | **Optional** — recorded only when kinematics are captured; all three components required when present |
 
 **Optional scalar entries** (always written when the producer supplies them):
 
@@ -496,11 +496,13 @@ argument (`{case: result}`).  `analysis_types` carries `"transient"`.
 
 `N_t` and `N_rec` are resolved **per case** (like the pushover block's
 per-direction `N_step` / `N_recorded_*`): `N_t` from `time` and `N_rec` from
-`node_tag`.  The node kinematics are optional — a run with no recorded
-displacements emits only the global block, and velocity/acceleration arrays
-are omitted entirely when the runner did not capture them (so a reader can
-tell "not recorded" from a zero).  `transient_case_names()` returns the sorted
-case labels, and `describe_results_npz()` reports them under
+`node_tag`.  The node block (`node_tag` + `node_disp_*`) is optional — a run
+with no recorded displacements emits only the global block.  When `node_tag` is
+present, all three `node_disp_x` / `node_disp_y` / `node_disp_z` grids are
+required; the velocity/acceleration groups are optional but each must be
+complete (all three components) whenever any one of its arrays is recorded (so
+a reader can tell "not recorded" from a zero).  `transient_case_names()`
+returns the sorted case labels, and `describe_results_npz()` reports them under
 `transient_cases`.
 
 ### Metadata

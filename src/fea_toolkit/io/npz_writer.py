@@ -547,8 +547,8 @@ def results_arrays(
     length_unit: Optional[str] = None,
     forces_coordinate_system: str = "local",
     mesh_model: Optional["MeshModel"] = None,
-    transient_results: Optional[dict[str, Any]] = None,
     case_meta: Optional[dict[str, dict[str, str]]] = None,
+    transient_results: Optional[dict[str, Any]] = None,
 ) -> dict[str, np.ndarray]:
     """Assemble a results archive **in memory** — ``{array_name: np.ndarray}``.
 
@@ -584,13 +584,6 @@ def results_arrays(
             correct split/meshed topology for visualisation.
             Pass the same ``MeshModel`` that was passed to the
             ``AnalysisBuilder``.
-        transient_results: Optional ``{case: result}`` mapping of time-history
-            runs — the dict returned by
-            :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.run_transient_analysis`
-            (or the enriched ``data`` of
-            :func:`~fea_toolkit.analysis.nonlinear_dynamic.run_nonlinear_dynamic_analysis`).
-            Written under the ``transient/<case>/...`` block via
-            :func:`collect_transient_arrays` and listed in ``analysis_types``.
         case_meta: Optional ``{case: {"group": str, "family": str, "coords": str}}`` per-case
             metadata.  ``group`` names the load combination each case came from
             and ``kind`` its magnitude sense (``"+QE"`` / ``"-QE"``) where the
@@ -598,6 +591,13 @@ def results_arrays(
             ``static_case_group`` / ``static_case_family`` / ``static_case_coords`` arrays so a plotter can
             pair a two-sided response-spectrum combination from data instead of
             from the ``"#1"`` / ``"#2"`` label convention.  ``None`` omits them.
+        transient_results: Optional ``{case: result}`` mapping of time-history
+            runs — the dict returned by
+            :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.run_transient_analysis`
+            (or the enriched ``data`` of
+            :func:`~fea_toolkit.analysis.nonlinear_dynamic.run_nonlinear_dynamic_analysis`).
+            Written under the ``transient/<case>/...`` block via
+            :func:`collect_transient_arrays` and listed in ``analysis_types``.
 
     Returns:
         The archive's arrays, ready to be saved or served to a repository.
@@ -677,8 +677,8 @@ def write_results_npz(
     length_unit: Optional[str] = None,
     forces_coordinate_system: str = "local",
     mesh_model: Optional["MeshModel"] = None,
-    transient_results: Optional[dict[str, Any]] = None,
     case_meta: Optional[dict[str, dict[str, str]]] = None,
+    transient_results: Optional[dict[str, Any]] = None,
 ) -> str:
     """Write a unified NPZ file with model geometry + analysis results.
 
@@ -700,10 +700,10 @@ def write_results_npz(
         forces_coordinate_system: Coordinate system of the recorded frame
             end-force arrays; ``"local"`` — see :func:`results_arrays`.
         mesh_model: Optional post-processed ``MeshModel`` supplying the geometry.
+        case_meta: Optional ``{case: {"group", "kind", "family", "coords"}}``.
         transient_results: Optional ``{case: result}`` mapping of time-history
             runs — written under the ``transient/<case>/...`` block (see
             :func:`collect_transient_arrays`).
-        case_meta: Optional ``{case: {"group", "kind", "family", "coords"}}``.
 
     Returns:
         Absolute path to the saved file.
@@ -1129,12 +1129,27 @@ def collect_transient_arrays(transient_results: dict[str, Any]) -> dict[str, np.
         return arrays
 
     for case, res in transient_results.items():
+        # A case label becomes one segment of the flat NPZ key
+        # ``transient/<case>/...``, so a ``/`` would silently create a nested
+        # key.  Reject it up front so ``transient_case_names()`` and the
+        # validator resolve exactly the labels written here.
+        if "/" in str(case):
+            raise ValueError(
+                f"transient case label {case!r} must not contain '/': "
+                "case names become flat NPZ key segments"
+            )
+
         times = np.asarray(res.get("times", []), dtype=float)
         n_t = int(times.size)
 
+        if "base_shear" not in res:
+            raise ValueError(
+                f"transient case {case!r} is missing the required 'base_shear' history"
+            )
+
         arrays[make_transient_key(case, "transient/{case}/time")] = times
         arrays[make_transient_key(case, "transient/{case}/base_shear")] = np.asarray(
-            res.get("base_shear", np.zeros(n_t)), dtype=float
+            res["base_shear"], dtype=float
         )
         arrays[make_transient_key(case, "transient/{case}/direction")] = np.asarray(
             str(res.get("direction", "X")), dtype=str

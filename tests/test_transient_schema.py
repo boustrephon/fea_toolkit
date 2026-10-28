@@ -9,6 +9,7 @@ periods.  These tests cover the collector, the schema validator, the reader's
 """
 
 import numpy as np
+import pytest
 
 from examples.sample_model import make_sample_model
 from fea_toolkit.io.npz_reader import describe_results_npz, read_results
@@ -17,6 +18,7 @@ from fea_toolkit.io.results_schema import (
     SCHEMA_VERSION,
     make_transient_key,
     transient_case_names,
+    validate_arrays,
     validate_npz,
 )
 from fea_toolkit.io.unified_writer import write_results
@@ -132,3 +134,52 @@ def test_transient_block_is_optional_for_geometry_only_archive(tmp_path):
 
     assert validate_npz(p) == []
     assert describe_results_npz(p)["transient_cases"] == []
+
+
+def _transient_archive(case="ELC"):
+    """A fully-populated transient archive dict (collector output + analysis_types)."""
+    res = _synthetic_transient([11, 22], n_steps=4)
+    arrays = collect_transient_arrays({case: res})
+    arrays["analysis_types"] = np.array(["transient"])
+    return arrays
+
+
+def test_collect_transient_arrays_rejects_slash_in_case_label():
+    """A case label containing ``/`` would create a nested NPZ key."""
+    res = _synthetic_transient([11], n_steps=3)
+    with pytest.raises(ValueError, match="must not contain"):
+        collect_transient_arrays({"a/b": res})
+
+
+def test_collect_transient_arrays_requires_base_shear():
+    """A transient run without a ``base_shear`` history is rejected before writing."""
+    res = _synthetic_transient([11], n_steps=3)
+    del res["base_shear"]
+    with pytest.raises(ValueError, match="base_shear"):
+        collect_transient_arrays({"ELC": res})
+
+
+def test_transient_case_names_discovers_cases_without_time():
+    """Cases are discovered from any transient key, not only the ``time`` anchor."""
+    arrays = {make_transient_key("BARE", "transient/{case}/base_shear"): np.zeros(3)}
+    assert transient_case_names(arrays) == ["BARE"]
+
+
+def test_validate_arrays_requires_node_disp_when_node_tag_present():
+    """All three displacement grids are required whenever ``node_tag`` is present."""
+    arrays = _transient_archive()
+    arrays.pop(make_transient_key("ELC", "transient/{case}/node_disp_y"))
+    assert any("node_disp_y" in m for m in validate_arrays(arrays))
+
+
+def test_validate_arrays_requires_complete_vel_accel_groups():
+    """Velocity / acceleration groups must be complete when any component is present."""
+    arrays = _transient_archive()
+    arrays.pop(make_transient_key("ELC", "transient/{case}/node_vel_y"))
+    assert any("node_vel_y" in m for m in validate_arrays(arrays))
+
+
+def test_validate_arrays_flags_transient_without_case_block():
+    """Declaring ``"transient"`` without any transient case block is an error."""
+    messages = validate_arrays({"analysis_types": np.array(["transient"])})
+    assert any("no transient case block" in m for m in messages)

@@ -476,13 +476,13 @@ def write_results(
     rs_nodal_displacements: Optional[dict[int, tuple]] = None,
     rs_shell_forces: Optional[dict[str, Any]] = None,
     pushover_results: Optional[dict[str, tuple]] = None,
-    transient_results: Optional[dict[str, Any]] = None,
     fmt: str = "npz",
     config: Optional[dict] = None,
     force_unit: Optional[str] = None,
     length_unit: Optional[str] = None,
     forces_coordinate_system: str = "local",
     case_meta: Optional[dict[str, dict[str, str]]] = None,
+    transient_results: Optional[dict[str, Any]] = None,
 ) -> str:
     """Write model geometry + analysis results to a unified output file.
 
@@ -505,10 +505,6 @@ def write_results(
             ``pushover/{direction}/{load_type}/...`` via
             :func:`fea_toolkit.io.npz_writer.collect_pushover_arrays`
             (requires *mesh_model* for the node tags).
-        transient_results: Optional ``{case: result}`` mapping of time-history
-            runs — written under the ``transient/<case>/...`` block via
-            :func:`fea_toolkit.io.npz_writer.collect_transient_arrays` and
-            listed in ``analysis_types`` as ``"transient"``.
         fmt: ``"npz"`` (default) or ``"h5"``.
         config: Builder config dict (included in metadata).
         force_unit: Optional force-unit label override.  ``None`` derives
@@ -527,6 +523,10 @@ def write_results(
             ``static_case_group`` / ``static_case_family`` / ``static_case_coords`` arrays so a plotter can
             pair a two-sided response-spectrum combination from data instead of
             from the ``"#1"`` / ``"#2"`` label convention.  ``None`` omits them.
+        transient_results: Optional ``{case: result}`` mapping of time-history
+            runs — written under the ``transient/<case>/...`` block via
+            :func:`fea_toolkit.io.npz_writer.collect_transient_arrays` and
+            listed in ``analysis_types`` as ``"transient"``.
 
     Returns:
         Absolute path to the written file.
