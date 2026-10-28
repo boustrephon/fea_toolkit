@@ -15,9 +15,10 @@ works for *beams* — RBS and other-than-RBS, split at ``d = 533 mm``.
 Hamburger (2019), "Proposed Updates to the ASCE 41 Nonlinear Modeling Parameters
 for Wide-Flange Steel Columns", DOI ``10.1061/(ASCE)ST.1943-541X.0002353`` (via
 the companion 2018 NCEE paper and the ASCE/SEI 41-17 Errata, which adopted them).
-These are the *first-cycle envelope* (ASCE 41) parameters; the cyclic-
-deterioration ``Λ`` of the monotonic backbone lives in the paywalled Lignos &
-Krawinkler (2011) paper (Table 3) and is left at 0.
+These include the *first-cycle envelope* (ASCE 41) parameters (Eqs. 6–10) and
+the cyclic-deterioration ``Λ`` (Eq. 13): ``Λs`` for basic-strength deterioration
+(two branches split at ``Pg/Pye = 0.35``, capped at 3.0 rad) and
+``Λc = Λk = 0.9·Λs`` for post-capping and unloading-stiffness deterioration.
 
 See ``docs/imk_deterioration_model.md`` for the design record.
 """
@@ -192,7 +193,7 @@ def lignos_2019_wide_flange_column(
 ) -> SteelIMKParams:
     """Wide-flange steel column ``IMKBilin`` parameters (Lignos et al. 2019 / ASCE 41-17).
 
-    Transcribes Eqs. 6–10 of Lignos, Hartloper, Elkady, Deierlein & Hamburger
+    Transcribes Eqs. 6–10 and 13 of Lignos, Hartloper, Elkady, Deierlein & Hamburger
     (2019), DOI ``10.1061/(ASCE)ST.1943-541X.0002353`` (via the companion 2018
     NCEE paper and the ASCE/SEI 41-17 Errata, which adopted them):
 
@@ -202,11 +203,15 @@ def lignos_2019_wide_flange_column(
     * ``θp = 15·(h/tw)^-1.6·(Lb/ry)^-0.3·(1 − Pg/Pye)^2.3 ≤ 0.10``  (Eq. 8);
     * ``θpc = 14·(h/tw)^-0.8·(Lb/ry)^-0.5·(1 − Pg/Pye)^3.2 ≤ 0.10``  (Eq. 9);
     * ``Mr = (0.4 − 0.4·Pg/Pye)·My*``  (Eq. 10).
+    * ``Λs = 25 500·(h/tw)^-2.14·(Lb/ry)^-0.53·(1 − Pg/Pye)^4.92 ≤ 3.0`` for
+      ``Pg/Pye ≤ 0.35``; and
+      ``Λs = 268 000·(h/tw)^-2.30·(Lb/ry)^-1.30·(1 − Pg/Pye)^1.19 ≤ 3.0``
+      for ``Pg/Pye > 0.35``  (Eq. 13 — basic-strength cyclic deterioration).
 
-    These are the *first-cycle envelope* (ASCE 41) parameters.  The cyclic-
-    deterioration ``Λ`` of the monotonic (``IMKBilin``) backbone is **not** given in
-    this paper (it lives in Lignos & Krawinkler 2011, Table 3), so ``lamda_*``
-    are set to ``0``.
+    The first five are the *first-cycle envelope* (ASCE 41) parameters.  Eq. 13
+    gives the cyclic-deterioration ``Λ`` of the monotonic (``IMKBilin``) backbone:
+    ``Λc = Λk = 0.9·Λs`` control post-capping and unloading-stiffness
+    deterioration (Lignos et al. 2019).
 
     Args:
         section_depth_m: Overall section depth ``d`` (m).
@@ -249,6 +254,17 @@ def lignos_2019_wide_flange_column(
     # Eq. 10 — residual strength ratio.
     kappa = 0.4 - 0.4 * axial_ratio
 
+    # Eq. 13 — reference cumulative plastic rotation Λs (basic-strength cyclic
+    # deterioration).  Two branches split at Pg/Pye = 0.35, capped at 3.0 rad;
+    # Λc and Λk (post-capping / unloading-stiffness) are 0.9·Λs.
+    if axial_ratio <= 0.35:
+        lamda_s = 25_500.0 * h_tw**-2.14 * lb_ry**-0.53 * one_minus_axial**4.92
+    else:
+        lamda_s = 268_000.0 * h_tw**-2.30 * lb_ry**-1.30 * one_minus_axial**1.19
+    lamda_s = min(lamda_s, 3.0)
+    lamda_c = 0.9 * lamda_s
+    lamda_k = 0.9 * lamda_s
+
     if theta_u is None:
         # 0.02 rad residual plateau between the end of post-capping and fracture.
         theta_u = theta_p + theta_pc + 0.02
@@ -262,9 +278,9 @@ def lignos_2019_wide_flange_column(
         theta_pc_neg=theta_pc,
         res_pos=kappa,
         res_neg=kappa,
-        lamda_S=0.0,
-        lamda_C=0.0,
-        lamda_K=0.0,
+        lamda_S=lamda_s,
+        lamda_C=lamda_c,
+        lamda_K=lamda_k,
         mc_my=mc_my,
         theta_u_pos=theta_u,
         theta_u_neg=theta_u,

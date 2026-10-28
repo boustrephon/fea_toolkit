@@ -122,9 +122,9 @@ near-rigid lumped-hinge convention).  `benchmarks/sac.builder_config` accepts
 **A0 (landed).** `benchmarks/imk_calibration.py` defines `SteelIMKParams` and
 `lignos_krawinkler_2011(...)`, which computes the full `IMKBilin` parameter set
 for **beams** (RBS and other-than-RBS, split at `d = 533 mm`; Lignos–Krawinkler
-2011) and **columns** (wide-flange; Lignos et al. 2019 / ASCE 41-17).  The
-column cyclic-deterioration `Λ` is not in the 2019 paper (first-cycle envelope
-only), so `lamda_*` is left at 0 for columns.
+2011) and **columns** (wide-flange; Lignos et al. 2019 / ASCE 41-17), including
+the column cyclic-deterioration `Λ` (Eq. 13: `Λs` basic-strength deterioration
+and `Λc = Λk = 0.9·Λs`).
 
 **A3 (in progress).** The frame-collapse path.  First increment landed
 (2026-10-27): `benchmarks/sac.enrich_imk()` stamps per-section `imk_params` from
@@ -145,8 +145,10 @@ Open A3 items, in build order:
    no intermediate bracing).  The composite-slab bracing assumption (typically
    `Lb ≈ L/2` for the bottom flange in negative moment) is a calibration choice;
    sweep it against the benchmark response.
-3. **Column cyclic-deterioration Λ.**  `lamda_*` is 0 for columns (the 2019 paper
-   is first-cycle only).  Add the Lignos & Krawinkler (2011, Table 3) column Λ.
+3. **Column cyclic-deterioration Λ.**  ✅ Landed — `lignos_2019_wide_flange_column`
+   transcribes Lignos et al. (2019) Eq. 13 (`Λs` basic-strength deterioration,
+   split at `Pg/Pye = 0.35`, capped at 3.0 rad; `Λc = Λk = 0.9·Λs`).  Remaining:
+   validate the `≤ 3.0` cap and `0.9×` factor against the column test hysteresis.
 4. **NLTHA convergence.**  Run the 3-story SAC ground-motion suite
    (`SAC_DT_CAL = 0.005 s`) with `hinge_backbone="imk"` and confirm the IMKBilin
    hinges converge under the strong records where the `Clough` trilinear hinge
@@ -183,7 +185,7 @@ into the capping point ``(θp, Mc)``.
 ### Columns (transcribed — Lignos et al. 2019 / ASCE 41-17)
 
 Wide-flange steel columns, from Lignos, Hartloper, Elkady, Deierlein &
-Hamburger (2019), DOI `10.1061/(ASCE)ST.1943-541X.0002353` (Eqs. 6–10; adopted
+Hamburger (2019), DOI `10.1061/(ASCE)ST.1943-541X.0002353` (Eqs. 6–10 and 13; adopted
 verbatim in the ASCE/SEI 41-17 Errata).  Variables: `h/tw = (d − 2tf)/tw`,
 `Lb/ry`, `Pg/Pye` (gravity axial load / expected axial yield).
 
@@ -195,15 +197,19 @@ verbatim in the ASCE/SEI 41-17 Errata).  Variables: `h/tw = (d − 2tf)/tw`,
 | post-capping `θpc` | `14 (h/tw)^-0.8 (Lb/ry)^-0.5 (1 − Pg/Pye)^3.2 ≤ 0.10` |
 | residual `Mr` | `(0.4 − 0.4·Pg/Pye)·My*` |
 
-`Ry` = AISC expected-yield ratio (1.1 for A992/A572-50).  These are the
-*first-cycle envelope* parameters; the column cyclic-deterioration `Λ` (for the
-monotonic `IMKBilin` backbone) is not in this paper — it lives in Lignos &
-Krawinkler (2011, Table 3), so `lamda_* = 0` for columns.
+`Ry` = AISC expected-yield ratio (1.1 for A992/A572-50).  The cyclic-deterioration
+`Λ` of the monotonic `IMKBilin` backbone is in the same paper (Eq. 13):
+
+| Parameter | Equation |
+|---|---|
+| `Λs` (basic-strength deterioration) | `25 500 (h/tw)^-2.14 (Lb/ry)^-0.53 (1 − Pg/Pye)^4.92 ≤ 3.0` if `Pg/Pye ≤ 0.35`; `268 000 (h/tw)^-2.30 (Lb/ry)^-1.30 (1 − Pg/Pye)^1.19 ≤ 3.0` otherwise |
+| `Λc`, `Λk` (post-capping / unloading-stiffness) | `0.9·Λs` |
 
 ## 7. References
 
 - Ibarra, Medina & Krawinkler (2005), *Earthq. Eng. Struct. Dyn.* 34(12):1489–1511, DOI `10.1002/eqe.495`.
 - Lignos & Krawinkler (2011), *J. Struct. Eng.* 137(11):1291–1302, DOI `10.1061/(ASCE)ST.1943-541X.0000376`.
+- Lignos, Hartloper, Elkady, Deierlein & Hamburger (2019), *J. Struct. Eng.* 145(9), DOI `10.1061/(ASCE)ST.1943-541X.0002353`.
 - Ibarra & Krawinkler (2005), PEER Report 2005/06 (collapse methodology).
 - OpenSees `IMKBilin` material (`IMKBilin.cpp`; the deprecated alias is `Bilin`).
 

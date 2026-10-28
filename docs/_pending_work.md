@@ -163,17 +163,20 @@ dEj = E/(My·θ_y).
 
 Source: `docs/benchmark_roadmap.md` §3 (canonical); `docs/imk_deterioration_model.md`.
 
-**Status (2026-10-27).** A1 machinery landed — `hinge_backbone="imk"` builds a
-`Bilin` steel hinge (energy-based cyclic deterioration) in `opensees/_elements.py`.
+**Status (2026-10-27).** A1 machinery landed — `hinge_backbone="imk"` builds an
+`IMKBilin` steel hinge (energy-based cyclic deterioration) in `opensees/_elements.py`.
 A0 landed — beams (Lignos–Krawinkler 2011 θp/θpc/Λ) and columns (Lignos et al.
-2019 / ASCE 41-17 first-cycle envelope).
+2019 / ASCE 41-17 backbone Eqs. 6–10 + cyclic-deterioration Λ Eq. 13,
+2026-10-28).
 **Remaining:**
-1. (Optional) Column cyclic-deterioration Λ — not in the 2019 paper (Lignos &
-   Krawinkler 2011, Table 3; paywalled).  Columns currently use Λ = 0.
+1. ✅ Column cyclic-deterioration Λ — landed (2026-10-28): transcribed Lignos
+   et al. (2019) Eq. 13 (`Λs` basic-strength deterioration, split at
+   `Pg/Pye = 0.35`, capped at 3.0 rad; `Λc = Λk = 0.9·Λs`).  (Previously
+   mis-attributed to Lignos & Krawinkler 2011 Table 3, which is beams-only.)
 2. A3 frame collapse (SAC 3/9/20 with IMK; IDA vs Ibarra–Krawinkler 2005) —
    first increment landed (`enrich_imk` + 3-story `backbone="imk"`); the
-   remaining sub-items (column axial ratio, beam unbraced length, column Λ,
-   NLTHA convergence, 9/20 matrices, IDA) are tracked in
+   remaining sub-items (column axial ratio, beam unbraced length, NLTHA
+   convergence, 9/20 matrices, IDA) are tracked in
    `docs/imk_deterioration_model.md` §5.
 
 **Where.** `benchmarks/imk_calibration.py`; `opensees/_elements.py`

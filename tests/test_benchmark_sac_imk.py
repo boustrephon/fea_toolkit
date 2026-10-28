@@ -130,8 +130,28 @@ def test_lignos_2019_column_equations():
     assert 0 < p.theta_p_pos <= 0.10
     assert 0 < p.theta_pc_pos <= 0.10
     assert p.res_pos == pytest.approx(0.4 - 0.4 * 0.1)
-    # No column cyclic-deterioration Lambda in the 2019 paper.
-    assert p.lamda_S == p.lamda_C == p.lamda_K == 0.0
+    # Eq. 13: column cyclic-deterioration Λ (Λc = Λk = 0.9·Λs), capped at 3.0.
+    assert 0.0 < p.lamda_S <= 3.0
+    assert p.lamda_C == pytest.approx(0.9 * p.lamda_S)
+    assert p.lamda_K == pytest.approx(0.9 * p.lamda_S)
+
+
+def test_lignos_2019_column_cyclic_lambda_cap():
+    # Eq. 13: with all slenderness/axial ratios = 1 (Pg/Pye = 0), Λs = 25,500,
+    # which is capped at 3.0; Λc = Λk = 0.9·Λs.
+    p = lignos_2019_wide_flange_column(
+        section_depth_m=0.5,
+        web_thickness_m=0.48,  # h/tw = 1
+        flange_thickness_m=0.01,
+        radius_of_gyration_m=1.0,  # Lb/ry = 1
+        unbraced_length_m=1.0,
+        fy_pa=345e6,
+        plastic_modulus_m3=2.0e-3,
+        axial_ratio=0.0,  # 1 − Pg/Pye = 1
+    )
+    assert p.lamda_S == pytest.approx(3.0)  # capped
+    assert p.lamda_C == pytest.approx(2.7)  # 0.9 · 3.0
+    assert p.lamda_K == pytest.approx(2.7)
 
 
 def test_lignos_2019_column_yield_moment_axial_gt_0_2():
@@ -165,7 +185,7 @@ def test_lignos_krawinkler_2011_column_delegates():
     )
     assert p.res_pos == pytest.approx(0.4 - 0.4 * 0.1)
     assert p.mc_my >= 1.0
-    assert p.lamda_S == 0.0
+    assert 0.0 < p.lamda_S <= 3.0
 
 
 def test_imk_hinge_builds():

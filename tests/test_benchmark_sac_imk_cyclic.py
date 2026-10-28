@@ -203,6 +203,6 @@ def test_sac_imk_params_plausible_ranges():
         if is_beam:
             assert 0.1 <= p.lamda_S <= 3.0, (name, p.lamda_S)
         else:
-            assert p.lamda_S == 0.0  # column Λ not in the 2019 paper
+            assert 0.0 < p.lamda_S <= 3.0, (name, p.lamda_S)  # column Λ (Lignos 2019, Eq. 13)
         assert p.mc_my >= 1.0, name
         assert 0.0 <= p.res_pos <= 0.6, name
