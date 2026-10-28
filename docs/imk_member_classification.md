@@ -36,10 +36,15 @@ the universal rule, and a divergence from the study is never silently ignored.
   `5` = fixed-pin — which `sac_member_data.py` does **not** transcribe today
   (the header notes "not transcribed here").  The exact codes must be verified
   against `struct#.m` when transcribing.
-* The toolkit already has a **general classifier**:
-  `Preprocessor._classify_element_type` → `MeshModel.frame_element_types`
-  (`beam`/`column`/`brace`/…), from section type + geometry (see
-  `element_classification.md`).
+* The toolkit already has the **analytical-default + explicit-override** pattern
+  (see `element_classification.md`): the geometry signal
+  (`Preprocessor._classify_element_type` → `MeshModel.frame_element_types`,
+  `beam`/`column`/`brace`) plus the section-type signal
+  (`Selection.from_brace_sections()`), with authoritative overrides
+  (`brace_sections` / `brace_selection`) applied on the builder.  Phase 2 there
+  proposes a first-class `frame_design_roles` with the same default/override
+  split.  This note reuses that pattern and adds the *warning* it currently
+  lacks.
 * `enrich_imk` currently uses a **benchmark-specific orientation heuristic**
   (`_frame_element_roles`: vertical → column, horizontal → beam) to choose the
   column-vs-beam equation, and models the brace/pin members as flexural beams
@@ -52,13 +57,18 @@ the universal rule, and a divergence from the study is never silently ignored.
 
 Three steps, applied in order:
 
-1. **Analytical.** The general `frame_element_types` classifier derives the role
-   (`beam`/`column`/`brace`) from section type + geometry, and member releases
-   derive pinned ends — no benchmark data involved.
+1. **Analytical.** The general classifier derives the role — the geometry signal
+   (`frame_element_types`: `beam`/`column`/`brace`) + the section-type signal
+   (`Selection.from_brace_sections()`), and member releases derive pinned ends —
+   no benchmark data involved.
 2. **Override.** Transcribe the `element_tbl` type column as a study override
-   table (`MEMBER_TYPES_3/9/20`: `moment`/`brace`/`fixed-pin`).
+   table (`MEMBER_TYPES_3/9/20`: `moment`/`brace`/`fixed-pin`), applied in the
+   same spirit as the existing `brace_sections` / `brace_selection` overrides —
+   authoritative, not gated by the analytical role.
 3. **Reconcile.** Map the analytical result onto the study taxonomy, compare, and
-   **`warnings.warn` on every mismatch**; the override wins.
+   **warn on every mismatch** — following the codebase convention:
+   `warnings.warn(<f-string>, UserWarning)`, asserted in tests with
+   `pytest.warns(UserWarning, match=…)`.  The override wins.
 
 | Analytical (general) | Study type (override) | IMK treatment |
 |---|---|---|
@@ -129,11 +139,16 @@ time — a separate release-honouring issue, tracked apart from the type column.
 
 ## Decisions (proposed order)
 
-1. Run the analytical `frame_element_types` classifier first (extend it, if
-   needed, to express the three study types via section + geometry + releases).
-2. Transcribe the `element_tbl` type column as a study override table.
-3. Reconcile: apply the override with a `warnings.warn` on every mismatch, and a
-   test asserting the expected mismatch set per SAC model — resolves (a) and (d).
+1. Run the analytical classifier first — geometry signal (`frame_element_types`)
+   + section-type signal, as in `element_classification.md` — extending it only
+   if needed to express the three study types (moment / brace / fixed-pin) via
+   section + geometry + releases.
+2. Transcribe the `element_tbl` type column as a study override table, applied
+   in the same spirit as `brace_sections` / `brace_selection` (authoritative).
+3. Reconcile in a helper in `benchmarks/sac.py` that wraps the general
+   classifier: `warnings.warn(<f-string>, UserWarning)` on every mismatch
+   (override wins), asserted with `pytest.warns(UserWarning, match=…)` — resolves
+   (a) and (d).
 4. Extend the axial ratio to per-member (b), keeping the base-section value as
    the reported summary.
 5. Keep `elem.imk_params` on the member for the benchmark; document/reject the
