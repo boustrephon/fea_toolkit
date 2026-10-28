@@ -57,6 +57,18 @@ def test_enrich_imk_column_capping_exceeds_beam():
     assert beam_mc == pytest.approx(1.05)
 
 
+def test_enrich_imk_records_theta_u_convention():
+    """``enrich_imk`` forwards ``theta_u_model`` and records it on the model."""
+    wipe()
+    md = sac.load_model(nonlinear=True, backbone="imk")
+    assert md.imk_theta_u_model == "plateau"  # default
+
+    sac.enrich_imk(md, building=3, theta_u_model="lignos")
+    assert md.imk_theta_u_model == "lignos"
+    cols, _, _ = _split_by_material(md)
+    assert all(md.sections[s].imk_params["theta_u_pos"] == pytest.approx(0.15) for s in cols)
+
+
 def test_imk_frame_builds_end_to_end():
     """``load_model(backbone='imk')`` → preprocess → build_domain succeeds."""
     wipe()

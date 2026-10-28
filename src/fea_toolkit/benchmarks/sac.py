@@ -330,6 +330,8 @@ def enrich_imk(
     building: int = 3,
     column_axial_ratio: float = 0.0,
     beam_unbraced_factor: float = 1.0,
+    theta_u: Optional[float] = None,
+    theta_u_model: str = "plateau",
 ) -> SAPModelData:
     """Stamp Lignos–Krawinkler ``IMKBilin`` hinge parameters onto the SAC sections.
 
@@ -357,6 +359,13 @@ def enrich_imk(
             (``0`` = pure flexure, the no-axial-load envelope; the per-column
             value from a gravity run is an open A3 item).
         beam_unbraced_factor: ``Lb / L`` for beams (default 1.0).
+        theta_u: Explicit ``IMKBilin`` ultimate rotation (rad) override; ``None``
+            defers to *theta_u_model* (benchmark calibration).
+        theta_u_model: Ultimate-rotation convention, one of
+            :data:`~fea_toolkit.benchmarks.imk_calibration.THETA_U_MODELS`.
+            Default ``"plateau"``.  Recorded on ``md.imk_theta_u_model`` as
+            run-level provenance (an explicit *theta_u* takes precedence over
+            the recorded convention).
 
     Raises:
         NotImplementedError: For ``building`` != 3 (per-member unbraced lengths /
@@ -411,8 +420,13 @@ def enrich_imk(
             plastic_modulus_m3=props["Z33"],
             axial_ratio=column_axial_ratio if is_col else 0.0,
             column=is_col,
+            theta_u=theta_u,
+            theta_u_model=theta_u_model,
         )
         sec.imk_params = params.to_dict()
+    # Run-level provenance: which ultimate-rotation convention produced ``θu``.
+    # An explicit ``theta_u`` override takes precedence over this convention.
+    md.imk_theta_u_model = theta_u_model
     return md
 
 

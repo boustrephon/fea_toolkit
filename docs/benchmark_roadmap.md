@@ -384,9 +384,9 @@ component database** (>300 wide-flange beam/column tests).
 `opensees/_elements.py`, wired through `sac.builder_config`.  A0 landed —
 `lignos_krawinkler_2011()` computes the full `IMKBilin` set for **beams**
 (Lignos–Krawinkler 2011, transcribed from Lignos' EPFL component tool +
-PEER/ATC-72-1 §3.2.2) and **columns** (Lignos et al. 2019, adopted in the
-ASCE 41-17 Errata; backbone Eqs. 6–10 plus the cyclic-deterioration Λ of
-Eq. 13).  A2 landed (single-member cyclic M-θ checks —
+PEER/ATC-72-1 §3.2.2) and **columns** (Lignos et al. 2019 — the
+*monotonic-backbone* parameters `My*`, `a`, `θp`, `θpc`, `Mr` plus the
+cyclic-deterioration `Λ` of Eq. 13).  A2 landed (single-member cyclic M-θ checks —
 `tests/test_benchmark_sac_imk_cyclic.py`); A3 in progress (first increment:
 `enrich_imk` + 3-story `backbone="imk"`, `tests/test_benchmark_sac_imk_frame.py`).
 See `docs/imk_deterioration_model.md`.

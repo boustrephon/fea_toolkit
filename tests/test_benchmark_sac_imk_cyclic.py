@@ -1,6 +1,6 @@
 """A2 — single-member IMK (IMKBilin) cyclic M-θ validation vs the calibrated backbones.
 
-The A0 calibration returns the *expected* backbone (``My``, ``Mc = a*·My``,
+The A0 calibration returns the *expected* backbone (``My``, ``Mc = a·My``,
 ``θp``, ``θpc``, ``Mr = κ·My``) for a section; A1 builds it as an OpenSees
 ``IMKBilin`` material.  These tests drive a single ``IMKBilin`` spring through
 monotonic and cyclic rotation histories (``DisplacementControl``) and assert the
@@ -198,8 +198,10 @@ def test_sac_imk_params_plausible_ranges():
     ]
     for name, p, is_beam in sections:
         assert p.My_pos > 0.0, name
-        assert 0.005 <= p.theta_p_pos <= 0.12, (name, p.theta_p_pos)
-        assert 0.02 <= p.theta_pc_pos <= 0.20, (name, p.theta_pc_pos)
+        # Column θp/θpc are the monotonic-backbone values (capped at 0.20 / 0.30);
+        # beam values (Lignos–Krawinkler 2011) sit well inside the same bounds.
+        assert 0.005 <= p.theta_p_pos <= 0.20, (name, p.theta_p_pos)
+        assert 0.02 <= p.theta_pc_pos <= 0.30, (name, p.theta_pc_pos)
         if is_beam:
             assert 0.1 <= p.lamda_S <= 3.0, (name, p.lamda_S)
         else:

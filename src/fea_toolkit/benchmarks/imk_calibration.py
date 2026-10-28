@@ -15,10 +15,11 @@ works for *beams* — RBS and other-than-RBS, split at ``d = 533 mm``.
 Hamburger (2019), "Proposed Updates to the ASCE 41 Nonlinear Modeling Parameters
 for Wide-Flange Steel Columns", DOI ``10.1061/(ASCE)ST.1943-541X.0002353`` (via
 the companion 2018 NCEE paper and the ASCE/SEI 41-17 Errata, which adopted them).
-These include the *first-cycle envelope* (ASCE 41) parameters (Eqs. 6–10) and
-the cyclic-deterioration ``Λ`` (Eq. 13): ``Λs`` for basic-strength deterioration
-(two branches split at ``Pg/Pye = 0.35``, capped at 3.0 rad) and
-``Λc = Λk = 0.9·Λs`` for post-capping and unloading-stiffness deterioration.
+These include the *monotonic-backbone* parameters (``My*``, ``a``, ``θp``,
+``θpc``, ``Mr``) and the cyclic-deterioration ``Λ`` (Eq. 13):
+``Λs`` for basic-strength deterioration (two branches split at
+``Pg/Pye = 0.35``, capped at 3.0 rad) and ``Λc = Λk = 0.9·Λs`` for post-capping
+and unloading-stiffness deterioration.
 
 See ``docs/imk_deterioration_model.md`` for the design record.
 """
@@ -53,6 +54,66 @@ IMK_PARAM_KEYS: tuple[str, ...] = (
 )
 
 
+# ── Ultimate-rotation (``theta_u`` / ``IMKBilin`` ``du``) conventions ──────
+# The ``IMKBilin`` material's ``du`` is the ultimate rotation at which the
+# strength drops to zero.  The papers do not give a single flexural ``du``
+# regression, so the toolkit exposes the choice as a named convention (plus an
+# explicit float override for benchmark calibration).  See
+# ``docs/imk_deterioration_model.md`` → "The ultimate rotation θu".
+THETA_U_MODELS: tuple[str, ...] = ("plateau", "none", "lignos", "hybrid")
+
+#: Lignos et al. (2019) Eq. 11 — monotonic-backbone ultimate chord rotation
+#: (rad), the rotation at which a column loses its axial-load-carrying capacity.
+LIGNOS_ULT_ROTATION: float = 0.15
+
+#: Residual-plateau length added after the post-capping branch (rad).
+THETA_U_PLATEAU: float = 0.02
+
+
+def _resolve_theta_u(
+    theta_u: Optional[float],
+    model: str,
+    theta_p: float,
+    theta_pc: float,
+) -> float:
+    """Resolve the ultimate rotation ``θu`` (``IMKBilin`` ``du``) from a convention.
+
+    An explicit *theta_u* (non-``None``) always wins.  Otherwise the named
+    convention selects the value:
+
+    * ``"plateau"`` — ``θp + θpc + 0.02`` (flexural fracture + residual plateau;
+      the default);
+    * ``"none"`` — ``θp + θpc`` (no plateau);
+    * ``"lignos"`` — ``0.15`` rad (Lignos et al. 2019 Eq. 11, monotonic
+      axial-collapse rotation);
+    * ``"hybrid"`` — ``max(θp + θpc + 0.02, 0.15)`` (floor at the paper's
+      collapse point, plateau otherwise).
+
+    Args:
+        theta_u: Explicit ultimate rotation (rad) or ``None`` to use *model*.
+        model: One of :data:`THETA_U_MODELS`.
+        theta_p: Pre-capping plastic rotation (rad).
+        theta_pc: Post-capping plastic rotation (rad).
+
+    Returns:
+        The resolved ultimate rotation (rad).
+
+    Raises:
+        ValueError: If *model* is not one of :data:`THETA_U_MODELS`.
+    """
+    if theta_u is not None:
+        return float(theta_u)
+    if model == "plateau":
+        return theta_p + theta_pc + THETA_U_PLATEAU
+    if model == "none":
+        return theta_p + theta_pc
+    if model == "lignos":
+        return LIGNOS_ULT_ROTATION
+    if model == "hybrid":
+        return max(theta_p + theta_pc + THETA_U_PLATEAU, LIGNOS_ULT_ROTATION)
+    raise ValueError(f"theta_u_model must be one of {THETA_U_MODELS}, got {model!r}")
+
+
 @dataclass
 class SteelIMKParams:
     """Parameters for a ``IMKBilin`` (modified IMK) steel hinge.
@@ -66,7 +127,10 @@ class SteelIMKParams:
     ``mc_my`` is the capping-to-yield ratio (``FmaxFy``) and ``res_*`` the
     residual ratio (``FresFy``); ``as_bilin_args`` maps ``θpc`` to ``IMKBilin``'s
     ``dpc = mc_my·θpc/(mc_my − res)`` so the post-capping slope matches the
-    calibrated Lignos–Krawinkler backbone.
+    calibrated Lignos–Krawinkler backbone.  ``theta_u_model`` records *which*
+    ultimate-rotation convention produced ``theta_u_*`` (one of
+    :data:`THETA_U_MODELS`); it is provenance only and is **not** serialized to
+    the ``imk_params`` dict (:meth:`to_dict`).
     """
 
     My_pos: float
@@ -88,6 +152,7 @@ class SteelIMKParams:
     c_K: float = 1.0
     D_pos: float = 1.0
     D_neg: float = 1.0
+    theta_u_model: str = "plateau"
 
     def to_dict(self) -> dict[str, float]:
         """Flatten to the ``imk_params`` dict stamped onto a section."""
@@ -190,28 +255,34 @@ def lignos_2019_wide_flange_column(
     axial_ratio: float,
     ry_factor: float = 1.1,
     theta_u: Optional[float] = None,
+    theta_u_model: str = "plateau",
 ) -> SteelIMKParams:
     """Wide-flange steel column ``IMKBilin`` parameters (Lignos et al. 2019 / ASCE 41-17).
 
-    Transcribes Eqs. 6–10 and 13 of Lignos, Hartloper, Elkady, Deierlein & Hamburger
-    (2019), DOI ``10.1061/(ASCE)ST.1943-541X.0002353`` (via the companion 2018
-    NCEE paper and the ASCE/SEI 41-17 Errata, which adopted them):
+    Transcribes the *monotonic-backbone* parameters of Lignos, Hartloper, Elkady,
+    Deierlein & Hamburger (2019), DOI ``10.1061/(ASCE)ST.1943-541X.0002353``
+    (via the companion 2018 NCEE paper and the ASCE/SEI 41-17 Errata, which
+    adopted the first-cycle envelope values):
 
     * ``My* = 1.15·Z·Ry·Fy·(1 − Pg/Pye)`` for ``Pg/Pye ≤ 0.20``; and
-      ``My* = 1.15·Z·Ry·Fy·(9/8)(1 − Pg/Pye)`` for ``Pg/Pye > 0.20``  (Eq. 6);
-    * ``a* = Mc/My = 9.5·(h/tw)^-0.4·(Lb/ry)^-0.16·(1 − Pg/Pye)^0.2 ≥ 1.0``  (Eq. 7);
-    * ``θp = 15·(h/tw)^-1.6·(Lb/ry)^-0.3·(1 − Pg/Pye)^2.3 ≤ 0.10``  (Eq. 8);
-    * ``θpc = 14·(h/tw)^-0.8·(Lb/ry)^-0.5·(1 − Pg/Pye)^3.2 ≤ 0.10``  (Eq. 9);
-    * ``Mr = (0.4 − 0.4·Pg/Pye)·My*``  (Eq. 10).
+      ``My* = 1.15·Z·Ry·Fy·(9/8)(1 − Pg/Pye)`` for ``Pg/Pye > 0.20``  (Eq. 2);
+    * ``a = Mc/My = 12.5·(h/tw)^-0.2·(Lb/ry)^-0.4·(1 − Pg/Pye)^0.4``,
+      ``1.0 ≤ a ≤ 1.3``  (Eq. 3);
+    * ``θp = 294·(h/tw)^-1.7·(Lb/ry)^-0.7·(1 − Pg/Pye)^1.6 ≤ 0.20``  (Eq. 7);
+    * ``θpc = 90·(h/tw)^-0.8·(Lb/ry)^-0.8·(1 − Pg/Pye)^2.5 ≤ 0.30``  (Eq. 9);
+    * ``Mr = (0.5 − 0.4·Pg/Pye)·My*``  (Eq. 5).
     * ``Λs = 25 500·(h/tw)^-2.14·(Lb/ry)^-0.53·(1 − Pg/Pye)^4.92 ≤ 3.0`` for
       ``Pg/Pye ≤ 0.35``; and
       ``Λs = 268 000·(h/tw)^-2.30·(Lb/ry)^-1.30·(1 − Pg/Pye)^1.19 ≤ 3.0``
       for ``Pg/Pye > 0.35``  (Eq. 13 — basic-strength cyclic deterioration).
 
-    The first five are the *first-cycle envelope* (ASCE 41) parameters.  Eq. 13
-    gives the cyclic-deterioration ``Λ`` of the monotonic (``IMKBilin``) backbone:
-    ``Λc = Λk = 0.9·Λs`` control post-capping and unloading-stiffness
-    deterioration (Lignos et al. 2019).
+    ``My*`` (Eq. 2) is shared by both curves; ``a``, ``θp``, ``θpc`` and ``Mr``
+    are the paper's *monotonic-backbone* parameters — the curve the ``IMKBilin``
+    hinge models for nonlinear response-history analysis — paired with the
+    cyclic-deterioration ``Λ`` (Eq. 13): ``Λc = Λk = 0.9·Λs`` control
+    post-capping and unloading-stiffness deterioration (Lignos et al. 2019).
+    (The *first-cycle envelope* / ASCE 41 curve uses different coefficients —
+    see ``docs/imk_deterioration_model.md``.)
 
     Args:
         section_depth_m: Overall section depth ``d`` (m).
@@ -224,9 +295,12 @@ def lignos_2019_wide_flange_column(
         plastic_modulus_m3: Strong-axis plastic section modulus ``Zx`` (m³).
         axial_ratio: Gravity axial-load ratio ``Pg/Pye``.
         ry_factor: AISC expected-yield ratio ``Ry`` (default 1.1 for A992/A572-50).
-        theta_u: Ultimate rotation (rad); defaults to
-            ``theta_p + theta_pc + 0.02`` (a 0.02 rad residual plateau before the
-            strength drops to zero at ``du``).
+        theta_u: Explicit ultimate rotation (rad).  When ``None``, the
+            *theta_u_model* convention is used; a non-``None`` value always
+            takes precedence (benchmark calibration).
+        theta_u_model: Ultimate-rotation convention, one of
+            :data:`THETA_U_MODELS` (``"plateau"`` / ``"none"`` / ``"lignos"`` /
+            ``"hybrid"``).  Default ``"plateau"`` (``θp + θpc + 0.02``).
 
     Note:
         Columns with ``Pg/Pye > 0.6`` are force-controlled (elastic) per ASCE 41;
@@ -237,22 +311,24 @@ def lignos_2019_wide_flange_column(
     lb_ry = unbraced_length_m / radius_of_gyration_m
     one_minus_axial = 1.0 - axial_ratio
 
-    # Eq. 6 — effective yield moment (cyclic hardening + axial-load reduction).
+    # Eq. 2 — effective yield moment (cyclic hardening + axial-load reduction).
     if axial_ratio <= 0.20:
         my = 1.15 * plastic_modulus_m3 * ry_factor * fy_pa * one_minus_axial
     else:
         my = 1.15 * plastic_modulus_m3 * ry_factor * fy_pa * (9.0 / 8.0) * one_minus_axial
 
-    # Eq. 7 — capping ratio (hardening) a* = Mc/My.
-    mc_my = 9.5 * h_tw**-0.4 * lb_ry**-0.16 * one_minus_axial**0.2
-    mc_my = max(mc_my, 1.0)
+    # Eq. 3 — capping ratio (hardening) a = Mc/My of the monotonic backbone,
+    # clamped to 1.0 ≤ a ≤ 1.3 (the cap binds for stocky sections, h/tw < 15).
+    mc_my = 12.5 * h_tw**-0.2 * lb_ry**-0.4 * one_minus_axial**0.4
+    mc_my = min(max(mc_my, 1.0), 1.3)
 
-    # Eqs. 8 & 9 — pre-/post-capping plastic rotations (capped at 0.10 rad).
-    theta_p = min(15.0 * h_tw**-1.6 * lb_ry**-0.3 * one_minus_axial**2.3, 0.10)
-    theta_pc = min(14.0 * h_tw**-0.8 * lb_ry**-0.5 * one_minus_axial**3.2, 0.10)
+    # Eqs. 7 & 9 — pre-/post-capping plastic rotations of the monotonic
+    # backbone (capped at 0.20 / 0.30 rad respectively).
+    theta_p = min(294.0 * h_tw**-1.7 * lb_ry**-0.7 * one_minus_axial**1.6, 0.20)
+    theta_pc = min(90.0 * h_tw**-0.8 * lb_ry**-0.8 * one_minus_axial**2.5, 0.30)
 
-    # Eq. 10 — residual strength ratio.
-    kappa = 0.4 - 0.4 * axial_ratio
+    # Eq. 5 — residual strength ratio of the monotonic backbone.
+    kappa = 0.5 - 0.4 * axial_ratio
 
     # Eq. 13 — reference cumulative plastic rotation Λs (basic-strength cyclic
     # deterioration).  Two branches split at Pg/Pye = 0.35, capped at 3.0 rad;
@@ -265,9 +341,7 @@ def lignos_2019_wide_flange_column(
     lamda_c = 0.9 * lamda_s
     lamda_k = 0.9 * lamda_s
 
-    if theta_u is None:
-        # 0.02 rad residual plateau between the end of post-capping and fracture.
-        theta_u = theta_p + theta_pc + 0.02
+    theta_u = _resolve_theta_u(theta_u, theta_u_model, theta_p, theta_pc)
 
     return SteelIMKParams(
         My_pos=my,
@@ -284,6 +358,7 @@ def lignos_2019_wide_flange_column(
         mc_my=mc_my,
         theta_u_pos=theta_u,
         theta_u_neg=theta_u,
+        theta_u_model=theta_u_model,
     )
 
 
@@ -304,6 +379,7 @@ def lignos_krawinkler_2011(
     mc_my: float = 1.05,
     kappa: float = 0.4,
     theta_u: Optional[float] = None,
+    theta_u_model: str = "plateau",
 ) -> SteelIMKParams:
     """Compute ``IMKBilin`` parameters from the Lignos–Krawinkler (2011) regressions (A0).
 
@@ -326,9 +402,12 @@ def lignos_krawinkler_2011(
         column: True for a column (else a beam).
         mc_my: Capping-to-yield moment ratio (beams; default 1.05).
         kappa: Residual strength ratio ``Mr/My`` (beams; default 0.4).
-        theta_u: Ultimate rotation (rad); defaults to
-            ``theta_p + theta_pc + 0.02`` (a 0.02 rad residual plateau before the
-            strength drops to zero at ``du``).
+        theta_u: Explicit ultimate rotation (rad).  When ``None``, the
+            *theta_u_model* convention is used; a non-``None`` value always
+            takes precedence (benchmark calibration).
+        theta_u_model: Ultimate-rotation convention, one of
+            :data:`THETA_U_MODELS` (``"plateau"`` / ``"none"`` / ``"lignos"`` /
+            ``"hybrid"``).  Default ``"plateau"`` (``θp + θpc + 0.02``).
     """
     if column:
         return lignos_2019_wide_flange_column(
@@ -341,6 +420,7 @@ def lignos_krawinkler_2011(
             plastic_modulus_m3=plastic_modulus_m3,
             axial_ratio=axial_ratio,
             theta_u=theta_u,
+            theta_u_model=theta_u_model,
         )
 
     h = section_depth_m - 2.0 * flange_thickness_m  # clear web depth
@@ -354,9 +434,7 @@ def lignos_krawinkler_2011(
     theta_p, theta_pc, lamda = _beam_rotations(h_tw, bf_2tf, lb_ry, l_over_2d, d_mm, fy_mpa, rbs)
 
     my = fy_pa * plastic_modulus_m3
-    if theta_u is None:
-        # 0.02 rad residual plateau between the end of post-capping and fracture.
-        theta_u = theta_p + theta_pc + 0.02
+    theta_u = _resolve_theta_u(theta_u, theta_u_model, theta_p, theta_pc)
 
     return SteelIMKParams(
         My_pos=my,
@@ -373,4 +451,5 @@ def lignos_krawinkler_2011(
         mc_my=mc_my,
         theta_u_pos=theta_u,
         theta_u_neg=theta_u,
+        theta_u_model=theta_u_model,
     )

@@ -166,8 +166,8 @@ Source: `docs/benchmark_roadmap.md` §3 (canonical); `docs/imk_deterioration_mod
 **Status (2026-10-27).** A1 machinery landed — `hinge_backbone="imk"` builds an
 `IMKBilin` steel hinge (energy-based cyclic deterioration) in `opensees/_elements.py`.
 A0 landed — beams (Lignos–Krawinkler 2011 θp/θpc/Λ) and columns (Lignos et al.
-2019 / ASCE 41-17 backbone Eqs. 6–10 + cyclic-deterioration Λ Eq. 13,
-2026-10-28).
+2019 — the monotonic-backbone parameters `My*`, `a`, `θp`, `θpc`, `Mr` +
+cyclic-deterioration `Λ` Eq. 13, 2026-10-28).
 **Remaining:**
 1. ✅ Column cyclic-deterioration Λ — landed (2026-10-28): transcribed Lignos
    et al. (2019) Eq. 13 (`Λs` basic-strength deterioration, split at

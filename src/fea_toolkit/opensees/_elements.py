@@ -154,7 +154,11 @@ def _imk_bilin_args(
     Lamda_C Lamda_K c_S c_C c_K D_pos D_neg``.  ``FmaxFy`` = capping ratio
     (``mc_my``), ``FresFy`` = residual ratio (``res``); all strengths and
     deformations are positive (``Fy_neg`` = ``-my_neg``).  A missing ``theta_u``
-    falls back to ``theta_p + theta_pc``.
+    falls back to ``theta_p + theta_pc`` — the *no-plateau* ``θu``, deliberately
+    the **conservative** choice: a smaller ``du`` drops the hinge to zero
+    strength earlier (predicts collapse sooner) than the calibrated
+    ``"plateau"`` convention (``θp + θpc + 0.02``), so an uncalibrated
+    hand-built dict never overstates ductility.
     """
     theta_p_pos = float(params.get("theta_p_pos", 0.0))
     theta_p_neg = float(params.get("theta_p_neg", 0.0))
@@ -162,6 +166,12 @@ def _imk_bilin_args(
     theta_pc_neg = float(params.get("theta_pc_neg", 0.0))
     theta_u_pos = float(params.get("theta_u_pos", 0.0))
     theta_u_neg = float(params.get("theta_u_neg", 0.0))
+    # Missing ``du`` → the conservative no-plateau fallback (``θp + θpc``).  A
+    # smaller ``du`` collapses the hinge earlier than the calibrated
+    # ``"plateau"`` default (``θp + θpc + 0.02``), so a hand-built dict never
+    # overstates its ductility.  The calibration path resolves ``θu``
+    # explicitly (see ``_resolve_theta_u``), so this only fires for
+    # uncalibrated dicts.
     if theta_u_pos <= 0.0:
         theta_u_pos = theta_p_pos + theta_pc_pos
     if theta_u_neg <= 0.0:
