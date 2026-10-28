@@ -1390,7 +1390,7 @@ class ElementMixin:
                 # ``stiff_factor`` x 6EI/L so the elastic member carries the
                 # elastic deformation, matching the bilinear/trilinear
                 # lumped-hinge convention.
-                params = getattr(sec, "imk_params", None)
+                params = getattr(elem, "imk_params", None) or getattr(sec, "imk_params", None)
                 stiff_factor = float(self.config.get("hinge_stiffness_factor", 10.0))
                 k0 = stiff_factor * 6.0 * E * max(I33, 1e-12) / max(L, 1e-12)
                 if params:

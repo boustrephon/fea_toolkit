@@ -350,8 +350,9 @@ def derive_column_axial_ratios(md: SAPModelData, building: int = 3) -> dict[str,
     Args:
         md: The SAC model after :func:`enrich_nonlinear` (moment-frame columns
             carry the ``SteelCol`` material; the leaning column stays elastic).
-        building: 3, 9 or 20.  Only 3 is wired today (9/20 need per-member
-            column splices).
+        building: 3, 9 or 20.  The base (lowest) column of each line is the
+            critical member; a column splice at the base would be read through
+            the below-splice physical section (``MAT_TO_SECTION``).
 
     Returns:
         ``{section_name: Pg/Pye}`` for the moment-frame column sections, taking
@@ -360,11 +361,6 @@ def derive_column_axial_ratios(md: SAPModelData, building: int = 3) -> dict[str,
 
     See :func:`gravity_axial_ratios` for the independent full-solve cross-check.
     """
-    if building != 3:
-        raise NotImplementedError(
-            f"column axial ratios for the {building}-story model need per-member "
-            "column splices (not yet wired); use building=3"
-        )
     g = g_from_units(md.units)
     roles = _frame_element_roles(md)
     nodes = md.nodes
@@ -387,8 +383,10 @@ def derive_column_axial_ratios(md: SAPModelData, building: int = 3) -> dict[str,
     ratios: dict[str, float] = {}
     for (x, y), (_, sname) in line_base.items():
         sec = md.sections.get(sname)
-        if sec is None or getattr(sec, "material", None) != "SteelCol":
-            continue  # leaning column — no hinge
+        if sec is None:
+            continue
+        if building == 3 and getattr(sec, "material", None) != "SteelCol":
+            continue  # 3-story leaning column — no hinge
         total_mass = 0.0
         for nid, mass in (md.added_masses or {}).items():
             nd = nodes.get(nid)
@@ -414,7 +412,7 @@ def gravity_axial_ratios(md: SAPModelData, building: int = 3) -> dict[str, float
     Args:
         md: The SAC model before preprocessing; ``added_masses`` are the FEMA
             355C seismic weight lumped at the floor nodes.
-        building: 3, 9 or 20.  Only 3 is exercised today.
+        building: 3, 9 or 20.
 
     Returns:
         ``{section_name: Pg/Pye}`` for the moment-frame column sections, taking
@@ -452,8 +450,10 @@ def gravity_axial_ratios(md: SAPModelData, building: int = 3) -> dict[str, float
             continue  # not a base (fixed) column
         sname = md.frame_assignments.get(eid, "")
         sec = md.sections.get(sname)
-        if sec is None or getattr(sec, "material", None) != "SteelCol":
-            continue  # leaning column
+        if sec is None:
+            continue
+        if building == 3 and getattr(sec, "material", None) != "SteelCol":
+            continue  # 3-story leaning column
         rxn = reactions.get(bottom.node_id)
         if rxn is None:
             continue
@@ -483,16 +483,23 @@ def enrich_imk(
 
     Geometry (``D``/``BF``/``TF``/``TW``/``Z33``/``I22``/``A``) is read from the
     AISC table via :func:`fea_toolkit.model.steel_sections.get_section_properties`,
-    with ``ry = sqrt(I22/A)``.  The representative member length ``L`` is the
-    longest frame element assigned to the section (exact for the 3-story model,
-    whose members of one section share a length); the beam unbraced length is
-    ``beam_unbraced_factor * L`` (default 1.0 — no intermediate lateral bracing, a
-    conservative first cut).
+    with ``ry = sqrt(I22/A)``.  One parameter set is computed **per member** from
+    that member's own length (columns: the storey height, which varies across the
+    basement / ground / upper storeys; beams: the bay width), so a section used at
+    several storeys gets length-corrected parameters on each element.  The beam
+    unbraced length is ``beam_unbraced_factor * L`` (default 1.0 — no intermediate
+    lateral bracing, a conservative first cut).  Column splice rows map to their
+    below-splice physical section (``MAT_TO_SECTION``); the 20-story box columns
+    use the wide-flange equations as a stocky-section approximation (see
+    ``docs/imk_deterioration_model.md``).
 
     Args:
-        md: SAC model, after :func:`enrich_display_sections` (the moment-frame
-            sections carry the ``SteelCol`` / ``SteelBeam`` material).
-        building: 3, 9 or 20.  Only 3 is wired today.
+        md: SAC model, after :func:`enrich_display_sections`.  The 3-story
+            moment-frame sections carry the ``SteelCol`` / ``SteelBeam`` material
+            (the leaning column stays ``Steel``); the 9/20-story sections are all
+            ``Steel``, so their role (column vs beam) is read from element
+            orientation.
+        building: 3, 9 or 20.
         column_axial_ratio: Gravity axial-load ratio ``Pg/Pye`` for columns
             (``0`` = pure flexure, the no-axial-load envelope).  Superseded
             per-section by *column_axial_ratios* when that is given.
@@ -513,51 +520,32 @@ def enrich_imk(
             run-level provenance when *theta_u* is ``None`` (an explicit
             *theta_u* takes precedence and is recorded instead).
 
-    Raises:
-        NotImplementedError: For ``building`` != 3 (per-member unbraced lengths /
-            column axial loads not yet wired).
-
     Returns:
         *md*, mutated in place.
     """
-    if building != 3:
-        raise NotImplementedError(
-            f"IMK hinges for the {building}-story model need per-member unbraced "
-            "lengths and column axial loads (not yet wired); use building=3"
-        )
     from ..model.steel_sections import get_section_properties
     from .imk_calibration import lignos_krawinkler_2011
 
-    # Representative (longest) member length per assigned section.
-    lengths: dict[str, float] = {}
-    for eid, sname in md.frame_assignments.items():
-        elem = md.frame_elements.get(eid)
-        if elem is None:
-            continue
-        ni = md.nodes.get(elem.node_i)
-        nj = md.nodes.get(elem.node_j)
-        if ni is None or nj is None:
-            continue
-        length = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
-        if length > lengths.get(sname, 0.0):
-            lengths[sname] = length
-
     name_map = MAT_TO_SECTION[building]
-    for sname, mat_no in _mat_no_by_section(md, building).items():
-        sec = md.sections.get(sname)
-        if sec is None or sname not in lengths:
-            continue
-        is_col = sec.material == "SteelCol"
-        if not is_col and sec.material != "SteelBeam":
-            continue  # leaning column (elastic material) — no hinge
-        props = get_section_properties(name_map[mat_no])
-        if props is None:
-            continue
-        length = lengths[sname]
-        axial = column_axial_ratio
+    mat_no_by_sec = _mat_no_by_section(md, building)
+    roles = _frame_element_roles(md)
+
+    def _axial(sname: str) -> float:
         if column_axial_ratios is not None:
-            axial = float(column_axial_ratios.get(sname, column_axial_ratio))
-        params = lignos_krawinkler_2011(
+            return float(column_axial_ratios.get(sname, column_axial_ratio))
+        return column_axial_ratio
+
+    def _compute(sname: str, length: float, is_col: bool, axial: float):
+        mat_no = mat_no_by_sec.get(sname)
+        if mat_no is None:
+            return None
+        shape = name_map.get(mat_no)
+        if shape is None:
+            return None
+        props = get_section_properties(shape)
+        if props is None:
+            return None
+        return lignos_krawinkler_2011(
             section_depth_m=props["D"],
             web_thickness_m=props["TW"],
             flange_width_m=props["BF"],
@@ -572,7 +560,70 @@ def enrich_imk(
             theta_u=theta_u,
             theta_u_model=theta_u_model,
         )
-        sec.imk_params = params.to_dict()
+
+    def _member_role(eid: str, sname: str) -> tuple[bool, bool]:
+        """Return ``(is_col, is_moment)``; ``is_moment=False`` ⇒ no hinge."""
+        sec = md.sections.get(sname)
+        if building == 3:
+            if sec is not None and sec.material == "SteelCol":
+                return True, True
+            if sec is not None and sec.material == "SteelBeam":
+                return False, True
+            return False, False  # leaning column / rigid-axial link bay
+        # 9/20: every member is moment-frame; column vs beam by orientation.
+        return roles.get(eid) == "col", roles.get(eid) in ("col", "beam")
+
+    # Per-member stamping — one parameter set per member from its *own* length
+    # (columns: the storey height, which varies across storeys; beams: the bay
+    # width).  The builder reads these via ``elem.imk_params``.
+    for eid, elem in md.frame_elements.items():
+        sname = md.frame_assignments.get(eid)
+        if sname is None:
+            continue
+        ni = md.nodes.get(elem.node_i)
+        nj = md.nodes.get(elem.node_j)
+        if ni is None or nj is None:
+            continue
+        length = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
+        is_col, is_moment = _member_role(eid, sname)
+        if not is_moment:
+            continue
+        params = _compute(sname, length, is_col, _axial(sname))
+        if params is None:
+            continue
+        elem.imk_params = params.to_dict()
+
+    # Section-level summary (3-story only): the 3-story sections are unambiguous
+    # (no section is both a column and a beam), so the longest-member length is
+    # exact there and keeps ``sec.imk_params`` readable (tests, the visualiser).
+    # 9/20 sections may be both (e.g. ``mat8`` = W24x131 column *and* beam), so
+    # only the per-member dict is authoritative for them.
+    if building == 3:
+        lengths: dict[str, float] = {}
+        for eid, sname in md.frame_assignments.items():
+            elem = md.frame_elements.get(eid)
+            if elem is None:
+                continue
+            ni = md.nodes.get(elem.node_i)
+            nj = md.nodes.get(elem.node_j)
+            if ni is None or nj is None:
+                continue
+            length = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
+            if length > lengths.get(sname, 0.0):
+                lengths[sname] = length
+        for sname in md.sections:
+            sec = md.sections.get(sname)
+            if sec is None or sname not in lengths:
+                continue
+            if sec.material == "SteelCol":
+                is_col = True
+            elif sec.material == "SteelBeam":
+                is_col = False
+            else:
+                continue
+            params = _compute(sname, lengths[sname], is_col, _axial(sname))
+            if params is not None:
+                sec.imk_params = params.to_dict()
     # Run-level provenance: the *effective* ultimate-rotation selection.  An
     # explicit ``theta_u`` overrides the convention, so record it (with its
     # value) rather than leaving the unused ``theta_u_model`` label behind.
@@ -805,12 +856,7 @@ def load_model(
         if building == 3:
             enrich_nonlinear(md)
         if backbone == "imk":
-            if building != 3:
-                raise NotImplementedError(
-                    f"IMK hinges for the {building}-story model need per-member "
-                    "unbraced lengths and column axial loads (not yet wired); "
-                    "use building=3"
-                )
+            pass  # enrich_display_sections + enrich_imk handle 3/9/20 below
         elif backbone in ("trilinear", "trilinear_steel02", "trilinear_clough"):
             enrich_trilinear(md, building=building)
         elif building != 3:

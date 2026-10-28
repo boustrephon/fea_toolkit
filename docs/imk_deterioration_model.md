@@ -141,7 +141,9 @@ derived from the FEMA 355C seismic weight via `sac.derive_column_axial_ratios()`
 with `sac.gravity_axial_ratios()` as the full-elastic-solve cross-check
 (agreement ≈ 0.15 %).  Third increment landed (2026-10-28): NLTHA convergence
 (item 4) — `IMKBilin` converges on all four strong cases where the Clough
-trilinear hinge failed.
+trilinear hinge failed.  Fourth increment landed (2026-10-28): the 9/20-story
+matrices (item 5) — per-member `imk_params` from the varying storey heights,
+column splices, and per-base-section axial ratios.
 
 Open A3 items, in build order:
 
@@ -174,8 +176,25 @@ Open A3 items, in build order:
    shortfall vs the hardening trilinear hinge).  Under an extreme monotonic
    pulse the frame yields then reaches dynamic instability, as the deterioration
    model intends.
-5. **9/20-story matrices.**  Wire `enrich_imk` for building 9/20 (per-member
-   unbraced lengths from the varying story heights; column splices).
+5. **9/20-story matrices.**  ✅ **Landed 2026-10-28** — `enrich_imk` now stamps
+   *per-member* `imk_params` (the builder reads ``elem.imk_params`` before the
+   section-level dict), so each member uses its own unbraced length (columns:
+   the varying basement / ground / upper storey heights; beams: the bay width)
+   and the column-splice rows map to their below-splice physical section
+   (``MAT_TO_SECTION``).  The 9/20-story sections are all ``Steel`` (no
+   ``SteelCol``/``SteelBeam`` marker), so the role is read from element
+   orientation; the 20-story ``mat8`` (W24x131) is used as *both* a column and a
+   beam, which the old per-section stamp could not express.  Column axial ratios
+   derive per base-section (9-story W14x370 ≈ 0.18 / W14x500 ≈ 0.27; 20-story
+   box ≈ 0.23 / W24x335 ≈ 0.49).  Two approximations are noted for calibration:
+   the 20-story box columns use the wide-flange column equations (a stocky
+   section stands in for the box), and the SAC columns are stocky enough
+   (``h/tw`` ≈ 5–8) that the Lignos 2019 caps bind (``mc/My``=1.3, ``θp``=0.20,
+   ``θpc``=0.30, ``Λs``=3.0) — so the per-member length is wired correctly but is
+   a no-op for *these* columns until slender columns appear.  The 9-story
+   gravity-bay pin release is still skipped under ``hinge_model='lumped'`` (the
+   lumped hinges re-point the member ends and win over the release — a known
+   A3/A4 refinement).  ``tests/test_benchmark_sac_imk_920.py``.
 6. **IDA vs Ibarra–Krawinkler (2005).**  Incremental dynamic analysis over the
    benchmark records; compare the median collapse capacity (`S_a(T1)`) against
    Ibarra–Medina–Krawinkler (2005).

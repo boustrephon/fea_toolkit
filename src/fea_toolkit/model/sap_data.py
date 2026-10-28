@@ -1986,6 +1986,12 @@ class FrameElement:
     mirror_2: bool = False  # Mirror the section about local 2
     mirror_3: bool = False  # Mirror the section about local 3
     transform_stiffness: bool = True  # Transform stiffness for centroid offset
+    # IMK (IMKBilin) hinge parameters stamped by ``benchmarks.sac.enrich_imk`` —
+    # per-member (computed with the member's *actual* length).  Read by the
+    # builder's ``hinge_backbone="imk"`` path in preference to the section-level
+    # ``Section.imk_params``.  ``None`` when the member carries no IMK hinge
+    # (e.g. the 3-story leaning column / rigid-axial link bay).
+    imk_params: Optional[dict[str, float]] = None
 
 
 # ── Opening / void section markers ───────────────────────────────────
