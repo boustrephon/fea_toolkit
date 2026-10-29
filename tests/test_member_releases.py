@@ -217,12 +217,15 @@ class TestBuilderReleases:
         import openseespy.opensees as ops
 
         try:
-            mesh, _b = _build(
+            mesh, b = _build(
                 {"1": FrameRelease("1", end_i=[0, 0, 0, 0, 0, 1])},
                 {"1": Restraint([1, 1, 1, 1, 1, 1]), "3": Restraint([1, 1, 1, 1, 1, 1])},
             )
-            assert "1_rel_i" in mesh.nodes
-            assert mesh.frame_elements["1"].node_i == "1_rel_i"
+            # Release nodes / re-pointing live on the builder, not the mesh (§3.2).
+            assert "1_rel_i" in b._release_nodes
+            assert b._release_repoints["1"]["I"] == "1_rel_i"
+            assert "1_rel_i" not in mesh.nodes  # mesh left un-mutated
+            assert mesh.frame_elements["1"].node_i == "1"
             assert len(ops.getNodeTags()) == 4  # 3 mesh + 1 release
         finally:
             ops.wipe()
@@ -254,6 +257,32 @@ class TestBuilderReleases:
             )
             assert "1_rel_i" not in mesh.nodes
             assert mesh.frame_elements["1"].node_i == "1"
+        finally:
+            ops.wipe()
+
+    def test_release_under_lumped_models_the_pin(self):
+        """A released end under ``hinge_model='lumped'`` still gets its pin.
+
+        The hinge loop skips the released end (no hinge spring there) while the
+        release route inserts the ``zeroLength`` pin and re-points the released
+        end onto its ``*_rel_*`` node; the moment end keeps its hinge spring.
+        """
+        import openseespy.opensees as ops
+
+        try:
+            mesh, b = _build(
+                {"1": FrameRelease("1", end_i=[0, 0, 0, 0, 0, 1])},
+                {"1": Restraint([1, 1, 1, 1, 1, 1]), "3": Restraint([1, 1, 1, 1, 1, 1])},
+                config={"hinge_model": "lumped", "hinge_backbone": "bilinear"},
+            )
+            # The released I-end is re-pointed to its release node on the builder…
+            assert b._release_repoints["1"]["I"] == "1_rel_i"
+            assert "1_rel_i" in b._release_nodes
+            assert "1_rel_i" not in mesh.nodes  # mesh left un-mutated
+            # …and the hinge route leaves the released end alone (no spring there).
+            assert b._hinge_repoints["1"][0] == "1"
+            # The domain carries the release zeroLength on top of the frames.
+            assert len(ops.getEleTags()) >= 3  # 2 frames + ≥1 release zeroLength
         finally:
             ops.wipe()
 
@@ -488,9 +517,9 @@ class TestPlanParity:
         import openseespy.opensees as ops
 
         try:
-            AnalysisBuilder(mesh, {"verbose": False}).build_domain()
-            created = {nid for nid in mesh.nodes if nid.endswith(("_rel_i", "_rel_j"))}
-            assert created == {rn["node_id"] for rn in plan["release_nodes"]}
+            b = AnalysisBuilder(mesh, {"verbose": False})
+            b.build_domain()
+            assert set(b._release_nodes) == {rn["node_id"] for rn in plan["release_nodes"]}
             # 2 frame elements + 1 zeroLength per released end.
             assert len(ops.getEleTags()) == 2 + len(plan["ends"])
         finally:

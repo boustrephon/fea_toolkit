@@ -53,10 +53,10 @@ def test_modal_periods_match_otori(building):
 def test_trilinear_builder_builds(building):
     """``backbone='trilinear'`` builds a lumped-hinge domain for 9/20-story.
 
-    Note: under ``hinge_model='lumped'`` the member-end releases (the 9-story
-    gravity-bay pin, ``element_tbl`` type 5) are skipped — the lumped hinges
-    re-point the member ends and win over the release.  The elastic anchor above
-    is unaffected; the nonlinear gravity-bay release is an A3/A4 refinement.
+    Under ``hinge_model='lumped'`` the member-end releases are honoured: the
+    9-story gravity-bay pin (``element_tbl`` type 5, M3 released at the far end)
+    gets a release ``zeroLength`` and no hinge spring at that end (see
+    ``test_9story_gravity_bay_pin_modeled_under_lumped``).
     """
     import openseespy.opensees as ops
     from openseespy.opensees import wipe
@@ -67,6 +67,30 @@ def test_trilinear_builder_builds(building):
         assert len(ops.getEleTags()) > 0
         m = b.run_modal_analysis(num_modes=1, print_results=False)
         assert m["periods"][0] > 0.0
+    finally:
+        wipe()
+
+
+def test_9story_gravity_bay_pin_modeled_under_lumped():
+    """The 9-story bay-4 fixed-pin beams keep their M3 release under lumped.
+
+    Each ``B{lvl}-4`` beam (``lvl`` 1..10) has its far end M3-released; under
+    ``hinge_model='lumped'`` the release route re-points that end onto its
+    ``*_rel_j`` node while the hinge route leaves it alone (a hinge spring only
+    at the moment end).
+    """
+    from openseespy.opensees import wipe
+
+    wipe()
+    try:
+        b = build_builder(building=9, backbone="trilinear")
+        bay4 = {f"B{lvl}-4" for lvl in range(1, 11)}
+        released = set(b._release_repoints) & bay4
+        assert released == bay4
+        for eid in bay4:
+            assert b._release_repoints[eid]["J"].endswith("_rel_j")
+            # The released J-end carries no hinge re-point: it stays the mesh node.
+            assert b._hinge_repoints[eid][1] == b.mesh_model.frame_elements[eid].node_j
     finally:
         wipe()
 
