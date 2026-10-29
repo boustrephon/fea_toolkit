@@ -55,10 +55,8 @@ class FrameSegment:
 #: Default hinge-eligibility rules, in application order.  ``honour_releases``
 #: drops a pinned (M3-released) end — a member with only one remaining point
 #: (fixed-pin) still emits a single segment spanning the full member, with the
-#: released end flagged on :class:`FrameSegment` so the builder leaves it
-#: connected to the structural node without a hinge spring there.  The M3 pin
-#: release itself is a separate concern and is not yet modelled under
-#: ``hinge_model='lumped'`` (see ``docs/imk_member_classification.md`` §(d)).
+#: released end flagged on :class:`FrameSegment` so the builder leaves it to
+#: the release route (a ``zeroLength`` pin, no hinge spring there).
 #: ``include_leaning_columns`` is deliberately
 #: absent (leaning columns stay elastic by default) and needs a leaning-column
 #: signal that is currently benchmark-specific, so it is deferred.
@@ -264,9 +262,8 @@ def segment_members(
         if len(hinge_nodes) == 1:
             # Fixed-pin member: one end M3-released.  Emit a single segment
             # spanning the full member so the moment end keeps its hinge; the
-            # released end is flagged so the builder leaves it connected to the
-            # structural node without adding a hinge spring there (the M3 pin
-            # release itself is not yet modelled under ``hinge_model='lumped'``).
+            # released end is flagged so the builder adds no hinge spring there
+            # — the release route inserts the pin ``zeroLength`` instead.
             length = _straight_length(chain_nodes[0], chain_nodes[-1], nodes)
             segments.append(
                 FrameSegment(

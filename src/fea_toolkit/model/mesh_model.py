@@ -186,10 +186,11 @@ class MeshModel:
     ``MeshModel`` is frozen with respect to its preprocessed topology —
     :attr:`panel_zones`, :attr:`wall_elements` and
     :attr:`frame_element_types` are read-only to the ``AnalysisBuilder``.
-    Remaining instrumentation (lumped hinges, member releases, bond-slip
-    springs, brace subdivision and limit-state columns) is applied by the
-    builder at build time and restored via its ``_restore_*`` helpers — known
-    debt, see ``docs/dev_notes.md``.
+    Lumped-hinge and member-release instrumentation are kept in builder-local
+    state (generated nodes / re-points never written back to the mesh).  The
+    remaining instrumentation (bond-slip springs, brace subdivision and
+    limit-state columns) is applied by the builder at build time and restored
+    via its ``_restore_*`` helpers — known debt, see ``docs/dev_notes.md``.
     """
 
     # ── Nodes ────────────────────────────────────────────────────

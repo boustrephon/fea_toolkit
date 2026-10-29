@@ -6,11 +6,12 @@ and creates the OpenSees domain objects.  It handles all analysis execution
 and result extraction.
 
 Panel-zone splitting is resolved by the Preprocessor, so the builder reads
-``mesh_model.panel_zones`` read-only.  Lumped-hinge instrumentation keeps its
-generated nodes and re-pointed connectivity in builder-local state
-(``_hinge_nodes`` / ``_hinge_repoints``), so it no longer writes back to the
-mesh; the remaining instrumentation (member releases, bond-slip springs, brace
-subdivision and limit-state columns) still writes back and is restored by the
+``mesh_model.panel_zones`` read-only.  Lumped-hinge and member-release
+instrumentation keep their generated nodes and re-pointed connectivity in
+builder-local state (``_hinge_nodes`` / ``_hinge_repoints`` /
+``_release_nodes`` / ``_release_repoints``), so they no longer write back to
+the mesh; the remaining instrumentation (bond-slip springs, brace subdivision
+and limit-state columns) still writes back and is restored by the
 ``_restore_*`` helpers — known debt, see ``docs/dev_notes.md``.
 """
 
@@ -58,10 +59,13 @@ class AnalysisBuilder(
 
     ``mesh_model.panel_zones`` is read-only: panel-zone splitting is resolved
     by the Preprocessor and stored as a declarative ``MeshModel`` field, which
-    the builder emits without writing back.  Other instrumentation (lumped
-    hinges, member releases, bond-slip springs, brace subdivision and
-    limit-state columns) still mutates the mesh at build time and is restored
-    by the ``_restore_*`` helpers — known debt, see ``docs/dev_notes.md``.
+    the builder emits without writing back.  Lumped-hinge and member-release
+    instrumentation keep their generated nodes and re-pointed connectivity in
+    builder-local state (``_hinge_nodes`` / ``_hinge_repoints`` /
+    ``_release_nodes`` / ``_release_repoints``).  The remaining instrumentation
+    (bond-slip springs, brace subdivision and limit-state columns) still mutates
+    the mesh at build time and is restored by the ``_restore_*`` helpers —
+    known debt, see ``docs/dev_notes.md``.
 
     Usage::
 
@@ -221,6 +225,11 @@ class AnalysisBuilder(
         # _create_lumped_hinges and read back by _add_beam_column.
         self._hinge_nodes: dict[str, Any] = {}
         self._hinge_repoints: dict[str, list[str]] = {}
+        # Release-build state kept off the MeshModel (§3.2): generated release
+        # nodes and re-pointed connectivity, reset per build in
+        # _create_member_releases and read back by _resolve_frame_endpoints.
+        self._release_nodes: dict[str, Any] = {}
+        self._release_repoints: dict[str, dict[str, str]] = {}
         self._next_variant_tag: int = (
             max(self.section_tags.values(), default=0) + 1 if self.section_tags else 1
         )
@@ -600,9 +609,6 @@ class AnalysisBuilder(
             # rebuild_with_fiber_sections() always subdivide the original
             # (un‑subdivided) elements rather than already-subdivided ones.
             self._restore_brace_canonical_state()
-            # Restore canonical release topology (endpoints + *_rel_* nodes)
-            # so repeated builds re-instrument the original elements.
-            self._restore_release_canonical_state()
             # Restore canonical limit-state column topology (control/anchor
             # nodes, re-pointed beams) so repeated builds instrument the
             # original elements rather than previously-instrumented ones.

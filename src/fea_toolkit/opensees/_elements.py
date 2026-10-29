@@ -680,18 +680,35 @@ class ElementMixin:
     ) -> tuple[Optional["Node"], Optional["Node"]]:
         """Resolve an element's effective end nodes for domain creation.
 
-        Builder-local hinge re-pointing (:attr:`_hinge_repoints`) and generated
-        hinge nodes (:attr:`_hinge_nodes`) win over the element's own endpoints,
-        so ``_create_lumped_hinges`` never has to mutate the frozen
-        :class:`MeshModel`.  Falls back to ``mesh_model.nodes`` for the normal
-        (un-instrumented) path.
+        Builder-local instrumentation wins over the element's own endpoints, so
+        neither :meth:`_create_lumped_hinges` nor
+        :meth:`_create_member_releases` mutates the frozen
+        :class:`MeshModel` (§3.2).  Hinge re-pointing (:attr:`_hinge_repoints`)
+        and release re-pointing (:attr:`_release_repoints`) are complementary:
+        the hinge loop skips released ends, so a released end appears only in
+        the release map and a moment/hinge end only in the hinge map.  Falls
+        back to ``mesh_model.nodes`` for the normal (un-instrumented) path.
         """
         ni_id, nj_id = elem.node_i, elem.node_j
         rep = self._hinge_repoints.get(elem.elem_id)
         if rep is not None:
             ni_id, nj_id = rep
-        ni = self._hinge_nodes.get(ni_id) or self.mesh_model.nodes.get(ni_id)
-        nj = self._hinge_nodes.get(nj_id) or self.mesh_model.nodes.get(nj_id)
+        rel = self._release_repoints.get(elem.elem_id)
+        if rel is not None:
+            if "I" in rel:
+                ni_id = rel["I"]
+            if "J" in rel:
+                nj_id = rel["J"]
+        ni = (
+            self._hinge_nodes.get(ni_id)
+            or self._release_nodes.get(ni_id)
+            or self.mesh_model.nodes.get(ni_id)
+        )
+        nj = (
+            self._hinge_nodes.get(nj_id)
+            or self._release_nodes.get(nj_id)
+            or self.mesh_model.nodes.get(nj_id)
+        )
         return ni, nj
 
     def _add_beam_column(self, elem, tag, elements, assignments):
@@ -1471,12 +1488,11 @@ class ElementMixin:
             point_ids = [segments[0].node_i] + [seg.node_j for seg in segments]
             for k in range(n + 1):
                 # A released (pinned) member end is a segment boundary but not a
-                # hinge point: leave it connected to the structural node and skip
-                # the spring, so the moment end keeps its hinge while the released
-                # end gets no spring.  Note: the M3 pin release itself is *not*
-                # yet modelled under ``hinge_model='lumped'`` (the release route
-                # is skipped there), so the released end stays moment-connected
-                # until that separately-tracked gap is closed.
+                # hinge point: leave it to the release route, which inserts the
+                # pin zeroLength and re-points the released end onto its *_rel_*
+                # node (_create_member_releases runs later in build_domain).
+                # The moment end keeps its hinge spring; the released end gets
+                # no hinge spring.
                 if k == 0 and segments[0].release_i:
                     continue
                 if k == n and segments[-1].release_j:
@@ -1513,24 +1529,6 @@ class ElementMixin:
     # ``AnalysisBuilder._set_defaults()``) so a single definition drives the
     # OpenSeesPy domain, the Tcl export and the config defaults.
 
-    def _restore_release_canonical_state(self) -> None:
-        """Restore canonical frame endpoints and drop stale release nodes.
-
-        Called at the start of :meth:`build_domain` (before
-        :meth:`_create_nodes`) so repeated builds re-instrument the original
-        elements rather than already-instrumented ones.
-        """
-        if not hasattr(self, "_release_canonical_elements"):
-            return
-        for nid in list(self.mesh_model.nodes.keys()):
-            if nid.endswith(("_rel_i", "_rel_j")):
-                del self.mesh_model.nodes[nid]
-        for eid, elem in self.mesh_model.frame_elements.items():
-            if eid in self._release_canonical_elements:
-                ni, nj = self._release_canonical_elements[eid]
-                elem.node_i = ni
-                elem.node_j = nj
-
     def _create_member_releases(self) -> None:
         """Insert zero-length release elements at released frame ends.
 
@@ -1563,48 +1561,49 @@ class ElementMixin:
         Using ``-mat``/``-dir`` rather than ``equalDOF`` keeps the
         ``Transformation`` constraint handler compatible with ``rigidLink``
         MPC end offsets — the same rationale as the bond-slip springs.
-        """
-        if not self.config.get("apply_releases", True):
-            return
-        releases = getattr(self.mesh_model, "frame_releases", None) or {}
-        if not releases:
-            return
-        if self.config.get("hinge_model") == "lumped":
-            warnings.warn(
-                "apply_releases and hinge_model='lumped' both re-point member "
-                "ends — releases skipped (lumped hinges win).",
-                stacklevel=2,
-            )
-            return
 
-        # ── Idempotency: preserve canonical endpoints on first call ──
-        # Restoration is handled by _restore_release_canonical_state().
-        # When bond-slip springs have already run (they precede this method
-        # in build_domain), the frame elements are re-pointed to their
-        # *_bond_i / *_bond_j nodes, so capture the true pre-instrumentation
-        # endpoints from the bond canonical map instead of the current
-        # (bond) node ids.
-        if not hasattr(self, "_release_canonical_elements"):
-            if hasattr(self, "_bond_canonical_elements"):
-                self._release_canonical_elements = dict(self._bond_canonical_elements)
-            else:
-                self._release_canonical_elements = {
-                    eid: (elem.node_i, elem.node_j)
-                    for eid, elem in self.mesh_model.frame_elements.items()
-                    if not getattr(elem, "inactive", False)
-                }
+        The generated release nodes and re-pointed connectivity are kept in
+        builder-local state (:attr:`_release_nodes` /
+        :attr:`_release_repoints`), reset per build and read back by
+        :meth:`_resolve_frame_endpoints` — never written to the frozen
+        :class:`MeshModel` (§3.2).  The lumped-hinge route skips released ends,
+        so a released end (release spring) and a moment end (hinge spring)
+        never conflict; under ``hinge_model='lumped'`` the released end now
+        gets its pin.
+        """
+        # ── Builder-local release state (§3.2) ──────────────────────
+        # Generated release nodes and re-pointed connectivity are kept on the
+        # builder — never written back to the frozen MeshModel — and reset per
+        # build so repeated build_domain() re-instruments cleanly with no
+        # restore pass.  _resolve_frame_endpoints reads them back.
+        self._release_nodes: dict[str, Node] = {}
+        self._release_repoints: dict[str, dict[str, str]] = {}
 
         # Shared planner (also used by the Tcl export paths).  It owns the
         # η/μ scaling, the partial-fixity springs, the zero-length guard and
         # the warning messages — nothing release-specific is recomputed here.
-        plan = plan_releases(self.mesh_model, self.config)
+        # It returns an empty plan when apply_releases is off or the model has
+        # no releases, so no separate guards are needed here.  The node tags
+        # are rebased above any builder-local hinge nodes (the Tcl exporters,
+        # which have no hinges, use the planner's mesh-derived default).
+        plan = plan_releases(
+            self.mesh_model,
+            self.config,
+            node_tag_base=(
+                max(
+                    max((nd.node_tag for nd in self.mesh_model.nodes.values()), default=0),
+                    max((nd.node_tag for nd in self._hinge_nodes.values()), default=0),
+                )
+                + 1
+            ),
+        )
         if not plan["ends"]:
             return
 
         # ── Coincident release nodes ─────────────────────────────────
         release_node_tags: dict[str, int] = {}
         for rn in plan["release_nodes"]:
-            self.mesh_model.nodes[rn["node_id"]] = Node(
+            self._release_nodes[rn["node_id"]] = Node(
                 node_id=rn["node_id"],
                 node_tag=rn["node_tag"],
                 x=rn["x"],
@@ -1668,12 +1667,12 @@ class ElementMixin:
             ops.element(*args)
             next_tag += 1
 
-        # ── Re-point member ends to their release nodes ──────────────
-        for eid, (node_i, node_j) in plan["endpoints"].items():
-            elem = self.mesh_model.frame_elements.get(eid)
-            if elem is not None:
-                elem.node_i = node_i
-                elem.node_j = node_j
+        # ── Re-point released ends to their release nodes (builder-local) ──
+        # The released end maps end-label → release node id; _resolve_frame_endpoints
+        # merges this with any hinge re-point (which never touches a released end).
+        for end in plan["ends"]:
+            eid = end["frame_id"]
+            self._release_repoints.setdefault(eid, {})[end["end"]] = end["node_id"]
 
     def _create_panel_zones(self) -> None:
         """Emit the panel-zone zero-length springs from ``MeshModel.panel_zones``.

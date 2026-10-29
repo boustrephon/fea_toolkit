@@ -81,15 +81,21 @@ def member_end_stiffness(sec, mat, length: float) -> Optional[list]:
     return [k_axial, k_shear, k_shear, k_torsion, k_bend_y, k_bend_z]
 
 
-def plan_releases(model, config: Optional[dict] = None) -> dict:
+def plan_releases(
+    model, config: Optional[dict] = None, *, node_tag_base: Optional[int] = None
+) -> dict:
     """Compute the release node / element plan for a model.
 
     Args:
         model: A ``MeshModel`` or ``SAPModelData`` (must expose ``nodes``,
             ``frame_elements``, ``frame_assignments``, ``sections``,
             ``materials`` and ``frame_releases``).
-        config: Builder config (``apply_releases``, ``hinge_model``,
+        config: Builder config (``apply_releases``,
             ``release_rigidity_factor``, ``release_softness_factor``).
+        node_tag_base: First node tag for the release nodes.  Defaults to one
+            past the model's highest node tag.  The ``AnalysisBuilder`` passes a
+            higher base when builder-local hinge nodes have already claimed tags
+            (the Tcl exporters, which have no hinges, use the default).
 
     Returns:
         Dict with keys:
@@ -113,8 +119,6 @@ def plan_releases(model, config: Optional[dict] = None) -> dict:
     empty = {"release_nodes": [], "ends": [], "endpoints": {}}
     if not releases or not config.get("apply_releases", True):
         return empty
-    if config.get("hinge_model") == "lumped":
-        return empty
 
     eta = float(config.get("release_rigidity_factor", DEFAULT_RIGIDITY_FACTOR))
     softness = float(config.get("release_softness_factor", DEFAULT_SOFTNESS_FACTOR))
@@ -124,7 +128,11 @@ def plan_releases(model, config: Optional[dict] = None) -> dict:
     nodes = model.nodes
     sections = getattr(model, "sections", {}) or {}
     materials = getattr(model, "materials", {}) or {}
-    next_node_tag = max((nd.node_tag for nd in nodes.values()), default=0) + 1
+    next_node_tag = (
+        node_tag_base
+        if node_tag_base is not None
+        else max((nd.node_tag for nd in nodes.values()), default=0) + 1
+    )
 
     release_nodes: list = []
     ends: list = []
