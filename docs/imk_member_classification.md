@@ -13,8 +13,11 @@ related: [imk_deterioration_model.md, element_classification.md, benchmark_roadm
 is transcribed (`BEAM_TYPES`), `reconcile_member_types` applies the study
 override with a `UserWarning` on mismatch, `enrich_imk` skips the study braces
 (the 3-story link bay and the 20-story 1st-basement beams), and the axial ratio
-is per member (`derive_column_axial_ratios_by_member`).  Item (c) (the splitting
-hazard) remains open.
+is per member (`derive_column_axial_ratios_by_member`).  Items (c)/(e) are now
+designed end-to-end: hinge-eligible **segments** (`frame_segments`) computed in
+preprocessing, **one spring per hinge-eligible point**, and IMK parameters
+computed at build time via `enrich_hinge` (a route, not a model enrichment) —
+with a residual-stiffness floor and collapse detection for the IDA work.
 
 ## Goals and the tension
 
@@ -103,6 +106,26 @@ the Lignos-2019 branch splits at `Pg/Pye = 0.20` and `0.35` now apply per
 member.  This is both benchmark-matching (each column segment has its own ratio)
 and general (it works for any column stack, spliced or not).
 
+**Where it lands.**  In the route-agnostic design the **raw** gravity axial
+`P_g` (model units, compression +) is stored on `FrameSegment.axial` (see
+(c)/(e)); the IMK ratio `Pg/Pye = P_g / (A·Ry·Fy)` is derived at build time by
+`enrich_hinge`, which knows the overstrength `Ry` (an AISC/SAC convention, not a
+model property).  This keeps the model convention-free and converges with the
+existing `_stack_gravity_axial` (raw `P_g` for the Elwood limit-state path) —
+one gravity-axial quantity, two consumers.
+
+**Transfer columns — warn, don't model the transfer.**  The tributary stack is
+exact only on a continuous vertical support chain down to a restraint.  A column
+whose bottom node is neither restrained nor continued by a column below — it
+lands on a beam / girder, including a cantilever's single support — has its load
+redistributed laterally, so the closed-form stack is wrong there.  Detecting the
+full transfer is out of scope; instead the derivation walks each column's
+support chain and **warns** (`UserWarning`) naming every transfer column.  The
+fallback is a static analysis — `gravity_axial_ratios` already does this, and
+the deferred `derive_column_axial` verb is the solved-case route that re-stamps
+`frame_segments`.  The warning is the trigger: tributary for continuous stacks,
+solve for transfers.
+
 ## (c) Where the per-member parameters live
 
 **Current:** `elem.imk_params` rides on the `FrameElement`; it survives
@@ -134,15 +157,32 @@ extended to also permit hinges at framing points.
 
 Implementation shape (open):
 
-1. Carry the member identity through the split — children already carry
-   ``parent_id``; propagate ``imk_params`` (or resolve it through the parent
-   chain) so the builder can find the member's hinge parameters.
-2. Teach ``_create_lumped_hinges`` to place the IMK spring at hinge-eligible
-   points (member ends + framing nodes) and emit **elastic** interior elements
+1. Compute **`frame_segments`** in preprocessing (route-agnostic): for each
+   member, the ordered hinge-eligible points and the segments between them —
+   elastic sub-element chain, length, per-segment axial (see (e)).
+2. Teach ``_create_lumped_hinges`` to place **one spring per hinge-eligible
+   point** — at a member end the spring joins the structural node to the first
+   segment's end; at a framing point it joins ``segment_{i-1}`` to
+   ``segment_i`` (the standard ``elastic → spring → elastic``
+   concentrated-plasticity topology) — and emit **elastic** interior elements
    everywhere else.
-3. Recompute ``imk_params`` per segment (segment length, not member length) when
-   a member is split at a framing point; distinguish framing points from pure
-   discretization (record the split reason, or use node connectivity).
+3. Compute the IMK parameters **at build time** via ``enrich_hinge`` (see (e)):
+   per segment, from section + material + axial + length through the existing
+   ``lignos_krawinkler_2011`` calibration — nothing stamped on the model, and no
+   recalculation per split (the segment *is* the calibration unit).
+
+**One spring per point, not two back-to-back.**  At a framing point the girder
+is *cut* there, so a naïve per-element emission would leave two back-to-back
+springs through a shared middle node — ``[G-0] -(s0j)- M -(s1i)- [G-1]``.  M is
+then connected only through springs; when both reach the residual plateau (zero
+*tangent* stiffness) and the framing beam is pinned, M's rotation is restrained
+by nothing — a **spurious** singular mode that is *not* the physical collapse
+(the elastic segments still bend and anchor M).  Placing **one** spring between
+the two segments — ``[G-0] -(sM)- [G-1]`` — keeps each side anchored to its own
+elastic segment, so the only soft mode left is the genuine plastic hinge (the
+relative rotation).  The residual plateau still reaches zero tangent at full
+degradation, so a residual-stiffness floor plus clean collapse detection are
+still needed (decision 7) — but the spurious mode is gone.
 
 ## (d) Special members (brace / fixed-pin)
 
@@ -164,6 +204,122 @@ mismatch: "beam + pin release" already maps to `fixed-pin` analytically, but the
 lumped-hinge build currently **skips the release**, so the pin is lost at build
 time — a separate release-honouring issue, tracked apart from the type column.
 
+## (e) Switchable rules, applied to a `Selection`
+
+**Assessment — right direction, simplified form.**  `Selection`
+(`model/selection.py`) is already the scoping primitive the workflow layer hands
+every verb (§3.12), so "a list of rules applied to a `Selection`" is the natural
+shape.  The first draft over-built it (a rule registry with `ParamSpec`-style
+specs, a JSON DSL, a verb); the practical form is lighter and reuses what already
+exists.
+
+**The split.**  Two levels, each with an existing home:
+
+1. **`Selection` scopes the members** — which members to consider (section,
+   material, group, storey, elevation, id, …).  The existing `Selection`, passed
+   as-is — no bespoke `scope` key.
+2. **A rule list classifies the points** — within each selected member, which
+   nodes are hinge-eligible.
+
+A rule is **not** itself a `Selection` (a `Selection` has no "member degree" or
+"endpoint" criterion); the list is *applied to* the members the `Selection`
+returns.  `None` (the default) means **all frame members** — the brace /
+leaning-column / release filtering is the *rules'* job, not the `Selection`'s,
+so a default `Selection(element_types=["beam","column"])` would be a second
+spelling of `exclude_braces` (anti-pattern 17).  A `Selection` narrows for user
+scoping (storeys, sections, groups, ids).
+
+**Rules are named switches, not a DSL.**  A rule set is a `list[str]` of rule
+names — a rule is "on" when its name is in the list, off otherwise.  The
+name → predicate mapping lives in a module-level dict (the `SHAPE_NAMES`
+pattern), so it is data, switchable, and trivially JSON-serialisable — no
+per-rule parameter specs, no registry machinery, no verb.
+
+| Rule | Effect |
+|---|---|
+| `member_ends` | the member's two endpoints are candidates (joints, supports) |
+| `framing_points` | interior nodes with `member_degree ≥ 2` are candidates (another member frames in) |
+| `exclude_braces` | consume `imk_member_types` / `frame_element_types` — drop axial-only members |
+| `honour_releases` | consume `FrameRelease` — drop a pinned (`M3`-released) end |
+| `include_leaning_columns` | gravity / leaning columns get hinges (omit to keep them elastic) |
+
+Composition: only `member_ends` and `framing_points` *add* candidates (their
+union); the other three *veto* — at three different granularities (whole-member
+for braces and leaning columns, per-end for releases).  A formal detector/filter
+abstraction is more machinery than five rules justify.  The member-type rules
+must **consume** the classification already in place (`imk_member_types` from
+(a), `frame_element_types`) rather than re-derive it — one spelling of "is this
+a brace" (anti-pattern 17).
+
+**The core test.**  `member_degree` = the number of distinct top-level
+`parent_id` identities incident to a node.  A node is a candidate unless
+`member_degree == 1` *and* interior to its member (a pure discretization node);
+"endpoint" and "framing point" both fall out of this one count.  The classified
+points then **cut each member into segments**, stored as first-class records
+(Option C — the segment is what the builder emits, so there is no parallel
+point/axial list to keep aligned):
+
+```python
+@dataclass(frozen=True)
+class FrameSegment:
+    node_i: str                      # start hinge-eligible node
+    node_j: str                      # end hinge-eligible node
+    sub_element_ids: tuple[str, ...] # frozen chain of elastic sub-elements
+    axial: float = 0.0               # raw column gravity axial P_g (0.0 = none)
+    length: float = 0.0              # straight-line length (== sum of sub-elements)
+
+frame_segments: dict[str, list[FrameSegment]]  # on MeshModel
+```
+
+Section stays member-level (one original element = one section), so it remains
+in `frame_assignments`; the hinge-eligible points stay derivable as segment
+boundaries for audit.
+
+**Wiring (open).**
+
+1. A segment-cutting helper in `model/` (OpenSees-free, beside `Selection` /
+   `geometry_frames`): classify hinge-eligible points via the rule map, then cut
+   segments and attach `sub_element_ids` / `length` / `axial`.
+   ``selection=None`` (the default) means all frame members.
+2. The Preprocessor calls it after splitting + shell meshing and stores
+   `frame_segments` on the `MeshModel` — alongside `frame_element_types` /
+   `panel_zones` (§3.2).
+3. `enrich_hinge(mesh, backbone=…)` computes the per-segment parameters at build
+   time (IMK first; trilinear/bilinear later); `_create_lumped_hinges` consumes
+   `frame_segments` and emits **one spring per hinge-eligible point**, never
+   re-deriving eligibility (anti-pattern 17).  A verb is deferred until a
+   GUI/recipe action needs to *set* the rules — it is not needed to build the
+   domain.
+
+**A route, not a model enrichment.**  The parameters are computed at build time
+because they depend on the final segment length, which is only fixed after
+splitting *and* shell meshing (2D areas mesh together with the frames, and
+frames split at shell nodes).  So `backbone="imk"` is one build-time route
+beside elastic/modal, fiber and the other hinge backbones; the model and the
+`MeshModel` stay route-agnostic, and `enrich_imk` becomes
+`enrich_hinge(backbone=…)`, invoked by the builder, not a recipe step.
+`frame_segments` is computed regardless (route-agnostic topology); *assigning*
+hinges is the route — a model with no hinges simply never selects
+`hinge_model="lumped"`, and elastic/modal/fiber don't consume the segments.
+
+**Where chained analyses fit.**  Three kinds of chaining already have homes:
+analysis-sequence (gravity → transient, modal → Rayleigh damping) stays inside
+the runner; pipeline (modal → response spectrum) is the recipe `kind`/`needs`
+chain; property-derivation (static solve → column axial → calibration) is a
+`static` step whose `CASES` feed a `derive_column_axial` step that re-stamps
+`frame_segments`.  The IMK calibration itself is *not* a step — it reads the
+segments and computes parameters inside the analysis verb's `backbone` route.
+*(The solved-case `derive_column_axial` verb is deferred; the tributary axial
+ships with the segmentation.)*
+
+**Generality, honestly.**  What generalizes is the *pattern* — a `Selection`
+scope, a switchable name list, and a per-member segment list — not the hinge
+rule names.  Panel zones, rigid links and wall interfaces are already computed
+by the Preprocessor and stored as their own `MeshModel` fields (`panel_zones`,
+`offset_rigid_links`, `wall_elements`); re-expressing them through a generic
+point engine would be a second spelling of existing logic, not a shared one.
+The reusable piece is the signature, not a universal rule vocabulary.
+
 ## Decisions (proposed order)
 
 1. ✅ Run the analytical classifier first — geometry signal
@@ -183,6 +339,28 @@ time — a separate release-honouring issue, tracked apart from the type column.
    braces.)*
 4. ✅ Extend the axial ratio to per-member (b), keeping the base-section value as
    the reported summary.  *(Landed: `derive_column_axial_ratios_by_member`.)*
-5. Attach IMK hinges at hinge-eligible points (member ends + framing points) and
-   keep the interior elastic (c) — carry the member identity through the split
-   and recompute parameters per segment.  *(Design refined 2026-10-28; open.)*
+5. Attach IMK hinges at hinge-eligible points (member ends + framing points),
+   **one spring per point** (not two back-to-back), and keep the interior
+   elastic (c).  *(Design refined 2026-10-28; open.)*
+6. Express hinge-eligibility as a switchable rule list applied to a `Selection`
+   (`member_ends` / `framing_points` add candidates; `exclude_braces` /
+   `honour_releases` / `include_leaning_columns` veto), consuming the existing
+   `imk_member_types` / `frame_element_types` / release classification rather
+   than re-deriving it.  *(Designed 2026-10-28, simplified; open.)*
+7. Add a **residual-stiffness floor** to the hinge backbones (a small positive
+   tangent on the residual branch) and **clean collapse detection** in the IDA
+   driver, so a fully-degraded hinge runs to the collapse criterion instead of a
+   premature local singularity — the one-spring-per-point rule (5) removes the
+   *spurious* mode; this handles the *genuine* plastic mechanism.  *(Designed
+   2026-10-28; open.)*
+8. Store the classification as **segments, not points** (`frame_segments`, each
+   a `FrameSegment` with its sub-element chain, length and axial — Option C), and
+   compute the IMK parameters **at build time** via `enrich_hinge(backbone=…)`
+   rather than stamping `imk_params` on the model (a route, not an enrichment;
+   `enrich_imk` is removed).  *(Designed 2026-10-28; open.)*
+9. Store the **raw** column gravity axial `P_g` on `FrameSegment.axial`
+   (convention-free; the IMK `Pg/Pye` ratio is derived at build time via
+   `enrich_hinge`), converging with the existing `_stack_gravity_axial` (Elwood).
+   **Warn on transfer columns** (a column bottom on a beam, no column below)
+   rather than modelling load transfer; the solved-case `derive_column_axial`
+   verb is the fallback.  *(Designed 2026-10-28; open.)*
