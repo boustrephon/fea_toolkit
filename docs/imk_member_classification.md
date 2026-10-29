@@ -195,16 +195,16 @@ differently:
 |---|---|---|
 | 3-story 4th-bay link bay | brace (`type 3`, axial-only) | flexural W21×44 beam with a hinge |
 | 20-story basement beams | brace (`type 3`) | flexural beams |
-| 9-story gravity-bay beams (bay 4) | fixed-pin (`type 5`, M3 released at far end) | release transcribed but **skipped** under `hinge_model='lumped'` |
+| 9-story gravity-bay beams (bay 4) | fixed-pin (`type 5`, M3 released at far end) | pin honoured under `hinge_model='lumped'` (release `zeroLength`, no hinge spring) |
 
 These are the members the reconcile step in (a) distinguishes.  The 3-story link
 bay and the 20-story basement beams are **classification overrides**: the study
 tags them brace while the analytical rule (an I-section, horizontal, no release)
 would call them a moment beam — so the warning fires and the override wins,
 removing the flexural hinge.  The 9-story gravity-bay is *not* a classification
-mismatch: "beam + pin release" already maps to `fixed-pin` analytically, but the
-lumped-hinge build currently **skips the release**, so the pin is lost at build
-time — a separate release-honouring issue, tracked apart from the type column.
+mismatch: "beam + pin release" already maps to `fixed-pin` analytically, and the
+lumped-hinge build now **honours the release** (a release `zeroLength` at the
+pinned end, no hinge spring there) — landed 2026-10-29 (see P44).
 
 ## (e) Switchable rules, applied to a `Selection`
 

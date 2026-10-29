@@ -107,9 +107,11 @@ always keyed by an active element.
 | ``release_rigidity_factor`` | ``DEFAULT_RIGIDITY_FACTOR`` (100.0) | η for retained DOFs |
 | ``release_softness_factor`` | ``DEFAULT_SOFTNESS_FACTOR`` (1e-6) | μ for fully released DOFs (``0`` = exact) |
 
-Releases are skipped (with a warning) when ``hinge_model == 'lumped'`` (both
-re-point member ends) or when section/material data are insufficient, and are
-skipped for degenerate/zero-length members.
+Releases are honoured under every hinge route — including
+``hinge_model == 'lumped'``, where the released end gets its ``zeroLength`` pin
+and no hinge spring (the release and hinge routes are complementary, not
+conflicting).  Releases are skipped (with a warning) when section/material data
+are insufficient, and are skipped for degenerate/zero-length members.
 
 ## Single shared planner (OpenSeesPy & Tcl)
 

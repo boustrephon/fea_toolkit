@@ -88,10 +88,10 @@ revision — the same "extra node + `zeroLength`" pattern used for frame release
 fixed that and a cyclic-softening bug in the trilinear hinge (see
 `benchmark_roadmap.md` §2 A4).
 
-The 9-story gravity-bay pin remains skipped under `hinge_model='lumped'`: the
-member-end release and the lumped hinge both re-point the member end, and the
-lumped hinge wins (`opensees/_elements.py` `_create_member_releases`).  It is
-left for the A3/A4 comparison.
+The 9-story gravity-bay pin is now honoured under `hinge_model='lumped'`: the
+release route inserts a pin `zeroLength` at the released end while the hinge
+route leaves that end alone, so the two no longer conflict
+(`opensees/_elements.py` `_create_member_releases`).
 
 `beamWithHinges` (below) needs no extra node or constraint at all — the hinge
 lives in the element formulation.

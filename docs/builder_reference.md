@@ -41,10 +41,11 @@ SAPModelData ──▶ Preprocessor ──▶ MeshModel (frozen) ──▶ Analy
 3. **The `AnalysisBuilder` is a one-way function `MeshModel → OpenSees domain`.**
    It *reads* the prepared mesh, *selects* which configured modelling approach to
    emit, and *creates* OpenSees objects.  Panel-zone splitting is resolved by the
-   Preprocessor, so ``panel_zones`` is read-only here.  The remaining
-   instrumentation — lumped hinges, member releases, bond-slip springs, brace
-   subdivision and limit-state columns — is applied at build time and restored
-   by the builder's ``_restore_*`` helpers (known debt; see
+   Preprocessor, so ``panel_zones`` is read-only here.  Lumped-hinge and
+   member-release instrumentation keep their generated nodes / re-points in
+   builder-local state; the remaining instrumentation — bond-slip springs,
+   brace subdivision and limit-state columns — is applied at build time and
+   restored by the builder's ``_restore_*`` helpers (known debt; see
    ``docs/dev_notes.md``).  The builder otherwise selects and emits.
 
 ### When two analyses share a `MeshModel`
@@ -66,8 +67,7 @@ nodes/elements exist)?
 In short: **share the `MeshModel` exactly when the two variants differ only in
 build-level choices** (element type, sections, loads, solver, constraint
 application, and build-time instrumentation — lumped hinges, member releases,
-brace subdivision, limit-state columns — which the builder applies and restores
-via its ``_restore_*`` helpers); **share only the `SAPModelData` when they
+brace subdivision, limit-state columns); **share only the `SAPModelData` when they
 differ in topology** (meshing, joint models, wall families, panel zones).  When
 in doubt, separate the `MeshModel`s — an accidentally-shared mesh that a builder
 then mutates is worse than a redundant preprocess run.

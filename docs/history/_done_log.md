@@ -10,6 +10,34 @@ category: [archive]
 > [`_pending_work.md`](../_pending_work.md) on 2026-10-27.  Nothing here is
 > open work; the live plan lives in `_pending_work.md`.
 
+## DONE (2026-10-29 — member-end releases honoured under `hinge_model='lumped'`)
+
+Relocated from `_pending_work.md` (P44 fully).
+
+#### P44 — honour member-end releases under `hinge_model='lumped'`
+
+Source: `docs/imk_member_classification.md` §(d); `docs/benchmark_roadmap.md` A2/A3.
+
+**Status (2026-10-29).** ✅ Landed.  `_create_member_releases` no longer
+early-returns under `hinge_model='lumped'`, so an M3-released member end (the
+9-story gravity-bay pin, `element_tbl` type 5) now gets its pin in the lumped
+NLTHA path — the last "not-quite-the-reference" choice for the 9-story A3/A4
+comparison.  The `hinge_model == "lumped"` guards were removed from
+`plan_releases` / `_create_member_releases`, the release instrumentation was
+migrated to builder-local state (`_release_nodes` / `_release_repoints`,
+mirroring the hinge extraction), `_restore_release_canonical_state` was
+dropped, and `_resolve_frame_endpoints` now composes release + hinge
+re-pointing.  A released end gets the release `zeroLength`; the hinge loop
+already skips it, so the two routes are complementary.  `plan_releases` gained
+an optional `node_tag_base` so the builder rebases release-node tags above the
+builder-local hinge nodes (the Tcl exporters use the mesh-derived default).
+
+**Where.**  `opensees/releases.py`; `opensees/_elements.py`
+(`_create_member_releases`, `_resolve_frame_endpoints`, `_create_lumped_hinges`);
+`opensees/analysis_builder.py`.  Tests: `tests/test_member_releases.py`
+(`test_release_under_lumped_models_the_pin`, builder-local assertions),
+`tests/test_benchmark_sac920.py` (`test_9story_gravity_bay_pin_modeled_under_lumped`).
+
 ## DONE (2026-10-26 — SAC A4 comparison: trilinear hinge + transient peak extraction)
 
 Relocated from `_pending_work.md` (P40 fully; P41's done part — the damage

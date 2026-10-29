@@ -775,13 +775,15 @@ source model rather than duplicated.
     `MeshModel` (frozen-topology rule), and views are lenses.  Modelling
     choices that *do* change topology (panel zones, hinges, bond-slip springs,
     member releases, brace subdivision, limit-state columns) belong in the
-    `Preprocessor` and are carried as declarative `MeshModel` fields.  Panel
+    `Preprocessor` as declarative `MeshModel` fields, or in builder-local state.
+    Panel
     zones were migrated there in the 2026-10 panel-zone work (see the
-    "Builder must not mutate the MeshModel" note below); lumped-hinge
-    instrumentation now keeps its generated nodes and re-pointed connectivity
-    in builder-local state (`_hinge_nodes` / `_hinge_repoints`), and the
+    "Builder must not mutate the MeshModel" note below); lumped-hinge and
+    member-release instrumentation now keep their generated nodes and re-pointed
+    connectivity in builder-local state (`_hinge_nodes` / `_hinge_repoints` /
+    `_release_nodes` / `_release_repoints`), and the
     remaining build-time instrumentation methods still mutate and restore
-    (`_restore_bond_canonical_state`, `_restore_release_canonical_state`,
+    (`_restore_bond_canonical_state`,
     `_restore_brace_canonical_state`, `_restore_limit_state_canonical_state`)
     and are known debt that should follow the same extraction.
 
@@ -791,12 +793,16 @@ The `AnalysisBuilder` is the OpenSees projector: it writes to the OpenSees
 domain, never to the `MeshModel`.  Split the Preprocessor's topology
 preparation from the builder's domain emission:
 
-*   A modelling choice that changes topology (panel-zone splitting, hinge
-    insertion, bond-slip nodes, member releases, brace subdivision,
-    limit-state columns) is computed once in the `Preprocessor` and stored as a
-    declarative `MeshModel` field.  The builder reads that spec and emits the
-    OpenSees commands — it never adds, removes, renames or re-points a
-    node/element, and never mutates the `MeshModel`.
+*   A modelling choice that changes topology is either computed once in the
+    `Preprocessor` and stored as a declarative `MeshModel` field (panel-zone
+    splitting, wall elements, frame segmentation), or kept in builder-local
+    state at build time (lumped-hinge nodes and member-release nodes —
+    generated on the builder, never written back).  The builder reads the
+    frozen spec and emits the OpenSees commands — it never adds, removes,
+    renames or re-points a mesh node/element, and never mutates the
+    `MeshModel`.  Bond-slip nodes, brace subdivision and limit-state columns
+    still mutate-and-restore — known debt that should follow the same
+    extraction.
 *   The panel-zone work (2026-10) moved the Krawinkler & Gupta joint split out
     of `AnalysisBuilder._create_panel_zones` into
     `Preprocessor._prepare_panel_zones`; the builder now only emits the
@@ -806,7 +812,8 @@ preparation from the builder's domain emission:
     -   Does the new code write to `mesh_model`?  Reject.
     -   Does it need to remember how to "undo" a mesh change across rebuilds
         (a `_restore_*` method)?  If yes, that change belongs in the
-        Preprocessor.
+        Preprocessor, or in builder-local state (like the hinge / release
+        nodes).
 
 ### What it buys — and what it does not
 

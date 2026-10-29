@@ -185,9 +185,7 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   own `EI1`).  The rigid floor diaphragms (`slv_tbl` master-slave) are opt-in
   under ``fidelity="faithful"`` — they move the base shear by ~0.004 % (the
   beam axial stiffness already ties each floor) and are off by default.  Left
-  for the nonlinear comparison (A3/A4): the `krawinkler_gupta` panel-zone path
-  and the 9-story gravity-bay pin under `hinge_model='lumped'` (the lumped
-  hinges re-point the member ends and win over the release).
+  for the nonlinear comparison (A3/A4): the `krawinkler_gupta` panel-zone path.
 - **A3 — NLTHA + peak extraction (recorders landed; P-Δ / Rayleigh confirmed).**
   `run_transient_analysis` now records the seven peak quantities — drift (from
   `displacements`), per-node velocity / acceleration, base shear (global
@@ -279,8 +277,9 @@ frames under the ten record cases — is planned as an A0–A4 sequence:
   is the best (base shear −11…+7 %, drift −14…+48 %), and D (Clough, β = 0.5)
   is unstable — it loses convergence on 4 of the 10 strong cases.  The Rayleigh
   anchor periods are taken from the *elastic* model (ARPACK, milliseconds).
-  The 9-story gravity-bay release is skipped under the lumped hinge (lumped
-  hinges re-point the member ends and win over the release), as before.
+  The 9-story gravity-bay release is now honoured under the lumped hinge (the
+  released end gets its pin `zeroLength` and no hinge spring), so the bay-4
+  beams match the benchmark's fixed-pin semantics.
 
   **20-story base-shear fix — the ground lateral tie's mass.**  The 20-story
   (and, to a lesser extent, the 9-story) base shear was over-predicted because

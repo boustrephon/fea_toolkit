@@ -199,9 +199,9 @@ Open A3 items, in build order:
    (``h/tw`` ≈ 5–8) that the Lignos 2019 caps bind (``mc/My``=1.3, ``θp``=0.20,
    ``θpc``=0.30, ``Λs``=3.0) — so the per-member length is wired correctly but is
    a no-op for *these* columns until slender columns appear.  The 9-story
-   gravity-bay pin release is still skipped under ``hinge_model='lumped'`` (the
-   lumped hinges re-point the member ends and win over the release — a known
-   A3/A4 refinement).  ``tests/test_benchmark_sac_imk_920.py``.
+   gravity-bay pin release is now honoured under ``hinge_model='lumped'`` (a
+   release ``zeroLength`` at the pinned end, no hinge spring there).
+   ``tests/test_benchmark_sac_imk_920.py``.
    The next refinement layer — member role/type from the transcribed
    ``element_tbl`` type column, per-member axial ratio, and brace/pin handling —
    is designed in ``docs/imk_member_classification.md``; steps 1–3 landed
