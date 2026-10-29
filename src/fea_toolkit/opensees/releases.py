@@ -6,11 +6,17 @@ Shared by :class:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder`
 so the release topology and stiffnesses are identical in both.
 
 A SAP2000 frame end release frees selected **local** DOFs at a member end;
-partial fixity replaces a freed DOF with a semi-rigid spring.  Each released
-end is modelled with the OpenSees "extra node + ``zeroLength``" pattern
-(M. Scott, OpenSeesDigital 2022)::
+partial fixity replaces a freed DOF with a semi-rigid spring.  The standalone
+release path (the Tcl export, and the OpenSeesPy domain for M3-released or
+non-lumped ends) models each released end with the OpenSees "extra node +
+``zeroLength``" pattern (M. Scott, OpenSeesDigital 2022)::
 
     structural_node_i → zeroLength(release) → {eid}_rel_i … member
+
+Under ``hinge_model == 'lumped'`` a **non-M3** release at a hinge-eligible end
+is instead folded into the hinge spring by the builder (see
+:func:`end_released_dofs`), so no separate release node/element is created
+there.
 
 ``P, V2, V3, T, M2, M3`` map 1:1 onto OpenSees ``zeroLength`` local DOFs
 ``1..6``.
@@ -29,8 +35,10 @@ __all__ = [
     "DEFAULT_SOFTNESS_FACTOR",
     "RELEASE_DOF_LABELS",
     "emit_release_tcl",
+    "end_released_dofs",
     "member_end_stiffness",
     "plan_releases",
+    "release_dofs",
 ]
 
 #: Local DOF labels in SAP2000 / OpenSees order (local DOF = index + 1).
@@ -79,6 +87,36 @@ def member_end_stiffness(sec, mat, length: float) -> Optional[list]:
     k_bend_y = E * I22 / length if I22 > 0.0 else k_axial
     k_bend_z = E * I33 / length if I33 > 0.0 else k_axial
     return [k_axial, k_shear, k_shear, k_torsion, k_bend_y, k_bend_z]
+
+
+def release_dofs(flags: list, springs: list, member_k: list, eta: float, softness: float) -> list:
+    """Per-DOF ``(dir, stiffness)`` pairs for one released end.
+
+    The shared η/μ/partial-fixity rule: a retained DOF gets the rigid spring
+    (``η × member stiffness``); a released DOF gets its partial-fixity spring
+    when one is given, else the soft spring (``μ × member stiffness``), else is
+    omitted (an exact zero release, which may leave the DOF singular).
+
+    Args:
+        flags: 6 release flags (``P, V2, V3, T, M2, M3``); ``1`` = released.
+        springs: 6 partial-fixity spring stiffnesses (``None``/``0`` = none).
+        member_k: 6 member end stiffnesses in local-DOF order.
+        eta: Rigidity factor for retained DOFs.
+        softness: Softness factor for fully released DOFs (``0`` = exact).
+
+    Returns:
+        ``[(dir, stiffness), …]`` in local-DOF order (``dir`` = 1..6).
+    """
+    dofs: list = []
+    for dof in range(6):
+        if not flags[dof]:
+            dofs.append((dof + 1, eta * member_k[dof]))
+        elif springs[dof]:
+            dofs.append((dof + 1, float(springs[dof])))
+        elif softness > 0.0:
+            dofs.append((dof + 1, softness * member_k[dof]))
+        # else: exact zero release — DOF omitted (may be singular).
+    return dofs
 
 
 def plan_releases(
@@ -189,15 +227,7 @@ def plan_releases(
         ):
             if not any(flags):
                 continue
-            dofs: list = []
-            for dof in range(6):
-                if not flags[dof]:
-                    dofs.append((dof + 1, eta * member_k[dof]))
-                elif springs[dof]:
-                    dofs.append((dof + 1, float(springs[dof])))
-                elif softness > 0.0:
-                    dofs.append((dof + 1, softness * member_k[dof]))
-                # else: exact zero release — DOF omitted (may be singular).
+            dofs = release_dofs(flags, springs, member_k, eta, softness)
             if not dofs:
                 warnings.warn(
                     f"frame {eid}: all six DOFs released at end {end} — "
@@ -233,6 +263,77 @@ def plan_releases(
         endpoints[eid] = (new_i, new_j)
 
     return {"release_nodes": release_nodes, "ends": ends, "endpoints": endpoints}
+
+
+def end_released_dofs(
+    model, leaf_id: str, end: str, config: Optional[dict] = None
+) -> Optional[list]:
+    """Release springs for the DOFs actually freed at one leaf end.
+
+    Returns only the *released* DOFs (soft spring or partial-fixity), in the
+    natural SAP2000/OpenSees local-DOF order (``P=1, V2=2, V3=3, T=4, M2=5,
+    M3=6``).  Retained DOFs are omitted — the merged hinge + release spring
+    keeps the hinge's own material on those (so the strong-axis backbone and
+    the rigid P/V/T springs survive).  A fully released DOF under
+    ``release_softness_factor == 0`` yields a ``None`` stiffness (exact zero).
+
+    Mirrors the member-end-stiffness derivation in :func:`plan_releases` so
+    the merged spring uses identical per-DOF release stiffnesses.
+
+    Args:
+        model: A ``MeshModel`` or ``SAPModelData`` (see :func:`plan_releases`).
+        leaf_id: Active frame-element id for the released leaf.
+        end: ``"I"`` or ``"J"`` (matches ``plan_releases``' end labelling).
+        config: Builder config (``release_softness_factor``).
+
+    Returns:
+        ``[(dir, stiffness_or_None), …]`` or ``None`` when the end carries no
+        release, the leaf is inactive/missing, or its stiffness cannot be
+        derived.
+    """
+    config = config or {}
+    releases = getattr(model, "frame_releases", None) or {}
+    release = releases.get(leaf_id)
+    if release is None:
+        return None
+    flags = release.end_i if end == "I" else release.end_j
+    if not any(flags):
+        return None
+    springs = release.end_i_k if end == "I" else release.end_j_k
+
+    elem = model.frame_elements.get(leaf_id)
+    if elem is None or getattr(elem, "inactive", False):
+        return None
+    assignments = getattr(model, "frame_assignments", None) or {}
+    sections = getattr(model, "sections", {}) or {}
+    materials = getattr(model, "materials", {}) or {}
+    nodes = model.nodes
+    sec_name = assignments.get(leaf_id)
+    sec = sections.get(sec_name) if sec_name else None
+    mat = materials.get(sec.material) if (sec is not None and sec.material) else None
+    ni = nodes.get(elem.node_i)
+    nj = nodes.get(elem.node_j)
+    if ni is None or nj is None:
+        return None
+    dx, dy, dz = nj.x - ni.x, nj.y - ni.y, nj.z - ni.z
+    length = float(np.sqrt(dx * dx + dy * dy + dz * dz))
+    if length < 1e-12:
+        return None
+    member_k = member_end_stiffness(sec, mat, length)
+    if member_k is None:
+        return None
+
+    softness = float(config.get("release_softness_factor", DEFAULT_SOFTNESS_FACTOR))
+    dofs: list = []
+    for dof in range(6):
+        if flags[dof]:
+            if springs[dof]:
+                dofs.append((dof + 1, float(springs[dof])))
+            elif softness > 0.0:
+                dofs.append((dof + 1, softness * member_k[dof]))
+            else:
+                dofs.append((dof + 1, None))  # exact-zero release
+    return dofs or None
 
 
 def emit_release_tcl(plan: dict, start_elem_tag: int, start_mat_tag: int) -> list:

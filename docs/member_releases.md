@@ -57,6 +57,11 @@ is incompatible with ``rigidLink`` MPC end offsets under the
 ``Transformation`` constraint handler (the same rationale as the bond-slip
 springs).
 
+Under ``hinge_model == 'lumped'`` a **non-M3** release at a hinge-eligible
+end is folded into the hinge spring itself rather than modelled with a
+separate release node — one merged ``zeroLength`` carries the released DOFs'
+springs alongside the hinge backbone (see *Configuration* below).
+
 ### Formulation-aware stiffness
 
 The stiffness of each DOF on the release element is derived from the
@@ -107,11 +112,20 @@ always keyed by an active element.
 | ``release_rigidity_factor`` | ``DEFAULT_RIGIDITY_FACTOR`` (100.0) | η for retained DOFs |
 | ``release_softness_factor`` | ``DEFAULT_SOFTNESS_FACTOR`` (1e-6) | μ for fully released DOFs (``0`` = exact) |
 
-Releases are honoured under every hinge route — including
-``hinge_model == 'lumped'``, where the released end gets its ``zeroLength`` pin
-and no hinge spring (the release and hinge routes are complementary, not
-conflicting).  Releases are skipped (with a warning) when section/material data
-are insufficient, and are skipped for degenerate/zero-length members.
+Releases are honoured under every hinge route.  Under
+``hinge_model == 'lumped'`` an **M3-released** (pinned) end gets its
+``zeroLength`` pin and no hinge spring — the hinge loop skips the pinned end,
+so the release and hinge routes are complementary there.  A **non-M3** release
+(another freed DOF, or a partial-fixity spring on a non-M3 DOF) leaves the end
+hinge-eligible, so the released end also carries a hinge spring; the released
+DOFs are then folded **into** that single hinge spring — a merged ``zeroLength``
+carries the released DOFs' springs alongside the hinge backbone
+(``structural → merged spring → hinge node → member``), so the hinge's M3
+backbone is not softened by a series release partner (chaining would put the
+release's retained ``η·EI/L`` in series with the hinge's
+``hinge_stiffness_factor·6EI/L`` and soften it by 37.5 %).  Releases are
+skipped (with a warning) when section/material data are insufficient, and are
+skipped for degenerate/zero-length members.
 
 ## Single shared planner (OpenSeesPy & Tcl)
 

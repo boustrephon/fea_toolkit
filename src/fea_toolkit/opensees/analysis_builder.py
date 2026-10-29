@@ -9,7 +9,8 @@ Panel-zone splitting is resolved by the Preprocessor, so the builder reads
 ``mesh_model.panel_zones`` read-only.  Lumped-hinge and member-release
 instrumentation keep their generated nodes and re-pointed connectivity in
 builder-local state (``_hinge_nodes`` / ``_hinge_repoints`` /
-``_release_nodes`` / ``_release_repoints``), so they no longer write back to
+``_release_nodes`` / ``_release_repoints`` / ``_combined_release_ends``), so
+they no longer write back to
 the mesh; the remaining instrumentation (bond-slip springs, brace subdivision
 and limit-state columns) still writes back and is restored by the
 ``_restore_*`` helpers — known debt, see ``docs/dev_notes.md``.
@@ -62,7 +63,8 @@ class AnalysisBuilder(
     the builder emits without writing back.  Lumped-hinge and member-release
     instrumentation keep their generated nodes and re-pointed connectivity in
     builder-local state (``_hinge_nodes`` / ``_hinge_repoints`` /
-    ``_release_nodes`` / ``_release_repoints``).  The remaining instrumentation
+    ``_release_nodes`` / ``_release_repoints`` / ``_combined_release_ends``).
+    The remaining instrumentation
     (bond-slip springs, brace subdivision and limit-state columns) still mutates
     the mesh at build time and is restored by the ``_restore_*`` helpers —
     known debt, see ``docs/dev_notes.md``.
@@ -230,6 +232,10 @@ class AnalysisBuilder(
         # _create_member_releases and read back by _resolve_frame_endpoints.
         self._release_nodes: dict[str, Any] = {}
         self._release_repoints: dict[str, dict[str, str]] = {}
+        # Member ends whose release is folded into their hinge spring (see
+        # _create_lumped_hinges); reset per build there, read by
+        # _create_member_releases.
+        self._combined_release_ends: set[tuple[str, str]] = set()
         self._next_variant_tag: int = (
             max(self.section_tags.values(), default=0) + 1 if self.section_tags else 1
         )

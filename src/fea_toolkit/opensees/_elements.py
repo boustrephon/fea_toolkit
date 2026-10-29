@@ -19,9 +19,26 @@ from ..utils import (
     mass_density_scale_factor,
 )
 from .preprocessor import _resolve_rigid_offset_method
-from .releases import plan_releases
+from .releases import end_released_dofs, plan_releases
 
 logger = logging.getLogger(__name__)
+
+# ── Combined hinge + release spring ────────────────────────────────
+# The lumped-hinge zeroLength uses ``-orient (vx, vz)`` (see
+# ``_create_lumped_hinges``), so its local DOFs 2/3 (shear) and 5/6 (moments)
+# are swapped relative to the natural SAP2000/OpenSees numbering
+# ``[P, V2, V3, T, M2, M3]`` used by the release planner.  Map each hinge
+# material slot (0-based) to the natural release-DOF index it physically
+# carries, so a released DOF's spring can be swapped into the correct slot of
+# a merged hinge+release zeroLength (shear/moment swaps are immaterial for the
+# symmetric retained rigid springs; only the released DOFs are re-placed).
+_HINGE_SLOT_TO_RELEASE_DOF = (0, 2, 1, 3, 5, 4)
+
+#: Base tag for the merged hinge+release springs' Elastic materials — a high,
+#: dedicated band (cf. the panel-zone springs at 900001) clear of the regular
+#: material block, the standalone release block (``max(material_tags) + 1000``),
+#: the brace-truss Hysteretic block (100000) and the fiber block (1000001).
+_MERGED_RELEASE_MAT_BASE = 500000
 
 
 def _trilinear_backbone(
@@ -684,10 +701,13 @@ class ElementMixin:
         neither :meth:`_create_lumped_hinges` nor
         :meth:`_create_member_releases` mutates the frozen
         :class:`MeshModel` (§3.2).  Hinge re-pointing (:attr:`_hinge_repoints`)
-        and release re-pointing (:attr:`_release_repoints`) are complementary:
-        the hinge loop skips released ends, so a released end appears only in
-        the release map and a moment/hinge end only in the hinge map.  Falls
-        back to ``mesh_model.nodes`` for the normal (un-instrumented) path.
+        and release re-pointing (:attr:`_release_repoints`) are complementary
+        for an M3-released (pinned) end — the hinge loop skips it, so it appears
+        only in the release map.  A non-M3-released end is folded into its hinge
+        spring by :meth:`_create_lumped_hinges`, so it appears only in the hinge
+        map (the member attaches to the hinge node).  Falls back to
+        ``mesh_model.nodes`` for the normal
+        (un-instrumented) path.
         """
         ni_id, nj_id = elem.node_i, elem.node_j
         rep = self._hinge_repoints.get(elem.elem_id)
@@ -1361,18 +1381,29 @@ class ElementMixin:
         Each spring is a ``zeroLength`` carrying all six DOFs via
         ``-mat``/``-dir`` (no ``equalDOF``): rigid ``Elastic`` materials retain
         P/Vy/Vz/T while the backbone material provides the two rotational DOFs.
+        A member end that also carries a *non*-M3 release (M3 retained) is
+        folded into that same spring — the released DOFs are swapped to their
+        release spring (exact-zero DOFs dropped) and the end is recorded in
+        :attr:`_combined_release_ends` so :meth:`_create_member_releases` does
+        not add a second, series release element.
         """
-        if self.config.get("hinge_model") != "lumped":
-            return
-        _validate_hinge_pairing("lumped", self.config.get("hinge_backbone"))
-
         # ── Builder-local hinge state (never writes back to the MeshModel) ──
         # Hinge nodes and re-pointed connectivity are kept on the builder so the
         # frozen MeshModel stays read-only (§3.2) and a rebuild needs no restore
         # pass.  ``_add_beam_column`` resolves an element's effective endpoints
-        # through these maps.
+        # through these maps.  Reset before the route check so a non-lumped
+        # build following a lumped one clears any stale hinge state.
         self._hinge_nodes: dict[str, Node] = {}
         self._hinge_repoints: dict[str, list[str]] = {}
+        # Member ends whose release is folded into their hinge spring by this
+        # method — ``(leaf_id, end_label)`` — so ``_create_member_releases``
+        # skips the standalone release spring and re-points the member onto the
+        # hinge node.  Reset before the route check for the same reason.
+        self._combined_release_ends: set[tuple[str, str]] = set()
+
+        if self.config.get("hinge_model") != "lumped":
+            return
+        _validate_hinge_pairing("lumped", self.config.get("hinge_backbone"))
 
         elements = self.mesh_model.frame_elements
         assignments = self.mesh_model.frame_assignments
@@ -1412,6 +1443,12 @@ class ElementMixin:
         )
         hinge_mat_tag = hinge_tag_base + len(self.section_tags) + 1
 
+        # Release-Elastic materials for merged hinge+release springs are
+        # allocated from _MERGED_RELEASE_MAT_BASE (see its comment) so they
+        # cannot collide with any other material block.
+        merged_rel_mat_tag = _MERGED_RELEASE_MAT_BASE
+        merged_rel_mat_cache: dict[float, int] = {}
+
         # Hinge instrumentation for the transient runner's damage recorders
         # (φmax / Emax / Nd), rebuilt on each build_domain.
         self._reset_hinge_recorders()
@@ -1427,15 +1464,56 @@ class ElementMixin:
             self._created_node_tags.add(tag)
             return tag
 
-        def _emit_spring(a_tag: int, b_tag: int, mats: list[int], orient) -> int:
+        def _emit_spring(a_tag: int, b_tag: int, mats: list[int], orient, dirs=None) -> int:
             nonlocal next_tag
             tag = next_tag
             next_tag += 1
-            args = ["zeroLength", tag, a_tag, b_tag, "-mat", *mats, "-dir", 1, 2, 3, 4, 5, 6]
+            args = [
+                "zeroLength",
+                tag,
+                a_tag,
+                b_tag,
+                "-mat",
+                *mats,
+                "-dir",
+                *(dirs if dirs is not None else [1, 2, 3, 4, 5, 6]),
+            ]
             if orient:
                 args += ["-orient", *orient]
             ops.element(*args)
             return tag
+
+        def _maybe_merge_release(mats: list[int], leaf_id: str, end_label: str):
+            """Fold a non-M3 release into the hinge spring, when present.
+
+            Returns ``(mats, dirs)`` — the hinge material list with the released
+            DOFs swapped to their release spring (exact-zero DOFs dropped) plus
+            the matching ``-dir`` list — or ``(mats, None)`` when the end has no
+            release.  A merged end is recorded so ``_create_member_releases``
+            skips its standalone release spring and keeps the member on the
+            hinge node.
+            """
+            nonlocal merged_rel_mat_tag
+            rel = end_released_dofs(self.mesh_model, leaf_id, end_label, self.config)
+            if not rel:
+                return mats, None
+            dirs = [1, 2, 3, 4, 5, 6]
+            merged = list(mats)
+            for dof, stiffness in rel:
+                slot = _HINGE_SLOT_TO_RELEASE_DOF[dof - 1]
+                if stiffness is None:
+                    dirs.remove(slot + 1)  # exact-zero release: DOF is free
+                    continue
+                key = round(stiffness, 6)
+                tag = merged_rel_mat_cache.get(key)
+                if tag is None:
+                    tag = merged_rel_mat_tag
+                    merged_rel_mat_tag += 1
+                    ops.uniaxialMaterial("Elastic", tag, stiffness)
+                    merged_rel_mat_cache[key] = tag
+                merged[slot] = tag
+            self._combined_release_ends.add((leaf_id, end_label))
+            return [merged[d - 1] for d in dirs], dirs
 
         def _repoint(elem: "FrameElement", point_id: str, new_node_id: str) -> None:
             rep = self._hinge_repoints.get(elem.elem_id)
@@ -1499,21 +1577,31 @@ class ElementMixin:
                     continue
                 mats, theta_y, my = calibs[min(k, n - 1)]
                 pnode = nodes[point_ids[k]]
+                dirs = None
                 if k < n:
                     # member start (k == 0) or interior framing point: the
                     # structural node is the joint, so the upstream segment
                     # stays anchored to it and the downstream segment starts at
                     # a single coincident hinge node —
                     # structural → spring → elastic.
+                    if k == 0:
+                        # A member end can carry a non-M3 release (M3 retained),
+                        # which the hinge route still emits a spring for.  Fold
+                        # the released DOFs into that single spring so the hinge
+                        # backbone is not softened by a series release partner.
+                        leaf_id = segments[0].sub_element_ids[0]
+                        mats, dirs = _maybe_merge_release(mats, leaf_id, "I")
                     hinge_id = f"{mid}__hinge_{k}"
                     hinge_tag = _add_hinge_node(hinge_id, pnode)
-                    spring_tag = _emit_spring(pnode.node_tag, hinge_tag, mats, orient)
+                    spring_tag = _emit_spring(pnode.node_tag, hinge_tag, mats, orient, dirs)
                     _repoint(elements[segments[k].sub_element_ids[0]], point_ids[k], hinge_id)
                 else:
                     # member end: elastic → spring → structural node
+                    leaf_id = segments[n - 1].sub_element_ids[-1]
+                    mats, dirs = _maybe_merge_release(mats, leaf_id, "J")
                     hinge_id = f"{mid}__hinge_{n}"
                     hinge_tag = _add_hinge_node(hinge_id, pnode)
-                    spring_tag = _emit_spring(hinge_tag, pnode.node_tag, mats, orient)
+                    spring_tag = _emit_spring(hinge_tag, pnode.node_tag, mats, orient, dirs)
                     _repoint(elements[segments[n - 1].sub_element_ids[-1]], point_ids[n], hinge_id)
 
                 self._hinge_tags.append(spring_tag)
@@ -1566,10 +1654,12 @@ class ElementMixin:
         builder-local state (:attr:`_release_nodes` /
         :attr:`_release_repoints`), reset per build and read back by
         :meth:`_resolve_frame_endpoints` — never written to the frozen
-        :class:`MeshModel` (§3.2).  The lumped-hinge route skips released ends,
-        so a released end (release spring) and a moment end (hinge spring)
-        never conflict; under ``hinge_model='lumped'`` the released end now
-        gets its pin.
+        :class:`MeshModel` (§3.2).  The lumped-hinge route skips M3-released
+        ends (they get their pin here); a *non*-M3 release at a hinge-eligible
+        end has already been folded into the hinge spring by
+        :meth:`_create_lumped_hinges` (recorded in
+        :attr:`_combined_release_ends`), so this method skips those ends
+        entirely — no standalone release spring and no coincident release node.
         """
         # ── Builder-local release state (§3.2) ──────────────────────
         # Generated release nodes and re-pointed connectivity are kept on the
@@ -1600,9 +1690,22 @@ class ElementMixin:
         if not plan["ends"]:
             return
 
+        # ── Ends already merged into their hinge spring ──────────────
+        # _create_lumped_hinges folds a non-M3 release into the hinge spring
+        # and records the end in _combined_release_ends.  Skip those ends here:
+        # no standalone release spring, no coincident release node (a free node
+        # would be singular), and no release re-point (the hinge route already
+        # re-pointed the member onto the hinge node).
+        combined = self._combined_release_ends
+        combined_node_ids = {
+            end["node_id"] for end in plan["ends"] if (end["frame_id"], end["end"]) in combined
+        }
+
         # ── Coincident release nodes ─────────────────────────────────
         release_node_tags: dict[str, int] = {}
         for rn in plan["release_nodes"]:
+            if rn["node_id"] in combined_node_ids:
+                continue
             self._release_nodes[rn["node_id"]] = Node(
                 node_id=rn["node_id"],
                 node_tag=rn["node_tag"],
@@ -1639,6 +1742,8 @@ class ElementMixin:
         mat_cache: dict[float, int] = {}
 
         for end in plan["ends"]:
+            if (end["frame_id"], end["end"]) in combined:
+                continue  # folded into the hinge spring by _create_lumped_hinges
             dirs: list[int] = []
             mats: list[int] = []
             for dof, stiffness in end["dofs"]:
@@ -1652,10 +1757,15 @@ class ElementMixin:
                 dirs.append(dof)
                 mats.append(mat_tag)
 
+            # Only M3-released (pinned) ends reach here — a non-M3 release at a
+            # hinge end is merged above — so the release spring anchors to the
+            # structural node (the hinge route left that end un-re-pointed).
+            struct_side_tag = end["struct_node_tag"]
+
             args: list = [
                 "zeroLength",
                 next_tag,
-                end["struct_node_tag"],
+                struct_side_tag,
                 release_node_tags[end["node_id"]],
                 "-mat",
                 *mats,
@@ -1669,8 +1779,11 @@ class ElementMixin:
 
         # ── Re-point released ends to their release nodes (builder-local) ──
         # The released end maps end-label → release node id; _resolve_frame_endpoints
-        # merges this with any hinge re-point (which never touches a released end).
+        # merges this with any hinge re-point.  A merged (non-M3) end is skipped
+        # here — the hinge route already re-pointed it onto the hinge node.
         for end in plan["ends"]:
+            if (end["frame_id"], end["end"]) in combined:
+                continue
             eid = end["frame_id"]
             self._release_repoints.setdefault(eid, {})[end["end"]] = end["node_id"]
 

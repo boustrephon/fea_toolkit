@@ -7,8 +7,10 @@ from fea_toolkit.model.sap_data import (
     AreaElement,
     FrameElement,
     FrameRelease,
+    ISection,
     Material,
     Node,
+    PipeSection,
     Restraint,
     SAPModelData,
     Section,
@@ -286,6 +288,53 @@ class TestBuilderReleases:
         finally:
             ops.wipe()
 
+    def test_non_m3_release_merges_into_hinge_spring(self):
+        """A non-M3 release + a hinge at one end merge into a single spring.
+
+        An axial (P) release leaves M3 retained, so the lumped-hinge loop emits
+        a spring at that end.  The released DOF is folded into that same spring
+        (no second series release element), and the member attaches directly to
+        the hinge node instead of a separate release node.
+        """
+        import openseespy.opensees as ops
+
+        try:
+            mesh, b = _build(
+                {"1": FrameRelease("1", end_i=[1, 0, 0, 0, 0, 0])},  # P released at I
+                {"1": Restraint([1, 1, 1, 1, 1, 1]), "3": Restraint([1, 1, 1, 1, 1, 1])},
+                config={"hinge_model": "lumped", "hinge_backbone": "bilinear"},
+            )
+            # The released end is folded into the hinge spring…
+            assert b._combined_release_ends == {("1", "I")}
+            # …so no standalone release node or re-point is created for it.
+            assert "1_rel_i" not in b._release_nodes
+            assert "1" not in b._release_repoints
+            # The member's I-end attaches to the hinge node instead.
+            hinge_id = b._hinge_repoints["1"][0]
+            assert hinge_id in b._hinge_nodes
+            assert b._resolve_frame_endpoints(mesh.frame_elements["1"])[0].node_id == hinge_id
+            # 2 frames + 4 hinge springs (the node-1 spring is the merged one).
+            assert len(ops.getEleTags()) == 6
+        finally:
+            ops.wipe()
+
+    def test_non_lumped_rebuild_clears_stale_hinge_state(self):
+        """A non-lumped rebuild clears the builder-local hinge state."""
+        import openseespy.opensees as ops
+
+        try:
+            _mesh, b = _build(
+                {},
+                {"1": Restraint([1, 1, 1, 1, 1, 1]), "3": Restraint([1, 1, 1, 1, 1, 1])},
+                config={"hinge_model": "lumped", "hinge_backbone": "bilinear"},
+            )
+            assert b._hinge_nodes  # the lumped build populated hinge state
+            b.build_domain(config_overrides={"hinge_model": "fiber"})
+            assert b._hinge_nodes == {}
+            assert b._hinge_repoints == {}
+        finally:
+            ops.wipe()
+
 
 # ═══════════════════════════════════════════════════════════════════
 # Physics hand-checks
@@ -339,6 +388,281 @@ class TestReleasePhysics:
             assert uz == pytest.approx(expected, rel=1e-3)
         finally:
             ops.wipe()
+
+
+def _build_release_hinge_cantilever(merged: bool):
+    """Hand-built cantilever: axial release + M3 hinge at the fixed end.
+
+    ``merged=True`` → a single ``zeroLength`` carries both the released P and
+    the hinge M3 (the new topology).  ``merged=False`` → the old chained
+    topology (hinge spring + series release spring).  Returns the tag of the
+    coincident spring node whose displacement exposes the spring deformation
+    (node 10 merged, node 11 chained).
+    """
+    import openseespy.opensees as ops
+
+    E = 2.0e11
+    G = E / 2.6
+    A = 1.0e-2
+    I_sec = 1.0e-4
+    L = 6.0
+    eta = 100.0
+    mu = 1.0e-6
+    k_axial = E * A / L
+    k_shear = G * A / L
+    k_torsion = G * I_sec / L
+    k_bend = E * I_sec / L
+    k_h = 10.0 * 6.0 * k_bend  # hinge elastic M3 (hinge_stiffness_factor × 6EI/L)
+
+    ops.wipe()
+    ops.model("basic", "-ndm", 3, "-ndf", 6)
+    ops.node(1, 0.0, 0.0, 0.0)
+    ops.node(2, L, 0.0, 0.0)
+    ops.node(10, 0.0, 0.0, 0.0)  # hinge node (coincident with node 1)
+    ops.fix(1, 1, 1, 1, 1, 1, 1)
+
+    # Elastic springs: soft P, rigid P, rigid shear, rigid torsion, rigid
+    # bend, hinge M3.
+    ops.uniaxialMaterial("Elastic", 101, mu * k_axial)
+    ops.uniaxialMaterial("Elastic", 102, eta * k_axial)
+    ops.uniaxialMaterial("Elastic", 103, eta * k_shear)
+    ops.uniaxialMaterial("Elastic", 104, eta * k_torsion)
+    ops.uniaxialMaterial("Elastic", 105, eta * k_bend)
+    ops.uniaxialMaterial("Elastic", 106, k_h)
+
+    if merged:
+        # Single spring: dir 1 = soft P, dir 6 = hinge M3, rest rigid.
+        ops.element(
+            "zeroLength",
+            20,
+            1,
+            10,
+            "-mat",
+            101,
+            103,
+            103,
+            104,
+            105,
+            106,
+            "-dir",
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+        )
+        spring_node = 10
+    else:
+        # Hinge spring (all rigid except M3) + series release spring.
+        ops.node(11, 0.0, 0.0, 0.0)  # release node
+        ops.element(
+            "zeroLength",
+            20,
+            1,
+            10,
+            "-mat",
+            102,
+            103,
+            103,
+            104,
+            105,
+            106,
+            "-dir",
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+        )
+        ops.element(
+            "zeroLength",
+            21,
+            10,
+            11,
+            "-mat",
+            101,
+            103,
+            103,
+            104,
+            105,
+            105,
+            "-dir",
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+        )
+        spring_node = 11
+
+    # Elastic member (spring node → tip).  Iz (dir 6) is the M3 axis.
+    ops.geomTransf("Linear", 1, 0, 0, 1)
+    ops.element("elasticBeamColumn", 1, spring_node, 2, A, E, G, I_sec, I_sec, I_sec, 1)
+    return spring_node
+
+
+def _run_cantilever_static(node_tag, load_vec):
+    """Apply a single nodal load and solve one linear static step."""
+    import openseespy.opensees as ops
+
+    ops.timeSeries("Linear", 1)
+    ops.pattern("Plain", 1, 1)
+    ops.load(node_tag, *load_vec)
+    ops.system("BandGen")
+    ops.numberer("Plain")
+    ops.constraints("Plain")
+    ops.integrator("LoadControl", 1.0)
+    ops.algorithm("Linear")
+    ops.analysis("Static")
+    assert ops.analyze(1) == 0
+
+
+def test_merged_spring_restores_hinge_m3_stiffness():
+    """The merged single spring avoids the chained series softening on M3.
+
+    A non-M3 (axial) release retains M3, whose hinge spring is ``10 × 6EI/L``;
+    the release's retained M3 is ``η × EI/L = 100 EI/L``.  Chaining them in
+    series softens the hinge to ``60·100/(60+100) = 37.5 EI/L`` — 37.5 % softer.
+    The merged single spring keeps the hinge's own ``60 EI/L`` on M3, so the
+    spring rotation under a tip moment is 1/1.6 of the chained value, while the
+    released axial DOF is unchanged (series error μ/η ≈ 1e-8).
+    """
+    import openseespy.opensees as ops
+
+    Mz = 1.0e5
+    Fx = 1.0e4
+
+    try:
+        node = _build_release_hinge_cantilever(True)
+        _run_cantilever_static(2, (0.0, 0.0, 0.0, 0.0, 0.0, Mz))
+        rz_merged = ops.nodeDisp(node)[5]  # rz = M3
+
+        node = _build_release_hinge_cantilever(False)
+        _run_cantilever_static(2, (0.0, 0.0, 0.0, 0.0, 0.0, Mz))
+        rz_chained = ops.nodeDisp(node)[5]
+
+        # Chained is 37.5 % softer → 1.6× the rotation.
+        assert rz_chained / rz_merged == pytest.approx(1.6, rel=1e-6)
+
+        node = _build_release_hinge_cantilever(True)
+        _run_cantilever_static(2, (Fx, 0.0, 0.0, 0.0, 0.0, 0.0))
+        ux_merged = ops.nodeDisp(node)[0]  # ux = released P
+
+        node = _build_release_hinge_cantilever(False)
+        _run_cantilever_static(2, (Fx, 0.0, 0.0, 0.0, 0.0, 0.0))
+        ux_chained = ops.nodeDisp(node)[0]
+
+        # Released axial DOF is the same (series error is μ/η ≈ 1e-8).
+        assert ux_chained == pytest.approx(ux_merged, rel=1e-6)
+    finally:
+        ops.wipe()
+
+
+def _brace_plus_release_model():
+    """Three diagonal-pipe braces plus a flexural beam with an axial release.
+
+    The braces become Truss elements under ``brace_truss`` (their per-element
+    Hysteretic materials occupy the 100000+ tag band); the beam's I-end axial
+    release is merged into its lumped hinge spring.  Building both together
+    exercises the merged release-material tag band against the brace-truss band.
+    """
+    nodes = {
+        "d0": Node("d0", 1, 0.0, 0.0, 0.0),
+        "d1": Node("d1", 2, 4.0, 0.0, 4.0),
+        "d2": Node("d2", 3, 8.0, 0.0, 0.0),
+        "d3": Node("d3", 4, 12.0, 0.0, 4.0),
+        "d4": Node("d4", 5, 16.0, 0.0, 0.0),
+        "d5": Node("d5", 6, 20.0, 0.0, 4.0),
+        "b0": Node("b0", 7, 0.0, 0.0, 6.0),
+        "b1": Node("b1", 8, 20.0, 0.0, 6.0),
+    }
+    materials = {
+        "STEEL": Material(
+            "STEEL", "Steel", E_mod=2e11, G_mod=7.7e10, nu=0.3, unit_weight=77.0, Fy=2.5e8
+        ),
+    }
+    sections = {
+        "PIPE": PipeSection(
+            name="PIPE",
+            shape="Pipe",
+            material="STEEL",
+            od=0.15,
+            t=0.008,
+            A=3.57e-3,
+            I33=8.6e-6,
+            I22=8.6e-6,
+            J=1.72e-5,
+        ),
+        "ISEC": ISection(
+            name="ISEC",
+            shape="I/Wide Flange",
+            material="STEEL",
+            depth=0.3,
+            bf=0.15,
+            tf=0.01,
+            tw=0.006,
+            A=6e-3,
+            I33=8e-5,
+            I22=3e-5,
+            J=2e-6,
+        ),
+    }
+    frames = {
+        "BR1": FrameElement("BR1", 1, "d0", "d1"),
+        "BR2": FrameElement("BR2", 2, "d2", "d3"),
+        "BR3": FrameElement("BR3", 3, "d4", "d5"),
+        "BEAM": FrameElement("BEAM", 4, "b0", "b1"),
+    }
+    return SAPModelData(
+        nodes=nodes,
+        restraints={},
+        materials=materials,
+        sections=sections,
+        frame_elements=frames,
+        area_elements={},
+        frame_assignments={"BR1": "PIPE", "BR2": "PIPE", "BR3": "PIPE", "BEAM": "ISEC"},
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
+        frame_releases={"BEAM": FrameRelease("BEAM", end_i=[1, 0, 0, 0, 0, 0])},
+        units=dict(UNITS),
+    )
+
+
+def test_merged_release_and_brace_truss_tags_disjoint():
+    """The merged release springs never collide with the brace-truss band.
+
+    A non-M3 release at a hinged end needs an Elastic release material, and a
+    brace truss needs a per-element Hysteretic material (100000+).  Building
+    both in one model must succeed — a tag overlap would raise OpenSees'
+    "similar tag exists" error during truss material creation.
+    """
+    import openseespy.opensees as ops
+
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+    try:
+        md = _brace_plus_release_model()
+        mesh = preprocess_model(
+            md, {"split_elements": False, "element_type": "elasticBeamColumn", "verbose": False}
+        )
+        builder = AnalysisBuilder(
+            mesh,
+            {
+                "brace_truss": True,
+                "hinge_model": "lumped",
+                "hinge_backbone": "bilinear",
+                "verbose": False,
+            },
+        )
+        builder.build_domain()
+        # The merge fired (the beam's axial release folded into its hinge).
+        assert ("BEAM", "I") in builder._combined_release_ends
+    finally:
+        ops.wipe()
 
 
 # ═══════════════════════════════════════════════════════════════════
