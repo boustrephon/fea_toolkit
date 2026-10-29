@@ -6,9 +6,11 @@ and creates the OpenSees domain objects.  It handles all analysis execution
 and result extraction.
 
 Panel-zone splitting is resolved by the Preprocessor, so the builder reads
-``mesh_model.panel_zones`` read-only.  Remaining instrumentation (lumped
-hinges, member releases, bond-slip springs, brace subdivision and limit-state
-columns) still writes back to the mesh at build time and is restored by the
+``mesh_model.panel_zones`` read-only.  Lumped-hinge instrumentation keeps its
+generated nodes and re-pointed connectivity in builder-local state
+(``_hinge_nodes`` / ``_hinge_repoints``), so it no longer writes back to the
+mesh; the remaining instrumentation (member releases, bond-slip springs, brace
+subdivision and limit-state columns) still writes back and is restored by the
 ``_restore_*`` helpers — known debt, see ``docs/dev_notes.md``.
 """
 
@@ -214,6 +216,11 @@ class AnalysisBuilder(
 
         # Per-build tracking
         self._created_node_tags: set = set()
+        # Hinge-build state kept off the MeshModel (§3.2): generated hinge
+        # nodes and re-pointed connectivity, reset per build in
+        # _create_lumped_hinges and read back by _add_beam_column.
+        self._hinge_nodes: dict[str, Any] = {}
+        self._hinge_repoints: dict[str, list[str]] = {}
         self._next_variant_tag: int = (
             max(self.section_tags.values(), default=0) + 1 if self.section_tags else 1
         )
@@ -586,9 +593,6 @@ class AnalysisBuilder(
             # Pre-compute frame tag map so shell elements can avoid clashing
             self._build_frame_tag_map()
 
-            # Restore canonical hinge state before any nodes are created,
-            # preventing stale *_hinge_* nodes from being recreated.
-            self._restore_hinge_canonical_state()
             # Restore canonical bond-slip state (endpoints + *_bond_* nodes)
             # so repeated builds re-instrument the original elements.
             self._restore_bond_canonical_state()

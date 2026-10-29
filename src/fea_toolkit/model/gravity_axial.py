@@ -75,7 +75,7 @@ def fill_column_gravity_axial(
     *,
     added_masses: Optional[dict[str, float]] = None,
     restraints: Optional[dict] = None,
-    g: float = 9.80665,
+    g: float,
 ) -> tuple[dict[str, list[FrameSegment]], list[str]]:
     """Fill raw column gravity axial ``P_g`` onto each column segment.
 
@@ -88,7 +88,8 @@ def fill_column_gravity_axial(
             ``role == "column"``.
         added_masses: ``{node_id: mass}`` (FEMA 355C seismic weight).
         restraints: ``{node_id: Restraint}``.
-        g: Gravitational acceleration in model units (default SI).
+        g: Gravitational acceleration in model units (required — supply
+            ``g_from_units(units)``; there is no hardcoded default).
 
     Returns:
         ``(frame_segments, transfer_ids)`` — ``frame_segments`` rebuilt with

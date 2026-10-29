@@ -777,12 +777,13 @@ source model rather than duplicated.
     member releases, brace subdivision, limit-state columns) belong in the
     `Preprocessor` and are carried as declarative `MeshModel` fields.  Panel
     zones were migrated there in the 2026-10 panel-zone work (see the
-    "Builder must not mutate the MeshModel" note below); the remaining
-    build-time instrumentation methods still mutate and restore
-    (`_restore_hinge_canonical_state`, `_restore_bond_canonical_state`,
-    `_restore_release_canonical_state`, `_restore_brace_canonical_state`,
-    `_restore_limit_state_canonical_state`) and are known debt that should
-    follow the same extraction.
+    "Builder must not mutate the MeshModel" note below); lumped-hinge
+    instrumentation now keeps its generated nodes and re-pointed connectivity
+    in builder-local state (`_hinge_nodes` / `_hinge_repoints`), and the
+    remaining build-time instrumentation methods still mutate and restore
+    (`_restore_bond_canonical_state`, `_restore_release_canonical_state`,
+    `_restore_brace_canonical_state`, `_restore_limit_state_canonical_state`)
+    and are known debt that should follow the same extraction.
 
 ### Builder must not mutate the MeshModel
 

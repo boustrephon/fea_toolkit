@@ -37,6 +37,10 @@ class FrameSegment:
         sub_element_ids: Frozen chain of elastic sub-elements, in order.
         axial: Raw column gravity axial ``P_g`` (``0.0`` = none yet).
         length: Straight-line length (sum of the sub-element lengths).
+        release_i: Whether ``node_i`` is an M3-released (pinned) member end —
+            a segment boundary the builder leaves connected to the structural
+            node without a hinge spring.
+        release_j: Whether ``node_j`` is an M3-released (pinned) member end.
     """
 
     node_i: str
@@ -44,12 +48,18 @@ class FrameSegment:
     sub_element_ids: tuple[str, ...]
     axial: float = 0.0
     length: float = 0.0
+    release_i: bool = False
+    release_j: bool = False
 
 
 #: Default hinge-eligibility rules, in application order.  ``honour_releases``
 #: drops a pinned (M3-released) end — a member with only one remaining point
-#: (fixed-pin) produces no segment; the builder's release mechanism handles that
-#: end (known A3/A4 refinement).  ``include_leaning_columns`` is deliberately
+#: (fixed-pin) still emits a single segment spanning the full member, with the
+#: released end flagged on :class:`FrameSegment` so the builder leaves it
+#: connected to the structural node without a hinge spring there.  The M3 pin
+#: release itself is a separate concern and is not yet modelled under
+#: ``hinge_model='lumped'`` (see ``docs/imk_member_classification.md`` §(d)).
+#: ``include_leaning_columns`` is deliberately
 #: absent (leaning columns stay elastic by default) and needs a leaning-column
 #: signal that is currently benchmark-specific, so it is deferred.
 DEFAULT_HINGE_RULES: tuple[str, ...] = (
@@ -134,6 +144,15 @@ def _released_m3(release: FrameRelease, end: str) -> bool:
     return _M3_INDEX in release.released_indices(end)
 
 
+def _straight_length(a: str, b: str, nodes: dict[str, Node]) -> float:
+    """Straight-line distance between two nodes (``0.0`` if either is missing)."""
+    na = nodes.get(a)
+    nb = nodes.get(b)
+    if na is None or nb is None:
+        return 0.0
+    return math.hypot(nb.x - na.x, nb.y - na.y, nb.z - na.z)
+
+
 def _veto_released_ends(
     flags: list[bool],
     ordered: list[str],
@@ -182,8 +201,11 @@ def segment_members(
 
     Returns:
         ``{member_id: [FrameSegment, ...]}`` ordered along the member.  A member
-        with fewer than two hinge-eligible points (a brace, or a fixed-pin
-        member) is omitted — the builder treats an absent member as elastic.
+        with *no* hinge-eligible points (a brace) is omitted — the builder
+        treats an absent member as elastic.  A fixed-pin member (one end
+        M3-released) yields a single segment spanning the full member, with the
+        released end flagged via :attr:`FrameSegment.release_i` /
+        :attr:`FrameSegment.release_j`.
     """
     rules = list(rules) if rules is not None else list(DEFAULT_HINGE_RULES)
     frame_element_types = frame_element_types or {}
@@ -235,28 +257,39 @@ def segment_members(
             _veto_released_ends(flags, ordered, chain_nodes, frame_elements, frame_releases)
 
         hinge_nodes = [chain_nodes[i] for i in range(n) if flags[i]]
-        if len(hinge_nodes) < 2:
-            continue
+        if not hinge_nodes:
+            continue  # brace / fully vetoed — elastic, no segment
 
         segments: list[FrameSegment] = []
-        for a, b in zip(hinge_nodes, hinge_nodes[1:]):
-            ia = chain_nodes.index(a)
-            ib = chain_nodes.index(b)
-            na = nodes.get(a)
-            nb = nodes.get(b)
-            length = (
-                math.hypot(nb.x - na.x, nb.y - na.y, nb.z - na.z)
-                if na is not None and nb is not None
-                else 0.0
-            )
+        if len(hinge_nodes) == 1:
+            # Fixed-pin member: one end M3-released.  Emit a single segment
+            # spanning the full member so the moment end keeps its hinge; the
+            # released end is flagged so the builder leaves it connected to the
+            # structural node without adding a hinge spring there (the M3 pin
+            # release itself is not yet modelled under ``hinge_model='lumped'``).
+            length = _straight_length(chain_nodes[0], chain_nodes[-1], nodes)
             segments.append(
                 FrameSegment(
-                    node_i=a,
-                    node_j=b,
-                    sub_element_ids=tuple(ordered[ia:ib]),
+                    node_i=chain_nodes[0],
+                    node_j=chain_nodes[-1],
+                    sub_element_ids=tuple(ordered),
                     length=length,
+                    release_i=not flags[0],
+                    release_j=not flags[-1],
                 )
             )
+        else:
+            for a, b in zip(hinge_nodes, hinge_nodes[1:]):
+                ia = chain_nodes.index(a)
+                ib = chain_nodes.index(b)
+                segments.append(
+                    FrameSegment(
+                        node_i=a,
+                        node_j=b,
+                        sub_element_ids=tuple(ordered[ia:ib]),
+                        length=_straight_length(a, b, nodes),
+                    )
+                )
         result[mid] = segments
 
     return result

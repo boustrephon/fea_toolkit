@@ -182,6 +182,15 @@ def test_resolve_theta_u_rejects_unknown_model():
         _resolve_theta_u(None, "bogus", 0.03, 0.05)
 
 
+def test_resolve_theta_u_rejects_theta_u_not_exceeding_theta_p():
+    """``lignos`` (0.15 rad) and an explicit ``theta_u`` are rejected when they
+    do not exceed the capping rotation (a stocky section)."""
+    with pytest.raises(ValueError, match="theta_p"):
+        _resolve_theta_u(None, "lignos", 0.20, 0.30)  # 0.15 < 0.20
+    with pytest.raises(ValueError, match="theta_p"):
+        _resolve_theta_u(0.10, "plateau", 0.20, 0.30)  # explicit 0.10 < 0.20
+
+
 def test_column_theta_u_model_records_convention():
     """The convention is recorded on ``SteelIMKParams`` and drives ``theta_u``."""
     p = lignos_2019_wide_flange_column(

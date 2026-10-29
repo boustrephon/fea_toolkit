@@ -79,6 +79,26 @@ def test_collect_transient_arrays_block_shapes():
     assert transient_case_names(arrays) == ["ELC"]
 
 
+def test_collect_transient_arrays_nan_fills_unrecorded_node_kinematics():
+    """A node absent from a velocity/acceleration history is NaN-filled."""
+    res = _synthetic_transient([11, 22], n_steps=4)
+    del res["velocities"][22]  # node 22's velocity was not recorded
+    arrays = collect_transient_arrays({"ELC": res})
+
+    vel_x = arrays[make_transient_key("ELC", "transient/{case}/node_vel_x")]
+    assert vel_x.shape == (4, 2)
+    assert np.all(~np.isnan(vel_x[:, 0]))  # node 11 recorded
+    assert np.all(np.isnan(vel_x[:, 1]))  # node 22 not recorded → NaN
+
+
+def test_collect_transient_arrays_rejects_wrong_shape_node_history():
+    """A node history whose first axis is not ``n_t`` is rejected, not truncated."""
+    res = _synthetic_transient([11], n_steps=4)
+    res["displacements"][11] = np.zeros((3, 3))  # 3 != 4 time steps
+    with pytest.raises(ValueError, match="shape"):
+        collect_transient_arrays({"ELC": res})
+
+
 def test_collect_transient_arrays_omits_unrecorded_kinematics():
     """A run without velocities/accelerations emits only the displacement block."""
     res = _synthetic_transient([11, 22], n_steps=4, with_kinematics=False)
@@ -124,6 +144,25 @@ def test_unified_writer_emits_transient_block(tmp_path):
     assert "transient" in describe_results_npz(p)["analysis_types"]
     data = read_results(p)
     assert list(data["schema_version"]) == [SCHEMA_VERSION]
+
+
+def test_unified_writer_emits_transient_block_h5(tmp_path):
+    """The HDF5 writer path also emits the transient block (``fmt="h5"``)."""
+    pytest.importorskip("h5py")
+    md = make_sample_model()
+    tags = sorted(nd.node_tag for nd in md.nodes.values())
+    p = write_results(
+        str(tmp_path / "unified_transient.h5"),
+        model=md,
+        transient_results={"ELC": _synthetic_transient(tags, n_steps=6)},
+        fmt="h5",
+    )
+
+    assert p.endswith(".h5")
+    data = read_results(p)  # auto-detects HDF5
+    assert "transient" in [str(v) for v in data["analysis_types"].tolist()]
+    assert list(data["schema_version"]) == [SCHEMA_VERSION]
+    assert make_transient_key("ELC", "transient/{case}/direction") in data
 
 
 def test_transient_block_is_optional_for_geometry_only_archive(tmp_path):
@@ -177,6 +216,14 @@ def test_validate_arrays_requires_complete_vel_accel_groups():
     arrays = _transient_archive()
     arrays.pop(make_transient_key("ELC", "transient/{case}/node_vel_y"))
     assert any("node_vel_y" in m for m in validate_arrays(arrays))
+
+
+def test_validate_arrays_flags_base_shear_length_mismatch():
+    """A ``base_shear`` history whose length differs from ``time`` is reported."""
+    arrays = _transient_archive()
+    key = make_transient_key("ELC", "transient/{case}/base_shear")
+    arrays[key] = np.zeros(3)  # ``time`` is length 4
+    assert any("base_shear" in m for m in validate_arrays(arrays))
 
 
 def test_validate_arrays_flags_transient_without_case_block():

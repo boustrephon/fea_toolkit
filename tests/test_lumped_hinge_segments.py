@@ -102,12 +102,14 @@ def test_framing_point_emits_one_spring_per_point():
         assert len(b._hinge_tags) == 5, f"expected 5 hinge springs, got {len(b._hinge_tags)}"
 
         # The girder's interior framing point M has a single hinge node (not a
-        # back-to-back pair), and the upstream segment stays anchored to the
-        # structural node while the downstream segment starts at the hinge node.
-        assert "G__hinge_1" in mm.nodes
-        assert "G__hinge_1a" not in mm.nodes
-        assert mm.frame_elements["G-0"].node_j == "M"
-        assert mm.frame_elements["G-1"].node_i == "G__hinge_1"
+        # back-to-back pair).  Hinge nodes and re-pointed connectivity live on
+        # the builder (not the MeshModel): the upstream segment stays anchored
+        # to the structural node while the downstream segment starts at the
+        # builder-local hinge node.
+        assert "G__hinge_1" in b._hinge_nodes
+        assert "G__hinge_1a" not in b._hinge_nodes
+        assert mm.frame_elements["G-0"].node_j == "M"  # mesh left un-mutated
+        assert b._hinge_repoints["G-1"][0] == "G__hinge_1"
     finally:
         ops.wipe()
 

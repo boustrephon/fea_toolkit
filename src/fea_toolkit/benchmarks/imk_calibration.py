@@ -89,6 +89,12 @@ def _resolve_theta_u(
     * ``"hybrid"`` — ``max(θp + θpc + 0.02, 0.15)`` (floor at the paper's
       collapse point, plateau otherwise).
 
+    Every resolved value — explicit *theta_u* included — is validated against
+    the capping rotation: an ultimate rotation that does not exceed *theta_p*
+    (e.g. ``"lignos"``'s fixed ``0.15`` rad for a stocky section with
+    ``θp = 0.20``) places the flexural collapse point *before* the capping
+    point and is rejected, since it is not a valid ``IMKBilin`` backbone.
+
     Args:
         theta_u: Explicit ultimate rotation (rad) or ``None`` to use *model*.
         model: One of :data:`THETA_U_MODELS`.
@@ -96,22 +102,32 @@ def _resolve_theta_u(
         theta_pc: Post-capping plastic rotation (rad).
 
     Returns:
-        The resolved ultimate rotation (rad).
+        The resolved ultimate rotation (rad), always greater than *theta_p*.
 
     Raises:
-        ValueError: If *model* is not one of :data:`THETA_U_MODELS`.
+        ValueError: If *model* is not one of :data:`THETA_U_MODELS`, or if the
+            resolved ultimate rotation is not greater than *theta_p*.
     """
     if theta_u is not None:
-        return float(theta_u)
-    if model == "plateau":
-        return theta_p + theta_pc + THETA_U_PLATEAU
-    if model == "none":
-        return theta_p + theta_pc
-    if model == "lignos":
-        return LIGNOS_ULT_ROTATION
-    if model == "hybrid":
-        return max(theta_p + theta_pc + THETA_U_PLATEAU, LIGNOS_ULT_ROTATION)
-    raise ValueError(f"theta_u_model must be one of {THETA_U_MODELS}, got {model!r}")
+        resolved = float(theta_u)
+    elif model == "plateau":
+        resolved = theta_p + theta_pc + THETA_U_PLATEAU
+    elif model == "none":
+        resolved = theta_p + theta_pc
+    elif model == "lignos":
+        resolved = LIGNOS_ULT_ROTATION
+    elif model == "hybrid":
+        resolved = max(theta_p + theta_pc + THETA_U_PLATEAU, LIGNOS_ULT_ROTATION)
+    else:
+        raise ValueError(f"theta_u_model must be one of {THETA_U_MODELS}, got {model!r}")
+    if resolved <= theta_p:
+        raise ValueError(
+            f"resolved ultimate rotation theta_u={resolved:g} rad must exceed the "
+            f"capping rotation theta_p={theta_p:g} rad; the selected convention "
+            f"(or explicit theta_u) places the collapse point before the capping "
+            f"point, which is not a valid IMKBilin backbone"
+        )
+    return resolved
 
 
 @dataclass

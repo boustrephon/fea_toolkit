@@ -68,15 +68,17 @@ def test_enrich_imk_column_capping_exceeds_beam():
 
 
 def test_enrich_imk_records_theta_u_convention():
-    """``enrich_imk`` forwards ``theta_u_model`` and records it on the model."""
+    """``enrich_imk`` records the default convention; ``"lignos"`` is rejected
+    for the stocky 3-story columns (their θp caps at 0.20 rad > 0.15)."""
     wipe()
     md = sac.load_model(nonlinear=True, backbone="imk")
     assert md.imk_theta_u_model == "plateau"  # default
 
-    sac.enrich_imk(md, building=3, theta_u_model="lignos")
-    assert md.imk_theta_u_model == "lignos"
-    cols, _, _ = _split_by_material(md)
-    assert all(md.sections[s].imk_params["theta_u_pos"] == pytest.approx(0.15) for s in cols)
+    # The SAC 3-story columns are stocky (Lignos-2019 θp caps at 0.20 rad), so
+    # the "lignos" convention's fixed 0.15 rad precedes the capping rotation and
+    # _resolve_theta_u rejects it — it must never be stamped as θu < θp.
+    with pytest.raises(ValueError, match="theta_p"):
+        sac.enrich_imk(md, building=3, theta_u_model="lignos")
 
 
 def test_imk_frame_builds_end_to_end():

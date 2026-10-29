@@ -675,10 +675,28 @@ class ElementMixin:
         rigid_J = rigid_I
         return rigid_E, rigid_A, rigid_I, rigid_G, rigid_J
 
+    def _resolve_frame_endpoints(
+        self, elem: "FrameElement"
+    ) -> tuple[Optional["Node"], Optional["Node"]]:
+        """Resolve an element's effective end nodes for domain creation.
+
+        Builder-local hinge re-pointing (:attr:`_hinge_repoints`) and generated
+        hinge nodes (:attr:`_hinge_nodes`) win over the element's own endpoints,
+        so ``_create_lumped_hinges`` never has to mutate the frozen
+        :class:`MeshModel`.  Falls back to ``mesh_model.nodes`` for the normal
+        (un-instrumented) path.
+        """
+        ni_id, nj_id = elem.node_i, elem.node_j
+        rep = self._hinge_repoints.get(elem.elem_id)
+        if rep is not None:
+            ni_id, nj_id = rep
+        ni = self._hinge_nodes.get(ni_id) or self.mesh_model.nodes.get(ni_id)
+        nj = self._hinge_nodes.get(nj_id) or self.mesh_model.nodes.get(nj_id)
+        return ni, nj
+
     def _add_beam_column(self, elem, tag, elements, assignments):
         """Add a single beam-column element to the OpenSees domain."""
-        ni = self.mesh_model.nodes.get(elem.node_i)
-        nj = self.mesh_model.nodes.get(elem.node_j)
+        ni, nj = self._resolve_frame_endpoints(elem)
         if ni is None or nj is None:
             return
 
@@ -983,27 +1001,6 @@ class ElementMixin:
         self.mesh_model.frame_assignments = snap["frame_assignments"]
         self.mesh_model.nodes = snap["nodes"]
         self.mesh_model.frame_dist_loads = snap["frame_dist_loads"]
-
-    def _restore_hinge_canonical_state(self) -> None:
-        """Restore canonical frame element endpoints and remove stale hinge nodes.
-
-        Called at the start of :meth:`build_domain` (before
-        :meth:`_create_nodes`) to prevent stale ``*_hinge_*`` nodes
-        from a previous build cycle from being recreated.
-        """
-        if not hasattr(self, "_hinge_canonical_elements"):
-            return
-        # Remove any *_hinge_* nodes left from a previous build
-        for nid in list(self.mesh_model.nodes.keys()):
-            if nid.endswith(("_hinge_i", "_hinge_j")) or "__hinge_" in nid:
-                del self.mesh_model.nodes[nid]
-        # Restore canonical element endpoints and assignments
-        for eid, elem in self.mesh_model.frame_elements.items():
-            if eid in self._hinge_canonical_elements:
-                ni, nj = self._hinge_canonical_elements[eid]
-                elem.node_i = ni
-                elem.node_j = nj
-        self.mesh_model.frame_assignments = dict(self._hinge_canonical_assignments)
 
     def _restore_bond_canonical_state(self) -> None:
         """Restore canonical frame element endpoints and remove stale bond nodes.
@@ -1352,20 +1349,13 @@ class ElementMixin:
             return
         _validate_hinge_pairing("lumped", self.config.get("hinge_backbone"))
 
-        # ── Idempotency: preserve canonical state on first call ────────
-        # Save canonical endpoints on first call; restoration is handled
-        # by _restore_hinge_canonical_state() in build_domain().
-        if not hasattr(self, "_hinge_canonical_elements"):
-            # Capture the frozen beam endpoints directly from the mesh — panel
-            # zones are now resolved by the Preprocessor, so a beam already
-            # points at its *_pz node here, and that is the correct
-            # pre-instrumentation state to restore on a rebuild.
-            self._hinge_canonical_elements = {
-                eid: (elem.node_i, elem.node_j)
-                for eid, elem in self.mesh_model.frame_elements.items()
-                if not getattr(elem, "inactive", False)
-            }
-            self._hinge_canonical_assignments = dict(self.mesh_model.frame_assignments)
+        # ── Builder-local hinge state (never writes back to the MeshModel) ──
+        # Hinge nodes and re-pointed connectivity are kept on the builder so the
+        # frozen MeshModel stays read-only (§3.2) and a rebuild needs no restore
+        # pass.  ``_add_beam_column`` resolves an element's effective endpoints
+        # through these maps.
+        self._hinge_nodes: dict[str, Node] = {}
+        self._hinge_repoints: dict[str, list[str]] = {}
 
         elements = self.mesh_model.frame_elements
         assignments = self.mesh_model.frame_assignments
@@ -1405,8 +1395,6 @@ class ElementMixin:
         )
         hinge_mat_tag = hinge_tag_base + len(self.section_tags) + 1
 
-        new_elements = dict(elements)
-        new_assignments = dict(assignments)
         # Hinge instrumentation for the transient runner's damage recorders
         # (φmax / Emax / Nd), rebuilt on each build_domain.
         self._reset_hinge_recorders()
@@ -1415,7 +1403,7 @@ class ElementMixin:
             nonlocal next_node_tag
             tag = next_node_tag
             next_node_tag += 1
-            self.mesh_model.nodes[hinge_id] = Node(
+            self._hinge_nodes[hinge_id] = Node(
                 node_id=hinge_id, node_tag=tag, x=pnode.x, y=pnode.y, z=pnode.z
             )
             ops.node(tag, pnode.x, pnode.y, pnode.z)
@@ -1433,12 +1421,16 @@ class ElementMixin:
             return tag
 
         def _repoint(elem: "FrameElement", point_id: str, new_node_id: str) -> None:
-            if elem.node_i == point_id:
-                elem.node_i = new_node_id
-            elif elem.node_j == point_id:
-                elem.node_j = new_node_id
+            rep = self._hinge_repoints.get(elem.elem_id)
+            if rep is None:
+                rep = [elem.node_i, elem.node_j]
+            if rep[0] == point_id:
+                rep[0] = new_node_id
+            elif rep[1] == point_id:
+                rep[1] = new_node_id
             else:
                 raise RuntimeError(f"segment boundary {point_id} not on element {elem.elem_id}")
+            self._hinge_repoints[elem.elem_id] = rep
 
         for mid, segments in segments_by_member.items():
             if not segments:
@@ -1478,6 +1470,17 @@ class ElementMixin:
             n = len(segments)
             point_ids = [segments[0].node_i] + [seg.node_j for seg in segments]
             for k in range(n + 1):
+                # A released (pinned) member end is a segment boundary but not a
+                # hinge point: leave it connected to the structural node and skip
+                # the spring, so the moment end keeps its hinge while the released
+                # end gets no spring.  Note: the M3 pin release itself is *not*
+                # yet modelled under ``hinge_model='lumped'`` (the release route
+                # is skipped there), so the released end stays moment-connected
+                # until that separately-tracked gap is closed.
+                if k == 0 and segments[0].release_i:
+                    continue
+                if k == n and segments[-1].release_j:
+                    continue
                 mats, theta_y, my = calibs[min(k, n - 1)]
                 pnode = nodes[point_ids[k]]
                 if k < n:
@@ -1502,10 +1505,6 @@ class ElementMixin:
                 self._hinge_yield_rotations.append(theta_y)
                 self._hinge_yield_moments.append(my)
                 self._hinge_moment_signs.append(sign)
-
-        # Update collections
-        self.mesh_model.frame_elements = new_elements
-        self.mesh_model.frame_assignments = new_assignments
 
     # ── Member end releases / partial fixity ─────────────────────────
     # The retained-DOF rigidity factor (η) and the fully-released softness

@@ -112,7 +112,11 @@ class TransientRunnerMixin:
         accel = np.asarray(accel, dtype=float)
         if num_steps is None:
             num_steps = len(accel)
-        dof = {"X": 1, "Y": 2, "Z": 3}[direction.upper()]
+        # Normalise once so the DOF lookup and the returned ``direction`` field
+        # agree (downstream collection writes the schema-consistent uppercase
+        # value the DOF resolution already used).
+        direction = direction.upper()
+        dof = {"X": 1, "Y": 2, "Z": 3}[direction]
 
         # ── Rebuild for an independent record ──
         # Each ground-motion record must start from a fresh domain: a previous

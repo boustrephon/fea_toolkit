@@ -1020,12 +1020,16 @@ def load_model(
             :func:`derive_column_axial_ratios_by_member`.
         derive_column_axial_ratio: When True (and ``backbone == "imk"``), derive
             the per-section ``Pg/Pye`` from the FEMA 355C seismic weight via
-            :func:`derive_column_axial_ratios` before stamping.
+            :func:`derive_column_axial_ratios` before stamping.  A caller-supplied
+            *column_axial_ratios* dict wins for any section it names (derivation
+            fills only the missing sections).
         derive_column_axial_ratio_by_member: When True (and ``backbone == "imk"``),
             derive the per-member ``Pg/Pye`` via
             :func:`derive_column_axial_ratios_by_member` (each column segment
             carries only the mass above it) before stamping; the per-section
-            governing ratios are derived alongside as the summary.
+            governing ratios are derived alongside as the summary.  A
+            caller-supplied *column_axial_ratios_by_member* dict wins for any
+            member it names.
 
     Raises:
         ValueError: For an unknown *building* or *backbone*.
@@ -1064,13 +1068,20 @@ def load_model(
             )
         enrich_display_sections(md, building=building)
         if backbone == "imk":
+            # Derive-flag handling: a caller-supplied axial-ratio dict wins for
+            # any key it names; derivation only fills the members/sections the
+            # caller left unspecified (never overwrites an explicit value).
             if derive_column_axial_ratio_by_member:
-                column_axial_ratios_by_member = derive_column_axial_ratios_by_member(
-                    md, building=building
-                )
-                column_axial_ratios = derive_column_axial_ratios(md, building=building)
+                derived_by_member = derive_column_axial_ratios_by_member(md, building=building)
+                derived_by_section = derive_column_axial_ratios(md, building=building)
+                column_axial_ratios_by_member = {
+                    **derived_by_member,
+                    **(column_axial_ratios_by_member or {}),
+                }
+                column_axial_ratios = {**derived_by_section, **(column_axial_ratios or {})}
             elif derive_column_axial_ratio:
-                column_axial_ratios = derive_column_axial_ratios(md, building=building)
+                derived_by_section = derive_column_axial_ratios(md, building=building)
+                column_axial_ratios = {**derived_by_section, **(column_axial_ratios or {})}
             enrich_imk(
                 md,
                 building=building,
@@ -1229,10 +1240,12 @@ def build_builder(
             to :func:`load_model` (``backbone == "imk"`` only).
         derive_column_axial_ratio: When True (and ``backbone == "imk"``), derive
             the per-section ``Pg/Pye`` from the FEMA 355C seismic weight before
-            stamping (see :func:`derive_column_axial_ratios`).
+            stamping (see :func:`derive_column_axial_ratios`).  A caller-supplied
+            *column_axial_ratios* dict wins for any section it names.
         derive_column_axial_ratio_by_member: When True (and ``backbone == "imk"``),
             derive the per-member ``Pg/Pye`` before stamping (see
-            :func:`derive_column_axial_ratios_by_member`).
+            :func:`derive_column_axial_ratios_by_member`).  A caller-supplied
+            *column_axial_ratios_by_member* dict wins for any member it names.
 
     Raises:
         ValueError: For an unknown *fidelity*, or for ``panel_zone=True`` with

@@ -70,15 +70,21 @@ def test_exclude_braces_drops_brace_member():
     assert "BR" not in seg
 
 
-def test_honour_releases_drops_pinned_end():
-    # M3 released at end J leaves one hinge-eligible point (A) → no segment
-    # (the builder's release mechanism handles the pinned end; the fixed-pin
-    # single-point case is a known refinement).
+def test_honour_releases_flags_pinned_end():
+    # M3 released at end J leaves one hinge-eligible point (A): the member is
+    # kept as a single segment spanning A→B, with the released end flagged so
+    # the builder leaves it a pin (no hinge spring there) while the moment end
+    # retains its hinge.
     nodes = {"A": _node("A", 0, 0, 0), "B": _node("B", 4, 0, 0)}
     elems = {"E": _elem("E", 1, "A", "B")}
     rel = FrameRelease(frame_id="E", end_j=[0, 0, 0, 0, 0, 1])
     seg = segment_members(elems, nodes, frame_releases={"E": rel})
-    assert "E" not in seg
+    assert set(seg) == {"E"}
+    s = seg["E"][0]
+    assert (s.node_i, s.node_j) == ("A", "B")
+    assert s.sub_element_ids == ("E",)
+    assert s.release_i is False  # moment end keeps its hinge
+    assert s.release_j is True  # M3-released end is a pin
 
 
 def test_member_ids_restricts_scope():

@@ -72,7 +72,7 @@ Three steps, applied in order:
    (`Selection.from_brace_sections()`), and member releases derive pinned ends —
    no benchmark data involved.
 2. **Override.** Transcribe the `element_tbl` type column as a study override
-   table (`MEMBER_TYPES_3/9/20`: `moment`/`brace`/`fixed-pin`), applied in the
+   table (`BEAM_TYPES_3/9/20`: `moment`/`brace`/`fixed-pin`), applied in the
    same spirit as the existing `brace_sections` / `brace_selection` overrides —
    authoritative, not gated by the analytical role.
 3. **Reconcile.** Map the analytical result onto the study taxonomy, compare, and

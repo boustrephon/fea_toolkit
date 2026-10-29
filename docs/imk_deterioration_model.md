@@ -322,6 +322,14 @@ the choice as a **named convention** — `theta_u_model` — plus an explicit
 | `"lignos"` | $0.15$ rad | Lignos et al. (2019) Eq. 11 — monotonic axial collapse |
 | `"hybrid"` | $\max(\theta_p + \theta_{pc} + 0.02,\ 0.15)$ | floor at the paper's collapse point |
 
+> **`"lignos"` is invalid when 0.15 rad precedes the capping rotation.**  The
+> `"lignos"` convention resolves to a fixed `0.15` rad; when that is not
+> greater than `θp` — as for a stocky section whose Lignos-2019 `θp` caps at
+> `0.20` rad — the ultimate rotation would sit *before* the capping point,
+> which is not a valid `IMKBilin` backbone.  `_resolve_theta_u` rejects any
+> resolved `θu` (an explicit `theta_u` included) that is not greater than `θp`,
+> so use `"hybrid"` or `"plateau"` for stocky sections.
+
 The chosen convention is recorded as run-level provenance
 (`md.imk_theta_u_model`) so a benchmark run and an assessment run stay
 comparable.  For **benchmark matching** use the default `"plateau"` (or an

@@ -59,10 +59,10 @@ exact force-based element).
 
 OpenSees' legacy **`beamWithHinges` command** integrates its concentrated
 plastic hinges under the **`HingeRadau`** rule (six points: two hinge points
-plus four interior points).  This is *not* what `fea_toolkit` ships — the
-toolkit's `hinge_model='beam_with_hinges'` emits a `forceBeamColumn` under
-**`HingeRadauTwo`** (see the fix below).  `HingeRadau`'s two interior weights
-are
+plus four interior points).  This is *not* what `fea_toolkit` ships
+— the toolkit's `hinge_model='beam_with_hinges'` emits a `forceBeamColumn`
+under **`HingeRadauTwo`** (see the fix below).  `HingeRadau`'s two interior
+weights are
 
     w = 0.5 − 2·(lpI + lpJ)/L
 
@@ -102,10 +102,14 @@ section's moment-*curvature* backbone to the member-end rotation `θ = φ·Lp`.
 The toolkit does **not** rescale `Lp` for the switch, so to preserve the
 intended post-yield response users must keep `hinge_length_fraction` at the
 value the backbone was calibrated against — the default `1/6` reproduces the SAC
-benchmark's `θ = φ·L/6` member-end rotation.  (The `IMKBilin`/IMK calibration
-is a separate **lumped-hinge** (`zeroLength` spring) backbone and is not used on
-this `beam_with_hinges`/`HingeRadauTwo` path, so it neither compensates for nor
-is affected by the integration-rule softening length.)
+benchmark's `θ = φ·L/6` member-end rotation.  (`HingeRadauTwo` places two points
+per hinge — weights `Lp/4` at the member end and `3Lp/4` at `2Lp/3` — which sum
+to `Lp`, so a constant-moment hinge still integrates `θ = φ·Lp` exactly; the
+two-point layout changes the numerical conditioning, not the integrated plastic
+rotation.)  (The `IMKBilin`/IMK calibration is a separate **lumped-hinge**
+(`zeroLength` spring) backbone and is not used on this
+`beam_with_hinges`/`HingeRadauTwo` path, so it neither compensates for nor is
+affected by the integration-rule softening length.)
 
 ## 2. Element & hinge cheat-sheet
 
