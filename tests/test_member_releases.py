@@ -17,6 +17,7 @@ from fea_toolkit.model.sap_data import (
 )
 from fea_toolkit.opensees.releases import (
     emit_release_tcl,
+    end_released_dofs,
     member_end_stiffness,
     plan_releases,
 )
@@ -155,6 +156,14 @@ class TestReleaseHelpers:
         md = _beam({"1": FrameRelease("1", end_i=[0, 0, 0, 0, 0, 1])}, {})
         assert plan_releases(md, {"apply_releases": False})["ends"] == []
 
+    def test_end_released_dofs_disabled_by_apply_releases(self):
+        md = _beam({"1": FrameRelease("1", end_i=[1, 0, 0, 0, 0, 0])}, {})
+        assert end_released_dofs(md, "1", "I", {"apply_releases": False}) is None
+        # Default (setting absent) still returns the released DOF.
+        dofs = end_released_dofs(md, "1", "I", {})
+        assert [d for d, _ in dofs] == [1]
+        assert dofs[0][1] == pytest.approx(1e-6 * E * A / 3.0)
+
     def test_emit_release_tcl_empty_plan(self):
         assert emit_release_tcl({"ends": [], "release_nodes": []}, 1, 1) == []
 
@@ -212,6 +221,50 @@ def _analyse(node_tag, load_z):
     ops.algorithm("Newton")
     ops.analysis("Static")
     return ops.analyze(1)
+
+
+def _zero_length_mat_dirs(releases, config=None):
+    """Return each ``zeroLength``'s ``(mats, dirs)`` from a lumped-hinge beam.
+
+    Captures the ``ops.element`` calls through the :class:`RecordingOpenSees`
+    proxy (the installed OpenSeesPy exposes no element-introspection API),
+    then restores the real module and wipes the domain.
+    """
+    import openseespy.opensees as ops
+
+    from fea_toolkit.opensees import _elements
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+    from fea_toolkit.opensees.recorder import RecordingOpenSees
+
+    md = _beam(
+        releases,
+        {"1": Restraint([1, 1, 1, 1, 1, 1]), "3": Restraint([1, 1, 1, 1, 1, 1])},
+    )
+    mesh = preprocess_model(
+        md, {"element_type": "elasticBeamColumn", "split_elements": False, "verbose": False}
+    )
+    cfg = {"verbose": False, "hinge_model": "lumped", "hinge_backbone": "bilinear"}
+    cfg.update(config or {})
+    builder = AnalysisBuilder(mesh, cfg)
+    rec = RecordingOpenSees(ops)
+    _elements.ops = rec
+    try:
+        builder.build_domain()
+    finally:
+        _elements.ops = ops
+        ops.wipe()
+
+    out = []
+    for _name, args, _kw in rec.commands:
+        if not args or args[0] != "zeroLength" or "-mat" not in args or "-dir" not in args:
+            continue
+        mi = args.index("-mat")
+        di = args.index("-dir", mi)
+        dirs = list(args[di + 1 :])
+        if "-orient" in dirs:
+            dirs = dirs[: dirs.index("-orient")]
+        out.append((list(args[mi + 1 : di]), dirs))
+    return out
 
 
 class TestBuilderReleases:
@@ -317,6 +370,53 @@ class TestBuilderReleases:
             assert len(ops.getEleTags()) == 6
         finally:
             ops.wipe()
+
+    @pytest.mark.parametrize(
+        ("end_i", "expected_dir"),
+        [
+            ([0, 1, 0, 0, 0, 0], 3),  # V2 → hinge Vz slot (dir 3)
+            ([0, 0, 0, 0, 1, 0], 6),  # M2 → hinge weak slot (dir 6)
+        ],
+    )
+    def test_merged_release_lands_on_expected_dir(self, end_i, expected_dir):
+        """A non-M3 release is swapped into the hinge spring's mapped slot.
+
+        The lumped-hinge zeroLength uses ``-orient (vx, vz)``, so its shear
+        (2/3) and moment (5/6) slots are swapped relative to the natural
+        SAP2000 numbering.  The released DOF's Elastic material must land on
+        the ``-dir`` entry ``_HINGE_SLOT_TO_RELEASE_DOF`` maps it to, while
+        the other five dirs keep their hinge materials.
+        """
+        from fea_toolkit.opensees._elements import _MERGED_RELEASE_MAT_BASE
+
+        entries = _zero_length_mat_dirs({"1": FrameRelease("1", end_i=end_i)})
+        merged = next(e for e in entries if any(m >= _MERGED_RELEASE_MAT_BASE for m in e[0]))
+        mats, dirs = merged
+        release_tag = next(m for m in mats if m >= _MERGED_RELEASE_MAT_BASE)
+        assert dirs == [1, 2, 3, 4, 5, 6]
+        assert dirs[mats.index(release_tag)] == expected_dir
+        # Every non-release dir keeps its hinge material (below the band).
+        for d, m in zip(dirs, mats):
+            if d != expected_dir:
+                assert m < _MERGED_RELEASE_MAT_BASE
+
+    def test_exact_zero_release_omits_mapped_dof(self):
+        """An exact-zero release drops its ``-dir`` entry from the hinge spring.
+
+        With ``release_softness_factor=0`` the released DOF carries no spring
+        (stiffness ``None``), so the merged hinge spring omits the mapped DOF
+        from ``-dir`` rather than emitting a zero-stiffness material.
+        """
+        entries = _zero_length_mat_dirs(
+            {"1": FrameRelease("1", end_i=[0, 1, 0, 0, 0, 0])},  # V2 released
+            config={"release_softness_factor": 0.0},
+        )
+        merged = next(e for e in entries if e[1] != [1, 2, 3, 4, 5, 6])
+        mats, dirs = merged
+        # V2 maps to the hinge's Vz slot (dir 3); the exact zero drops it.
+        assert 3 not in dirs
+        assert dirs == [1, 2, 4, 5, 6]
+        assert len(mats) == 5
 
     def test_non_lumped_rebuild_clears_stale_hinge_state(self):
         """A non-lumped rebuild clears the builder-local hinge state."""
