@@ -9,6 +9,7 @@ from typing import Optional
 import numpy as np
 import openseespy.opensees as ops
 
+from ..model.frame_segments import segment_members
 from ..model.geometry import frame_end_offsets_global, get_SAP_vecxz
 from ..model.sap_data import FrameElement, Node
 from ..utils import (
@@ -994,7 +995,7 @@ class ElementMixin:
             return
         # Remove any *_hinge_* nodes left from a previous build
         for nid in list(self.mesh_model.nodes.keys()):
-            if nid.endswith(("_hinge_i", "_hinge_j")):
+            if nid.endswith(("_hinge_i", "_hinge_j")) or "__hinge_" in nid:
                 del self.mesh_model.nodes[nid]
         # Restore canonical element endpoints and assignments
         for eid, elem in self.mesh_model.frame_elements.items():
@@ -1097,23 +1098,255 @@ class ElementMixin:
         self._hinge_yield_moments: list[float] = []
         self._hinge_moment_signs: list[float] = []
 
+    def _create_segment_hinge_materials(
+        self, elem: "FrameElement", sec, sec_name: str, L: float, base_tag: int
+    ) -> tuple[list[int], float, float]:
+        """Create the 6 uniaxial hinge materials for one member segment.
+
+        The segment is the lumped/IMK calibration unit: its own ``L`` (segment
+        length) and section feed the backbone, so a member split at a framing
+        point gets one calibration per segment.  Returns ``(mats,
+        hinge_theta_y, hinge_my)`` where ``mats`` is the 6-tag list
+        ``[P, Vy, Vz, T, strong, weak]`` (the ``-mat`` order used by the
+        zeroLength hinge) and ``hinge_theta_y`` / ``hinge_my`` the strong-axis
+        yield rotation / moment (``inf`` / ``0.0`` when the strong axis stays
+        elastic).
+        """
+        hinge_mat_tag = base_tag
+        mat = self.mesh_model.materials.get(sec.material)
+
+        # Defensive defaults for nullable section values
+        Z33 = getattr(sec, "Z33", None) or 0.0
+        Z22 = getattr(sec, "Z22", None) or 0.0
+        I33 = getattr(sec, "I33", None) or 0.0
+        I22 = getattr(sec, "I22", None) or 0.0
+        A_val = getattr(sec, "A", None) or 0.0
+        J_val = getattr(sec, "J", None) or 0.0
+        Fy = mat.Fy if mat and mat.Fy and mat.Fy > 0 else 2.5e8
+        E = mat.E_mod if mat and mat.E_mod > 0 else 2.0e11
+        G = mat.G_mod if mat and mat.G_mod and mat.G_mod > 0 else 0.4 * E
+
+        # ── Concrete guard ──────────────────────────────────────────
+        if mat and mat.type and "concrete" in mat.type.lower():
+            warnings.warn(
+                f"Lumped hinges for concrete sections require reinforcement "
+                f"data not available in generic Section/Material model. "
+                f"Section '{sec_name}', material '{sec.material}' — "
+                f"using elastic moment defaults.",
+                stacklevel=2,
+            )
+
+        # Compute yield moments from section geometry
+        if Z33 > 0:
+            My = Fy * Z33
+        elif I33 > 0 and A_val > 0:
+            d_eff = 2.0 * math.sqrt(I33 / A_val)  # 2× radius of gyration
+            My = Fy * (I33 / max(d_eff * 0.5, 1e-6))
+        else:
+            My = Fy * 1e-4  # Minimal fallback
+        if Z22 > 0:
+            My_weak = Fy * Z22
+        elif I22 > 0 and A_val > 0:
+            d_eff = 2.0 * math.sqrt(I22 / A_val)
+            My_weak = Fy * (I22 / max(d_eff * 0.5, 1e-6))
+        else:
+            My_weak = Fy * 1e-4
+
+        # ASCE 41 plastic hinge length for yield rotation scaling
+        from ..model.checks import compute_asce41_hinge_length
+
+        Lp = compute_asce41_hinge_length(self.mesh_model, sec_name, L)
+        theta_y = (
+            (My * Lp) / (max(6.0 * E * max(I33, 1e-12), 1e-12))
+            if E * max(I33, 1e-12) > 0
+            else 0.005
+        )
+        theta_y_weak = (
+            (My_weak * Lp) / (max(6.0 * E * max(I22, 1e-12), 1e-12))
+            if E * max(I22, 1e-12) > 0
+            else 0.005
+        )
+        theta_cap = theta_y * 6.0
+        theta_cap_weak = theta_y_weak * 6.0
+
+        # Retained DOFs are rigid (η × member stiffness) — the hinge is a pure
+        # rotational spring; the elastic member carries P/V/T.
+        eta = float(self.config.get("release_rigidity_factor", 100.0))
+        ops.uniaxialMaterial("Elastic", hinge_mat_tag, eta * max(A_val, 1e-6) * E / L)  # P (dir 1)
+        ops.uniaxialMaterial(
+            "Elastic", hinge_mat_tag + 4, eta * G * max(A_val, 1e-6) / L
+        )  # Vy (dir 2)
+        ops.uniaxialMaterial(
+            "Elastic", hinge_mat_tag + 5, eta * G * max(A_val, 1e-6) / L
+        )  # Vz (dir 3)
+        if self.config.get("hinge_backbone") == "bilinear":
+            # Bilinear steel hinge (Steel01) — concentrated plasticity.
+            b = float(self.config.get("hardening_ratio", 0.02))
+            stiff_factor = float(self.config.get("hinge_stiffness_factor", 10.0))
+            if stiff_factor <= 0.0 or not math.isfinite(stiff_factor):
+                raise ValueError(
+                    f"hinge_stiffness_factor must be positive and finite, got {stiff_factor}"
+                )
+            e0_strong = stiff_factor * 6.0 * E * max(I33, 1e-12) / max(L, 1e-12)
+            e0_weak = stiff_factor * 6.0 * E * max(I22, 1e-12) / max(L, 1e-12)
+            ops.uniaxialMaterial("Steel01", hinge_mat_tag + 1, My, e0_strong, b)
+            ops.uniaxialMaterial("Steel01", hinge_mat_tag + 2, My_weak, e0_weak, b)
+            hinge_theta_y = My / max(e0_strong, 1e-12)
+            hinge_my = My
+        elif self.config.get("hinge_backbone") == "trilinear":
+            # Trilinear hinge (Hysteretic) from the transcribed Ohtori mat_tbl.
+            ei1 = getattr(sec, "ei1", None) or 0.0
+            ei2 = getattr(sec, "ei2", None) or 0.0
+            ei3 = getattr(sec, "ei3", None) or 0.0
+            d1 = getattr(sec, "d1", None) or 0.0
+            d2 = getattr(sec, "d2", None) or 0.0
+            my_tri, m2, ei3_eff = _trilinear_backbone(ei1, ei2, ei3, d1, d2)
+            stiff_factor = float(self.config.get("hinge_stiffness_factor", 10.0))
+            if stiff_factor <= 0.0 or not math.isfinite(stiff_factor):
+                raise ValueError(
+                    f"hinge_stiffness_factor must be positive and finite, got {stiff_factor}"
+                )
+            k0 = stiff_factor * 6.0 * ei1 / max(L, 1e-12)
+            k1 = 6.0 * ei2 / max(L, 1e-12)
+            k2 = 6.0 * ei3_eff / max(L, 1e-12)
+
+            theta_y = my_tri / k0
+            theta_2 = theta_y + (m2 - my_tri) / k1
+            theta_cap = theta_2 * 2.0
+            m_cap = m2 + k2 * (theta_cap - theta_2)
+
+            for mat_tag in (hinge_mat_tag + 1, hinge_mat_tag + 2):
+                ops.uniaxialMaterial(
+                    "Hysteretic",
+                    mat_tag,
+                    my_tri,
+                    theta_y,
+                    m2,
+                    theta_2,
+                    m_cap,
+                    theta_cap,
+                    -my_tri,
+                    -theta_y,
+                    -m2,
+                    -theta_2,
+                    -m_cap,
+                    -theta_cap,
+                    1.0,
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                )
+            hinge_theta_y = theta_y
+            hinge_my = my_tri
+        elif self.config.get("hinge_backbone") == "imk":
+            # IMK steel hinge (Lignos-Krawinkler, collapse-level) — IMKBilin.
+            params = getattr(elem, "imk_params", None) or getattr(sec, "imk_params", None)
+            stiff_factor = float(self.config.get("hinge_stiffness_factor", 10.0))
+            k0 = stiff_factor * 6.0 * E * max(I33, 1e-12) / max(L, 1e-12)
+            if params:
+                my_imk = float(params.get("My_pos", My))
+                my_imk_neg = float(params.get("My_neg", -my_imk))
+                ops.uniaxialMaterial(
+                    "IMKBilin",
+                    hinge_mat_tag + 1,
+                    *_imk_bilin_args(params, k0, my_imk, my_imk_neg),
+                )
+                hinge_theta_y = my_imk / max(k0, 1e-12)
+                hinge_my = my_imk
+            else:
+                # No IMK calibration (e.g. an elastic leaning column) — keep the
+                # strong axis elastic at k0 and report no yield.
+                ops.uniaxialMaterial("Elastic", hinge_mat_tag + 1, k0)
+                hinge_theta_y = float("inf")
+                hinge_my = 0.0
+            # Weak-axis moment stays elastic (out-of-plane; the 2D frame carries
+            # all in-plane action on the strong axis).
+            ops.uniaxialMaterial(
+                "Elastic",
+                hinge_mat_tag + 2,
+                stiff_factor * 6.0 * E * max(I22, 1e-12) / max(L, 1e-12),
+            )
+        else:
+            # Strong-axis moment (ASCE 41 Hysteretic backbone)
+            ops.uniaxialMaterial(
+                "Hysteretic",
+                hinge_mat_tag + 1,
+                My,
+                theta_y,
+                My * 1.1,
+                theta_cap,
+                -My,
+                -theta_y,
+                -My * 1.1,
+                -theta_cap,
+                1.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+            )
+            # Weak-axis moment
+            ops.uniaxialMaterial(
+                "Hysteretic",
+                hinge_mat_tag + 2,
+                My_weak,
+                theta_y_weak,
+                My_weak * 1.1,
+                theta_cap_weak,
+                -My_weak,
+                -theta_y_weak,
+                -My_weak * 1.1,
+                -theta_cap_weak,
+                1.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+            )
+            hinge_theta_y = theta_y
+            hinge_my = My
+        # Torsion (rigid — no inelastic torsion expected)
+        ops.uniaxialMaterial(
+            "Elastic",
+            hinge_mat_tag + 3,
+            eta * (G * max(J_val, 1e-6) / L if J_val else G * 1e-6 / L),
+        )
+
+        mats = [
+            hinge_mat_tag,  # P (dir 1)
+            hinge_mat_tag + 4,  # Vy (dir 2)
+            hinge_mat_tag + 5,  # Vz (dir 3)
+            hinge_mat_tag + 3,  # T (dir 4)
+            hinge_mat_tag + 1,  # strong (dir 5)
+            hinge_mat_tag + 2,  # weak (dir 6)
+        ]
+        return mats, hinge_theta_y, hinge_my
+
     def _create_lumped_hinges(self) -> None:
-        """Replace frame elements with lumped plasticity hinges.
+        """Replace frame members with lumped hinges at hinge-eligible points.
 
         Activated via ``config['hinge_model'] = 'lumped'``.
 
-        Each frame element is split into::
+        Consumes the Preprocessor's route-agnostic ``frame_segments`` (one
+        :class:`~fea_toolkit.model.frame_segments.FrameSegment` per stretch
+        between consecutive hinge-eligible points — member ends plus framing
+        points) and emits **one spring per hinge-eligible point**, the standard
+        ``elastic → spring → elastic`` concentrated-plasticity topology::
 
-            structural_node_i → hinge_i → elastic_mid → hinge_j → structural_node_j
+            node ─spring─ seg₀ elastic … ─spring─ seg₁ elastic … ─spring─ node
 
-        Coincident hinge nodes sit at the same coordinates.  Each hinge is a
-        ``zeroLength`` element carrying all six DOFs via ``-mat``/``-dir``
-        (no ``equalDOF``): rigid ``Elastic`` materials retain P/Vy/Vz/T,
-        while the hinge materials (``Hysteretic`` or ``Steel01``) provide the
-        two rotational DOFs.
+        A member-end spring joins the structural node to the segment's elastic
+        end; a framing-point spring joins segment ``i-1`` (anchored at the
+        structural node) to segment ``i`` via a single coincident hinge node.  Pure-discretization points stay inside a
+        segment's elastic interior (no spring).  When ``frame_segments`` is
+        empty (a hand-built mesh that skipped the Preprocessor) one segment per
+        element is synthesised via
+        :func:`~fea_toolkit.model.frame_segments.segment_members`.
 
-        Hinge backbones use ``Hysteretic`` materials matched to ASCE 41
-        rotation limits.
+        Each spring is a ``zeroLength`` carrying all six DOFs via
+        ``-mat``/``-dir`` (no ``equalDOF``): rigid ``Elastic`` materials retain
+        P/Vy/Vz/T while the backbone material provides the two rotational DOFs.
         """
         if self.config.get("hinge_model") != "lumped":
             return
@@ -1136,8 +1369,19 @@ class ElementMixin:
 
         elements = self.mesh_model.frame_elements
         assignments = self.mesh_model.frame_assignments
+        nodes = self.mesh_model.nodes
 
-        next_node_tag = max((nd.node_tag for nd in self.mesh_model.nodes.values()), default=0) + 1
+        # ── Hinge-eligible segments (never re-derived here) ───────────
+        segments_by_member = self.mesh_model.frame_segments
+        if not segments_by_member:
+            segments_by_member = segment_members(
+                elements,
+                nodes,
+                frame_element_types=getattr(self.mesh_model, "frame_element_types", None),
+                frame_releases=getattr(self.mesh_model, "frame_releases", None),
+            )
+
+        next_node_tag = max((nd.node_tag for nd in nodes.values()), default=0) + 1
         # Consider existing OpenSees element tags (shells, rigid links already
         # created) and reserved offset-rigid-link tags to avoid collisions.
         try:
@@ -1161,313 +1405,58 @@ class ElementMixin:
         )
         hinge_mat_tag = hinge_tag_base + len(self.section_tags) + 1
 
-        new_elements: dict[str, FrameElement] = {}
-        new_assignments: dict[str, str] = {}
+        new_elements = dict(elements)
+        new_assignments = dict(assignments)
         # Hinge instrumentation for the transient runner's damage recorders
         # (φmax / Emax / Nd), rebuilt on each build_domain.
         self._reset_hinge_recorders()
 
-        for eid, elem in list(elements.items()):
-            if elem.inactive:
-                new_elements[eid] = elem
-                if eid in assignments:
-                    new_assignments[eid] = assignments[eid]
-                continue
+        def _add_hinge_node(hinge_id: str, pnode: "Node") -> int:
+            nonlocal next_node_tag
+            tag = next_node_tag
+            next_node_tag += 1
+            self.mesh_model.nodes[hinge_id] = Node(
+                node_id=hinge_id, node_tag=tag, x=pnode.x, y=pnode.y, z=pnode.z
+            )
+            ops.node(tag, pnode.x, pnode.y, pnode.z)
+            self._created_node_tags.add(tag)
+            return tag
 
-            sec_name = assignments.get(eid) if assignments else None
+        def _emit_spring(a_tag: int, b_tag: int, mats: list[int], orient) -> int:
+            nonlocal next_tag
+            tag = next_tag
+            next_tag += 1
+            args = ["zeroLength", tag, a_tag, b_tag, "-mat", *mats, "-dir", 1, 2, 3, 4, 5, 6]
+            if orient:
+                args += ["-orient", *orient]
+            ops.element(*args)
+            return tag
+
+        def _repoint(elem: "FrameElement", point_id: str, new_node_id: str) -> None:
+            if elem.node_i == point_id:
+                elem.node_i = new_node_id
+            elif elem.node_j == point_id:
+                elem.node_j = new_node_id
+            else:
+                raise RuntimeError(f"segment boundary {point_id} not on element {elem.elem_id}")
+
+        for mid, segments in segments_by_member.items():
+            if not segments:
+                continue
+            first_sub = segments[0].sub_element_ids[0] if segments[0].sub_element_ids else None
+            if first_sub is None:
+                continue
+            sec_name = assignments.get(first_sub)
+            elem = elements.get(first_sub)
+            if elem is None or getattr(elem, "inactive", False):
+                continue
             if not sec_name or sec_name not in self.section_tags:
-                new_elements[eid] = elem
-                if eid in assignments:
-                    new_assignments[eid] = assignments[eid]
                 continue
-
-            ni = self.mesh_model.nodes.get(elem.node_i)
-            nj = self.mesh_model.nodes.get(elem.node_j)
-            if ni is None or nj is None:
-                new_elements[eid] = elem
-                if eid in assignments:
-                    new_assignments[eid] = assignments[eid]
-                continue
-
-            L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
-            if L < 1e-12:
-                new_elements[eid] = elem
-                if eid in assignments:
-                    new_assignments[eid] = assignments[eid]
-                continue
-
             sec = self.mesh_model.sections.get(sec_name)
             if sec is None:
-                new_elements[eid] = elem
-                if eid in assignments:
-                    new_assignments[eid] = assignments[eid]
                 continue
 
-            # --- Create coincident hinge nodes ---
-            hinge_i_id = f"{eid}_hinge_i"
-            hinge_j_id = f"{eid}_hinge_j"
-            hinge_i_tag = next_node_tag
-            next_node_tag += 1
-            hinge_j_tag = next_node_tag
-            next_node_tag += 1
-
-            self.mesh_model.nodes[hinge_i_id] = Node(
-                node_id=hinge_i_id,
-                node_tag=hinge_i_tag,
-                x=ni.x,
-                y=ni.y,
-                z=ni.z,
-            )
-            self.mesh_model.nodes[hinge_j_id] = Node(
-                node_id=hinge_j_id,
-                node_tag=hinge_j_tag,
-                x=nj.x,
-                y=nj.y,
-                z=nj.z,
-            )
-
-            # Create OpenSees nodes for coincident hinge nodes
-            ops.node(hinge_i_tag, ni.x, ni.y, ni.z)
-            ops.node(hinge_j_tag, nj.x, nj.y, nj.z)
-            self._created_node_tags.update([hinge_i_tag, hinge_j_tag])
-
-            # --- Create Hysteretic hinge section ---
-            mat = self.mesh_model.materials.get(sec.material)
-
-            # Defensive defaults for nullable section values — initialised
-            # before the concrete guard so they are guaranteed bound for
-            # the hinge backbone computation below.
-            Z33 = getattr(sec, "Z33", None) or 0.0
-            Z22 = getattr(sec, "Z22", None) or 0.0
-            I33 = getattr(sec, "I33", None) or 0.0
-            I22 = getattr(sec, "I22", None) or 0.0
-            A_val = getattr(sec, "A", None) or 0.0
-            J_val = getattr(sec, "J", None) or 0.0
-            Fy = mat.Fy if mat and mat.Fy and mat.Fy > 0 else 2.5e8
-            E = mat.E_mod if mat and mat.E_mod > 0 else 2.0e11
-            G = mat.G_mod if mat and mat.G_mod and mat.G_mod > 0 else 0.4 * E
-
-            # ── Concrete guard ──────────────────────────────────────
-            # Concrete sections fire a warning (reinforcement data not
-            # available) but still fall through to create elastic hinges
-            # using the defaults initialised above.
-            if mat and mat.type and "concrete" in mat.type.lower():
-                import warnings
-
-                warnings.warn(
-                    f"Lumped hinges for concrete sections require reinforcement "
-                    f"data not available in generic Section/Material model. "
-                    f"Section '{sec_name}', material '{sec.material}' — "
-                    f"using elastic moment defaults.",
-                )
-
-            # Compute yield moments from section geometry
-            if Z33 > 0:
-                My = Fy * Z33
-            elif I33 > 0 and A_val > 0:
-                d_eff = 2.0 * math.sqrt(I33 / A_val)  # 2× radius of gyration
-                My = Fy * (I33 / max(d_eff * 0.5, 1e-6))
-            else:
-                My = Fy * 1e-4  # Minimal fallback
-            if Z22 > 0:
-                My_weak = Fy * Z22
-            elif I22 > 0 and A_val > 0:
-                d_eff = 2.0 * math.sqrt(I22 / A_val)
-                My_weak = Fy * (I22 / max(d_eff * 0.5, 1e-6))
-            else:
-                My_weak = Fy * 1e-4
-
-            # ASCE 41 plastic hinge length for yield rotation scaling
-            from ..model.checks import compute_asce41_hinge_length
-
-            Lp = compute_asce41_hinge_length(self.mesh_model, sec_name, L)
-            theta_y = (
-                (My * Lp) / (max(6.0 * E * max(I33, 1e-12), 1e-12))
-                if E * max(I33, 1e-12) > 0
-                else 0.005
-            )
-            theta_y_weak = (
-                (My_weak * Lp) / (max(6.0 * E * max(I22, 1e-12), 1e-12))
-                if E * max(I22, 1e-12) > 0
-                else 0.005
-            )
-            theta_cap = theta_y * 6.0
-            theta_cap_weak = theta_y_weak * 6.0
-
-            # Retained DOFs are rigid (η × member stiffness) — the hinge is a
-            # pure rotational spring; the elastic member carries P/V/T.  The
-            # rigid translations live inside a zeroLength element (the release
-            # convention) so no equalDOF tie is needed.
-            eta = float(self.config.get("release_rigidity_factor", 100.0))
-            ops.uniaxialMaterial(
-                "Elastic", hinge_mat_tag, eta * max(A_val, 1e-6) * E / L
-            )  # P (dir 1)
-            ops.uniaxialMaterial(
-                "Elastic", hinge_mat_tag + 4, eta * G * max(A_val, 1e-6) / L
-            )  # Vy (dir 2)
-            ops.uniaxialMaterial(
-                "Elastic", hinge_mat_tag + 5, eta * G * max(A_val, 1e-6) / L
-            )  # Vz (dir 3)
-            if self.config.get("hinge_backbone") == "bilinear":
-                # Bilinear steel hinge (Steel01) — concentrated plasticity for
-                # steel moment frames (e.g. the SAC benchmark).  The elastic
-                # rotational stiffness is a configurable multiple of the
-                # member's own flexural stiffness (6EI/L), so the hinge is
-                # nearly rigid in the elastic range and the interior member
-                # carries the elastic deformation; past My it hardens at
-                # hardening_ratio.
-                b = float(self.config.get("hardening_ratio", 0.02))
-                stiff_factor = float(self.config.get("hinge_stiffness_factor", 10.0))
-                if stiff_factor <= 0.0 or not math.isfinite(stiff_factor):
-                    raise ValueError(
-                        f"hinge_stiffness_factor must be positive and finite, got {stiff_factor}"
-                    )
-                e0_strong = stiff_factor * 6.0 * E * max(I33, 1e-12) / max(L, 1e-12)
-                e0_weak = stiff_factor * 6.0 * E * max(I22, 1e-12) / max(L, 1e-12)
-                ops.uniaxialMaterial("Steel01", hinge_mat_tag + 1, My, e0_strong, b)
-                ops.uniaxialMaterial("Steel01", hinge_mat_tag + 2, My_weak, e0_weak, b)
-                hinge_theta_y = My / max(e0_strong, 1e-12)
-                hinge_my = My
-            elif self.config.get("hinge_backbone") == "trilinear":
-                # Trilinear hinge (Hysteretic) from the transcribed Ohtori
-                # ``mat_tbl`` backbone — elastic EI1, post-yield EI2, hardening
-                # EI3, break curvatures d1/d2 (My = EI1*d1).  The member-level
-                # curvature→rotation conversion uses the member end stiffness
-                # 6EI/L, so the hinge's rotational slopes are 6*EI2/L and
-                # 6*EI3/L, with a "nearly rigid" elastic stiffness
-                # (hinge_stiffness_factor × 6*EI1/L) so the elastic interior
-                # member carries the elastic deformation.
-                ei1 = getattr(sec, "ei1", None) or 0.0
-                ei2 = getattr(sec, "ei2", None) or 0.0
-                ei3 = getattr(sec, "ei3", None) or 0.0
-                d1 = getattr(sec, "d1", None) or 0.0
-                d2 = getattr(sec, "d2", None) or 0.0
-                my_tri, m2, ei3_eff = _trilinear_backbone(ei1, ei2, ei3, d1, d2)
-                stiff_factor = float(self.config.get("hinge_stiffness_factor", 10.0))
-                if stiff_factor <= 0.0 or not math.isfinite(stiff_factor):
-                    raise ValueError(
-                        f"hinge_stiffness_factor must be positive and finite, got {stiff_factor}"
-                    )
-                k0 = stiff_factor * 6.0 * ei1 / max(L, 1e-12)
-                k1 = 6.0 * ei2 / max(L, 1e-12)
-                k2 = 6.0 * ei3_eff / max(L, 1e-12)
-
-                theta_y = my_tri / k0
-                theta_2 = theta_y + (m2 - my_tri) / k1
-                theta_cap = theta_2 * 2.0
-                m_cap = m2 + k2 * (theta_cap - theta_2)
-
-                for mat_tag in (hinge_mat_tag + 1, hinge_mat_tag + 2):
-                    ops.uniaxialMaterial(
-                        "Hysteretic",
-                        mat_tag,
-                        my_tri,
-                        theta_y,
-                        m2,
-                        theta_2,
-                        m_cap,
-                        theta_cap,
-                        -my_tri,
-                        -theta_y,
-                        -m2,
-                        -theta_2,
-                        -m_cap,
-                        -theta_cap,
-                        1.0,
-                        1.0,
-                        0.0,
-                        0.0,
-                        0.0,
-                    )
-                hinge_theta_y = theta_y
-                hinge_my = my_tri
-            elif self.config.get("hinge_backbone") == "imk":
-                # IMK steel hinge (Lignos-Krawinkler, collapse-level) — a
-                # ``IMKBilin`` uniaxial material on the strong axis with an
-                # energy-based cyclic-deterioration rule.  Parameters come from
-                # the section's stamped ``imk_params`` dict (see
-                # ``benchmarks/imk_calibration.py``).  K0 is the near-rigid
-                # ``stiff_factor`` x 6EI/L so the elastic member carries the
-                # elastic deformation, matching the bilinear/trilinear
-                # lumped-hinge convention.
-                params = getattr(elem, "imk_params", None) or getattr(sec, "imk_params", None)
-                stiff_factor = float(self.config.get("hinge_stiffness_factor", 10.0))
-                k0 = stiff_factor * 6.0 * E * max(I33, 1e-12) / max(L, 1e-12)
-                if params:
-                    my_imk = float(params.get("My_pos", My))
-                    my_imk_neg = float(params.get("My_neg", -my_imk))
-                    ops.uniaxialMaterial(
-                        "IMKBilin",
-                        hinge_mat_tag + 1,
-                        *_imk_bilin_args(params, k0, my_imk, my_imk_neg),
-                    )
-                    hinge_theta_y = my_imk / max(k0, 1e-12)
-                    hinge_my = my_imk
-                else:
-                    # Section carries no IMK calibration (e.g. the elastic
-                    # leaning column) — keep the strong axis elastic at k0 and
-                    # report no yield for it.
-                    ops.uniaxialMaterial("Elastic", hinge_mat_tag + 1, k0)
-                    hinge_theta_y = float("inf")
-                    hinge_my = 0.0
-                # Weak-axis moment stays elastic (out-of-plane; the 2D frame
-                # carries all in-plane action on the strong axis).
-                ops.uniaxialMaterial(
-                    "Elastic",
-                    hinge_mat_tag + 2,
-                    stiff_factor * 6.0 * E * max(I22, 1e-12) / max(L, 1e-12),
-                )
-            else:
-                # Strong-axis moment (ASCE 41 Hysteretic backbone)
-                ops.uniaxialMaterial(
-                    "Hysteretic",
-                    hinge_mat_tag + 1,
-                    My,
-                    theta_y,
-                    My * 1.1,
-                    theta_cap,
-                    -My,
-                    -theta_y,
-                    -My * 1.1,
-                    -theta_cap,
-                    1.0,
-                    1.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                )
-                # Weak-axis moment
-                ops.uniaxialMaterial(
-                    "Hysteretic",
-                    hinge_mat_tag + 2,
-                    My_weak,
-                    theta_y_weak,
-                    My_weak * 1.1,
-                    theta_cap_weak,
-                    -My_weak,
-                    -theta_y_weak,
-                    -My_weak * 1.1,
-                    -theta_cap_weak,
-                    1.0,
-                    1.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                )
-                hinge_theta_y = theta_y
-                hinge_my = My
-            # Torsion (rigid — no inelastic torsion expected)
-            ops.uniaxialMaterial(
-                "Elastic",
-                hinge_mat_tag + 3,
-                eta * (G * max(J_val, 1e-6) / L if J_val else G * 1e-6 / L),
-            )
-
-            hinge_mat_tag += 6
-
-            # Get local axes for element orientation and the strong-axis moment
-            # sign (the zeroLength nodal-moment sign flips with the -orient
-            # handedness between columns and beams — see _runner_dynamic).
+            # Local axes + strong-axis moment sign (constant along a member).
             try:
                 vx, _vy, vz = self._get_local_axes(elem)
                 orient = (vx[0], vx[1], vx[2], vz[0], vz[1], vz[2])
@@ -1476,81 +1465,43 @@ class ElementMixin:
                 orient = None
                 sign = 1.0
 
-            # --- Create zero-length hinge elements (zeroLength + -mat/-dir) ---
-            # Retained DOFs (P, Vy, Vz, T) are rigid; the flexural hinges are
-            # the two rotational DOFs.  `-orient (vx, vz)` (above) points the
-            # hinge's local y-axis along the member's local z — the strong
-            # axis — so dir 5 is the strong-axis (in-plane) hinge and dir 6
-            # the weak-axis hinge.
-            m = hinge_mat_tag - 6  # base material tag
-            mats = [m, m + 4, m + 5, m + 3, m + 1, m + 2]  # P, Vy, Vz, T, strong, weak
-            dirs = [1, 2, 3, 4, 5, 6]
-
-            hinge_i_elem_tag = next_tag
-            next_tag += 1
-            if orient:
-                ops.element(
-                    "zeroLength",
-                    hinge_i_elem_tag,
-                    ni.node_tag,
-                    hinge_i_tag,
-                    "-mat",
-                    *mats,
-                    "-dir",
-                    *dirs,
-                    "-orient",
-                    *orient,
+            # ── Per-segment calibration (the segment is the unit) ──
+            calibs: list[tuple[list[int], float, float]] = []
+            for seg in segments:
+                mats, theta_y, my = self._create_segment_hinge_materials(
+                    elem, sec, sec_name, seg.length, hinge_mat_tag
                 )
-            else:
-                ops.element(
-                    "zeroLength",
-                    hinge_i_elem_tag,
-                    ni.node_tag,
-                    hinge_i_tag,
-                    "-mat",
-                    *mats,
-                    "-dir",
-                    *dirs,
-                )
+                hinge_mat_tag += 6
+                calibs.append((mats, theta_y, my))
 
-            hinge_j_elem_tag = next_tag
-            next_tag += 1
-            if orient:
-                ops.element(
-                    "zeroLength",
-                    hinge_j_elem_tag,
-                    hinge_j_tag,
-                    nj.node_tag,
-                    "-mat",
-                    *mats,
-                    "-dir",
-                    *dirs,
-                    "-orient",
-                    *orient,
-                )
-            else:
-                ops.element(
-                    "zeroLength",
-                    hinge_j_elem_tag,
-                    hinge_j_tag,
-                    nj.node_tag,
-                    "-mat",
-                    *mats,
-                    "-dir",
-                    *dirs,
-                )
+            # ── One spring per hinge-eligible point ──────────────────
+            n = len(segments)
+            point_ids = [segments[0].node_i] + [seg.node_j for seg in segments]
+            for k in range(n + 1):
+                mats, theta_y, my = calibs[min(k, n - 1)]
+                pnode = nodes[point_ids[k]]
+                if k < n:
+                    # member start (k == 0) or interior framing point: the
+                    # structural node is the joint, so the upstream segment
+                    # stays anchored to it and the downstream segment starts at
+                    # a single coincident hinge node —
+                    # structural → spring → elastic.
+                    hinge_id = f"{mid}__hinge_{k}"
+                    hinge_tag = _add_hinge_node(hinge_id, pnode)
+                    spring_tag = _emit_spring(pnode.node_tag, hinge_tag, mats, orient)
+                    _repoint(elements[segments[k].sub_element_ids[0]], point_ids[k], hinge_id)
+                else:
+                    # member end: elastic → spring → structural node
+                    hinge_id = f"{mid}__hinge_{n}"
+                    hinge_tag = _add_hinge_node(hinge_id, pnode)
+                    spring_tag = _emit_spring(hinge_tag, pnode.node_tag, mats, orient)
+                    _repoint(elements[segments[n - 1].sub_element_ids[-1]], point_ids[n], hinge_id)
 
-            self._hinge_tags.extend([hinge_i_elem_tag, hinge_j_elem_tag])
-            self._hinge_sections.extend([None, None])
-            self._hinge_yield_rotations.extend([hinge_theta_y, hinge_theta_y])
-            self._hinge_yield_moments.extend([hinge_my, hinge_my])
-            self._hinge_moment_signs.extend([sign, sign])
-
-            # --- Shorten original element to span between hinge nodes ---
-            elem.node_i = hinge_i_id
-            elem.node_j = hinge_j_id
-            new_elements[eid] = elem
-            new_assignments[eid] = sec_name
+                self._hinge_tags.append(spring_tag)
+                self._hinge_sections.append(None)
+                self._hinge_yield_rotations.append(theta_y)
+                self._hinge_yield_moments.append(my)
+                self._hinge_moment_signs.append(sign)
 
         # Update collections
         self.mesh_model.frame_elements = new_elements

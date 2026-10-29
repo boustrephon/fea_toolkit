@@ -386,7 +386,8 @@ def _decode_value(data: t.Any, hint: t.Any) -> t.Any:
             return data
         if origin in (list, tuple):
             elem = args[0] if args else t.Any
-            return [_decode_value(v, elem) for v in data]
+            decoded = [_decode_value(v, elem) for v in data]
+            return tuple(decoded) if origin is tuple else decoded
         if origin is dict:
             v_t = args[1] if len(args) == 2 else t.Any
             return {str(k): _decode_value(v, v_t) for k, v in data.items()}
