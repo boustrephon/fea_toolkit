@@ -9,15 +9,17 @@ related: [imk_deterioration_model.md, element_classification.md, benchmark_roadm
 
 # IMK Member Role & Type — Design Note
 
-⚠️ Partial — steps 1–3 and (b) landed (2026-10-28): the `element_tbl` type column
-is transcribed (`BEAM_TYPES`), `reconcile_member_types` applies the study
-override with a `UserWarning` on mismatch, `enrich_imk` skips the study braces
-(the 3-story link bay and the 20-story 1st-basement beams), and the axial ratio
-is per member (`derive_column_axial_ratios_by_member`).  Items (c)/(e) are now
-designed end-to-end: hinge-eligible **segments** (`frame_segments`) computed in
-preprocessing, **one spring per hinge-eligible point**, and IMK parameters
-computed at build time via `enrich_hinge` (a route, not a model enrichment) —
-with a residual-stiffness floor and collapse detection for the IDA work.
+⚠️ Partial — steps 1–3, (b) and the segmentation core landed (2026-10-29): the
+`element_tbl` type column is transcribed (`BEAM_TYPES`),
+`reconcile_member_types` applies the study override with a `UserWarning` on
+mismatch, `enrich_imk` skips the study braces (the 3-story link bay and the
+20-story 1st-basement beams), the axial ratio is per member
+(`derive_column_axial_ratios_by_member`), hinge-eligible **segments**
+(`frame_segments`) are computed in preprocessing with the **raw** column axial
+`P_g` + transfer-column warning, and the builder consumes `frame_segments` to
+emit **one spring per hinge-eligible point** (calibrated per segment).
+Remaining: the `enrich_hinge` build-time IMK route (replacing `enrich_imk`), a
+residual-stiffness floor and collapse detection for the IDA work.
 
 ## Goals and the tension
 
@@ -339,9 +341,11 @@ The reusable piece is the signature, not a universal rule vocabulary.
    braces.)*
 4. ✅ Extend the axial ratio to per-member (b), keeping the base-section value as
    the reported summary.  *(Landed: `derive_column_axial_ratios_by_member`.)*
-5. Attach IMK hinges at hinge-eligible points (member ends + framing points),
+5. ✅ Attach IMK hinges at hinge-eligible points (member ends + framing points),
    **one spring per point** (not two back-to-back), and keep the interior
-   elastic (c).  *(Design refined 2026-10-28; open.)*
+   elastic (c).  *(Landed 2026-10-29: `_create_lumped_hinges` consumes
+   `frame_segments` — one spring per point, per-segment calibration; a framing
+   point keeps the upstream segment anchored to the structural node.)*
 6. Express hinge-eligibility as a switchable rule list applied to a `Selection`
    (`member_ends` / `framing_points` add candidates; `exclude_braces` /
    `honour_releases` / `include_leaning_columns` veto), consuming the existing
@@ -353,14 +357,16 @@ The reusable piece is the signature, not a universal rule vocabulary.
    premature local singularity — the one-spring-per-point rule (5) removes the
    *spurious* mode; this handles the *genuine* plastic mechanism.  *(Designed
    2026-10-28; open.)*
-8. Store the classification as **segments, not points** (`frame_segments`, each
+8. 🚧 Store the classification as **segments, not points** (`frame_segments`, each
    a `FrameSegment` with its sub-element chain, length and axial — Option C), and
    compute the IMK parameters **at build time** via `enrich_hinge(backbone=…)`
    rather than stamping `imk_params` on the model (a route, not an enrichment;
-   `enrich_imk` is removed).  *(Designed 2026-10-28; open.)*
-9. Store the **raw** column gravity axial `P_g` on `FrameSegment.axial`
+   `enrich_imk` is removed).  *(Segments stored and consumed 2026-10-29; the
+   `enrich_hinge` build-time route and `enrich_imk` removal remain open.)*
+9. ✅ Store the **raw** column gravity axial `P_g` on `FrameSegment.axial`
    (convention-free; the IMK `Pg/Pye` ratio is derived at build time via
    `enrich_hinge`), converging with the existing `_stack_gravity_axial` (Elwood).
    **Warn on transfer columns** (a column bottom on a beam, no column below)
    rather than modelling load transfer; the solved-case `derive_column_axial`
-   verb is the fallback.  *(Designed 2026-10-28; open.)*
+   verb is the fallback.  *(Raw `P_g` + transfer warning landed 2026-10-29; the
+   `enrich_hinge` `Pg/Pye` ratio and the solved-case verb remain open.)*
