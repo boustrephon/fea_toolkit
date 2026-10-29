@@ -191,6 +191,12 @@ def test_resolve_theta_u_rejects_theta_u_not_exceeding_theta_p():
         _resolve_theta_u(0.10, "plateau", 0.20, 0.30)  # explicit 0.10 < 0.20
 
 
+def test_resolve_theta_u_rejects_nan():
+    """A NaN ultimate rotation never compares greater than theta_p."""
+    with pytest.raises(ValueError, match="theta_p"):
+        _resolve_theta_u(float("nan"), "plateau", 0.03, 0.05)
+
+
 def test_column_theta_u_model_records_convention():
     """The convention is recorded on ``SteelIMKParams`` and drives ``theta_u``."""
     p = lignos_2019_wide_flange_column(

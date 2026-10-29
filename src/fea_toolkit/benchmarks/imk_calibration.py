@@ -120,7 +120,9 @@ def _resolve_theta_u(
         resolved = max(theta_p + theta_pc + THETA_U_PLATEAU, LIGNOS_ULT_ROTATION)
     else:
         raise ValueError(f"theta_u_model must be one of {THETA_U_MODELS}, got {model!r}")
-    if resolved <= theta_p:
+    # NaN-safe: reject any value not strictly greater than theta_p — a NaN (or
+    # a resolved rotation at/below the capping point) is not a valid backbone.
+    if not resolved > theta_p:
         raise ValueError(
             f"resolved ultimate rotation theta_u={resolved:g} rad must exceed the "
             f"capping rotation theta_p={theta_p:g} rad; the selected convention "
