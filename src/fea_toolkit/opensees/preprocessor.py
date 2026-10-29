@@ -31,6 +31,7 @@ from ..model.geometry import (
     split_slabs_at_wall_intersections,
     subdivide_area_mesh,
 )
+from ..model.gravity_axial import fill_column_gravity_axial
 from ..model.mesh_model import MeshModel, PanelZoneSpec, WallElement
 from ..model.openings import collect_opening_areas
 from ..model.sap_data import (
@@ -51,6 +52,7 @@ from ..model.sap_data import (
 )
 from ..model.selection import Selection
 from ..utils import (
+    g_from_units,
     scale_material_dict,
     stress_scale_factor,
 )
@@ -920,6 +922,31 @@ class Preprocessor:
             frame_element_types=frame_element_types,
             frame_releases=frame_releases,
         )
+
+        # ── 9c. Per-column gravity axial (raw P_g, tributary) ─────
+        # Fills ``FrameSegment.axial`` for column segments from the seismic
+        # weight (``added_masses``) and warns on transfer columns — a column
+        # bottom on a beam, no column below — where the closed-form stack is
+        # unreliable (docs/imk_member_classification.md (b)).
+        if getattr(md, "added_masses", None):
+            frame_segments, transfer_ids = fill_column_gravity_axial(
+                frame_segments,
+                new_elems,
+                md.nodes,
+                frame_element_types,
+                added_masses=md.added_masses,
+                restraints=md.restraints,
+                g=g_from_units(md.units),
+            )
+            if transfer_ids:
+                warnings.warn(
+                    "transfer column(s) detected: "
+                    + ", ".join(sorted(transfer_ids))
+                    + " — the tributary gravity axial is unreliable there; "
+                    "run a static analysis to override P_g "
+                    "(docs/imk_member_classification.md (b)).",
+                    stacklevel=2,
+                )
 
         # ── 10. Resolve per-element creation properties ────────────
         # Build the MeshModel first, then resolve properties directly
