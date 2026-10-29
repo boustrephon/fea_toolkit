@@ -1385,7 +1385,9 @@ class ElementMixin:
         folded into that same spring — the released DOFs are swapped to their
         release spring (exact-zero DOFs dropped) and the end is recorded in
         :attr:`_combined_release_ends` so :meth:`_create_member_releases` does
-        not add a second, series release element.
+        not add a second, series release element.  This merge happens only when
+        ``apply_releases`` is on (its default); with ``apply_releases=False``
+        the release is ignored and the end keeps its plain hinge spring.
         """
         # ── Builder-local hinge state (never writes back to the MeshModel) ──
         # Hinge nodes and re-pointed connectivity are kept on the builder so the
@@ -1489,9 +1491,9 @@ class ElementMixin:
             Returns ``(mats, dirs)`` — the hinge material list with the released
             DOFs swapped to their release spring (exact-zero DOFs dropped) plus
             the matching ``-dir`` list — or ``(mats, None)`` when the end has no
-            release.  A merged end is recorded so ``_create_member_releases``
-            skips its standalone release spring and keeps the member on the
-            hinge node.
+            release (or releases are disabled via ``apply_releases=False``).  A
+            merged end is recorded so ``_create_member_releases`` skips its
+            standalone release spring and keeps the member on the hinge node.
             """
             nonlocal merged_rel_mat_tag
             rel = end_released_dofs(self.mesh_model, leaf_id, end_label, self.config)

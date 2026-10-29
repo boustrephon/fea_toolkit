@@ -16,7 +16,8 @@ non-lumped ends) models each released end with the OpenSees "extra node +
 Under ``hinge_model == 'lumped'`` a **non-M3** release at a hinge-eligible end
 is instead folded into the hinge spring by the builder (see
 :func:`end_released_dofs`), so no separate release node/element is created
-there.
+there.  This merge is skipped when ``apply_releases`` is off (its default is
+on).
 
 ``P, V2, V3, T, M2, M3`` map 1:1 onto OpenSees ``zeroLength`` local DOFs
 ``1..6``.
@@ -284,14 +285,17 @@ def end_released_dofs(
         model: A ``MeshModel`` or ``SAPModelData`` (see :func:`plan_releases`).
         leaf_id: Active frame-element id for the released leaf.
         end: ``"I"`` or ``"J"`` (matches ``plan_releases``' end labelling).
-        config: Builder config (``release_softness_factor``).
+        config: Builder config (``apply_releases``,
+            ``release_softness_factor``).
 
     Returns:
         ``[(dir, stiffness_or_None), …]`` or ``None`` when the end carries no
-        release, the leaf is inactive/missing, or its stiffness cannot be
-        derived.
+        release, releases are disabled (``apply_releases=False``), the leaf is
+        inactive/missing, or its stiffness cannot be derived.
     """
     config = config or {}
+    if not config.get("apply_releases", True):
+        return None
     releases = getattr(model, "frame_releases", None) or {}
     release = releases.get(leaf_id)
     if release is None:
