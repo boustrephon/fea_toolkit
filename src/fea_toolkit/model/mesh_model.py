@@ -9,6 +9,7 @@ subdivided areas, detected constraints — with no OpenSees domain objects.
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from .frame_segments import FrameSegment
 from .sap_data import (
     AreaElement,
     AreaElementProperties,
@@ -269,6 +270,13 @@ class MeshModel:
     frame_element_types: dict[str, str] = field(default_factory=dict)
     #   elem_id → "beam" | "column" | "brace" | "wall" | "slab" | "unknown"
     area_element_types: dict[str, str] = field(default_factory=dict)
+
+    # ── Hinge-eligible segmentation (route-agnostic topology) ─────
+    # member_id → ordered [FrameSegment, ...] between consecutive
+    # hinge-eligible points.  Computed by the Preprocessor; the builder emits
+    # one spring per point only on the lumped-hinge route
+    # (see docs/imk_member_classification.md (c)/(e)).
+    frame_segments: dict[str, list[FrameSegment]] = field(default_factory=dict)
 
     # ── Materials, sections, groups, restraints ───────────────────
     materials: dict[str, Material] = field(default_factory=dict)

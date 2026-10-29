@@ -17,6 +17,7 @@ from dataclasses import fields, replace
 from typing import Any, Optional
 
 from ..io.log import PipelineLog, coerce_log
+from ..model.frame_segments import segment_members
 from ..model.geometry import (
     apply_frame_end_offsets,
     compute_t_location,
@@ -908,6 +909,18 @@ class Preprocessor:
         if orphan_nodes:
             pass  # kept for visualisation
 
+        # ── 9b. Hinge-eligible segmentation (route-agnostic topology) ──
+        # One ordered segment list per member, cut at hinge-eligible points
+        # (member ends + framing points, minus braces / released ends).  Stored
+        # frozen on the MeshModel; the builder consumes it only on the
+        # lumped-hinge route (see docs/imk_member_classification.md (c)/(e)).
+        frame_segments = segment_members(
+            new_elems,
+            md.nodes,
+            frame_element_types=frame_element_types,
+            frame_releases=frame_releases,
+        )
+
         # ── 10. Resolve per-element creation properties ────────────
         # Build the MeshModel first, then resolve properties directly
         # onto it using the mutated model_data (md) which contains
@@ -931,6 +944,7 @@ class Preprocessor:
             offset_rigid_links=offset_rigid_links,
             frame_end_offsets=carried_offsets,
             frame_element_types=frame_element_types,
+            frame_segments=frame_segments,
             area_element_types=area_element_types,
             panel_zones=panel_zones,
             diaphragm_z_tolerance=float(self.config.get("diaphragm_z_tolerance", 0.01)),
