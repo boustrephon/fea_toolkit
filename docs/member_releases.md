@@ -60,7 +60,10 @@ springs).
 Under ``hinge_model == 'lumped'`` a **non-M3** release at a hinge-eligible
 end is folded into the hinge spring itself rather than modelled with a
 separate release node — one merged ``zeroLength`` carries the released DOFs'
-springs alongside the hinge backbone (see *Configuration* below).
+springs alongside the hinge backbone (see *Configuration* below).  Setting
+``apply_releases=False`` disables this merging (the non-M3 release is
+ignored rather than folded into the hinge spring); it does not change the
+hinge spring otherwise.
 
 ### Formulation-aware stiffness
 
