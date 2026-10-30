@@ -16,7 +16,7 @@ from fea_toolkit.benchmarks.generic_frame import (
     steel_e_pa,
     storey_height_m,
 )
-from fea_toolkit.benchmarks.generic_frame_data import FRAME_CODES
+from fea_toolkit.benchmarks.generic_frame_data import FRAME_CODES, FRAME_DATA, STOREY_HEIGHT_IN
 
 
 def test_geometry_is_si():
@@ -47,8 +47,9 @@ def test_build_model_geometry_and_masses():
     for level in (1, 2, 3):
         floor = md.added_masses[f"{level}-0"] + md.added_masses[f"{level}-1"]
         assert floor == pytest.approx(total / 3.0)
-    # Base is free in ry (for the base spring), fixed otherwise.
-    assert md.restraints["0-0"].dofs == [1, 1, 1, 1, 0, 1]
+    # Base is fixed (the column-base spring k0=Kc anchors the column); other
+    # nodes are free in-plane (ux, uz, ry) with out-of-plane DOFs restrained.
+    assert md.restraints["0-0"].dofs == [1, 1, 1, 1, 1, 1]
     assert md.restraints["1-0"].dofs == [0, 1, 0, 1, 0, 1]
 
 
@@ -99,3 +100,20 @@ def test_all_frames_build():
         md = build_model(code)
         n = md.sections.__len__()
         assert len(md.frame_elements) == 3 * n  # 2N columns + N beams
+
+
+def test_gamma_yield_base_shear_is_unity():
+    """The frames are designed (IK-2005 Appendix B) for ``γ = Vy/W = 1.0``.
+
+    First-yield base shear (in the table's kip/in units): the first-storey beam
+    sway yields at ``V = 2·Myb1/h`` (portal, ``M_beam = V·h/2``) and the column
+    base at ``V = 4·Myc/h`` (``M_base = V·h/4``); the lower one is ``Vy``.
+    """
+    for code in FRAME_CODES:
+        d = FRAME_DATA[code]
+        w = d["norm"]["W"]
+        h = STOREY_HEIGHT_IN
+        myb1 = d["norm"]["Myb2"] * d["stories"][1]["Mybi_Myb2"]
+        myc = d["stories"][0]["Myc"]
+        gamma = min(2 * myb1 / h, 4 * myc / h) / w
+        assert gamma == pytest.approx(1.0, rel=0.02), f"{code}: γ = {gamma:.4f}"

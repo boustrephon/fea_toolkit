@@ -1168,7 +1168,13 @@ class ElementMixin:
         self._hinge_moment_signs: list[float] = []
 
     def _create_segment_hinge_materials(
-        self, elem: "FrameElement", sec, sec_name: str, L: float, base_tag: int
+        self,
+        elem: "FrameElement",
+        sec,
+        sec_name: str,
+        L: float,
+        base_tag: int,
+        params: Optional[dict[str, float]] = None,
     ) -> tuple[list[int], float, float]:
         """Create the 6 uniaxial hinge materials for one member segment.
 
@@ -1180,6 +1186,10 @@ class ElementMixin:
         zeroLength hinge) and ``hinge_theta_y`` / ``hinge_my`` the strong-axis
         yield rotation / moment (``inf`` / ``0.0`` when the strong axis stays
         elastic).
+
+        ``params`` is an optional per-end ``imk_params`` override (see
+        :attr:`FrameElement.imk_params_i` / ``imk_params_j``); ``None`` resolves
+        the element- then section-level ``imk_params``.
         """
         hinge_mat_tag = base_tag
         mat = self.mesh_model.materials.get(sec.material)
@@ -1312,9 +1322,15 @@ class ElementMixin:
             # IMK steel hinge (collapse-level): ``IMKBilin`` (bilinear) or
             # ``IMKPeakOriented`` (peak-oriented — the IK-2005 reference law).
             backbone = self.config.get("hinge_backbone")
-            params = getattr(elem, "imk_params", None) or getattr(sec, "imk_params", None)
+            if params is None:
+                params = getattr(elem, "imk_params", None) or getattr(sec, "imk_params", None)
             stiff_factor = float(self.config.get("hinge_stiffness_factor", 10.0))
             k0 = stiff_factor * 6.0 * E * max(I33, 1e-12) / max(L, 1e-12)
+            if params:
+                # A per-end total-M-θ spring (e.g. the IK-2005 column-base spring)
+                # may override the near-rigid ``k0`` with its own elastic
+                # stiffness ``Kc``.
+                k0 = float(params.get("k0", k0))
             if params:
                 my_imk = float(params.get("My_pos", My))
                 my_imk_neg = float(params.get("My_neg", -my_imk))
@@ -1616,7 +1632,26 @@ class ElementMixin:
                     continue
                 if k == n and segments[-1].release_j:
                     continue
-                mats, theta_y, my = calibs[min(k, n - 1)]
+                end_params = None
+                if k == 0:
+                    end_params = getattr(elem, "imk_params_i", None)
+                elif k == n:
+                    end_params = getattr(elem, "imk_params_j", None)
+                if end_params is not None:
+                    # A per-end total-M-θ spring (e.g. the IK-2005 column-base
+                    # spring with ``k0 = Kc``) gets its own calibration instead of
+                    # the segment's shared (near-rigid) one.
+                    mats, theta_y, my = self._create_segment_hinge_materials(
+                        elem,
+                        sec,
+                        sec_name,
+                        segments[min(k, n - 1)].length,
+                        hinge_mat_tag,
+                        params=end_params,
+                    )
+                    hinge_mat_tag += 6
+                else:
+                    mats, theta_y, my = calibs[min(k, n - 1)]
                 pnode = nodes[point_ids[k]]
                 dirs = None
                 if k < n:

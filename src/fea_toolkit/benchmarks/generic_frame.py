@@ -36,6 +36,8 @@ strength or modulus is hand-converted — :func:`steel_e_pa` scales the table's
 
 from __future__ import annotations
 
+from typing import Any, Optional
+
 from .._unit_scaling import g_from_units
 from ..model.sap_data import (
     FrameElement,
@@ -175,9 +177,10 @@ def build_model(code: str) -> SAPModelData:
         for line in (0, 1):
             nid = f"{level}-{line}"
             if level == 0:
-                # Base: fixed in translation and out-of-plane rotation, with the
-                # in-plane rotation (ry) free for the base rotational spring.
-                restraints[nid] = Restraint([1, 1, 1, 1, 0, 1])
+                # Base: fixed (the column-base rotational spring — stamped as the
+                # ground-storey column's ``imk_params_i`` with ``k0 = Kc`` — is a
+                # zeroLength between this fixed node and the column interior).
+                restraints[nid] = Restraint([1, 1, 1, 1, 1, 1])
             else:
                 restraints[nid] = Restraint([0, 1, 0, 1, 0, 1])
 
@@ -210,7 +213,7 @@ def build_model(code: str) -> SAPModelData:
 def imk_params(
     ke: float,
     my: float,
-    theta_y: float,
+    theta_y: Optional[float] = None,
     *,
     alpha_s: float = ALPHA_S,
     alpha_c: float = ALPHA_C,
@@ -221,10 +224,11 @@ def imk_params(
 
     The spring backbone is expressed at the member end (Appendix B: the
     "spring" parameters refer to the member-end moment–rotation relationship).
-    Given the member-end elastic stiffness ``ke``, yield moment ``my`` and
-    elastic yield rotation ``theta_y = my / ke``, the IK-2005 reference
-    (peak-oriented, ``αs``, ``αc``, ``δc/δy``, no CD, no residual) maps to the
-    plastic-rotation backbone the lumped IMK hinge consumes:
+    Given the member-end elastic stiffness ``ke`` and yield moment ``my``, the
+    elastic yield rotation is ``theta_y = my / ke`` (the table's ``θy`` is the
+    *rounded* version of this).  The IK-2005 reference (peak-oriented, ``αs``,
+    ``αc``, ``δc/δy``, no CD, no residual) maps to the plastic-rotation
+    backbone the lumped IMK hinge consumes:
 
     * ``theta_p = (δc/δy − 1) · θy`` (pre-capping plastic rotation);
     * ``mc_my = 1 + αs · (δc/δy − 1)`` (capping ratio Mc/My);
@@ -235,7 +239,7 @@ def imk_params(
     Args:
         ke: Member-end elastic rotational stiffness (model units).
         my: Yield moment (positive; model units).
-        theta_y: Elastic yield rotation (rad), ``= my / ke``.
+        theta_y: Elastic yield rotation (rad); ``None`` uses ``my / ke``.
         alpha_s: Strain-hardening ratio (default :data:`ALPHA_S`).
         alpha_c: Post-capping ratio (default :data:`ALPHA_C`).
         ductility: Capping ductility ``δc/δy`` (default :data:`DUCTILITY_RATIO`).
@@ -246,6 +250,8 @@ def imk_params(
         An ``imk_params`` dict ready for the ``hinge_backbone='imk'`` /
         ``'imk_peak'`` lumped-hinge path.
     """
+    if theta_y is None:
+        theta_y = my / ke
     mc_my = 1.0 + alpha_s * (ductility - 1.0)
     theta_p = (ductility - 1.0) * theta_y
     theta_pc = (mc_my - residual) * my / (abs(alpha_c) * ke)
@@ -301,3 +307,102 @@ def beam_spring_props(code: str, storey: int) -> dict[str, float]:
         "Myb": norm["Myb2"] * row["Mybi_Myb2"] * _KIP_IN_TO_NM,
         "theta_yb": norm["theta_yb2"] * row["theta_ybi_theta_yb2"],
     }
+
+
+def enrich_imk(md: SAPModelData, code: str) -> SAPModelData:
+    """Stamp the IK-2005 §5.3.2 ``IMKPeakOriented`` springs onto the frame.
+
+    * **beam ends** — near-rigid ``imk_peak`` springs (the elastic beam provides
+      the member's ``6EI/L``);
+    * **ground-storey column bases** — a total-M-θ spring (``k0 = Kc``), stamped
+      as ``imk_params_i`` so only the base end carries it and the column top
+      stays a rigid near-rigid elastic spring;
+    * **upper columns** — elastic (no ``imk_params``).
+
+    Mutates and returns *md*.
+    """
+    base = base_spring_props(code)
+    base_params = imk_params(ke=base["Kc"], my=base["Myc"])
+    base_params["k0"] = base["Kc"]
+    for eid, elem in md.frame_elements.items():
+        if eid.startswith("B"):
+            storey = int(eid[1:])
+            b = beam_spring_props(code, storey)
+            elem.imk_params = imk_params(ke=b["Kb"], my=b["Myb"])
+        elif eid.startswith("C1-"):
+            elem.imk_params_i = dict(base_params)
+    return md
+
+
+def add_pdelta_gravity(md: SAPModelData, factor: float = 1.4) -> SAPModelData:
+    """Add held gravity joint loads ``P = factor × seismic mass × g`` for P-Δ.
+
+    IK-2005 models global P-Δ as ``1.4 × the seismically effective mass`` held
+    throughout the history (dead + 40 % live).  One downward global-Z joint load
+    per mass node, pattern ``"GRAV"`` (idempotent).  Mirrors
+    :func:`fea_toolkit.benchmarks.sac.add_pdelta_gravity`.
+    """
+    from ..model.sap_data import JointLoad
+
+    g = g_from_units(md.units)
+    md.joint_loads = [jl for jl in md.joint_loads if jl.pattern != "GRAV"]
+    for nid, mass in md.added_masses.items():
+        if mass <= 0.0:
+            continue
+        md.joint_loads.append(JointLoad(pattern="GRAV", node_id=nid, fz=-factor * mass * g))
+    return md
+
+
+def builder_config(*, pdelta: bool = False) -> dict[str, Any]:
+    """The ``AnalysisBuilder`` config for the IK-2005 generic frame.
+
+    Args:
+        pdelta: When True, emit the ``PDelta`` geometric transformation (global
+            P-Δ) instead of ``Linear``.
+    """
+    return {
+        "element_type": "elasticBeamColumn",
+        "hinge_model": "lumped",
+        "hinge_backbone": "imk_peak",
+        # The benchmark's member-end stiffness is the *exact* 6EI/L (the
+        # spring/beam-column split is internal — IK-2005 Appendix B) — a large
+        # factor keeps the near-rigid spring ~rigid so the elastic member carries
+        # the full Ke (residual softening < 1 %).
+        "hinge_stiffness_factor": 100.0,
+        "geom_transf_type": "PDelta" if pdelta else "Linear",
+    }
+
+
+def preprocess_config() -> dict[str, Any]:
+    """The ``Preprocessor`` config for the generic frame."""
+    return {"element_type": "elasticBeamColumn"}
+
+
+def build_builder(
+    code: str,
+    *,
+    pdelta: bool = False,
+    pdelta_gravity: bool = False,
+):
+    """Build the generic frame into an ``AnalysisBuilder`` (domain already built).
+
+    Args:
+        code: Frame code (e.g. ``"0909"``).
+        pdelta: When True, use the ``PDelta`` geometric transformation.
+        pdelta_gravity: When True, add the held ``1.4 × seismic mass`` gravity
+            loads (pair with ``pdelta=True`` for a P-Δ collapse comparison).
+
+    Returns:
+        An ``AnalysisBuilder`` with ``build_domain()`` already called.
+    """
+    from ..opensees.analysis_builder import AnalysisBuilder
+    from ..opensees.preprocessor import preprocess_model
+
+    md = build_model(code)
+    enrich_imk(md, code)
+    if pdelta_gravity:
+        add_pdelta_gravity(md)
+    mesh = preprocess_model(md, preprocess_config())
+    builder = AnalysisBuilder(mesh, builder_config(pdelta=pdelta))
+    builder.build_domain()
+    return builder

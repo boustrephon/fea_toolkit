@@ -12,8 +12,10 @@ related: [sac_imk_collapse_benchmark.md, imk_deterioration_model.md, benchmark_r
 > ⚠️ Partial — decisions recorded; `benchmarks/generic_frame_data.py` (the 12
 > Medina Appendix-A tables), the peak-oriented `IMKPeakOriented` hinge
 > (`hinge_backbone="imk_peak"`), and the `generic_frame` generator (SI model +
-> IMK backbone mapping, modal-T1-validated to ≤ 0.5 %) landed; the member-end
-> spring placement and the collapse runner are next.
+> IMK backbone mapping + spring placement) landed; the modal-T1 check matches
+> all 12 frames to ≤ 0.5 % and the pushover strength `γ = Vy/W` matches the
+> Appendix-B design value 1.0 to ≤ 2 % — both record-free.  The LMSR-N collapse
+> (IDA) runner is next.
 
 ## Purpose
 
@@ -112,13 +114,34 @@ Rules applied (`.clinerules` §4.6):
 
 ## Validation ladder
 
-1. ✅ Modal `T1` against the table — all 12 frames within **0.5 %**
-   (`tests/test_generic_frame_modal.py`).
-2. Pushover `Vy/W = γ` (record-free).
+1. ✅ Modal `T1` against the table — all 12 frames within **0.5 %**, through the
+   full pipeline (`tests/test_generic_frame_modal.py`).
+2. ✅ Pushover `Vy/W = γ` — the Appendix-B design `γ = 1.0` matches to **≤ 2 %**
+   analytically (first-yield `min(2·Myb1/h, 4·Myc/h)/W`, all 12 frames) and the
+   pipeline pushover peak base-shear coefficient lands in `[0.9, 1.4]`
+   (`tests/test_generic_frame.py`, `tests/test_generic_frame_pushover.py`).
 3. IDA collapse `(Sa,c/g)/γ ≈ 3.3` at `T1 ≈ 1 s` — needs LMSR-N.
 
 First target: **`0909`** (N = 9, T1 = 0.9 s) — closest to the SAC 3-story's
 period.
+
+## Spring placement (landed)
+
+The IK-2005 Appendix B splits each member-end spring's elastic stiffness
+between the spring and the elastic beam-column, *arbitrarily* — the member-end
+``Kmem`` is what matters.  The generator uses:
+
+* **beam ends** — near-rigid ``imk_peak`` springs (``hinge_stiffness_factor =
+  100`` so the elastic beam carries the full ``6EI/L``);
+* **column bases** — a *total*-M-θ spring with ``k0 = Kc`` (the base has no
+  elastic member below it), placed only at the base end via the per-end
+  ``FrameElement.imk_params_i`` override, with the column top left a rigid
+  near-rigid elastic spring;
+* **upper columns** — elastic (no ``imk_params``).
+
+The per-end override (``imk_params_i`` / ``imk_params_j``) and the ``k0`` field
+in ``imk_params`` are the only new machinery; the IK-2005 backbone maps to
+``θp = 3θy``, ``mc_my = 1.09``, ``θpc = 10.9θy``, ``res = 0`` (§5.3.2).
 
 ## References
 

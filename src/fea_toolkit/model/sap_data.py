@@ -1992,6 +1992,12 @@ class FrameElement:
     # ``Section.imk_params``.  ``None`` when the member carries no IMK hinge
     # (e.g. the 3-story leaning column / rigid-axial link bay).
     imk_params: Optional[dict[str, float]] = None
+    # Per-end IMK hinge overrides (start = ``node_i``, end = ``node_j``).  When
+    # set, they win over ``imk_params`` for that member end — used by the
+    # IK-2005 generic frames, whose ground-storey column carries a total-M-θ
+    # base spring (``k0 = Kc``) at the base only, with a rigid (near-rigid) top.
+    imk_params_i: Optional[dict[str, float]] = None
+    imk_params_j: Optional[dict[str, float]] = None
 
 
 # ── Opening / void section markers ───────────────────────────────────
