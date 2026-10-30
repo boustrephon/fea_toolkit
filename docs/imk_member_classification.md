@@ -18,8 +18,11 @@ mismatch, `enrich_imk` skips the study braces (the 3-story link bay and the
 (`frame_segments`) are computed in preprocessing with the **raw** column axial
 `P_g` + transfer-column warning, and the builder consumes `frame_segments` to
 emit **one spring per hinge-eligible point** (calibrated per segment).
-Remaining: the `enrich_hinge` build-time IMK route (replacing `enrich_imk`), a
-residual-stiffness floor and collapse detection for the IDA work.
+Remaining: the `enrich_hinge` build-time IMK route (replacing `enrich_imk`) and
+the four-record median `Sa(T1)` collapse comparison vs Ibarra–Krawinkler (2005).
+(Collapse detection + bisection + the `Sa(T1)` collapse capacity landed
+2026-10-30; the residual-stiffness floor was **dropped 2026-10-30** — the
+benchmark's non-convergence criterion makes it unnecessary — see decision 7.)
 
 ## Goals and the tension
 
@@ -183,8 +186,10 @@ by nothing — a **spurious** singular mode that is *not* the physical collapse
 the two segments — ``[G-0] -(sM)- [G-1]`` — keeps each side anchored to its own
 elastic segment, so the only soft mode left is the genuine plastic hinge (the
 relative rotation).  The residual plateau still reaches zero tangent at full
-degradation, so a residual-stiffness floor plus clean collapse detection are
-still needed (decision 7) — but the spurious mode is gone.
+degradation, so the *genuine* plastic mechanism ends in a singular matrix — but
+that is exactly the collapse the benchmark's non-convergence criterion is meant
+to detect (Ibarra–Krawinkler 2005, PEER 2005/06), so **no residual-stiffness
+floor is added** (decision 7) — and the spurious mode is gone.
 
 ## (d) Special members (brace / fixed-pin)
 
@@ -351,18 +356,33 @@ The reusable piece is the signature, not a universal rule vocabulary.
    `honour_releases` / `include_leaning_columns` veto), consuming the existing
    `imk_member_types` / `frame_element_types` / release classification rather
    than re-deriving it.  *(Designed 2026-10-28, simplified; open.)*
-7. Add a **residual-stiffness floor** to the hinge backbones (a small positive
+7. ~~Add a **residual-stiffness floor** to the hinge backbones (a small positive
    tangent on the residual branch) and **clean collapse detection** in the IDA
    driver, so a fully-degraded hinge runs to the collapse criterion instead of a
-   premature local singularity — the one-spring-per-point rule (5) removes the
-   *spurious* mode; this handles the *genuine* plastic mechanism.  *(Designed
-   2026-10-28; open.)*
+   premature local singularity.~~ **Decided 2026-10-30 — drop the floor.**  The
+   canonical Ibarra–Krawinkler (2005, PEER 2005/06 p.37) methodology defines
+   collapse as **numerical non-convergence** (dynamic instability), refined by
+   **bisection** to a tolerance — it does *not* add a residual-stiffness floor
+   (Vamvatsikos & Cornell 2002 equate dynamic instability with numerical
+   instability; `IMKBilin.cpp` keeps the residual branch flat, with no built-in
+   floor).  The one-spring-per-point rule (5) already removes the *spurious*
+   mode; the remaining zero tangent is the *genuine* plastic mechanism = the
+   collapse signal, which non-convergence detects correctly.  **Collapse
+   detection landed 2026-10-30** — `benchmarks/sac_run.collapse_intensity`
+   (non-convergence OR peak-drift > 0.10) plus `_ida_run` / `run_ida`
+   (`tests/test_benchmark_sac_ida.py`).  **Bisection landed 2026-10-30** —
+   `run_ida(..., tolerance=0.01)` bisects the first collapse intensity to a 1 %
+   relative tolerance (first collapse only); `sdof_spectral_acceleration` /
+   `collapse_capacity_sa` report the collapse capacity in `Sa(T1)` terms.
 8. 🚧 Store the classification as **segments, not points** (`frame_segments`, each
    a `FrameSegment` with its sub-element chain, length and axial — Option C), and
    compute the IMK parameters **at build time** via `enrich_hinge(backbone=…)`
    rather than stamping `imk_params` on the model (a route, not an enrichment;
    `enrich_imk` is removed).  *(Segments stored and consumed 2026-10-29; the
    `enrich_hinge` build-time route and `enrich_imk` removal remain open.)*
+   **Decided 2026-10-30 — land `enrich_hinge` first, keep `enrich_imk` as a
+   `_`-prefixed deprecated wrapper, then remove it** (per §4.5 — no
+   move-plus-behaviour-change in one diff).
 9. ✅ Store the **raw** column gravity axial `P_g` on `FrameSegment.axial`
    (convention-free; the IMK `Pg/Pye` ratio is derived at build time via
    `enrich_hinge`), converging with the existing `_stack_gravity_axial` (Elwood).

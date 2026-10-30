@@ -652,8 +652,10 @@ def enrich_imk(
     that member's own length (columns: the storey height, which varies across the
     basement / ground / upper storeys; beams: the bay width), so a section used at
     several storeys gets length-corrected parameters on each element.  The beam
-    unbraced length is ``beam_unbraced_factor * L`` (default 1.0 — no intermediate
-    lateral bracing, a conservative first cut).  Column splice rows map to their
+    unbraced length is ``beam_unbraced_factor * L`` (default 1.0 — the bare-steel
+    default ``Lb = L``, no intermediate bottom-flange bracing; the ``Lb = L/2``
+    composite-slab assumption is a documented sensitivity only — see
+    ``docs/imk_deterioration_model.md`` §A3 item 2).  Column splice rows map to their
     below-splice physical section (``MAT_TO_SECTION``); the 20-story box columns
     use the wide-flange equations as a stocky-section approximation (see
     ``docs/imk_deterioration_model.md``).

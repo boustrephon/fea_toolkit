@@ -151,9 +151,13 @@ Source: `docs/sac_nonlinear_benchmark.md`;
 `src/fea_toolkit/opensees/_runner_dynamic.py`.
 
 **What.** The peak extraction and `.mat` comparison landed 2026-10-26 (see
-`history/_done_log.md`).  **Remaining:** the runner still returns the *raw*
+`history/_done_log.md`).  ~~**Remaining:** the runner still returns the *raw*
 damage quantities — normalize them to the benchmark's φj = θ/θ_y and
-dEj = E/(My·θ_y).
+dEj = E/(My·θ_y).~~ ✅ **Landed 2026-10-30** — the runner now reads the
+already-instrumented `_hinge_yield_moments` and returns `peak_damage_rotation`
+(max hinge `θ/θ_y`) and `max_damage_energy` (max hinge `E/(My·θ_y)`), both
+dimensionless; asserted in `tests/test_benchmark_sac3_nltha.py`
+(`test_transient_recorders_hinge_damage`).
 
 **Where.** `opensees/_runner_dynamic.py`; `opensees/_elements.py`
 (`_create_lumped_hinges` hinge instrumentation); tests
@@ -177,8 +181,24 @@ cyclic-deterioration `Λ` Eq. 13, 2026-10-28).
    first increment landed (`enrich_imk` + 3-story `backbone="imk"`); the
    column axial ratio, NLTHA convergence, the 9/20-story matrices, the member
    role/type reconcile and the per-member axial ratio all landed 2026-10-28.
-   Remaining sub-items (beam unbraced length, IDA) tracked in
-   `docs/imk_deterioration_model.md` §5 / `docs/imk_member_classification.md`.
+   ~~Remaining sub-items (beam unbraced length, IDA) tracked in
+   `docs/imk_deterioration_model.md` §5 / `docs/imk_member_classification.md`.~~
+   **IDA driver + collapse detection landed 2026-10-30** —
+   `benchmarks/sac_run.py` gained `collapse_intensity` (the pure
+   non-convergence / drift-threshold predicate), `_ida_run` (a single-builder
+   IM ladder) and `run_ida` (record-based), tested by
+   `tests/test_benchmark_sac_ida.py`.  **Bisection + `Sa(T1)` collapse
+   capacity landed 2026-10-30** — `run_ida(..., tolerance=0.01)` bisects the
+   first collapse intensity to a 1 % relative tolerance, and
+   `sdof_spectral_acceleration` / `collapse_capacity_sa` report the median
+   collapse capacity in `Sa(T1)` terms.  **Resolved 2026-10-30:** beam
+   unbraced length (keep `Lb = L`, the bare-steel default) and Λ validation
+   (Eq. 13 transcription + cap already unit-tested).  **Remaining:** the
+   four-record median `Sa(T1)` collapse comparison vs Ibarra–Krawinkler (2005)
+   and the `enrich_hinge` build-time route (see
+   `docs/imk_deterioration_model.md` §5 / `docs/imk_member_classification.md`).
+   The residual-stiffness floor was **dropped 2026-10-30** — non-convergence is
+   the canonical collapse criterion.
 
 **Where.** `benchmarks/imk_calibration.py`; `opensees/_elements.py`
 (`hinge_backbone="imk"`); `tests/test_benchmark_sac_imk.py`.

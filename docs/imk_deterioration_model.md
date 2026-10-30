@@ -9,8 +9,13 @@ related: [benchmark_roadmap.md, sac_nonlinear_benchmark.md, sac_trilinear_hinge_
 
 # IMK (IMKBilin) Steel Hinge — Deterioration Model
 
-⚠️ Partial — A0/A1/A2 landed; A3 (frame collapse) in progress — first increment
-`enrich_imk` + 3-story `backbone="imk"` (2026-10-27).
+⚠️ Partial — A0/A1/A2 landed; A3 (frame collapse) in progress — collapse
+detection + IDA driver + bisection + `Sa(T1)` collapse capacity landed
+2026-10-30 (`collapse_intensity` / `_ida_run` / `run_ida` /
+`sdof_spectral_acceleration` / `collapse_capacity_sa`; **no residual-stiffness
+floor** — non-convergence is the benchmark's collapse criterion).  Remaining:
+the four-record median `Sa(T1)` comparison vs Ibarra–Krawinkler (2005) and the
+`enrich_hinge` build-time route.
 
 ## 1. What it is
 
@@ -165,14 +170,27 @@ Open A3 items, in build order:
    applies them per section; the 3-story governing ratios are W14x257 ≈ 0.195
    (gravity-bay line, full tributary bay) and W14x311 ≈ 0.162, both below the
    0.20 ASCE 41 force-controlled threshold.
-2. **Beam unbraced length.**  `beam_unbraced_factor` defaults to 1.0 (`Lb = L`,
-   no intermediate bracing).  The composite-slab bracing assumption (typically
-   `Lb ≈ L/2` for the bottom flange in negative moment) is a calibration choice;
-   sweep it against the benchmark response.
+2. **Beam unbraced length.**  ✅ **Resolved 2026-10-30 — keep `Lb = L`**
+   (`beam_unbraced_factor = 1.0`).  The SAC benchmark frames are *bare steel*
+   (the Ohtori M1/M2 models carry no composite action), and Lignos–Krawinkler
+   (2011) represent a composite slab via the asymmetric `D⁺/D⁻` factors and
+   strength multipliers, **not** by shortening `Lb`.  For the bare-steel bottom
+   flange in negative moment, `Lb = L` (full member length, no intermediate
+   bracing) is the correct conservative default.  `Lb = L/2` (composite-slab
+   bottom-flange bracing) is retained as a *documented sensitivity* only — to
+   be run once to quantify how much `Lb` moves the response, not as a default.
 3. **Column cyclic-deterioration Λ.**  ✅ Landed — `lignos_2019_wide_flange_column`
    transcribes Lignos et al. (2019) Eq. 13 (`Λs` basic-strength deterioration,
-   split at `Pg/Pye = 0.35`, capped at 3.0 rad; `Λc = Λk = 0.9·Λs`).  Remaining:
-   validate the `≤ 3.0` cap and `0.9×` factor against the column test hysteresis.
+   split at `Pg/Pye = 0.35`, capped at 3.0 rad; `Λc = Λk = 0.9·Λs`).
+   ~~Remaining: validate the `≤ 3.0` cap and `0.9×` factor against the column
+   test hysteresis.~~ ✅ **Resolved 2026-10-30 — transcription verification.**
+   The SAC columns are *stocky* (`h/tw ≈ 5–8`), so the Eq. 13 cap binds
+   (`Λs = 3.0`) and the `≤ 3.0` / `0.9×` values are the paper's own *stated*
+   equations, already asserted in `tests/test_benchmark_sac_imk.py`
+   (`test_lignos_2019_column_cyclic_lambda_cap`).  A component-test hysteresis
+   match would exercise the *slender* (uncapped) regime (`30 < h/tw < 50` —
+   Elkady–Lignos 2018), which the SAC frames do not contain, so it is **not**
+   applicable here; the validation is the transcription itself, done.
 4. **NLTHA convergence.**  ✅ **Landed 2026-10-28** — the 3-story SAC suite runs
    with `hinge_backbone="imk"` (`IMKBilin`) and converges on all four strong
    cases where the `Clough` trilinear hinge (β = 0.5) lost convergence
@@ -208,7 +226,28 @@ Open A3 items, in build order:
    2026-10-28.
 6. **IDA vs Ibarra–Krawinkler (2005).**  Incremental dynamic analysis over the
    benchmark records; compare the median collapse capacity (`S_a(T1)`) against
-   Ibarra–Medina–Krawinkler (2005).
+   Ibarra–Medina–Krawinkler (2005).  The **collapse detection + IDA driver
+   landed 2026-10-30** — `benchmarks/sac_run.collapse_intensity` (non-
+   convergence OR peak-drift > 0.10), `_ida_run` and `run_ida`
+   (`tests/test_benchmark_sac_ida.py`).  **Decided 2026-10-30 — no
+   residual-stiffness floor**: the benchmark defines collapse as *numerical
+   non-convergence* (dynamic instability, refined by bisection — PEER 2005/06
+   p.37; Vamvatsikos & Cornell 2002), so the zero-tangent residual plateau is
+   the collapse signal, not an artefact to regularize (see
+   `imk_member_classification.md` decision 7).  **Bisection + the `Sa(T1)`
+   collapse capacity landed 2026-10-30** — `run_ida(..., tolerance=0.01)`
+   bisects the first collapse intensity to a 1 % relative tolerance (first
+   collapse only, per the 2005 algorithm), and `sdof_spectral_acceleration` /
+   `collapse_capacity_sa` convert per-record collapse scale factors to
+   `Sa(T1)` terms and take the median — the MDOF intensity measure
+   (`{[Sa(T1)/g]/γ}c`, IK-2005 footnote 4).  The IM ladder stays the record
+   scale factor; `Sa(T1)` is computed once per record at the elastic T1.
+   **Decided 2026-10-30 — the four SAC records** (El Centro, Hachinohe,
+   Northridge, Kobe — `CASE_ORDER`) are the first comparison set; the
+   ~40-record LMSR-N (Medina 2002) / 44-record FEMA P-695 far-field set is the
+   documented follow-on for a statistically meaningful median.  **Remaining:**
+   run the four-record median `Sa(T1)` collapse capacity and compare it against
+   Ibarra–Krawinkler (2005), then the `enrich_hinge` build-time route.
 
 ## 6. Calibration equations
 

@@ -10,6 +10,64 @@ category: [archive]
 > [`_pending_work.md`](../_pending_work.md) on 2026-10-27.  Nothing here is
 > open work; the live plan lives in `_pending_work.md`.
 
+## DONE (2026-10-30 — P41 damage normalisation + the A3 IDA collapse driver)
+
+#### P41 — A4 damage normalisation (φj = θ/θ_y, dEj = E/(My·θ_y))
+
+Source: `docs/sac_nonlinear_benchmark.md`; `docs/_pending_work.md` (P41).
+
+**Status (2026-10-30).** ✅ Landed.  The transient runner
+(`opensees/_runner_dynamic.py`) now reads the already-instrumented
+`_hinge_yield_moments` list and returns two dimensionless damage indices beside
+the raw peak reductions: `peak_damage_rotation` (max hinge `θ/θ_y`) and
+`max_damage_energy` (max hinge `E/(My·θ_y)`), normalised per hinge from the
+trapezoidal dissipated energy and the per-hinge yield rotation/moment.  Guarded
+against a zero yield rotation/moment.  The `Returns` docstring lists both keys.
+
+**Where.** `opensees/_runner_dynamic.py`; asserted in
+`tests/test_benchmark_sac3_nltha.py` (`test_transient_recorders_hinge_damage`).
+
+#### P42 (part) — A3 IDA driver + collapse detection
+
+Source: `docs/benchmark_roadmap.md` §3; `docs/imk_deterioration_model.md` §5;
+`docs/_pending_work.md` (P42 item 2).
+
+**Status (2026-10-30).** ✅ Landed (the IDA/collapse-detection sub-item, plus
+bisection and the `Sa(T1)` collapse capacity; the four-record median `Sa(T1)`
+comparison vs Ibarra–Krawinkler (2005) and the `enrich_hinge` build-time route
+remain open — the residual-stiffness floor was dropped 2026-10-30 in favour of
+the benchmark's non-convergence criterion, and the beam-unbraced-length sweep /
+Λ validation were resolved 2026-10-30 as documented notes).  `benchmarks/sac_run.py` gained:
+
+- `collapse_intensity(intensities, drifts, converged, collapse_drift=0.10)` —
+  the pure predicate: the first intensity at which a run either fails to
+  converge to the end of the record (the Ibarra–Krawinkler non-convergence
+  criterion) or exceeds the peak-interstorey-drift threshold (the FEMA P-695
+  sidesway proxy);
+- `_ida_run(building, record_id, accel_base, dt, intensities, …,
+  tolerance=None)` — a single-builder IM ladder over a base record (each
+  `run_transient_analysis` call rebuilds the domain), returning the IDA curve
+  (drift vs intensity), the per-rung convergence flags, the collapse intensity
+  and (when `tolerance` is given) the bisection bracket;
+- `run_ida(building, record_id, intensities, …, tolerance=0.01)` — the
+  record-based wrapper (loads the ground-motion mirror and delegates to
+  `_ida_run`), bisecting the first collapse intensity to a 1 % relative
+  tolerance (first collapse only, per the 2005 algorithm);
+- `sdof_spectral_acceleration(accel, dt, T, zeta=0.05)` — the 5 %-damped
+  Newmark SDOF spectral acceleration `Sa(T)`;
+- `collapse_capacity_sa(building, record_ids, intensities, …)` — per-record
+  collapse capacity in `Sa(T1)` terms + the median (the IK-2005 MDOF IM
+  `{[Sa(T1)/g]/γ}c`; the `/γ` strength normalisation is a per-building
+  constant).
+
+**Where.** `benchmarks/sac_run.py`; tests `tests/test_benchmark_sac_ida.py`
+(`test_collapse_intensity_criteria` always-on;
+`test_ida_synthetic_ladder_collapses_at_top` always-on;
+`test_ida_bisection_refines_collapse` always-on;
+`test_sdof_spectral_acceleration_stiff_tracks_pga` /
+`test_sdof_spectral_acceleration_linear_in_amplitude` always-on;
+`test_ida_elcentro_ladder` gated on `ELCENTRO`).
+
 ## DONE (2026-10-29 — member-end releases honoured under `hinge_model='lumped'`)
 
 Relocated from `_pending_work.md` (P44 fully).
