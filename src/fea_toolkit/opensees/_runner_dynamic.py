@@ -97,8 +97,12 @@ class TransientRunnerMixin:
             (m), ``peak_base_shear`` (N), ``peak_plastic_rotation`` (the
             maximum total hinge deformation — rad for lumped hinges, 1/m for
             ``beamWithHinges`` end-section curvature), ``max_dissipated_energy``
-            (N·m), ``num_yielded_hinges``, ``converged_steps`` and the two
-            Rayleigh ``period_1`` / ``period_2``.
+            (N·m), ``peak_damage_rotation`` (the maximum hinge rotation
+            normalised by its yield rotation, ``φj = θ/θ_y`` — dimensionless),
+            ``max_damage_energy`` (the maximum hinge dissipated energy
+            normalised by ``My·θ_y`` — dimensionless), ``num_yielded_hinges``,
+            ``converged_steps`` and the two Rayleigh ``period_1`` /
+            ``period_2``.
 
         The builder ``config`` may set ``transient_algorithm`` (the solver
         algorithm; default ``"Newton"``), ``transient_record_node_tags`` (an
@@ -248,11 +252,13 @@ class TransientRunnerMixin:
         # hinge.
         hinge_tags = list(getattr(self, "_hinge_tags", None) or [])
         hinge_theta_y = list(getattr(self, "_hinge_yield_rotations", None) or [])
+        hinge_my = list(getattr(self, "_hinge_yield_moments", None) or [])
         hinge_sections = list(getattr(self, "_hinge_sections", None) or [])
         n_hinges = len(hinge_tags)
         hinge_prev_theta = [0.0] * n_hinges
         hinge_prev_moment = [0.0] * n_hinges
         hinge_energy = [0.0] * n_hinges
+        hinge_peak_rotation = [0.0] * n_hinges
         hinge_yielded = [False] * n_hinges
         peak_plastic_rotation = 0.0
 
@@ -295,6 +301,7 @@ class TransientRunnerMixin:
                     deform = float(ops.eleResponse(tag, "section", sec_num, "deformation")[0])
                     moment = float(ops.eleResponse(tag, "section", sec_num, "force")[0])
                 peak_plastic_rotation = max(peak_plastic_rotation, abs(deform))
+                hinge_peak_rotation[i] = max(hinge_peak_rotation[i], abs(deform))
                 hinge_energy[i] += (
                     0.5 * (hinge_prev_moment[i] + moment) * (deform - hinge_prev_theta[i])
                 )
@@ -313,6 +320,23 @@ class TransientRunnerMixin:
             if v.size:
                 peak = max(peak, float(np.max(np.abs(v))))
 
+        # ── Damage normalisation (φj = θ/θ_y, dEj = E/(My·θ_y)) ──
+        # The raw ``peak_plastic_rotation`` / ``max_dissipated_energy`` are the
+        # benchmark's absolute damage measures; the normalised forms divide each
+        # hinge's peak rotation by its yield rotation and its dissipated energy
+        # by the elastic energy ``My·θ_y``, so the damage indices are comparable
+        # across members (and match the Ibarra–Krawinkler φj / dEj definitions).
+        peak_damage_rotation = 0.0
+        max_damage_energy = 0.0
+        for i in range(n_hinges):
+            ty = hinge_theta_y[i] if i < len(hinge_theta_y) else 0.0
+            if ty > 0.0:
+                peak_damage_rotation = max(peak_damage_rotation, hinge_peak_rotation[i] / ty)
+            my = hinge_my[i] if i < len(hinge_my) else 0.0
+            denom = my * ty
+            if denom > 0.0:
+                max_damage_energy = max(max_damage_energy, hinge_energy[i] / denom)
+
         return {
             "times": times,
             "direction": direction,
@@ -325,6 +349,8 @@ class TransientRunnerMixin:
             "peak_base_shear": float(np.max(np.abs(base_shear_steps))) if base_shear_steps else 0.0,
             "peak_plastic_rotation": peak_plastic_rotation,
             "max_dissipated_energy": float(max(hinge_energy)) if hinge_energy else 0.0,
+            "peak_damage_rotation": peak_damage_rotation,
+            "max_damage_energy": max_damage_energy,
             "num_yielded_hinges": int(sum(hinge_yielded)),
             "converged_steps": converged_steps,
             "period_1": period_1,

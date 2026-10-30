@@ -300,5 +300,15 @@ def test_transient_recorders_hinge_damage():
         assert res["max_dissipated_energy"] > 0.0
         # The peak plastic rotation exceeds the (small) hinge yield rotation.
         assert res["peak_plastic_rotation"] > b._hinge_yield_rotations[0]
+
+        # P41 — the normalised damage indices (φj = θ/θ_y, dEj = E/(My·θ_y))
+        # are positive once the hinges yield, and are bounded below by the raw
+        # peak divided by the largest yield threshold (they are dimensionless).
+        assert res["peak_damage_rotation"] > 0.0
+        assert res["max_damage_energy"] > 0.0
+        max_ty = max(b._hinge_yield_rotations)
+        assert res["peak_damage_rotation"] >= res["peak_plastic_rotation"] / max_ty
+        max_my_ty = max(my * ty for my, ty in zip(b._hinge_yield_moments, b._hinge_yield_rotations))
+        assert res["max_damage_energy"] >= res["max_dissipated_energy"] / max_my_ty
     finally:
         wipe()
