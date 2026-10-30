@@ -361,6 +361,11 @@ for automated cross-referencing.
   Tags: `gui`, `qt`, `pyside6`, `pyvistaqt`, `architecture`, `planning`, `roadmap`
   Related: [Visualisation Toolkit](viewer.md) · [Analysis Workflow](workflow.md) · [Unified Results Schema](results_schema.md) · [Rhino 3-D Export](rhino_export.md) · [Report Generation — Design Proposal](report_generation.md)
 
+- [IK-2005 Generic-Frame Collapse Benchmark](ik2005_generic_frame_benchmark.md) — ⚠️ Partial
+  > Reproduction of Ibarra & Krawinkler (2005, PEER 2005/06) generic single-bay frame collapse capacities: the Medina (2002) frame data, the Table 5.1 parameter matrix, the peak-oriented IMK material decision, and the validation plan.
+  Tags: `validation`, `benchmark`, `collapse`, `ida`, `imk`, `ibarra-krawinkler`, `medina`, `peak-oriented`, `moment-frame`, `ground-motion`
+  Related: [SAC 3-Story IMK Collapse Benchmark (IDA)](sac_imk_collapse_benchmark.md) · [IMK (IMKBilin) Steel Hinge — Deterioration Model](imk_deterioration_model.md) · [Benchmark & Validation Model Register](benchmark_register.md) · [Ground-Motion Data & Benchmark Sources](ground_motion_data.md)
+
 - [IMK (IMKBilin) Steel Hinge — Deterioration Model](imk_deterioration_model.md) — ⚠️ Partial
   > The Ibarra–Medina–Krawinkler (IMK) deterioration model for steel moment frames: relationship to the ASCE 41 backbone and ETABS/SAP2000/Perform-3D, the OpenSees IMKBilin material, and the A0–A3 implementation plan and status.
   Tags: `imk`, `ibarra-krawinkler`, `lignos-krawinkler`, `deterioration`, `collapse`, `hinge`, `imkbilin`, `bilin`, `steel`, `nonlinear-dynamic`, `moment-frame`
@@ -476,7 +481,7 @@ Tags across all documentation files:
 - **`beam-column-joint`** — [benchmark_register.md](benchmark_register.md)
 - **`beam-with-hinges`** — [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`beams`** — [element_classification.md](element_classification.md)
-- **`benchmark`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [cantilever_benchmark.md](cantilever_benchmark.md), [duong_benchmark.md](duong_benchmark.md), [ground_motion_data.md](ground_motion_data.md), [imk_member_classification.md](imk_member_classification.md), [sac_benchmark.md](sac_benchmark.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [shear_building_benchmark.md](shear_building_benchmark.md), [tcl_import.md](tcl_import.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`benchmark`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [cantilever_benchmark.md](cantilever_benchmark.md), [duong_benchmark.md](duong_benchmark.md), [ground_motion_data.md](ground_motion_data.md), [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [imk_member_classification.md](imk_member_classification.md), [sac_benchmark.md](sac_benchmark.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [shear_building_benchmark.md](shear_building_benchmark.md), [tcl_import.md](tcl_import.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`bilin`** — [imk_deterioration_model.md](imk_deterioration_model.md)
 - **`bilinearization`** — [csm_bilinearization.md](csm_bilinearization.md)
 - **`boolean`** — [shell_openings.md](shell_openings.md)
@@ -499,7 +504,7 @@ Tags across all documentation files:
 - **`closed-form`** — [cantilever_benchmark.md](cantilever_benchmark.md), [shear_building_benchmark.md](shear_building_benchmark.md)
 - **`clough`** — [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`codes`** — [capacity.md](capacity.md)
-- **`collapse`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [imk_deterioration_model.md](imk_deterioration_model.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md)
+- **`collapse`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [imk_deterioration_model.md](imk_deterioration_model.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md)
 - **`columns`** — [element_classification.md](element_classification.md)
 - **`combination`** — [load_cases_and_combinations.md](load_cases_and_combinations.md), [load_combinations.md](load_combinations.md)
 - **`command`** — [workflow_palette.md](workflow_palette.md)
@@ -558,7 +563,7 @@ Tags across all documentation files:
 - **`geometry`** — [rhino_export.md](rhino_export.md), [shell_openings.md](shell_openings.md)
 - **`gpl`** — [licence.md](licence.md)
 - **`gravity`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
-- **`ground-motion`** — [benchmark_register.md](benchmark_register.md), [ground_motion_data.md](ground_motion_data.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md)
+- **`ground-motion`** — [benchmark_register.md](benchmark_register.md), [ground_motion_data.md](ground_motion_data.md), [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md)
 - **`gui`** — [gui.md](gui.md), [gui_roadmap.md](gui_roadmap.md), [project_bundle.md](project_bundle.md), [workflow_authoring.md](workflow_authoring.md), [workflow_palette.md](workflow_palette.md)
 - **`guidance`** — [modeling_guidance.md](modeling_guidance.md)
 - **`guide`** — [llm_guide.md](llm_guide.md)
@@ -567,10 +572,10 @@ Tags across all documentation files:
 - **`hinges`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md)
 - **`html-export`** — [viewer.md](viewer.md)
 - **`hysteretic`** — [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
-- **`ibarra-krawinkler`** — [imk_deterioration_model.md](imk_deterioration_model.md), [imk_member_classification.md](imk_member_classification.md)
-- **`ida`** — [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md)
+- **`ibarra-krawinkler`** — [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [imk_deterioration_model.md](imk_deterioration_model.md), [imk_member_classification.md](imk_member_classification.md)
+- **`ida`** — [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md)
 - **`identifiers`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
-- **`imk`** — [imk_deterioration_model.md](imk_deterioration_model.md), [imk_member_classification.md](imk_member_classification.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md)
+- **`imk`** — [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [imk_deterioration_model.md](imk_deterioration_model.md), [imk_member_classification.md](imk_member_classification.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md)
 - **`imkbilin`** — [imk_deterioration_model.md](imk_deterioration_model.md)
 - **`import`** — [tcl_import.md](tcl_import.md)
 - **`infill`** — [benchmark_register.md](benchmark_register.md)
@@ -600,6 +605,7 @@ Tags across all documentation files:
 - **`mander`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`masonry`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md)
 - **`mcft`** — [duong_benchmark.md](duong_benchmark.md), [shear_failure_modelling.md](shear_failure_modelling.md)
+- **`medina`** — [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md)
 - **`member-classification`** — [imk_member_classification.md](imk_member_classification.md)
 - **`mesh-model`** — [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`meshing`** — [constraint_detection.md](constraint_detection.md), [element_splitting.md](element_splitting.md), [shell_openings.md](shell_openings.md), [shell_support.md](shell_support.md)
@@ -611,7 +617,7 @@ Tags across all documentation files:
 - **`model-review`** — [ETABS_checklist.md](ETABS_checklist.md), [ETABS_checklist_gb.md](ETABS_checklist_gb.md), [ETABS_checklist_hk.md](ETABS_checklist_hk.md), [ETABS_checklist_is.md](ETABS_checklist_is.md), [SAP2000_checklist_gb.md](SAP2000_checklist_gb.md), [SAP2000_checklist_hk.md](SAP2000_checklist_hk.md)
 - **`modeling`** — [modeling_guidance.md](modeling_guidance.md)
 - **`modifiers`** — [stiffness_factors.md](stiffness_factors.md)
-- **`moment-frame`** — [benchmark_roadmap.md](benchmark_roadmap.md), [imk_deterioration_model.md](imk_deterioration_model.md), [sac_benchmark.md](sac_benchmark.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
+- **`moment-frame`** — [benchmark_roadmap.md](benchmark_roadmap.md), [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [imk_deterioration_model.md](imk_deterioration_model.md), [sac_benchmark.md](sac_benchmark.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`mvlem`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
 - **`nltha`** — [benchmark_roadmap.md](benchmark_roadmap.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`nonlinear`** — [element_properties_config.md](element_properties_config.md), [modeling_guidance.md](modeling_guidance.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [pushover_analysis.md](pushover_analysis.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
@@ -629,6 +635,7 @@ Tags across all documentation files:
 - **`panel-zone`** — [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md)
 - **`parser`** — [e2k_import_plan.md](e2k_import_plan.md), [json_serialization.md](json_serialization.md), [parser_coverage.md](parser_coverage.md)
 - **`partial-fixity`** — [member_releases.md](member_releases.md)
+- **`peak-oriented`** — [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md)
 - **`phase-b`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`pipeline`** — [pipeline_logging.md](pipeline_logging.md), [workflow.md](workflow.md)
 - **`planning`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [csm_test_model_plan.md](csm_test_model_plan.md), [deprecation_plan.md](deprecation_plan.md), [force_diagram_unification.md](force_diagram_unification.md), [gui_roadmap.md](gui_roadmap.md), [linting_fix_plan.md](linting_fix_plan.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [versioning.md](versioning.md)
@@ -707,7 +714,7 @@ Tags across all documentation files:
 - **`units`** — [modeling_guidance.md](modeling_guidance.md), [units_conversion.md](units_conversion.md)
 - **`usage`** — [llm_guide.md](llm_guide.md)
 - **`userstrings`** — [rhino_attributes.md](rhino_attributes.md)
-- **`validation`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [cantilever_benchmark.md](cantilever_benchmark.md), [duong_benchmark.md](duong_benchmark.md), [ground_motion_data.md](ground_motion_data.md), [mander_confinement_validation.md](mander_confinement_validation.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [sac_benchmark.md](sac_benchmark.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [shear_building_benchmark.md](shear_building_benchmark.md), [shear_failure_modelling.md](shear_failure_modelling.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`validation`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [cantilever_benchmark.md](cantilever_benchmark.md), [duong_benchmark.md](duong_benchmark.md), [ground_motion_data.md](ground_motion_data.md), [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [mander_confinement_validation.md](mander_confinement_validation.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [sac_benchmark.md](sac_benchmark.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [shear_building_benchmark.md](shear_building_benchmark.md), [shear_failure_modelling.md](shear_failure_modelling.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`verbs`** — [workflow_authoring.md](workflow_authoring.md)
 - **`versioning`** — [versioning.md](versioning.md)
 - **`viewer`** — [viewer.md](viewer.md)

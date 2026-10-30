@@ -105,6 +105,17 @@ conventions the hinge layer absorbs: the post-capping stiffness is
 named `theta_u_model` convention (default `"plateau"` = `θp + θpc + 0.02`) —
 see §6 "The ultimate rotation θu".
 
+`IMKPeakOriented` (peak-oriented — the IK-2005 reference hysteretic law) shares
+`IMKBilin`'s backbone parameterisation and adds the **accelerated-reloading**
+deterioration mode, so its signature is ``IMKPeakOriented matTag Ke dp_pos
+dpc_pos du_pos Fy_pos FmaxFy_pos FresFy_pos dp_neg dpc_neg du_neg Fy_neg
+FmaxFy_neg FresFy_neg Lamda_S Lamda_C Lamda_A Lamda_K c_S c_C c_A c_K D_pos
+D_neg`` (23 doubles).  The toolkit adds it as ``hinge_backbone="imk_peak"`` on
+the lumped path for the IK-2005 generic-frame collapse benchmark — see
+[`ik2005_generic_frame_benchmark.md`](ik2005_generic_frame_benchmark.md).
+`ModIMKPeakOriented` is the deprecated spelling (emits
+``WARNING … HAS BEEN REPLACED``); target `IMKPeakOriented`.
+
 ## 5. Implementation plan and status
 
 From `benchmark_roadmap.md` §3 (priority 1):

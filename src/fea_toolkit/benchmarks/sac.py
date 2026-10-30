@@ -1112,9 +1112,11 @@ def builder_config(
             ``Hysteretic`` hinge), ``"trilinear_steel02"`` (the same backbone
             as two ``Steel02`` springs in parallel), ``"trilinear_clough"``
             (the same ``Hysteretic`` hinge with Clough/Takeda unloading-
-            stiffness degradation) or ``"imk"`` (the Lignos-Krawinkler
+            stiffness degradation), ``"imk"`` (the Lignos-Krawinkler
             ``IMKBilin`` hinge; ``imk_params`` must be stamped on the sections —
-            see ``benchmarks/imk_calibration.py``).
+            see ``benchmarks/imk_calibration.py``) or ``"imk_peak"`` (the
+            peak-oriented ``IMKPeakOriented`` hinge — the IK-2005 reference
+            law; same ``imk_params`` dict).
         hinge_model: ``"lumped"`` (default, zero-length rotational springs) or
             ``"beam_with_hinges"`` (the benchmark's own concentrated-plasticity
             ``beamWithHinges`` element — ``trilinear`` / ``trilinear_steel02`` /
@@ -1126,12 +1128,12 @@ def builder_config(
 
     Raises:
         ValueError: For an unsupported ``hinge_model``/``backbone`` pairing
-            (only ``lumped`` + ``bilinear``/``trilinear``/``imk``, and
-            ``beam_with_hinges`` + ``trilinear``/``trilinear_steel02``/
+            (only ``lumped`` + ``bilinear``/``trilinear``/``imk``/``imk_peak``,
+            and ``beam_with_hinges`` + ``trilinear``/``trilinear_steel02``/
             ``trilinear_clough`` are valid).
     """
     _valid_backbones = {
-        "lumped": ("bilinear", "trilinear", "imk"),
+        "lumped": ("bilinear", "trilinear", "imk", "imk_peak"),
         "beam_with_hinges": ("trilinear", "trilinear_steel02", "trilinear_clough"),
     }
     allowed = _valid_backbones.get(hinge_model)
@@ -1139,7 +1141,7 @@ def builder_config(
         raise ValueError(
             f"unsupported hinge_model/backbone combination: "
             f"hinge_model={hinge_model!r} with backbone={backbone!r}; "
-            f"valid pairings are lumped+{{bilinear,trilinear,imk}} and "
+            f"valid pairings are lumped+{{bilinear,trilinear,imk,imk_peak}} and "
             f"beam_with_hinges+{{trilinear,trilinear_steel02,trilinear_clough}}"
         )
     return {
@@ -1271,11 +1273,13 @@ def build_builder(
             ``Hysteretic`` hinge), ``"trilinear_steel02"`` (the same backbone
             as two ``Steel02`` springs in parallel), ``"trilinear_clough"``
             (the same ``Hysteretic`` hinge with Clough/Takeda unloading-
-            stiffness degradation) or ``"imk"`` (the Lignos-Krawinkler
+            stiffness degradation), ``"imk"`` (the Lignos-Krawinkler
             ``IMKBilin`` hinge; ``imk_params`` must be stamped on the sections —
-            see ``benchmarks/imk_calibration.py``).
+            see ``benchmarks/imk_calibration.py``) or ``"imk_peak"`` (the
+            peak-oriented ``IMKPeakOriented`` hinge — the IK-2005 reference
+            law; same ``imk_params`` dict).
         hinge_model: ``"lumped"`` (default; ``backbone`` may be ``bilinear``,
-            ``trilinear`` or ``imk``) or ``"beam_with_hinges"`` (the benchmark's
+            ``trilinear``, ``imk`` or ``imk_peak``) or ``"beam_with_hinges"`` (the benchmark's
             own concentrated-plasticity element; ``backbone`` may be
             ``trilinear``, ``trilinear_steel02`` or ``trilinear_clough``).
         fidelity: ``"simplified"`` (default) or ``"faithful"`` — the explicit

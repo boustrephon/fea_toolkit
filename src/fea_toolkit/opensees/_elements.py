@@ -228,6 +228,41 @@ def _imk_bilin_args(
     )
 
 
+def _imk_peak_oriented_args(
+    params: dict[str, float], k0: float, my_pos: float, my_neg: float
+) -> tuple[float, ...]:
+    """Map a stamped ``imk_params`` dict to the ``IMKPeakOriented`` material's args.
+
+    ``IMKPeakOriented`` is the peak-oriented IMK hysteretic law — the IK-2005
+    (PEER 2005/06) reference.  It shares ``IMKBilin``'s backbone
+    parameterisation (``Ke``, ``dp``, ``dpc``, ``du``, ``Fy``, ``FmaxFy``,
+    ``FresFy`` per side, then the cyclic-deterioration parameters) but adds the
+    **accelerated-reloading** deterioration mode, so its signature is::
+
+        IMKPeakOriented matTag Ke dp_pos dpc_pos du_pos Fy_pos FmaxFy_pos
+            FresFy_pos dp_neg dpc_neg du_neg Fy_neg FmaxFy_neg FresFy_neg
+            Lamda_S Lamda_C Lamda_A Lamda_K c_S c_C c_A c_K D_pos D_neg
+
+    i.e. :func:`_imk_bilin_args`'s 21 values with ``Lamda_A`` inserted after
+    ``Lamda_C`` and ``c_A`` after ``c_C``.  The post-capping ``dpc`` and
+    ``theta_u`` conventions are those of :func:`_imk_bilin_args`.  ``Lamda_A``
+    and ``c_A`` default to ``0.0`` / ``1.0`` (no accelerated-reloading
+    deterioration — the IK-2005 reference ``γs,c,k,a = ∞`` case).
+    """
+    base = _imk_bilin_args(params, k0, my_pos, my_neg)
+    lamda_a = float(params.get("lamda_A", 0.0))
+    c_a = float(params.get("c_A", 1.0))
+    # base: k0, dp, dpc, du, Fy, FmaxFy, FresFy (pos), dp, dpc, du, Fy, FmaxFy,
+    # FresFy (neg), Lamda_S, Lamda_C, Lamda_K, c_S, c_C, c_K, D_pos, D_neg.
+    return (
+        *base[:15],  # k0 .. Lamda_C
+        lamda_a,
+        *base[15:18],  # Lamda_K, c_S, c_C
+        c_a,
+        *base[18:],  # c_K, D_pos, D_neg
+    )
+
+
 class ElementMixin:
     """Frame/wall/shell element creation, brace selection, and lumped hinges."""
 
@@ -1273,19 +1308,23 @@ class ElementMixin:
                 )
             hinge_theta_y = theta_y
             hinge_my = my_tri
-        elif self.config.get("hinge_backbone") == "imk":
-            # IMK steel hinge (Lignos-Krawinkler, collapse-level) — IMKBilin.
+        elif self.config.get("hinge_backbone") in ("imk", "imk_peak"):
+            # IMK steel hinge (collapse-level): ``IMKBilin`` (bilinear) or
+            # ``IMKPeakOriented`` (peak-oriented — the IK-2005 reference law).
+            backbone = self.config.get("hinge_backbone")
             params = getattr(elem, "imk_params", None) or getattr(sec, "imk_params", None)
             stiff_factor = float(self.config.get("hinge_stiffness_factor", 10.0))
             k0 = stiff_factor * 6.0 * E * max(I33, 1e-12) / max(L, 1e-12)
             if params:
                 my_imk = float(params.get("My_pos", My))
                 my_imk_neg = float(params.get("My_neg", -my_imk))
-                ops.uniaxialMaterial(
-                    "IMKBilin",
-                    hinge_mat_tag + 1,
-                    *_imk_bilin_args(params, k0, my_imk, my_imk_neg),
-                )
+                if backbone == "imk_peak":
+                    material_name = "IMKPeakOriented"
+                    imk_args = _imk_peak_oriented_args(params, k0, my_imk, my_imk_neg)
+                else:
+                    material_name = "IMKBilin"
+                    imk_args = _imk_bilin_args(params, k0, my_imk, my_imk_neg)
+                ops.uniaxialMaterial(material_name, hinge_mat_tag + 1, *imk_args)
                 hinge_theta_y = my_imk / max(k0, 1e-12)
                 hinge_my = my_imk
             else:
