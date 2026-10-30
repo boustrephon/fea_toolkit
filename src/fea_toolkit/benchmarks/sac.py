@@ -42,6 +42,7 @@ from ..model.sap_data import (
     FrameElement,
     FrameRelease,
     ISection,
+    JointLoad,
     MassSource,
     Material,
     Node,
@@ -1093,7 +1094,11 @@ def load_model(
     return md
 
 
-def builder_config(backbone: str = "bilinear", hinge_model: str = "lumped") -> dict[str, Any]:
+def builder_config(
+    backbone: str = "bilinear",
+    hinge_model: str = "lumped",
+    pdelta: bool = False,
+) -> dict[str, Any]:
     """The ``AnalysisBuilder`` config for the nonlinear evaluation model.
 
     Purely build-level choices (element type, hinge model).  The panel-zone
@@ -1114,6 +1119,10 @@ def builder_config(backbone: str = "bilinear", hinge_model: str = "lumped") -> d
             ``"beam_with_hinges"`` (the benchmark's own concentrated-plasticity
             ``beamWithHinges`` element — ``trilinear`` / ``trilinear_steel02`` /
             ``trilinear_clough`` backbones).
+        pdelta: When True, emit the ``PDelta`` geometric transformation (global
+            P-Δ) instead of ``Linear`` — required for the IK-2005 P-Δ-enabled
+            collapse comparison (pair with ``build_builder(pdelta_gravity=True)``
+            so a gravity load is held through the analysis).
 
     Raises:
         ValueError: For an unsupported ``hinge_model``/``backbone`` pairing
@@ -1137,6 +1146,7 @@ def builder_config(backbone: str = "bilinear", hinge_model: str = "lumped") -> d
         "element_type": "elasticBeamColumn",
         "hinge_model": hinge_model,
         "hinge_backbone": backbone,
+        "geom_transf_type": "PDelta" if pdelta else "Linear",
         # The trilinear Hysteretic hinge has two sharp yield corners where plain
         # Newton stalls; the SAC transient runs opt in to the line search (the
         # default elsewhere is plain Newton).
@@ -1188,6 +1198,41 @@ def _floor_ux_tie_groups(building: int) -> list[list[str]]:
     return groups
 
 
+def add_pdelta_gravity(
+    md: SAPModelData,
+    factor: float = 1.4,
+    pattern: str = "GRAV",
+) -> SAPModelData:
+    """Add held gravity joint loads ``P = factor × seismic mass × g`` for P-Δ.
+
+    Ibarra–Krawinkler (2005) model global P-Δ by applying the gravity load at
+    the start of the time history and holding it (a constant geometric-stiffness
+    matrix ``Kg`` added to ``Ke``): the load is ``1.4 × the seismically
+    effective mass``, i.e. dead plus a live load equal to 40 % of dead.  The
+    SAC seismic mass is dead-only (steel framing, floor slabs, ceiling/flooring,
+    mechanical/electrical, partitions, roofing and a penthouse — no occupancy
+    live), so ``factor=1.4`` reproduces that load exactly.  One downward
+    global-Z joint load is added per node with added mass; any existing loads
+    under *pattern* are replaced so the helper is idempotent.
+
+    Args:
+        md: SAC model (after parsing/enrichment); its ``added_masses`` are the
+            lumped seismic masses.
+        factor: P-Δ gravity multiplier on the seismic mass (default ``1.4``).
+        pattern: Load-pattern name for the gravity loads (default ``"GRAV"``).
+
+    Returns:
+        *md*, mutated in place (its ``joint_loads`` gains the gravity loads).
+    """
+    g = g_from_units(md.units)
+    md.joint_loads = [jl for jl in md.joint_loads if jl.pattern != pattern]
+    for nid, mass in md.added_masses.items():
+        if mass <= 0.0:
+            continue
+        md.joint_loads.append(JointLoad(pattern=pattern, node_id=nid, fz=-factor * mass * g))
+    return md
+
+
 def build_builder(
     panel_zone: bool = False,
     nonlinear: bool = True,
@@ -1196,6 +1241,8 @@ def build_builder(
     backbone: str = "bilinear",
     hinge_model: str = "lumped",
     fidelity: str = "simplified",
+    pdelta: bool = False,
+    pdelta_gravity: bool = False,
     column_axial_ratios: Optional[dict[str, float]] = None,
     column_axial_ratios_by_member: Optional[dict[str, float]] = None,
     derive_column_axial_ratio: bool = False,
@@ -1236,6 +1283,12 @@ def build_builder(
             default: the ties move the base shear by ~0.004 % (the beam axial
             stiffness already ties each floor near-rigidly) while making the
             transient ~35× slower under the ``Transformation`` handler.
+        pdelta: When True, emit the ``PDelta`` geometric transformation (global
+            P-Δ) instead of ``Linear``.
+        pdelta_gravity: When True, add the held IK-2005 gravity joint loads
+            ``P = 1.4 × seismic mass × g`` via :func:`add_pdelta_gravity`
+            (downward global-Z at every mass node).  Pair with ``pdelta=True``
+            for a P-Δ-enabled collapse comparison.
         column_axial_ratios: Optional ``{section_name: Pg/Pye}`` forwarded to
             :func:`load_model` (``backbone == "imk"`` only).
         column_axial_ratios_by_member: Optional ``{element_id: Pg/Pye}`` forwarded
@@ -1274,8 +1327,10 @@ def build_builder(
         derive_column_axial_ratio=derive_column_axial_ratio,
         derive_column_axial_ratio_by_member=derive_column_axial_ratio_by_member,
     )
+    if pdelta_gravity:
+        add_pdelta_gravity(md)
     mesh = preprocess_model(md, preprocess_config(panel_zone=panel_zone))
-    cfg = builder_config(backbone, hinge_model) if nonlinear else {}
+    cfg = builder_config(backbone, hinge_model, pdelta=pdelta) if nonlinear else {}
     # The benchmark's ``slv_tbl`` horizontal floor ties, opt-in under
     # ``fidelity="faithful"``.  Applied inside ``build_domain`` via the
     # ``floor_ux_ties`` config, so they survive the transient runner's

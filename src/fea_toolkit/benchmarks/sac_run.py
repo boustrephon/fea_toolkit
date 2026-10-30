@@ -513,6 +513,8 @@ def _ida_run(
     damping: float = 0.02,
     tolerance: Optional[float] = None,
     max_scale: Optional[float] = None,
+    pdelta: bool = False,
+    pdelta_gravity: bool = False,
 ) -> dict[str, Any]:
     """Run one IDA ladder (a base record scaled over *intensities*).
 
@@ -549,6 +551,11 @@ def _ida_run(
         max_scale: Optional upper bound on the ladder; when the ladder does not
             collapse, the top rung is doubled (capped at *max_scale*) until
             collapse.  ``None`` disables extension.
+        pdelta: When True, emit the ``PDelta`` geometric transformation (global
+            P-Δ).
+        pdelta_gravity: When True, hold the IK-2005 gravity load
+            (``1.4 × seismic mass``) through the analysis via the ``"GRAV"``
+            load pattern.
 
     Returns:
         ``{"building", "record", "intensities", "drifts", "converged",
@@ -569,6 +576,8 @@ def _ida_run(
             backbone="imk",
             hinge_model="lumped",
             derive_column_axial_ratio_by_member=True,
+            pdelta=pdelta,
+            pdelta_gravity=pdelta_gravity,
         )
         levels = floor_levels(builder)
         tags = [t for _, t in levels]
@@ -586,6 +595,7 @@ def _ida_run(
                 damping_ratio=damping,
                 period_1=period_1,
                 period_2=period_2,
+                gravity_patterns={"GRAV": 1.0} if pdelta_gravity else None,
             )
             m = compute_metrics(res, accel, levels)
             return float(m["d_max"]), bool(m["converged_steps"] == m["num_steps"])
@@ -664,6 +674,8 @@ def run_ida(
     damping: float = 0.02,
     tolerance: float = 0.01,
     max_scale: Optional[float] = None,
+    pdelta: bool = False,
+    pdelta_gravity: bool = False,
 ) -> dict[str, Any]:
     """Incremental dynamic analysis of one benchmark record over an IM ladder.
 
@@ -687,6 +699,10 @@ def run_ida(
         max_scale: Optional upper bound on the ladder; when the ladder does not
             collapse, the top rung is doubled (capped at *max_scale*) until
             collapse (default ``None`` — no extension).
+        pdelta: When True, emit the ``PDelta`` geometric transformation (global
+            P-Δ).
+        pdelta_gravity: When True, hold the IK-2005 gravity load
+            (``1.4 × seismic mass``) through the analysis.
 
     Returns:
         The :func:`_ida_run` result dict (``collapse_intensity`` is the first
@@ -705,6 +721,8 @@ def run_ida(
         damping=damping,
         tolerance=tolerance,
         max_scale=max_scale,
+        pdelta=pdelta,
+        pdelta_gravity=pdelta_gravity,
     )
 
 
@@ -755,6 +773,8 @@ def collapse_capacity_sa(
     damping: float = 0.02,
     tolerance: float = 0.01,
     max_scale: Optional[float] = None,
+    pdelta: bool = False,
+    pdelta_gravity: bool = False,
 ) -> dict[str, Any]:
     """Per-record collapse capacity in ``Sa(T1)`` terms + the median.
 
@@ -786,6 +806,10 @@ def collapse_capacity_sa(
         damping: Rayleigh damping ratio.
         tolerance: Bisection relative tolerance on the collapse intensity.
         max_scale: Optional upper bound on the ladder (see :func:`run_ida`).
+        pdelta: When True, emit the ``PDelta`` geometric transformation (global
+            P-Δ).
+        pdelta_gravity: When True, hold the IK-2005 gravity load
+            (``1.4 × seismic mass``) through the analysis.
 
     Returns:
         ``{"building", "T1", "capacities", "median_collapse_sa", "records"}``
@@ -810,6 +834,8 @@ def collapse_capacity_sa(
             damping=damping,
             tolerance=tolerance,
             max_scale=max_scale,
+            pdelta=pdelta,
+            pdelta_gravity=pdelta_gravity,
         )
         im = res["collapse_intensity"]
         capacities[rid] = (im * sa_t1) if im is not None else None
