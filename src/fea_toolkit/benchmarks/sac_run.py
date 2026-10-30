@@ -512,6 +512,7 @@ def _ida_run(
     collapse_drift: float = 0.10,
     damping: float = 0.02,
     tolerance: Optional[float] = None,
+    max_scale: Optional[float] = None,
 ) -> dict[str, Any]:
     """Run one IDA ladder (a base record scaled over *intensities*).
 
@@ -520,6 +521,11 @@ def _ida_run(
     call rebuilds the domain, so no intensity sees the previous intensity's
     state.  The IMK (``IMKBilin``) hinge with the FEMA-355C column axial ratios
     is the collapse-level model.
+
+    When *max_scale* is given and the ladder does not collapse, the top rung is
+    extended **geometrically** (doubled, capped at *max_scale*) until collapse
+    or the cap is reached — so the collapse scale factor need not be known a
+    priori.  The returned ``intensities`` then include the extended rungs.
 
     When *tolerance* is given and the ladder brackets a collapse, the first
     collapse intensity is refined by **bisection** between the last
@@ -540,6 +546,9 @@ def _ida_run(
         tolerance: Relative tolerance for the bisection refinement of the
             collapse intensity (``None`` disables bisection — the ladder rung
             is reported as-is).
+        max_scale: Optional upper bound on the ladder; when the ladder does not
+            collapse, the top rung is doubled (capped at *max_scale*) until
+            collapse.  ``None`` disables extension.
 
     Returns:
         ``{"building", "record", "intensities", "drifts", "converged",
@@ -591,6 +600,23 @@ def _ida_run(
 
         im_collapse = collapse_intensity(ladder, drifts, converged, collapse_drift)
 
+        # ── Geometric ladder extension ───────────────────────────
+        # Extend the top rung (doubling, capped at *max_scale*) until collapse,
+        # so a collapse scale factor need not be known a priori.
+        if max_scale is not None and im_collapse is None and ladder and ladder[-1] < max_scale:
+            top = ladder[-1]
+            while (
+                0 < top < max_scale
+            ):  # ``top`` positive — a zero/negative rung must not hang the doubling
+                top = min(2.0 * top, max_scale)
+                d, c = _eval(top)
+                ladder.append(top)
+                drifts.append(d)
+                converged.append(c)
+                if (not c) or d > collapse_drift:
+                    im_collapse = top
+                    break
+
         # ── Bisection refinement (Ibarra–Krawinkler 2005) ──────────
         bisection: Optional[dict[str, Any]] = None
         if tolerance is not None and im_collapse is not None:
@@ -637,6 +663,7 @@ def run_ida(
     collapse_drift: float = 0.10,
     damping: float = 0.02,
     tolerance: float = 0.01,
+    max_scale: Optional[float] = None,
 ) -> dict[str, Any]:
     """Incremental dynamic analysis of one benchmark record over an IM ladder.
 
@@ -657,6 +684,9 @@ def run_ida(
         damping: Rayleigh damping ratio.
         tolerance: Relative tolerance for the bisection refinement of the
             collapse intensity (default ``0.01`` — 1 %).
+        max_scale: Optional upper bound on the ladder; when the ladder does not
+            collapse, the top rung is doubled (capped at *max_scale*) until
+            collapse (default ``None`` — no extension).
 
     Returns:
         The :func:`_ida_run` result dict (``collapse_intensity`` is the first
@@ -674,6 +704,7 @@ def run_ida(
         collapse_drift=collapse_drift,
         damping=damping,
         tolerance=tolerance,
+        max_scale=max_scale,
     )
 
 
@@ -723,6 +754,7 @@ def collapse_capacity_sa(
     collapse_drift: float = 0.10,
     damping: float = 0.02,
     tolerance: float = 0.01,
+    max_scale: Optional[float] = None,
 ) -> dict[str, Any]:
     """Per-record collapse capacity in ``Sa(T1)`` terms + the median.
 
@@ -735,9 +767,10 @@ def collapse_capacity_sa(
     is reported here, the ``/γ`` strength normalisation being a per-building
     constant).
 
-    Records that do not collapse within *intensities* contribute ``None`` and
-    are excluded from the median — the 2005 methodology scales until collapse,
-    so a no-collapse record needs a wider ladder.
+    Records that do not collapse within *intensities* (or, when *max_scale* is
+    given, within the geometrically extended ladder up to *max_scale*)
+    contribute ``None`` and are excluded from the median — the 2005 methodology
+    scales until collapse, so a no-collapse record needs a wider ladder.
 
     Note: the SAC benchmark ships four records (El Centro, Hachinohe,
     Northridge, Kobe — see ``sac_response_data.CASE_ORDER``).  A statistically
@@ -752,6 +785,7 @@ def collapse_capacity_sa(
         collapse_drift: Peak interstorey-drift ratio collapse threshold.
         damping: Rayleigh damping ratio.
         tolerance: Bisection relative tolerance on the collapse intensity.
+        max_scale: Optional upper bound on the ladder (see :func:`run_ida`).
 
     Returns:
         ``{"building", "T1", "capacities", "median_collapse_sa", "records"}``
@@ -775,6 +809,7 @@ def collapse_capacity_sa(
             collapse_drift=collapse_drift,
             damping=damping,
             tolerance=tolerance,
+            max_scale=max_scale,
         )
         im = res["collapse_intensity"]
         capacities[rid] = (im * sa_t1) if im is not None else None

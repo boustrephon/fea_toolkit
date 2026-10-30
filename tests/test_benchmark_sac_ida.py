@@ -79,6 +79,32 @@ def test_ida_bisection_refines_collapse():
     assert result["bisection"]["evaluations"]
 
 
+def test_ida_extends_ladder_to_collapse():
+    """A short ladder + ``max_scale`` extends geometrically until collapse (always-on)."""
+    dt, n = 0.005, 300
+    accel_base = np.ones(n)  # amplitude 1 m/s²; scaled by the ladder
+    result = _ida_run(3, "SYNTHETIC", accel_base, dt, [0.2, 1.0], damping=0.02, max_scale=6.0)
+
+    # The seed ladder [0.2, 1.0] converges (both True); the extension then
+    # doubles the top rung until collapse, so the ladder grew past its seed.
+    assert result["converged"][:2] == [True, True]
+    assert len(result["intensities"]) > 2
+    assert result["intensities"][-1] <= 6.0
+    # Collapse was found at the last extended rung (no bisection without tolerance).
+    assert result["collapse_intensity"] is not None
+    assert result["collapse_intensity"] == result["intensities"][-1]
+
+
+def test_ida_max_scale_stops_without_collapse():
+    """The ladder extension halts at ``max_scale`` when nothing collapses (always-on)."""
+    dt, n = 0.005, 300
+    accel_base = np.ones(n)
+    # max_scale below the collapse intensity (≈5) → no collapse reported.
+    result = _ida_run(3, "SYNTHETIC", accel_base, dt, [0.2, 1.0], damping=0.02, max_scale=2.0)
+    assert result["collapse_intensity"] is None
+    assert result["intensities"][-1] == 2.0
+
+
 def test_sdof_spectral_acceleration_stiff_tracks_pga():
     """A very stiff oscillator tracks the ground — ``Sa(T→0) ≈ PGA``."""
     dt = 0.001
