@@ -132,6 +132,37 @@ decision is to **adopt IK-2005's `1.4 × seismic mass` convention** verbatim
 (their exact method) so the comparison is direct — the SAC data specifies no
 gravity load of its own.
 
+### With P-Δ (IK-2005 `1.4 × seismic mass`, held)
+
+Re-running the pushover and IDA with `pdelta=True` + `pdelta_gravity=True`
+(`geom_transf_type="PDelta"`, gravity `P = 1.4 × W = 20.24 MN` held via
+`loadConst`):
+
+| Quantity | no P-Δ | P-Δ |
+|---|---|---|
+| `Vy` (EPP yield base shear) | ≈ 4.3 MN | ≈ 3.75 MN |
+| `γ = Vy / W` | ≈ 0.30 | **≈ 0.26** |
+| `Sa,c(T1)/g` (4-record median) | 2.21 | **2.20** |
+| `(Sa,c/g) / γ` | ≈ 7.4 | **≈ 8.5** |
+
+The pushover shows the expected P-Δ softening (peak at ≈ 2.4 % roof drift then a
+negative post-yield slope, versus ≈ 7.5 % without), and the held gravity is
+verified (vertical reaction = 20.24 MN).  But the **IDA collapse capacity barely
+moves**: P-Δ lowers `γ` (~13 %) yet leaves `Sa,c` almost unchanged, so the
+*normalised* capacity actually rises.  This is consistent with Ibarra–Krawinkler
+(2005) §5.5.1 — *"the trend is reversed for the three-story frames because P-∆
+effects are small"*.  P-Δ therefore does **not** close the gap to their
+`(Sa,c/g)/γ ≈ 3.3` at `T1 ≈ 1 s`.
+
+**Structural mismatch, not a P-Δ gap.**  IK-2005's frames obey `T1 = 0.1N`
+(stiff) or `0.2N` (flexible), so the frames at `T1 ≈ 1 s` are **9–10 storeys**
+(`0909` at 0.9 s, `0612` at 1.2 s) — tall frames whose collapse is P-Δ-dominated
+and hence low.  The SAC 3-storey is **3 storeys at `T1 ≈ 1.0 s`** (an unusually
+flexible perimeter frame with a leaning column), which IK-2005 never modelled;
+its P-Δ is small by comparison.  A like-for-like collapse match therefore needs
+either the SAC **9/20-storey** buildings (whose `T1`/`N` map onto IK-2005's tall
+frames) or a comparison at the SAC 3-storey's *own* period/strength.
+
 ## Acceptance
 
 The median collapse capacity `Sa,c(T1)/g ≈ 2.2` is in the expected order of
