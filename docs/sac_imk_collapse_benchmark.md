@@ -88,6 +88,34 @@ The four-record dispersion (std of ln `Sa,c` ≈ 0.24) is dominated by the
 near-field Kobe record (highest) and the far-field Hachinohe record (lowest) —
 the expected pattern for a 4-record sample.
 
+## Strength ratio `γ` and normalised collapse capacity
+
+IK-2005 normalises the MDOF collapse capacity by the **strength ratio**
+`γ = Vy / W` (yield base shear / seismic weight), so the four-record median is
+re-expressed as `(Sa,c/g)/γ` for the like-for-like comparison.  `Vy` comes from
+a displacement-controlled pushover of the *same* IMK model (triangular lateral
+pattern, X direction, `gravity_patterns={}`).  The curve is nearly
+elastic-perfectly-plastic after first yield (yield ≈ 1 % roof drift; peak
+`Vmax ≈ 4.4 MN` at ≈ 4–7 % roof drift, `Vmax/Vy ≈ 1.03` — the small post-yield
+hardening is characteristic of the modified-bilinear IMK backbone), so the
+equal-energy EPP idealisation gives a stable `Vy`.  With the one-frame seismic
+weight `W = 14.46 MN` (`1.4745e6 kg × 9.80665 m/s²`):
+
+| Quantity | Value |
+|---|---|
+| `W` (seismic weight, one frame) | 14.46 MN |
+| `Vy` (EPP yield base shear) | ≈ 4.3 MN |
+| `γ = Vy / W` | **≈ 0.30** |
+| `Sa,c(T1)/g` (4-record median) | 2.21 |
+| `(Sa,c/g) / γ` | **≈ 7.4** |
+
+**No P-Δ.**  The SAC transcription carries no gravity loads (the leaning column
+provides the P-Δ axial stiffness but is never loaded), so both this pushover and
+the IDA runs are **without** P-Δ — IK-2005's generic frames include P-Δ through
+the auxiliary backbone.  Adding the leaning-column gravity load would lower both
+`Vy` and the collapse capacity; the no-P-Δ pairing above is internally
+consistent and an upper bound on the P-Δ-normalised capacity.
+
 ## Acceptance
 
 The median collapse capacity `Sa,c(T1)/g ≈ 2.2` is in the expected order of
