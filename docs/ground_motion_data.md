@@ -22,6 +22,7 @@ and are converted at read time (`read_peer_record`).  Analysis-domain scaling
 |---|---|---|---|
 | USA (public domain) | FEMA P-695 far-field (USGS / ATC-63) | Public domain | No committed waveform subset (see §6) |
 | USA | PEER NGA-West2 (ngawest2.berkeley.edu) | Registration; see §3 | Shallow-crustal, active regimes |
+| USA | CESMD (strongmotioncenter.org, USGS + CGS) | Free; registration optional | US (EDC) + worldwide (VDC); scriptable web services; see §5 |
 | Japan | K-NET / KiK-net (NIED, kyoshin.bosai.go.jp) | Free for research; registration | ~1,700 stations; KiK-net downhole + surface |
 | EU / Med / Middle-East | ESM v3.0 (ORFEUS–INGV), DOI 10.13127/esm.3 | Open access | FDSN + Obspy; includes Turkey + Greece |
 | Turkey | AFAD / TADAS | Open | Also surfaced through ESM |
@@ -67,6 +68,14 @@ for a JSON manifest registry, and carries no waveform data.
   downloads it straight into the mirror, keeping the source file's extension.
   Redistributable records land in `data/ground_motion/public/` (committed);
   the rest land in `data/ground_motion/local/` (never committed).
+- **CESMD web services** — `fea_toolkit.io.cesmd` is a client for the CESMD
+  (USGS + CGS) `/wserv/` API (record-metadata query + zipped dataset download),
+  and `scripts/fetch_cesmd_records.py` drives it to fetch the 40-record IK-2005
+  LMSR-N set into `data/ground_motion/local/<record_id>.csv`.  A dataset
+  download authenticates with any registered e-mail (``CESMD_EMAIL`` env var).
+  Note: ``strongmotioncenter.org`` was DNS-unreachable at the time of writing
+  (Oct 2026 — its authoritative nameservers return ``SERVFAIL``); the client is
+  verified against the archived API docs and fails cleanly while it is down.
 - **Gated providers** — where the provider requires an interactive login (e.g.
   PEER NGA-West2), the script prints the metadata and portal URL and the user
   downloads the waveform manually to `data/ground_motion/local/<record_id>.at2`.

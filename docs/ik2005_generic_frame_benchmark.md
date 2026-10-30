@@ -228,6 +228,18 @@ fetch all 40 records into `data/ground_motion/local/` (the client lives in
    (the runner reads `.AT2` natively via `read_peer_record`; `.csv` also works).
    Mind the download caps (~200 records / 2 weeks, 400 / month).
 
+**Route C — FEMA P-695 far-field (public-domain fallback).**  If CESMD stays
+down, the **44-record FEMA P-695 far-field set** (ATC-63) is the documented
+public-domain alternative — free, widely mirrored, and a standard
+"ordinary far-field" collapse set with ~4 records in common with LMSR-N
+(Capitola, Gilroy Array #3, El Centro Imp. Co., LA Hollywood Stor).  Its median
+``(Sa,c/g)/γ`` differs slightly from IK-2005's ``≈ 3.3`` (different records),
+so it validates the collapse *machinery* rather than reproducing the exact
+number.  The **USGS NSMP archive** (`escweb.wr.usgs.gov/nsmp-data/`) holds only
+the USGS-operated stations — it is missing most of the CSMIP California stations
+that dominate the LMSR-N Loma Prieta / Northridge records — so it is **not** a
+complete substitute.
+
 Either way, re-run the collapse driver:
 `collapse_capacity_sa("0909", <40 ids>, ...)`.
 
