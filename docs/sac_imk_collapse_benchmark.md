@@ -25,8 +25,12 @@ with `nonlinear=True`, `backbone="imk"`, `hinge_model="lumped"`.  Beam hinges
 use the Lignos–Krawinkler (2011) backbone; column hinges use Lignos et al.
 (2019) with FEMA-355C axial ratios derived member-by-member
 (`derive_column_axial_ratio_by_member=True`); the leaning column stays elastic.
-The model is SI (`{"F": "N", "L": "m", "T": "C"}`), so the m/s² records apply
-directly.
+The model is a **2-D** N–S perimeter moment frame (5 column lines × 3 storeys,
+`ndm=2`/`ndf=3`) carrying **half** the building's seismic mass — one of the two
+symmetric frames — with a leaning column (line 5) that models the interior
+gravity framing for P-Δ.  The transcription carries **no gravity loads** (see
+the strength-ratio section below).  The model is SI
+(`{"F": "N", "L": "m", "T": "C"}`), so the m/s² records apply directly.
 
 ## Method
 
@@ -109,12 +113,18 @@ weight `W = 14.46 MN` (`1.4745e6 kg × 9.80665 m/s²`):
 | `Sa,c(T1)/g` (4-record median) | 2.21 |
 | `(Sa,c/g) / γ` | **≈ 7.4** |
 
-**No P-Δ.**  The SAC transcription carries no gravity loads (the leaning column
-provides the P-Δ axial stiffness but is never loaded), so both this pushover and
-the IDA runs are **without** P-Δ — IK-2005's generic frames include P-Δ through
-the auxiliary backbone.  Adding the leaning-column gravity load would lower both
-`Vy` and the collapse capacity; the no-P-Δ pairing above is internally
-consistent and an upper bound on the P-Δ-normalised capacity.
+**No gravity / no P-Δ.**  The SAC transcription carries **no gravity loads at
+all** — neither on the moment-frame members nor on the leaning column.  The
+moment-frame columns' gravity *axial ratio* `Pg/Pye` **is** already reflected in
+the IMK backbone (`derive_column_axial_ratios_by_member`), so their yield
+moments account for gravity; but the *geometric* P-Δ (second-order moment from
+axial load × drift) needs a held gravity load and is absent.  The leaning column
+is the 2-D P-Δ device that would carry the interior gravity framing's weight —
+also unloaded.  Both this pushover and the IDA runs are therefore **without**
+P-Δ, while IK-2005's frames include it.  Applying gravity (tributary dead load on
+the frame + the gravity-framing weight on the leaning column) would lower both
+`Vy` and the collapse capacity; the no-gravity pairing above is internally
+consistent and an upper bound on the P-Δ-inclusive normalised capacity.
 
 ## Acceptance
 
