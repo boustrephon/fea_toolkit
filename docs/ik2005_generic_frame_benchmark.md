@@ -189,22 +189,46 @@ characteristics.  Transcribed verbatim from Ibarra & Krawinkler (2005), PEER
 | SH87pls | Superstition Hills | 1987 | 6.7 | Plaster City | 21.0 | 0.186 |
 | SH87wsm | Superstition Hills | 1987 | 6.7 | Westmorland Fire Station | 13.3 | 0.172 |
 
+*Station-ID provenance.*  The IDs are the Medina (2002) record labels as
+printed in IK-2005 Table 4.2, verified against the report's PDF text layer
+(not an image OCR).  Three OCR misreads circulate in image-derived copies of
+the table: "Agnes" → **Agnews** State Hospital, ``NR94cmp`` → **``NR94cnp``**,
+``NR94flc`` → **``NR94fle``**.
+
 ### Downloading them (you, not the repo)
 
 The waveforms are **PEER NGA-West2** data, non-redistributable, so they are
 fetched into the local-only mirror by whoever runs the benchmark — never
-committed (`ground_motion_data.md` §3, §5):
+committed (`ground_motion_data.md` §3, §5).  Two routes:
 
+**Route A — CESMD (free, no academic email — the recommended route).**  The
+same 40 California recordings are in the **CESMD** archive
+(<https://www.strongmotioncenter.org>), the merged USGS (NSMP) + California
+Geological Survey (CSMIP) strong-motion data centre.  Its registration form is
+*optional* ("not required as a condition of your access…"), so it needs no
+academic/corporate account, and the records are US Government data (public
+domain).  Search by event + station from the table above, download the
+*processed* (Vol2) horizontal component, and write it as
+`data/ground_motion/local/<record_id>.csv` (two columns ``time,accel`` in m/s²)
+— the runner reads ``.csv`` directly.  (CESMD Vol2 files are header + ASCII
+columns, not PEER ``.AT2``; convert the acceleration column to a plain CSV.)
+
+**Route B — PEER NGA-West2 (academic/corporate email).**
 1. **Register** at <https://ngawest2.berkeley.edu> with a *university or
    corporate* email (personal addresses are rejected; sign-up is open Mon–Fri
    8 AM–8 PM PST; membership ~1 year).
 2. **Search** by earthquake + station from the table above (e.g. event
    "Imperial Valley-06", station "Calipatria Fire Station").
-3. **Download** the `.AT2` waveform for the record into
-   `data/ground_motion/local/<record_id>.AT2` (the runner reads `.AT2` natively
-   via `read_peer_record`; `.csv` also works).  Mind the download caps
-   (~200 records / 2 weeks, 400 / month).
-4. Re-run the collapse driver: `collapse_capacity_sa("0909", <40 ids>, ...)`.
+3. **Download** the `.AT2` waveform into `data/ground_motion/local/<record_id>.AT2`
+   (the runner reads `.AT2` natively via `read_peer_record`; `.csv` also works).
+   Mind the download caps (~200 records / 2 weeks, 400 / month).
+
+Either way, re-run the collapse driver:
+`collapse_capacity_sa("0909", <40 ids>, ...)`.
+
+**Processing caveat.**  CESMD's Vol2 processing differs slightly from PEER's
+NGA re-processing (different band-pass corners); for these well-recorded events
+the difference is small, but exact NGA reproduction needs the NGA files.
 
 **Component caveat.**  Table 4.2 lists no component azimuth: Medina (2002)
 selected *one* horizontal component per station at random.  Exact reproduction
