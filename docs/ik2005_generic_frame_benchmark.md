@@ -138,6 +138,81 @@ period.
   option (`a1 = 0`, `a0 = 4πξ/T1`), the collapse runner uses it, and
   `rayleigh_coefficients` is unit-tested (`tests/test_runner_dynamic.py`).
 
+## LMSR-N record set (IK-2005 Table 4.2)
+
+The collapse comparison needs the 40-record **LMSR-N** set ("Large Magnitude
+Small Distance – New", Medina 2002) — ordinary California records, Mw 6.5–6.9,
+source-to-site 13–40 km, NEHRP site class D, no pulse-type near-fault
+characteristics.  Transcribed verbatim from Ibarra & Krawinkler (2005), PEER
+2005/06, **Table 4.2**:
+
+| Record ID | Event | Year | Mw | Station | R (km) | PGA (g) |
+|---|---|---|---|---|---|---|
+| IV79cal | Imperial Valley | 1979 | 6.5 | Calipatria Fire Station | 23.8 | 0.078 |
+| IV79chi | Imperial Valley | 1979 | 6.5 | Chihuahua | 28.7 | 0.270 |
+| IV79cmp | Imperial Valley | 1979 | 6.5 | Compuertas | 32.6 | 0.186 |
+| IV79e01 | Imperial Valley | 1979 | 6.5 | El Centro Array #1 | 15.5 | 0.139 |
+| IV79e12 | Imperial Valley | 1979 | 6.5 | El Centro Array #12 | 18.2 | 0.116 |
+| IV79e13 | Imperial Valley | 1979 | 6.5 | El Centro Array #13 | 21.9 | 0.139 |
+| IV79nil | Imperial Valley | 1979 | 6.5 | Niland Fire Station | 35.9 | 0.109 |
+| IV79pls | Imperial Valley | 1979 | 6.5 | Plaster City | 31.7 | 0.057 |
+| IV79qkp | Imperial Valley | 1979 | 6.5 | Cucapah | 23.6 | 0.309 |
+| IV79wsm | Imperial Valley | 1979 | 6.5 | Westmorland Fire Station | 15.1 | 0.110 |
+| LP89agw | Loma Prieta | 1989 | 6.9 | Agnews State Hospital | 28.2 | 0.172 |
+| LP89cap | Loma Prieta | 1989 | 6.9 | Capitola | 14.5 | 0.443 |
+| LP89g03 | Loma Prieta | 1989 | 6.9 | Gilroy Array #3 | 14.4 | 0.367 |
+| LP89g04 | Loma Prieta | 1989 | 6.9 | Gilroy Array #4 | 16.1 | 0.212 |
+| LP89gmr | Loma Prieta | 1989 | 6.9 | Gilroy Array #7 | 24.2 | 0.226 |
+| LP89hch | Loma Prieta | 1989 | 6.9 | Hollister City Hall | 28.2 | 0.247 |
+| LP89hda | Loma Prieta | 1989 | 6.9 | Hollister Differential Array | 25.8 | 0.279 |
+| LP89hvr | Loma Prieta | 1989 | 6.9 | Halls Valley | 31.6 | 0.134 |
+| LP89sjw | Loma Prieta | 1989 | 6.9 | Salinas - John & Work | 32.6 | 0.112 |
+| LP89slc | Loma Prieta | 1989 | 6.9 | Palo Alto - SLAC Lab. | 36.3 | 0.194 |
+| LP89svl | Loma Prieta | 1989 | 6.9 | Sunnyvale - Colton Ave. | 28.8 | 0.207 |
+| NR94cen | Northridge | 1994 | 6.7 | LA - Centinela St. | 30.9 | 0.322 |
+| NR94cnp | Northridge | 1994 | 6.7 | Canoga Park - Topanga Can. | 15.8 | 0.420 |
+| NR94far | Northridge | 1994 | 6.7 | LA - N Faring Rd. | 23.9 | 0.273 |
+| NR94fle | Northridge | 1994 | 6.7 | LA - Fletcher Dr. | 29.5 | 0.240 |
+| NR94glp | Northridge | 1994 | 6.7 | Glendale - Las Palmas | 25.4 | 0.206 |
+| NR94hol | Northridge | 1994 | 6.7 | LA - Hollywood Stor FF | 25.5 | 0.231 |
+| NR94lh1 | Northridge | 1994 | 6.7 | Lake Hughes #1 | 36.3 | 0.087 |
+| NR94lv2 | Northridge | 1994 | 6.7 | Leona Valley #2 | 37.7 | 0.063 |
+| NR94lv6 | Northridge | 1994 | 6.7 | Leona Valley #6 | 38.5 | 0.178 |
+| NR94nya | Northridge | 1994 | 6.7 | La Crescenta-New York | 22.3 | 0.159 |
+| NR94pic | Northridge | 1994 | 6.7 | LA - Pico & Sentous | 32.7 | 0.186 |
+| NR94stc | Northridge | 1994 | 6.7 | Northridge - 17645 Saticoy St. | 13.3 | 0.368 |
+| NR94stn | Northridge | 1994 | 6.7 | LA - Saturn St | 30.0 | 0.474 |
+| NR94ver | Northridge | 1994 | 6.7 | LA - E Vernon Ave | 39.3 | 0.153 |
+| SF71pel | San Fernando | 1971 | 6.6 | LA - Hollywood Stor Lot | 21.2 | 0.174 |
+| SH87bra | Superstition Hills | 1987 | 6.7 | Brawley | 18.2 | 0.156 |
+| SH87icc | Superstition Hills | 1987 | 6.7 | El Centro Imp. Co. Cent | 13.9 | 0.358 |
+| SH87pls | Superstition Hills | 1987 | 6.7 | Plaster City | 21.0 | 0.186 |
+| SH87wsm | Superstition Hills | 1987 | 6.7 | Westmorland Fire Station | 13.3 | 0.172 |
+
+### Downloading them (you, not the repo)
+
+The waveforms are **PEER NGA-West2** data, non-redistributable, so they are
+fetched into the local-only mirror by whoever runs the benchmark — never
+committed (`ground_motion_data.md` §3, §5):
+
+1. **Register** at <https://ngawest2.berkeley.edu> with a *university or
+   corporate* email (personal addresses are rejected; sign-up is open Mon–Fri
+   8 AM–8 PM PST; membership ~1 year).
+2. **Search** by earthquake + station from the table above (e.g. event
+   "Imperial Valley-06", station "Calipatria Fire Station").
+3. **Download** the `.AT2` waveform for the record into
+   `data/ground_motion/local/<record_id>.AT2` (the runner reads `.AT2` natively
+   via `read_peer_record`; `.csv` also works).  Mind the download caps
+   (~200 records / 2 weeks, 400 / month).
+4. Re-run the collapse driver: `collapse_capacity_sa("0909", <40 ids>, ...)`.
+
+**Component caveat.**  Table 4.2 lists no component azimuth: Medina (2002)
+selected *one* horizontal component per station at random.  Exact reproduction
+needs that per-record component (Medina 2002 thesis); until it is transcribed,
+the pragmatic choice is the record's single horizontal as resolved from the
+station metadata, or the RotD50 of the two horizontals — this is an open item,
+not silently assumed.
+
 ## Spring placement (landed)
 
 The IK-2005 Appendix B splits each member-end spring's elastic stiffness

@@ -52,3 +52,39 @@ def test_collapse_capacity_result_shape():
     assert res["median_collapse_sa"] is None  # no records collapsed
     assert res["median_collapse_sa_gamma"] is None
     assert res["records"] == []
+
+
+def test_load_record_reads_at2_and_csv():
+    """``_load_record`` accepts PEER ``.AT2`` (g→m/s²) and ``.csv`` (as-is)."""
+    from pathlib import Path
+
+    root = Path(gfr.__file__).resolve().parent.parent.parent.parent
+    local = root / "data" / "ground_motion" / "local"
+    local.mkdir(parents=True, exist_ok=True)
+    at2_id = "_test_lmsr_n_at2"
+    csv_id = "_test_lmsr_n_csv"
+    at2_path = local / f"{at2_id}.AT2"
+    csv_path = local / f"{csv_id}.csv"
+    at2_path.write_text(
+        "PEER NGA STRONG MOTION RECORD\nNPTS=    5, DT=  0.005\n0.1\n-0.1\n0.2\n0.0\n-0.05\n"
+    )
+    csv_path.write_text("time,accel\n0.0,0.0\n0.005,1.0\n0.010,-1.0\n")
+    try:
+        accel_at2, dt_at2 = gfr._load_record(at2_id, 0.005)
+        accel_csv, dt_csv = gfr._load_record(csv_id, 0.005)
+    finally:
+        at2_path.unlink(missing_ok=True)
+        csv_path.unlink(missing_ok=True)
+
+    # .AT2 stores g — converted to m/s² by read_peer_record.
+    assert dt_at2 == 0.005
+    assert accel_at2 == pytest.approx(np.array([0.1, -0.1, 0.2, 0.0, -0.05]) * _G)
+    # .csv stores m/s² directly.
+    assert dt_csv == 0.005
+    assert accel_csv == pytest.approx(np.array([0.0, 1.0, -1.0]))
+
+
+def test_load_record_missing_raises():
+    """An absent record raises a clear ``FileNotFoundError``."""
+    with pytest.raises(FileNotFoundError):
+        gfr._load_record("_no_such_lmsr_n_record", 0.005)

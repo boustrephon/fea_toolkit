@@ -25,14 +25,13 @@ from typing import Any, Optional
 import numpy as np
 
 from .._unit_scaling import g_from_units
-from ..io.ground_motion import read_time_history_csv
+from ..io.ground_motion import read_peer_record, read_time_history_csv
 from . import generic_frame as gf
 from .generic_frame_data import FRAME_DATA
 from .sac_run import (
     collapse_intensity,
     compute_metrics,
     floor_levels,
-    record_path,
     sdof_spectral_acceleration,
 )
 
@@ -46,6 +45,47 @@ _COLLAPSE_DRIFT = 0.10
 def period_1(code: str) -> float:
     """The frame's fundamental period ``T1 = 0.1N`` / ``0.2N`` (s)."""
     return float(FRAME_DATA[code]["T1"])
+
+
+def _load_record(record_id: str, dt: float) -> tuple[np.ndarray, float]:
+    """Load a record from the local/public mirror as ``(accel, dt)`` in m/s².
+
+    PEER NGA waveforms are downloaded as ``.AT2`` (native, g → m/s² via
+    :func:`~fea_toolkit.io.ground_motion.read_peer_record`); the SAC mirror uses
+    ``.csv`` (``time,accel`` in m/s²).  Either is accepted, ``.AT2`` first.  The
+    signal is resampled to *dt* when the native sampling differs.
+
+    Args:
+        record_id: Record identifier (an LMSR-N id such as ``"IV79cal"``).
+        dt: Target integration step (s).
+
+    Returns:
+        ``(accel, dt)`` — resampled acceleration samples (m/s²) and the step.
+
+    Raises:
+        FileNotFoundError: If the record is absent from both mirrors.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent.parent.parent / "data" / "ground_motion"
+    for sub in ("local", "public"):
+        for ext in (".AT2", ".csv"):
+            path = root / sub / f"{record_id}{ext}"
+            if not path.exists():
+                continue
+            if ext == ".AT2":
+                times, accel = read_peer_record(str(path))
+            else:
+                times, accel = read_time_history_csv(str(path))
+            dt0 = float(times[1] - times[0])
+            if abs(dt0 - dt) > 1e-9:
+                t_new = np.arange(0.0, times[-1] + dt, dt)
+                accel = np.interp(t_new, times, accel)
+            return np.asarray(accel, dtype=float), float(dt)
+    raise FileNotFoundError(
+        f"record {record_id!r} not found in data/ground_motion/{{local,public}} "
+        f"(expected {record_id}.AT2 or {record_id}.csv)"
+    )
 
 
 def _ida_run(
@@ -213,15 +253,11 @@ def run_ida(
     Returns:
         The :func:`_ida_run` result dict.
     """
-    times, accel = read_time_history_csv(str(record_path(record_id)))
-    dt0 = float(times[1] - times[0])
-    if abs(dt0 - dt) > 1e-9:
-        t_new = np.arange(0.0, times[-1] + dt, dt)
-        accel = np.interp(t_new, times, accel)
+    accel, dt = _load_record(record_id, dt)
     return _ida_run(
         code,
         record_id,
-        np.asarray(accel, dtype=float),
+        accel,
         dt,
         intensities,
         collapse_drift=collapse_drift,
@@ -274,8 +310,7 @@ def collapse_capacity_sa(
     g = g_from_units(gf.UNITS)
     capacities: dict[str, Optional[float]] = {}
     for rid in record_ids:
-        _, accel = read_time_history_csv(str(record_path(rid)))
-        accel_base = np.asarray(accel, dtype=float)
+        accel_base, dt = _load_record(rid, dt)
         sa_t1 = sdof_spectral_acceleration(accel_base, dt, t1, zeta=0.05)
         res = _ida_run(
             code,
