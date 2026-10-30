@@ -213,6 +213,11 @@ domain).  Search by event + station from the table above, download the
 — the runner reads ``.csv`` directly.  (CESMD Vol2 files are header + ASCII
 columns, not PEER ``.AT2``; convert the acceleration column to a plain CSV.)
 
+This is automated by `scripts/fetch_cesmd_records.py`: run ``--list`` first to
+verify the station-name mapping, then ``--download --email you@example.com`` to
+fetch all 40 records into `data/ground_motion/local/` (the client lives in
+`fea_toolkit.io.cesmd`).
+
 **Route B — PEER NGA-West2 (academic/corporate email).**
 1. **Register** at <https://ngawest2.berkeley.edu> with a *university or
    corporate* email (personal addresses are rejected; sign-up is open Mon–Fri
