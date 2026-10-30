@@ -113,18 +113,24 @@ weight `W = 14.46 MN` (`1.4745e6 kg × 9.80665 m/s²`):
 | `Sa,c(T1)/g` (4-record median) | 2.21 |
 | `(Sa,c/g) / γ` | **≈ 7.4** |
 
-**No gravity / no P-Δ.**  The SAC transcription carries **no gravity loads at
-all** — neither on the moment-frame members nor on the leaning column.  The
-moment-frame columns' gravity *axial ratio* `Pg/Pye` **is** already reflected in
-the IMK backbone (`derive_column_axial_ratios_by_member`), so their yield
-moments account for gravity; but the *geometric* P-Δ (second-order moment from
-axial load × drift) needs a held gravity load and is absent.  The leaning column
-is the 2-D P-Δ device that would carry the interior gravity framing's weight —
-also unloaded.  Both this pushover and the IDA runs are therefore **without**
-P-Δ, while IK-2005's frames include it.  Applying gravity (tributary dead load on
-the frame + the gravity-framing weight on the leaning column) would lower both
-`Vy` and the collapse capacity; the no-gravity pairing above is internally
-consistent and an upper bound on the P-Δ-inclusive normalised capacity.
+**No gravity / no P-Δ — faithful to the SAC benchmark.**  The absence of gravity
+is **not** a gap in the transcription: the Ohtori et al. (2004) benchmark itself
+is a no-gravity, no-P-Δ model.  Its incremental equation of motion (Eq. 1) has
+loading vectors only for ground acceleration, control forces and the unbalanced
+hysteresis force; the tangent stiffness is the *material* (concentrated-
+plasticity) stiffness with no geometric-stiffness term; `struct3.m` defines only
+`Element_mass` (seismic mass) with no load data; and the paper never mentions
+gravity / P-Δ / dead / live load.  This is why the transcription reproduces the
+published El Centro 1.0× response to ~1–4 % without gravity.  The moment-frame
+columns' gravity *axial ratio* `Pg/Pye` is still reflected in the IMK backbone
+(`derive_column_axial_ratios_by_member`).
+
+For the **P-Δ-enabled comparison to Ibarra–Krawinkler (2005)**, whose generic
+frames *do* include global P-Δ (gravity `P = 1.4 × seismic mass`, i.e. dead +
+40 % live, held via a constant geometric-stiffness matrix), the benchmark
+decision is to **adopt IK-2005's `1.4 × seismic mass` convention** verbatim
+(their exact method) so the comparison is direct — the SAC data specifies no
+gravity load of its own.
 
 ## Acceptance
 
