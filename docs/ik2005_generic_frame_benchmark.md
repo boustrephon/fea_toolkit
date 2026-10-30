@@ -14,8 +14,9 @@ related: [sac_imk_collapse_benchmark.md, imk_deterioration_model.md, benchmark_r
 > (`hinge_backbone="imk_peak"`), and the `generic_frame` generator (SI model +
 > IMK backbone mapping + spring placement) landed; the modal-T1 check matches
 > all 12 frames to ≤ 0.5 % and the pushover strength `γ = Vy/W` matches the
-> Appendix-B design value 1.0 to ≤ 2 % — both record-free.  The LMSR-N collapse
-> (IDA) runner is next.
+> Appendix-B design value 1.0 to ≤ 2 % — both record-free.  The collapse (IDA)
+> runner `generic_frame_run.py` landed (P-Δ + held gravity + 5 % mass-proportional
+> damping, smoke-tested on a synthetic pulse); the LMSR-N record fetch remains.
 
 ## Purpose
 
@@ -120,10 +121,22 @@ Rules applied (`.clinerules` §4.6):
    analytically (first-yield `min(2·Myb1/h, 4·Myc/h)/W`, all 12 frames) and the
    pipeline pushover peak base-shear coefficient lands in `[0.9, 1.4]`
    (`tests/test_generic_frame.py`, `tests/test_generic_frame_pushover.py`).
-3. IDA collapse `(Sa,c/g)/γ ≈ 3.3` at `T1 ≈ 1 s` — needs LMSR-N.
+3. ⏳ IDA collapse `(Sa,c/g)/γ ≈ 3.3` at `T1 ≈ 1 s` — the runner
+   (`benchmarks/generic_frame_run.py`) is landed and smoke-tested; only the
+   **LMSR-N record fetch** remains (non-redistributable, local).
 
 First target: **`0909`** (N = 9, T1 = 0.9 s) — closest to the SAC 3-story's
 period.
+
+## Cross-checks (landed)
+
+* **First-mode shape linearity** — the table's `Ii/I1` ratios are tuned for a
+  straight-line first mode; `extract_mode_shapes` confirms `φ_i/φ_r = i/N` to
+  < 0.1 % for the spot-checked frames (`tests/test_generic_frame_modal.py`).
+* **Mass-proportional damping** — IK-2005 §4.3 uses ξ = 5 % proportional to mass
+  only.  `run_transient_analysis` gained a `damping_type="mass_proportional"`
+  option (`a1 = 0`, `a0 = 4πξ/T1`), the collapse runner uses it, and
+  `rayleigh_coefficients` is unit-tested (`tests/test_runner_dynamic.py`).
 
 ## Spring placement (landed)
 

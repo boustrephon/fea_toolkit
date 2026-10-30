@@ -11,6 +11,44 @@ import openseespy.opensees as ops
 logger = logging.getLogger(__name__)
 
 
+def rayleigh_coefficients(
+    damping_ratio: float,
+    period_1: float,
+    period_2: Optional[float] = None,
+    damping_type: str = "rayleigh",
+) -> tuple[float, float]:
+    """Compute the ``(a0, a1)`` damping coefficients for ``C = a0·M + a1·K``.
+
+    Args:
+        damping_ratio: Damping ratio ξ.
+        period_1: First retained period (s) — the anchor for mass-proportional
+            damping.
+        period_2: Second retained period (s) for two-period Rayleigh; ``None``
+            falls back to ``period_1 * 0.5`` (the single-mode convention).
+        damping_type: ``"rayleigh"`` (default, mass + initial-stiffness
+            proportional) or ``"mass_proportional"`` (``a1 = 0``,
+            ``a0 = 4πξ/T1`` — the IK-2005 §4.3 convention: damping proportional
+            to mass only).
+
+    Returns:
+        ``(a0, a1)`` — mass- and initial-stiffness-proportional coefficients.
+
+    Raises:
+        ValueError: For an unknown *damping_type*.
+    """
+    if damping_type == "mass_proportional":
+        return 4.0 * math.pi * damping_ratio / period_1, 0.0
+    if damping_type == "rayleigh":
+        if period_2 is None:
+            period_2 = period_1 * 0.5
+        a0 = 4.0 * math.pi * damping_ratio / (period_1 + period_2)
+        a1 = damping_ratio * period_1 * period_2 / (math.pi * (period_1 + period_2))
+        return a0, a1
+    raise ValueError(
+        f"unknown damping_type {damping_type!r} (expected 'rayleigh' or 'mass_proportional')"
+    )
+
+
 def _free_dof_node_tags(mesh_model: Any, dof: int, ground_exclusion: bool = False) -> set[int]:
     """Node tags whose mass contributes to the lateral base shear.
 
@@ -63,6 +101,7 @@ class TransientRunnerMixin:
         dt: float,
         direction: str = "X",
         damping_ratio: float = 0.05,
+        damping_type: str = "rayleigh",
         period_1: Optional[float] = None,
         period_2: Optional[float] = None,
         gravity_patterns: Optional[dict[str, float]] = None,
@@ -75,7 +114,9 @@ class TransientRunnerMixin:
                 model's acceleration units (length / s²).
             dt: Time step (s).
             direction: Excitation direction — ``"X"``, ``"Y"`` or ``"Z"``.
-            damping_ratio: Rayleigh damping ratio for the two retained modes.
+            damping_ratio: Damping ratio ξ (Rayleigh or mass-proportional).
+            damping_type: ``"rayleigh"`` (default) or ``"mass_proportional"``
+                (``a1 = 0``, ``a0 = 4πξ/T1`` — the IK-2005 §4.3 convention).
             period_1: First Rayleigh period (s); ``None`` → from a 2-mode
                 modal solve.
             period_2: Second Rayleigh period (s); ``None`` → from a 2-mode
@@ -145,9 +186,8 @@ class TransientRunnerMixin:
             if period_2 is None:
                 period_2 = float(periods[1]) if len(periods) > 1 else period_1 * 0.5
 
-        # Rayleigh coefficients — C = a0 * M + a1 * K (exact two-period formula).
-        a0 = 4.0 * math.pi * damping_ratio / (period_1 + period_2)
-        a1 = damping_ratio * period_1 * period_2 / (math.pi * (period_1 + period_2))
+        # Damping matrix — C = a0 * M + a1 * K.
+        a0, a1 = rayleigh_coefficients(damping_ratio, period_1, period_2, damping_type)
 
         # ── Gravity hand-off ──
         if gravity_patterns:

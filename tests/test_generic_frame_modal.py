@@ -42,3 +42,30 @@ def test_generic_frame_fundamental_period(code):
     assert abs(t1 - target) <= _T1_TOL * target, (
         f"{code}: T1 = {t1:.4f} s vs target {target:.2f} s ({100 * (t1 - target) / target:+.2f} %)"
     )
+
+
+@pytest.mark.parametrize("code", ["0303", "0909", "0918"])
+def test_first_mode_shape_is_linear(code):
+    """The frames are tuned for a straight-line first-mode shape (Appendix B).
+
+    The table's ``Ii/I1`` ratios are chosen so the elastic first-mode lateral
+    shape varies linearly from 0 at the base to 1 at the roof: ``φ_i/φ_r = i/N``.
+    """
+    import openseespy.opensees as ops
+
+    ops.wipe()
+    try:
+        builder = gf.build_builder(code)
+        builder.run_modal_analysis(num_modes=2, print_results=False)
+        shapes = builder.extract_mode_shapes(1)
+        n = FRAME_DATA[code]["N"]
+        tags = {level: builder.mesh_model.nodes[f"{level}-0"].node_tag for level in range(n + 1)}
+        phi = [shapes[0][tags[level]][0] for level in range(n + 1)]
+    finally:
+        ops.wipe()
+
+    roof = phi[-1]
+    assert abs(roof) > 1e-12, f"{code}: zero roof displacement in the first mode"
+    norm = [p / roof for p in phi]
+    dev = max(abs(norm[level] - level / n) for level in range(n + 1))
+    assert dev < 0.01, f"{code}: first-mode shape deviates from linear by {dev:.4f}"

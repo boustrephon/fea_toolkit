@@ -189,3 +189,28 @@ def test_free_dof_node_tags_ground_exclusion_drops_below_ground():
     # Z: only the base is fixed in Z → B-1, ground and floor are all free
     # and above the base (z=0).
     assert _free_dof_node_tags(mesh, 3, ground_exclusion=True) == {2, 3, 4}
+
+
+def test_rayleigh_coefficients_two_period():
+    """The default is the exact two-period Rayleigh (a0·M + a1·K)."""
+    from fea_toolkit.opensees._runner_dynamic import rayleigh_coefficients
+
+    a0, a1 = rayleigh_coefficients(0.05, 1.0, 0.5)
+    assert a0 == pytest.approx(4.0 * math.pi * 0.05 / (1.0 + 0.5))
+    assert a1 == pytest.approx(0.05 * 1.0 * 0.5 / (math.pi * (1.0 + 0.5)))
+
+
+def test_rayleigh_coefficients_mass_proportional():
+    """Mass-proportional (IK-2005 §4.3): a1 = 0, a0 = 4πξ/T1."""
+    from fea_toolkit.opensees._runner_dynamic import rayleigh_coefficients
+
+    a0, a1 = rayleigh_coefficients(0.05, 0.9, damping_type="mass_proportional")
+    assert a1 == 0.0
+    assert a0 == pytest.approx(4.0 * math.pi * 0.05 / 0.9)
+
+
+def test_rayleigh_coefficients_rejects_unknown_type():
+    from fea_toolkit.opensees._runner_dynamic import rayleigh_coefficients
+
+    with pytest.raises(ValueError):
+        rayleigh_coefficients(0.05, 1.0, damping_type="tangent")
