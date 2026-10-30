@@ -20,6 +20,8 @@ from __future__ import annotations
 import hashlib
 import importlib.metadata
 import json
+import math
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Optional
 
@@ -467,6 +469,326 @@ def _save_npz(
     save_results_arrays(str(path), arrays)
 
 
+def collapse_intensity(
+    intensities: Sequence[float],
+    drifts: Sequence[float],
+    converged: Sequence[bool],
+    collapse_drift: float = 0.10,
+) -> Optional[float]:
+    """First intensity at which the structure collapses.
+
+    A run *collapses* when it either fails to converge to the end of the record
+    (``converged`` is ``False`` — the Ibarra–Krawinkler non-convergence
+    criterion) or its peak interstorey-drift ratio exceeds *collapse_drift*
+    (the dynamic-instability / sidesway criterion).  The two criteria are
+    evaluated in the order they appear; the first intensity that trips either
+    one is the collapse intensity.
+
+    Args:
+        intensities: The IM ladder (record scale factors), ascending.
+        drifts: Peak interstorey-drift ratio per intensity (``d_max``).
+        converged: ``converged_steps == num_steps`` per intensity.
+        collapse_drift: Peak interstorey-drift ratio above which the structure
+            is deemed collapsed (default ``0.10`` — the FEMA P-695 sidesway
+            proxy).
+
+    Returns:
+        The collapse intensity (scale factor), or ``None`` if no run in the
+        ladder collapsed.
+    """
+    for im, drift, ok in zip(intensities, drifts, converged):
+        if not ok or drift > collapse_drift:
+            return float(im)
+    return None
+
+
+def _ida_run(
+    building: int,
+    record_id: str,
+    accel_base: np.ndarray,
+    dt: float,
+    intensities: Sequence[float],
+    *,
+    collapse_drift: float = 0.10,
+    damping: float = 0.02,
+    tolerance: Optional[float] = None,
+) -> dict[str, Any]:
+    """Run one IDA ladder (a base record scaled over *intensities*).
+
+    Reuses a single :class:`AnalysisBuilder` across the ladder — each
+    :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.run_transient_analysis`
+    call rebuilds the domain, so no intensity sees the previous intensity's
+    state.  The IMK (``IMKBilin``) hinge with the FEMA-355C column axial ratios
+    is the collapse-level model.
+
+    When *tolerance* is given and the ladder brackets a collapse, the first
+    collapse intensity is refined by **bisection** between the last
+    non-collapsed and first collapsed rung, to a relative interval
+    ``(hi − lo)/hi ≤ tolerance`` (the Ibarra–Krawinkler 2005 procedure — small
+    steps until numerical instability, then bisection to a tolerance, taking
+    only the first collapse).  The reported ``collapse_intensity`` is then the
+    bracket midpoint; ``bisection`` records the bracket and each evaluation.
+
+    Args:
+        building: SAC building number (3, 9 or 20).
+        record_id: Record label (provenance only — any identifier works).
+        accel_base: Base acceleration samples (length/s²), one per time step.
+        dt: Integration time step (s).
+        intensities: The IM ladder (ascending scale factors on *accel_base*).
+        collapse_drift: Peak interstorey-drift ratio collapse threshold.
+        damping: Rayleigh damping ratio.
+        tolerance: Relative tolerance for the bisection refinement of the
+            collapse intensity (``None`` disables bisection — the ladder rung
+            is reported as-is).
+
+    Returns:
+        ``{"building", "record", "intensities", "drifts", "converged",
+        "collapse_intensity", "collapse_drift", "bisection"}`` — the IDA curve
+        (drift vs intensity), the per-intensity convergence flags, the collapse
+        intensity (``None`` when none collapsed), and the bisection bracket
+        (``None`` when no bisection ran).
+    """
+    from openseespy.opensees import wipe
+
+    period_1, period_2 = _elastic_rayleigh_periods(building)
+
+    wipe()
+    try:
+        builder = sac.build_builder(
+            building=building,
+            nonlinear=True,
+            backbone="imk",
+            hinge_model="lumped",
+            derive_column_axial_ratio_by_member=True,
+        )
+        levels = floor_levels(builder)
+        tags = [t for _, t in levels]
+        # Record only the representative floor nodes (limit memory), with their
+        # kinematics so ``compute_metrics`` can reconstruct the drift.
+        builder.config["transient_record_node_tags"] = tags
+        builder.config["transient_record_kinematics"] = True
+
+        def _eval(im: float) -> tuple[float, bool]:
+            accel = np.asarray(accel_base, dtype=float) * im
+            res = builder.run_transient_analysis(
+                accel,
+                dt,
+                direction="X",
+                damping_ratio=damping,
+                period_1=period_1,
+                period_2=period_2,
+            )
+            m = compute_metrics(res, accel, levels)
+            return float(m["d_max"]), bool(m["converged_steps"] == m["num_steps"])
+
+        ladder = [float(im) for im in intensities]
+        drifts: list[float] = []
+        converged: list[bool] = []
+        for im in ladder:
+            d, c = _eval(im)
+            drifts.append(d)
+            converged.append(c)
+
+        im_collapse = collapse_intensity(ladder, drifts, converged, collapse_drift)
+
+        # ── Bisection refinement (Ibarra–Krawinkler 2005) ──────────
+        bisection: Optional[dict[str, Any]] = None
+        if tolerance is not None and im_collapse is not None:
+            idx = ladder.index(im_collapse)
+            if idx > 0:
+                lo = ladder[idx - 1]
+                hi = im_collapse
+                evaluations: list[dict[str, Any]] = []
+                while (hi - lo) / hi > tolerance:
+                    mid = 0.5 * (lo + hi)
+                    d, c = _eval(mid)
+                    evaluations.append({"intensity": mid, "drift": d, "converged": c})
+                    if (not c) or d > collapse_drift:
+                        hi = mid
+                    else:
+                        lo = mid
+                bisection = {
+                    "lo": lo,
+                    "hi": hi,
+                    "tolerance": float(tolerance),
+                    "evaluations": evaluations,
+                }
+                im_collapse = 0.5 * (lo + hi)
+    finally:
+        wipe()
+
+    return {
+        "building": building,
+        "record": record_id,
+        "intensities": ladder,
+        "drifts": drifts,
+        "converged": converged,
+        "collapse_intensity": im_collapse,
+        "collapse_drift": float(collapse_drift),
+        "bisection": bisection,
+    }
+
+
+def run_ida(
+    building: int,
+    record_id: str,
+    intensities: Sequence[float],
+    *,
+    collapse_drift: float = 0.10,
+    damping: float = 0.02,
+    tolerance: float = 0.01,
+) -> dict[str, Any]:
+    """Incremental dynamic analysis of one benchmark record over an IM ladder.
+
+    Loads the record from the ground-motion mirror, then scales it over
+    *intensities* (the same scale-factor convention the SAC benchmark's
+    ``CASE_ORDER`` uses) and reports the first collapse intensity, refined by
+    bisection to *tolerance*.  This is the A3 collapse driver — the per-record
+    input to a median collapse-capacity comparison against Ibarra–Krawinkler
+    (2005).
+
+    Args:
+        building: SAC building number (3, 9 or 20).
+        record_id: Benchmark record identifier (a key of
+            :data:`~fea_toolkit.benchmarks.sac_response_data.CASE_ORDER`, e.g.
+            ``"ELCENTRO"``).
+        intensities: Ascending record scale factors (the IM ladder).
+        collapse_drift: Peak interstorey-drift ratio collapse threshold.
+        damping: Rayleigh damping ratio.
+        tolerance: Relative tolerance for the bisection refinement of the
+            collapse intensity (default ``0.01`` — 1 %).
+
+    Returns:
+        The :func:`_ida_run` result dict (``collapse_intensity`` is the first
+        intensity at which the structure collapsed, refined by bisection, or
+        ``None``).
+    """
+    accel_raw, dt = sac.load_benchmark_record(str(record_path(record_id)), sac.SAC_DT_CAL)
+    accel_base = np.asarray(accel_raw, dtype=float)
+    return _ida_run(
+        building,
+        record_id,
+        accel_base,
+        dt,
+        intensities,
+        collapse_drift=collapse_drift,
+        damping=damping,
+        tolerance=tolerance,
+    )
+
+
+def sdof_spectral_acceleration(accel: np.ndarray, dt: float, T: float, zeta: float = 0.05) -> float:
+    """Peak absolute acceleration of a damped linear SDOF oscillator (``Sa(T)``).
+
+    Newmark average-acceleration integration (γ=0.5, β=0.25 — unconditionally
+    stable) of the relative-displacement SDOF ``ü + 2ζω u̇ + ω² u = −üg``, then
+    ``Sa = max |ü_total| = max |ü + üg|`` — the 5 %-damped spectral
+    acceleration used as the MDOF collapse intensity measure (Ibarra–Krawinkler
+    2005 footnote 4: ``{[Sa(T1)/g]/γ}c`` for MDOF systems).
+
+    Args:
+        accel: Ground acceleration samples (length/s²), one per time step.
+        dt: Time step (s).
+        T: Oscillator period (s).
+        zeta: Damping ratio (default ``0.05``).
+
+    Returns:
+        ``Sa(T)`` (length/s²).
+    """
+    accel = np.asarray(accel, dtype=float)
+    w = 2.0 * math.pi / T
+    c = 2.0 * zeta * w
+    k = w * w
+    u = 0.0
+    v = 0.0
+    a = -accel[0]  # relative acceleration at t=0 (quiescent start: ü = -üg)
+    sa = abs(a + accel[0])
+    denom = 1.0 + 0.5 * dt * c + 0.25 * dt * dt * k
+    for i in range(1, len(accel)):
+        ag = accel[i]
+        u_pred = u + dt * v + 0.25 * dt * dt * a
+        v_pred = v + 0.5 * dt * a
+        a = (-ag - c * v_pred - k * u_pred) / denom
+        u = u_pred + 0.25 * dt * dt * a
+        v = v_pred + 0.5 * dt * a
+        sa = max(sa, abs(a + ag))
+    return float(sa)
+
+
+def collapse_capacity_sa(
+    building: int,
+    record_ids: Sequence[str],
+    intensities: Sequence[float],
+    *,
+    collapse_drift: float = 0.10,
+    damping: float = 0.02,
+    tolerance: float = 0.01,
+) -> dict[str, Any]:
+    """Per-record collapse capacity in ``Sa(T1)`` terms + the median.
+
+    Runs :func:`run_ida` for each record and converts each collapse scale
+    factor to a spectral-acceleration capacity — ``Sa(T1)`` scales linearly
+    with the record amplitude, so the capacity is
+    ``collapse_scale_factor × Sa(T1)`` of the unscaled record.  The median over
+    the collapsed records is the Ibarra–Krawinkler (2005) median collapse
+    capacity (their MDOF intensity measure is ``{[Sa(T1)/g]/γ}c``; ``Sa(T1)``
+    is reported here, the ``/γ`` strength normalisation being a per-building
+    constant).
+
+    Records that do not collapse within *intensities* contribute ``None`` and
+    are excluded from the median — the 2005 methodology scales until collapse,
+    so a no-collapse record needs a wider ladder.
+
+    Note: the SAC benchmark ships four records (El Centro, Hachinohe,
+    Northridge, Kobe — see ``sac_response_data.CASE_ORDER``).  A statistically
+    meaningful median collapse capacity would use the ~40-record LMSR-N set
+    (Medina 2002) or the 44-record FEMA P-695 far-field set; the four-record
+    median is the benchmark-scale first step.
+
+    Args:
+        building: SAC building number (3, 9 or 20).
+        record_ids: Benchmark record identifiers.
+        intensities: Ascending record scale factors (the IM ladder).
+        collapse_drift: Peak interstorey-drift ratio collapse threshold.
+        damping: Rayleigh damping ratio.
+        tolerance: Bisection relative tolerance on the collapse intensity.
+
+    Returns:
+        ``{"building", "T1", "capacities", "median_collapse_sa", "records"}``
+        where ``capacities`` maps each record to its ``Sa(T1)`` collapse
+        capacity (or ``None``) and ``median_collapse_sa`` is the median over
+        the collapsed records (or ``None``).
+    """
+    period_1, _ = _elastic_rayleigh_periods(building)
+    t1 = float(period_1) if period_1 else 1.0
+    capacities: dict[str, Optional[float]] = {}
+    for rid in record_ids:
+        accel_raw, dt = sac.load_benchmark_record(str(record_path(rid)), sac.SAC_DT_CAL)
+        accel_base = np.asarray(accel_raw, dtype=float)
+        sa_t1 = sdof_spectral_acceleration(accel_base, dt, t1, zeta=0.05)
+        res = _ida_run(
+            building,
+            rid,
+            accel_base,
+            dt,
+            intensities,
+            collapse_drift=collapse_drift,
+            damping=damping,
+            tolerance=tolerance,
+        )
+        im = res["collapse_intensity"]
+        capacities[rid] = (im * sa_t1) if im is not None else None
+    collapsed = [v for v in capacities.values() if v is not None]
+    median = float(np.median(collapsed)) if collapsed else None
+    return {
+        "building": building,
+        "T1": t1,
+        "capacities": capacities,
+        "median_collapse_sa": median,
+        "records": [str(rid) for rid in record_ids],
+    }
+
+
 def run_matrix(
     buildings: tuple[int, ...] = (3, 9, 20),
     *,
@@ -550,11 +872,15 @@ def write_manifest(rows: list[dict[str, Any]], path: Optional[str] = None) -> Pa
 
 __all__ = [
     "case_fingerprint",
+    "collapse_capacity_sa",
+    "collapse_intensity",
     "compute_metrics",
     "floor_levels",
     "manifest_path",
     "record_path",
     "run_case",
+    "run_ida",
     "run_matrix",
+    "sdof_spectral_acceleration",
     "write_manifest",
 ]
