@@ -4,7 +4,7 @@ description: "Master index of validation/benchmark models for fea_toolkit: bench
 status: "partial"
 tags: [validation, benchmark, planning, pushover, nonlinear-dynamic, modal, response-spectrum, shear-wall, beam-column-joint, ground-motion, masonry, infill, collapse, precast, braced-frame, composite]
 category: [planning]
-related: [benchmark_roadmap.md, vecchio_emara_benchmark.md, duong_benchmark.md, ground_motion_data.md, pushover_analysis.md, nonlinear_dynamic_analysis.md]
+related: [benchmark_roadmap.md, vecchio_emara_benchmark.md, duong_benchmark.md, ground_motion_data.md, pushover_analysis.md, nonlinear_dynamic_analysis.md, sac_imk_collapse_benchmark.md]
 ---
 
 # Benchmark & Validation Model Register
@@ -34,7 +34,7 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
 |---|---|---|---|---|---|---|---|
 | Vertical cantilever | ◐ | ◐ | ◐ | ◐ | ◐ | ◐ | ○ |
 | Beam-column joint | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
-| Steel moment frame | ○ | ○ | ● SAC | ○ | ○ | ● SAC | ○ |
+| Steel moment frame | ○ | ○ | ● SAC | ○ | ○ | ● SAC | ● SAC |
 | RC moment frame | ◐ | ◐ | ◐ | ◐ | ● V&E, Duong | ○ | ○ |
 | Shear wall | ◐ | ◐ | ○ | ○ | ◐ | ○ | ○ |
 | Masonry / URM | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
@@ -50,6 +50,7 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
 | Przemieniecki/Paz shear building + CQC | shear building · modal/RS | T1 | [shear_building_benchmark.md](shear_building_benchmark.md) | `test_benchmark_shear_building.py` |
 | SAC 3/9/20-story frame — modal | steel moment frame · modal | T2 | [sac_benchmark.md](sac_benchmark.md) | `test_benchmark_sac3.py`, `test_benchmark_sac920.py` |
 | SAC 3/9/20-story frame — NLTHA | steel moment frame · NLTHA | T4 | [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md) | `test_benchmark_sac3_nltha.py`, `test_benchmark_sac920.py` |
+| SAC 3-story frame — IMK collapse (IDA) | steel moment frame · IDA | T4 | [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md) | `test_benchmark_sac_ida.py` |
 | Vecchio & Emara (1992) frame | RC moment frame · pushover | T3 | [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md) | `test_rc_benchmark.py` |
 | Duong et al. (2007) shear-critical frame | RC moment frame · pushover | T3 | [duong_benchmark.md](duong_benchmark.md) | `test_duong_benchmark.py` |
 | RC wall pushover (LayeredShell + MVLEM) | shear wall · pushover | — | [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [shell_support.md](shell_support.md) | `test_wall_pushover.py` |

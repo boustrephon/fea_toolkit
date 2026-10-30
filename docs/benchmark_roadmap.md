@@ -377,7 +377,7 @@ cyclic-deterioration modes (basic strength, post-capping strength,
 unloading/reloading stiffness) — calibrated from the **Lignos–Krawinkler steel
 component database** (>300 wide-flange beam/column tests).
 
-**Status (2026-10-27).** A1 machinery landed — `hinge_backbone="imk"` builds a
+**Status (2026-10-30).** A1 machinery landed — `hinge_backbone="imk"` builds a
 `IMKBilin` (modified IMK, **bilinear** hysteretic — the *steel* variant; note
 `ModIMKPeakOriented` is the RC-flexure variant) strong-axis hinge in
 `opensees/_elements.py`, wired through `sac.builder_config`.  A0 landed —
@@ -386,8 +386,12 @@ component database** (>300 wide-flange beam/column tests).
 PEER/ATC-72-1 §3.2.2) and **columns** (Lignos et al. 2019 — the
 *monotonic-backbone* parameters `My*`, `a`, `θp`, `θpc`, `Mr` plus the
 cyclic-deterioration `Λ` of Eq. 13).  A2 landed (single-member cyclic M-θ checks —
-`tests/test_benchmark_sac_imk_cyclic.py`); A3 in progress (first increment:
-`enrich_imk` + 3-story `backbone="imk"`, `tests/test_benchmark_sac_imk_frame.py`).
+`tests/test_benchmark_sac_imk_cyclic.py`).  **A3 landed** — collapse detection
+(`collapse_intensity`: non-convergence OR peak-drift > 0.10), the IDA driver
+(`run_ida`), bisection to 1 %, and the `Sa(T1)` collapse capacity
+(`sdof_spectral_acceleration` + `collapse_capacity_sa`); the four-record median
+3-story collapse capacity is the first comparison (recorded in
+`sac_imk_collapse_benchmark.md`; the 9/20-story matrices are the follow-on).
 See `docs/imk_deterioration_model.md`.
 
 Note: this "Krawinkler" thread (deterioration/collapse) is distinct from the

@@ -9,13 +9,10 @@ related: [benchmark_roadmap.md, sac_nonlinear_benchmark.md, sac_trilinear_hinge_
 
 # IMK (IMKBilin) Steel Hinge — Deterioration Model
 
-⚠️ Partial — A0/A1/A2 landed; A3 (frame collapse) in progress — collapse
-detection + IDA driver + bisection + `Sa(T1)` collapse capacity landed
-2026-10-30 (`collapse_intensity` / `_ida_run` / `run_ida` /
-`sdof_spectral_acceleration` / `collapse_capacity_sa`; **no residual-stiffness
-floor** — non-convergence is the benchmark's collapse criterion).  Remaining:
-the four-record median `Sa(T1)` comparison vs Ibarra–Krawinkler (2005) and the
-`enrich_hinge` build-time route.
+⚠️ Partial — A0/A1/A2/A3 landed; the four-record median `Sa(T1)` collapse
+comparison vs Ibarra–Krawinkler (2005) landed 2026-10-30 — median
+`Sa,c(T1)/g ≈ 2.21` (see `sac_imk_collapse_benchmark.md`).  Remaining: the
+`enrich_hinge` build-time route and the 9/20-story matrices.
 
 ## 1. What it is
 
@@ -117,7 +114,7 @@ From `benchmark_roadmap.md` §3 (priority 1):
 | **A0 — backbone data** | Beams: Lignos–Krawinkler (2011) θp/θpc/Λ; Columns: Lignos et al. (2019) My/a*/θp/θpc/Mr | ✅ |
 | **A1 — material** | IMK (`IMKBilin`) uniaxial material behind `hinge_backbone="imk"` | ✅ landed |
 | **A2 — single-member checks** | M-θ loops vs the component-database envelopes | ✅ landed (material-level) |
-| **A3 — frame collapse** | SAC 3/9/20 matrices with IMK; IDA vs Ibarra–Krawinkler (2005) | 🚧 in progress |
+| **A3 — frame collapse** | SAC 3/9/20 matrices with IMK; IDA vs Ibarra–Krawinkler (2005) | ✅ landed (3-story) |
 
 **A1 (landed).** `opensees/_elements.py` gained a `hinge_backbone="imk"` branch
 in `_create_lumped_hinges` — a `IMKBilin` strong-axis hinge reading a stamped
@@ -245,9 +242,10 @@ Open A3 items, in build order:
    **Decided 2026-10-30 — the four SAC records** (El Centro, Hachinohe,
    Northridge, Kobe — `CASE_ORDER`) are the first comparison set; the
    ~40-record LMSR-N (Medina 2002) / 44-record FEMA P-695 far-field set is the
-   documented follow-on for a statistically meaningful median.  **Remaining:**
-   run the four-record median `Sa(T1)` collapse capacity and compare it against
-   Ibarra–Krawinkler (2005), then the `enrich_hinge` build-time route.
+   documented follow-on for a statistically meaningful median.  **Landed
+   2026-10-30** — the four-record median collapse capacity is
+   `Sa,c(T1)/g ≈ 2.21` (see `sac_imk_collapse_benchmark.md`).  **Remaining:**
+   the `enrich_hinge` build-time route.
 
 ## 6. Calibration equations
 

@@ -18,8 +18,9 @@ mismatch, `enrich_imk` skips the study braces (the 3-story link bay and the
 (`frame_segments`) are computed in preprocessing with the **raw** column axial
 `P_g` + transfer-column warning, and the builder consumes `frame_segments` to
 emit **one spring per hinge-eligible point** (calibrated per segment).
-Remaining: the `enrich_hinge` build-time IMK route (replacing `enrich_imk`) and
-the four-record median `Sa(T1)` collapse comparison vs Ibarra–Krawinkler (2005).
+Remaining: the `enrich_hinge` build-time IMK route (replacing `enrich_imk`).
+The four-record median `Sa(T1)` collapse comparison vs Ibarra–Krawinkler (2005)
+landed 2026-10-30 — see `docs/sac_imk_collapse_benchmark.md`.
 (Collapse detection + bisection + the `Sa(T1)` collapse capacity landed
 2026-10-30; the residual-stiffness floor was **dropped 2026-10-30** — the
 benchmark's non-convergence criterion makes it unnecessary — see decision 7.)
