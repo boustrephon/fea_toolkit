@@ -173,19 +173,29 @@ def test_lmsr_n_manifest_ids_match_ik2005_table():
 
 
 _EXPECTED_NOT_IN_CESMD = {
+    "LP89agw",  # Agnews State Hospital
+    "LP89sjw",  # Salinas - John & Work
+    "NR94lv6",  # Leona Valley #6
+    "SH87bra",  # Brawley
+    "SH87icc",  # El Centro Imp. Co. Cent
+    "SH87pls",  # Plaster City (Superstition Hills)
+}
+
+_EXPECTED_VIA_USGS = {
+    "IV79cal",
+    "IV79e01",
+    "IV79e12",
+    "IV79e13",
+    "IV79nil",
+    "IV79pls",
+    "IV79wsm",
     "IV79chi",
     "IV79cmp",
-    "IV79qkp",  # Baja California (Mexico)
-    "IV79nil",
-    "LP89agw",
+    "IV79qkp",
     "LP89hch",
     "LP89hda",
-    "LP89sjw",
     "LP89slc",
-    "NR94lv6",
-    "SH87bra",
-    "SH87icc",
-    "SH87pls",
+    "LP89svl",
 }
 
 
@@ -193,4 +203,7 @@ def test_not_in_cesmd_subset_of_manifest():
     fetch = _load_fetch_script()
     ids = {rid for rid, _, _, _ in fetch.LMSR_N_RECORDS}
     assert fetch.NOT_IN_CESMD == _EXPECTED_NOT_IN_CESMD
+    assert fetch.VIA_USGS == _EXPECTED_VIA_USGS
     assert ids >= fetch.NOT_IN_CESMD
+    assert ids >= fetch.VIA_USGS
+    assert not (fetch.NOT_IN_CESMD & fetch.VIA_USGS), "skip sets must be disjoint"

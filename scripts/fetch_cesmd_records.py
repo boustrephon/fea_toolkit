@@ -96,24 +96,38 @@ LMSR_N_RECORDS: list[tuple[str, int, str, str]] = [
     ("SH87wsm", 1987, "Westmorland", "Westmorland Fire Station"),
 ]
 
-#: LMSR-N records that CESMD does **not** expose (Baja-California stations, plus
-#: older CSMIP/USGS records absent from CESMD's web services).  These need PEER
-#: NGA-West2.  (Some may exist under different names; none are retrievable via
-#: the current search keys.)
+#: LMSR-N records that CESMD does **not** expose (older CSMIP/USGS records absent
+#: from CESMD's web services) and that still need PEER NGA-West2.  (Some may
+#: exist under different names; none are retrievable via the current search keys.)
 NOT_IN_CESMD: set[str] = {
+    "LP89agw",  # Agnews State Hospital (CSMIP; CESMD metadata-only)
+    "LP89sjw",  # Salinas - John & Work (CSMIP; CESMD metadata-only)
+    "NR94lv6",  # Leona Valley #6 (CESMD has #1-#5)
+    "SH87bra",  # Brawley (Superstition Hills 1987)
+    "SH87icc",  # El Centro Imp. Co. Cent
+    "SH87pls",  # Plaster City (Superstition Hills 1987)
+}
+
+#: LMSR-N records already fetched from the USGS NSMP archive (see
+#: ``scripts/fetch_usgs_records.py``) — skip them here.  This covers the whole
+#: Imperial Valley 1979 event (CESMD holds none of it) and the four Loma Prieta
+#: stations whose CESMD name either differs (Hollister City Hall / Diff Array,
+#: SLAC) or maps to the wrong building (Sunnyvale → Salsman Residence).
+VIA_USGS: set[str] = {
+    "IV79cal",
+    "IV79e01",
+    "IV79e12",
+    "IV79e13",
+    "IV79nil",
+    "IV79pls",
+    "IV79wsm",
     "IV79chi",
     "IV79cmp",
-    "IV79qkp",  # Baja California (Mexico)
-    "IV79nil",  # Niland Fire Station
-    "LP89agw",  # Agnews State Hospital
-    "LP89hch",  # Hollister City Hall
-    "LP89hda",  # Hollister Differential Array
-    "LP89sjw",  # Salinas - John & Work
-    "LP89slc",  # Palo Alto - SLAC Lab.
-    "NR94lv6",  # Leona Valley #6 (CESMD has #1-#5)
-    "SH87bra",
-    "SH87icc",
-    "SH87pls",  # Brawley / El Centro Imp. / Plaster City
+    "IV79qkp",
+    "LP89hch",
+    "LP89hda",
+    "LP89slc",
+    "LP89svl",
 }
 
 #: Where downloaded records are written (the runner's local mirror).
@@ -186,6 +200,9 @@ def cmd_list(delay: float = 1.0, limit: Optional[int] = None) -> int:
         if rid in NOT_IN_CESMD:
             print(f"{rid:8s} {station!r} ({year}) -> not in CESMD (needs PEER)")
             continue
+        if rid in VIA_USGS:
+            print(f"{rid:8s} {station!r} ({year}) -> already fetched from USGS NSMP")
+            continue
         try:
             matches = _iter_matches(_search(key, year))
         except CESMDError as exc:
@@ -216,6 +233,9 @@ def cmd_download(
             time.sleep(delay)
         if rid in NOT_IN_CESMD:
             print(f"skip   {rid} (not in CESMD — needs PEER NGA-West2)")
+            continue
+        if rid in VIA_USGS:
+            print(f"skip   {rid} (already fetched from USGS NSMP)")
             continue
         csv_path = LOCAL / f"{rid}.csv"
         if csv_path.exists():
