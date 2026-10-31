@@ -130,6 +130,27 @@ def test_query_records_includes_groupby(monkeypatch):
     assert "nodata" not in captured["url"]
 
 
+def test_download_dataset_rejects_empty_response(tmp_path, monkeypatch):
+    """An empty (HTTP 204) response — unregistered e-mail — is a clear error."""
+    import urllib.request
+
+    monkeypatch.setenv(cesmd.CESMD_EMAIL_ENV, "test@example.com")
+
+    class _Empty:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return b""
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _Empty())
+    with pytest.raises(CESMDError, match="not registered"):
+        cesmd.download_dataset(tmp_path, "IV79cal", stname="Calipatria")
+
+
 # ── fetch script manifest ───────────────────────────────────────────
 
 

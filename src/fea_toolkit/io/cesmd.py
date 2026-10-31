@@ -199,6 +199,12 @@ def download_dataset(
             f"could not download from CESMD ({url}): {exc}. "
             "The CESMD site may be down (DNS or network outage)."
         ) from exc
+    if not data:
+        raise CESMDError(
+            f"CESMD returned an empty dataset for {filename!r} — the e-mail "
+            f"{email!r} is likely not registered (a registered e-mail is "
+            "required to download datasets)."
+        )
     target.write_bytes(data)
     return target
 
