@@ -47,7 +47,9 @@ def period_1(code: str) -> float:
     return float(FRAME_DATA[code]["T1"])
 
 
-def _load_record(record_id: str, dt: float) -> tuple[np.ndarray, float]:
+def _load_record(
+    record_id: str, dt: float, *, channel: Optional[str] = None
+) -> tuple[np.ndarray, float]:
     """Load a record from the local/public mirror as ``(accel, dt)`` in m/s².
 
     PEER NGA waveforms are downloaded as ``.AT2`` (native, g → m/s² via
@@ -55,9 +57,16 @@ def _load_record(record_id: str, dt: float) -> tuple[np.ndarray, float]:
     ``.csv`` (``time,accel`` in m/s²).  Either is accepted, ``.AT2`` first.  The
     signal is resampled to *dt* when the native sampling differs.
 
+    Multi-component mirrors store one file per channel, ``<record_id>_<channel>.csv``
+    (the USGS records fetched by ``scripts/fetch_usgs_records.py``).  Pass
+    *channel* to read ``<record_id>_<channel>.csv`` instead of the single-file
+    ``<record_id>.csv`` / ``.AT2``.
+
     Args:
         record_id: Record identifier (an LMSR-N id such as ``"IV79cal"``).
         dt: Target integration step (s).
+        channel: Optional channel suffix (e.g. ``"a"``) for a multi-component
+            mirror; ``None`` reads the single-file record.
 
     Returns:
         ``(accel, dt)`` — resampled acceleration samples (m/s²) and the step.
@@ -67,10 +76,11 @@ def _load_record(record_id: str, dt: float) -> tuple[np.ndarray, float]:
     """
     from pathlib import Path
 
+    suffix = f"_{channel}" if channel else ""
     root = Path(__file__).resolve().parent.parent.parent.parent / "data" / "ground_motion"
     for sub in ("local", "public"):
         for ext in (".AT2", ".csv"):
-            path = root / sub / f"{record_id}{ext}"
+            path = root / sub / f"{record_id}{suffix}{ext}"
             if not path.exists():
                 continue
             if ext == ".AT2":
@@ -84,7 +94,7 @@ def _load_record(record_id: str, dt: float) -> tuple[np.ndarray, float]:
             return np.asarray(accel, dtype=float), float(dt)
     raise FileNotFoundError(
         f"record {record_id!r} not found in data/ground_motion/{{local,public}} "
-        f"(expected {record_id}.AT2 or {record_id}.csv)"
+        f"(expected {record_id}{suffix}.AT2 or {record_id}{suffix}.csv)"
     )
 
 
@@ -230,6 +240,7 @@ def run_ida(
     max_scale: Optional[float] = None,
     pdelta: bool = True,
     pdelta_gravity: bool = True,
+    channel: Optional[str] = None,
 ) -> dict[str, Any]:
     """Incremental dynamic analysis of one record over an IM ladder.
 
@@ -249,11 +260,13 @@ def run_ida(
         max_scale: Optional upper bound on the ladder (geometric extension).
         pdelta: When True, emit the ``PDelta`` geometric transformation.
         pdelta_gravity: When True, hold the IK-2005 gravity load.
+        channel: Optional channel suffix for a multi-component mirror (see
+            :func:`_load_record`).
 
     Returns:
         The :func:`_ida_run` result dict.
     """
-    accel, dt = _load_record(record_id, dt)
+    accel, dt = _load_record(record_id, dt, channel=channel)
     return _ida_run(
         code,
         record_id,
@@ -281,6 +294,8 @@ def collapse_capacity_sa(
     max_scale: Optional[float] = None,
     pdelta: bool = True,
     pdelta_gravity: bool = True,
+    record_channels: Optional[dict[str, str]] = None,
+    verbose: bool = False,
 ) -> dict[str, Any]:
     """Per-record collapse capacity in ``Sa(T1)`` terms + the median, for *code*.
 
@@ -301,6 +316,11 @@ def collapse_capacity_sa(
         max_scale: Optional upper bound on the ladder.
         pdelta: When True, emit the ``PDelta`` geometric transformation.
         pdelta_gravity: When True, hold the IK-2005 gravity load.
+        record_channels: Optional ``record_id → channel suffix`` map for the
+            multi-component mirror (USGS records stored as
+            ``<record_id>_<channel>.csv``).  Records absent from the map are read
+            as single-file ``<record_id>.csv`` / ``.AT2``.
+        verbose: When True, print per-record progress.
 
     Returns:
         ``{"code", "T1", "gamma", "capacities", "median_collapse_sa",
@@ -309,8 +329,11 @@ def collapse_capacity_sa(
     t1 = period_1(code)
     g = g_from_units(gf.UNITS)
     capacities: dict[str, Optional[float]] = {}
-    for rid in record_ids:
-        accel_base, dt = _load_record(rid, dt)
+    for i, rid in enumerate(record_ids):
+        if verbose:
+            print(f"  [{i + 1}/{len(record_ids)}] {rid}", flush=True)
+        channel = record_channels.get(rid) if record_channels else None
+        accel_base, dt = _load_record(rid, dt, channel=channel)
         sa_t1 = sdof_spectral_acceleration(accel_base, dt, t1, zeta=0.05)
         res = _ida_run(
             code,

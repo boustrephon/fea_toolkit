@@ -88,3 +88,20 @@ def test_load_record_missing_raises():
     """An absent record raises a clear ``FileNotFoundError``."""
     with pytest.raises(FileNotFoundError):
         gfr._load_record("_no_such_lmsr_n_record", 0.005)
+
+
+def test_load_record_reads_channel_suffix():
+    """``_load_record`` reads ``<record_id>_<channel>.csv`` when channel is given."""
+    from pathlib import Path
+
+    root = Path(gfr.__file__).resolve().parent.parent.parent.parent
+    local = root / "data" / "ground_motion" / "local"
+    local.mkdir(parents=True, exist_ok=True)
+    path = local / "_test_lmsr_n_chan_a.csv"
+    path.write_text("time,accel\n0.0,0.0\n0.005,2.0\n")
+    try:
+        accel, dt = gfr._load_record("_test_lmsr_n_chan", 0.005, channel="a")
+    finally:
+        path.unlink(missing_ok=True)
+    assert dt == 0.005
+    assert accel == pytest.approx(np.array([0.0, 2.0]))

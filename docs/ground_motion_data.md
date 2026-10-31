@@ -70,12 +70,18 @@ for a JSON manifest registry, and carries no waveform data.
   the rest land in `data/ground_motion/local/` (never committed).
 - **CESMD web services** — `fea_toolkit.io.cesmd` is a client for the CESMD
   (USGS + CGS) `/wserv/` API (record-metadata query + zipped dataset download),
-  and `scripts/fetch_cesmd_records.py` drives it to fetch the 40-record IK-2005
-  LMSR-N set into `data/ground_motion/local/<record_id>.csv`.  A dataset
-  download authenticates with any registered e-mail (``CESMD_EMAIL`` env var).
-  Note: ``strongmotioncenter.org`` was DNS-unreachable at the time of writing
-  (Oct 2026 — its authoritative nameservers return ``SERVFAIL``); the client is
-  verified against the archived API docs and fails cleanly while it is down.
+  and `scripts/fetch_cesmd_records.py` drives it to fetch the IK-2005 LMSR-N
+  records CESMD holds (19 of 40) into `data/ground_motion/local/<record_id>.csv`.
+  A dataset download authenticates with any registered e-mail (``CESMD_EMAIL``
+  env var).
+- **USGS NSMP archive** — `scripts/fetch_usgs_records.py` fetches the 14 LMSR-N
+  records CESMD lacks (Imperial Valley 1979 via the DDS-7 CD-ROM, four Loma
+  Prieta stations via the per-event ``corr_sma-1.zip``) into
+  `data/ground_motion/local/<record_id>_<channel>.csv` (SMC format, parsed by
+  `parse_smc`).
+- **PEER NGA-West2 only** — 7 of the 40 LMSR-N records exist only in PEER
+  NGA-West2 (Agnews, Salinas, Leona Valley #6, Pico & Sentous, Brawley,
+  El Centro Imp. Co., Plaster City); see `ik2005_generic_frame_benchmark.md`.
 - **Gated providers** — where the provider requires an interactive login (e.g.
   PEER NGA-West2), the script prints the metadata and portal URL and the user
   downloads the waveform manually to `data/ground_motion/local/<record_id>.at2`.

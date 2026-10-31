@@ -16,7 +16,10 @@ related: [sac_imk_collapse_benchmark.md, imk_deterioration_model.md, benchmark_r
 > all 12 frames to ≤ 0.5 % and the pushover strength `γ = Vy/W` matches the
 > Appendix-B design value 1.0 to ≤ 2 % — both record-free.  The collapse (IDA)
 > runner `generic_frame_run.py` landed (P-Δ + held gravity + 5 % mass-proportional
-> damping, smoke-tested on a synthetic pulse); the LMSR-N record fetch remains.
+> damping, smoke-tested on a synthetic pulse).  33 of the 40 LMSR-N records are
+> now fetched locally (19 CESMD + 14 USGS NSMP); the remaining 7 are PEER
+> NGA-West2-only.  `scripts/run_ik2005_collapse.py` drives the 33-record IDA on
+> `0909`.
 
 ## Purpose
 
@@ -195,6 +198,26 @@ printed in IK-2005 Table 4.2, verified against the report's PDF text layer
 the table: "Agnes" → **Agnews** State Hospital, ``NR94cmp`` → **``NR94cnp``**,
 ``NR94flc`` → **``NR94fle``**.
 
+### Acquisition status — 33/40 fetched
+
+33 records are in the local mirror (`data/ground_motion/local/`), fetched from
+two open archives; the other 7 exist only in PEER NGA-West2:
+
+| Source | Count | Records |
+|---|---|---|
+| USGS NSMP archive (SMC / DDS-7) | 14 | `IV79cal` `IV79chi` `IV79cmp` `IV79e01` `IV79e12` `IV79e13` `IV79nil` `IV79pls` `IV79qkp` `IV79wsm` `LP89hch` `LP89hda` `LP89slc` `LP89svl` |
+| CESMD (Vol2) | 19 | `LP89cap` `LP89g03` `LP89g04` `LP89gmr` `LP89hvr` `NR94cen` `NR94cnp` `NR94far` `NR94fle` `NR94glp` `NR94hol` `NR94lh1` `NR94lv2` `NR94nya` `NR94stc` `NR94stn` `NR94ver` `SF71pel` `SH87wsm` |
+| **PEER NGA-West2 only** | 7 | `LP89agw` `LP89sjw` `NR94lv6` `NR94pic` `SH87bra` `SH87icc` `SH87pls` |
+
+The 7 PEER-only records were confirmed absent from both open archives: CESMD's
+Superstition Hills 1987 coverage is only the CDMG stations (not the USGS
+`Brawley` / `El Centro Imp. Co. Cent` / `Plaster City`), the USGS NSMP online
+archive has digitised only 3 of its ~20 Superstition Hills stations, and the
+Agnews / Salinas / Leona Valley #6 / Pico & Sentous records are CSMIP/CDMG
+recordings CESMD never digitised.  Their NGA-West2 RSNs (verify against the
+flatfile): `SH87bra`≈718, `SH87icc`≈719, `SH87pls`≈720, `LP89agw`≈758,
+`LP89sjw`≈762, `NR94lv6`≈1045, `NR94pic`≈1119.
+
 ### Downloading them (you, not the repo)
 
 The waveforms are **PEER NGA-West2** data, non-redistributable, so they are
@@ -213,10 +236,14 @@ domain).  Search by event + station from the table above, download the
 — the runner reads ``.csv`` directly.  (CESMD Vol2 files are header + ASCII
 columns, not PEER ``.AT2``; convert the acceleration column to a plain CSV.)
 
-This is automated by `scripts/fetch_cesmd_records.py`: run ``--list`` first to
-verify the station-name mapping, then ``--download --email you@example.com`` to
-fetch all 40 records into `data/ground_motion/local/` (the client lives in
-`fea_toolkit.io.cesmd`).
+This is automated by `scripts/fetch_cesmd_records.py` (19 of the 40 records —
+see the acquisition table above: ``NOT_IN_CESMD`` skips the 7 PEER-only records
+and ``VIA_USGS`` skips the 14 already fetched from the USGS NSMP archive).  Run
+``--list`` first to verify the station-name mapping, then
+``--download --email you@example.com`` (the client lives in
+`fea_toolkit.io.cesmd`).  The 14 USGS records CESMD lacks (all of Imperial
+Valley 1979 plus four Loma Prieta stations) come from the USGS NSMP archive via
+`scripts/fetch_usgs_records.py`.
 
 **Route B — PEER NGA-West2 (academic/corporate email).**
 1. **Register** at <https://ngawest2.berkeley.edu> with a *university or
@@ -240,8 +267,15 @@ the USGS-operated stations — it is missing most of the CSMIP California statio
 that dominate the LMSR-N Loma Prieta / Northridge records — so it is **not** a
 complete substitute.
 
-Either way, re-run the collapse driver:
-`collapse_capacity_sa("0909", <40 ids>, ...)`.
+Either way, run the collapse driver over the available records:
+
+```bash
+python scripts/run_ik2005_collapse.py --code 0909
+```
+
+This wraps `collapse_capacity_sa("0909", <33 ids>, ..., record_channels=USGS_CHANNELS)`
+— the channel map selects, for each multi-component USGS record, the horizontal
+component whose PGA matches Table 4.2.
 
 **Processing caveat.**  CESMD's Vol2 processing differs slightly from PEER's
 NGA re-processing (different band-pass corners); for these well-recorded events
@@ -250,9 +284,12 @@ the difference is small, but exact NGA reproduction needs the NGA files.
 **Component caveat.**  Table 4.2 lists no component azimuth: Medina (2002)
 selected *one* horizontal component per station at random.  Exact reproduction
 needs that per-record component (Medina 2002 thesis); until it is transcribed,
-the pragmatic choice is the record's single horizontal as resolved from the
-station metadata, or the RotD50 of the two horizontals — this is an open item,
-not silently assumed.
+the runner picks the horizontal component whose PGA matches Table 4.2 — for the
+multi-component USGS records via ``USGS_CHANNELS`` in
+`scripts/run_ik2005_collapse.py`, and for the CESMD records the single ``CH1``
+channel — rather than silently assuming a component.  (Two CESMD ``CH1`` records,
+`LP89gmr` and `NR94stc`, landed on the *other* horizontal than Table 4.2; the
+rest match within ~5 %.)
 
 ## Spring placement (landed)
 
