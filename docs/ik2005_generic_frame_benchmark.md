@@ -125,7 +125,7 @@ Rules applied (`.clinerules` §4.6):
    pipeline pushover peak base-shear coefficient lands in `[0.9, 1.4]`
    (`tests/test_generic_frame.py`, `tests/test_generic_frame_pushover.py`).
 3. ✅ IDA collapse `(Sa,c/g)/γ ≈ 3.3` at `T1 ≈ 1 s` — median **3.41** over the
-   33 fetched LMSR-N records (vs ≈ 3.3, +3 %); dispersion σ_ln = 0.56 vs
+   33 fetched LMSR-N records (vs ≈ 3.3, +3 %); dispersion σ_ln = 0.55 vs
    IK-2005's ≈ 0.42 (Fig 5.18c).  See "Results" below.
 
 First target: **`0909`** (N = 9, T1 = 0.9 s) — closest to the SAC 3-story's
@@ -141,7 +141,7 @@ every record collapses; the five slow records resolve at scales 33–64):
 | Statistic | Ours (33 records) | IK-2005 | Δ |
 |---|---|---|---|
 | Median `(Sa,c/g)/γ` | **3.41** | ≈ 3.3 (§5.5) | **+3 %** ✅ |
-| Dispersion σ_ln | **0.56** | ≈ 0.42 (Fig 5.18c) | +33 % ⚠️ |
+| Dispersion σ_ln | **0.55** | ≈ 0.42 (Fig 5.18c) | +31 % ⚠️ |
 
 IK-2005 reports σ_ln only *graphically* (Fig 5.18c, "Dispersion of Collapse
 Capacity Spectra", y-axis "Standard Dev. ln[Sa,c(T1)/g]/γ") — ≈ 0.42 is read
@@ -191,7 +191,7 @@ change):
 **Reading.**  Collapse is dominated by dynamic instability (28/33), so the
 detector largely *is* the IK-2005 criterion.  The 10 % drift proxy only clips 5
 records — and it is **not** what inflates σ_ln: recomputing σ_ln over the 28
-instability records alone gives 0.56, unchanged.  The 0.56-vs-0.42 gap therefore
+instability records alone gives 0.55, unchanged.  The 0.55-vs-0.42 gap therefore
 comes from elsewhere (the 7 absent PEER records, the two wrong-component CESMD
 records `LP89gmr`/`NR94stc`, CESMD Vol2-vs-PEER processing, and/or modelling
 differences).  The drift proxy also does **not** drag the median below target:
