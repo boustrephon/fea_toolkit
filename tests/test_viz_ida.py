@@ -51,6 +51,22 @@ def test_plot_ida_curves_empty_is_none():
     assert plot_ida_curves({}) is None
 
 
+def test_plot_ida_curves_flatline_option(ida_arrays):
+    """flatline=True draws a horizontal cap instead of × markers."""
+    fig = plot_ida_curves(ida_arrays, flatline=True)
+    assert fig is not None
+    import matplotlib.pyplot as plt
+
+    ax = fig.axes[0]
+    # IV79cal collapses by non-convergence -> one dashed horizontal flatline.
+    flat = [ln for ln in ax.lines if ln.get_linestyle() == "--" and len(ln.get_xdata()) == 2]
+    assert len(flat) == 1
+    assert flat[0].get_ydata()[0] == flat[0].get_ydata()[1]
+    # No × non-converged scatter in flatline mode (only the collapse markers).
+    assert len(ax.collections) == 1
+    plt.close(fig)
+
+
 def test_plot_ida_curves_marks_nonconverged_rungs(ida_arrays):
     """A non-converged rung is a `×` marker, not part of the curve line."""
     fig = plot_ida_curves(ida_arrays)
