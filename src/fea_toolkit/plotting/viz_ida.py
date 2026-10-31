@@ -21,38 +21,56 @@ def _scalar(data: dict, key: str) -> Optional[float]:
     return float(np.asarray(arr).reshape(-1)[0])
 
 
-def _ida_curves(data: dict) -> tuple[list[str], list[tuple[str, np.ndarray, np.ndarray]]]:
-    """Return ``(records, curves)`` — the per-record ``(im, drift)`` pairs.
+def _ida_curves(
+    data: dict,
+) -> tuple[list[str], list[tuple[str, np.ndarray, np.ndarray, np.ndarray]]]:
+    """Return ``(records, curves)`` — per-record ``(im, drift, converged)``.
 
     The IM axis is ``scale × Sa_T1_g`` (spectral acceleration at T1, normalised
     by g, the IK-2005 intensity measure); the EDP axis is the peak
-    interstorey-drift ratio.
+    interstorey-drift ratio.  ``converged`` is the per-rung boolean ladder the
+    plotter uses to separate the converged response (the curve) from the
+    non-converged (collapse) rungs, whose recorded drift is the peak reached
+    before numerical failure rather than the true flatline response.
     """
     records = [str(r) for r in data.get("ida/record_id", [])]
     if not records:
         records = ida_record_names(data)
-    curves: list[tuple[str, np.ndarray, np.ndarray]] = []
+    curves: list[tuple[str, np.ndarray, np.ndarray, np.ndarray]] = []
     for rid in records:
         scale = np.asarray(data.get(make_ida_key(rid, "ida/{record}/scale")), dtype=float)
         drift = np.asarray(data.get(make_ida_key(rid, "ida/{record}/drift")), dtype=float)
+        converged = np.asarray(data.get(make_ida_key(rid, "ida/{record}/converged")), dtype=bool)
+        if converged.shape != drift.shape:
+            converged = np.ones(drift.shape, dtype=bool)
         sa_g = _scalar(data, make_ida_key(rid, "ida/{record}/Sa_T1_g"))
         sa_g = sa_g if sa_g is not None else 1.0
-        curves.append((rid, scale * sa_g, drift))
+        curves.append((rid, scale * sa_g, drift, converged))
     return records, curves
 
 
 def _median_curve(
-    curves: list[tuple[str, np.ndarray, np.ndarray]], n_grid: int = 120
+    curves: list[tuple[str, np.ndarray, np.ndarray, np.ndarray]], n_grid: int = 120
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Median drift across records on a shared log-spaced IM grid."""
-    im_all = np.concatenate([im for _, im, _ in curves])
+    """Median drift across records on a shared log-spaced IM grid.
+
+    Non-converged rungs are excluded: their recorded drift is the peak reached
+    before numerical failure, not the true (unbounded) flatline response.
+    """
+    im_all = np.concatenate([im[c] for _, im, _, c in curves if np.any(c)])
+    if im_all.size == 0:
+        return np.array([]), np.array([])
     lo, hi = float(im_all.min()), float(im_all.max())
     if lo <= 0 or hi <= 0 or hi <= lo:
         return np.array([]), np.array([])
     grid = np.logspace(np.log10(lo), np.log10(hi), n_grid)
     medians = []
     for g in grid:
-        vals = [float(np.interp(g, im, drift)) for _, im, drift in curves if im[0] <= g <= im[-1]]
+        vals = [
+            float(np.interp(g, im[c], drift[c]))
+            for _, im, drift, c in curves
+            if np.any(c) and im[c][0] <= g <= im[c][-1]
+        ]
         medians.append(float(np.median(vals)) if vals else np.nan)
     return grid, np.asarray(medians)
 
@@ -85,7 +103,11 @@ def plot_ida_curves(
 ) -> Optional[Any]:
     """Plot the per-record IDA curves (drift vs ``Sa(T1, 5 %)/g``).
 
-    Draws one thin curve per record, the median drift curve (optional), and the
+    Draws one thin curve per record through its **converged** rungs only; a
+    non-converged (collapse) rung is shown as a distinct ``×`` marker instead of
+    being joined to the curve, because its recorded drift is the peak reached
+    before numerical failure (not the true flatline response) and joining it
+    would draw a spurious "reversal".  Also draws the median drift curve and the
     collapse capacities as markers at the panel edge (optional).
 
     Args:
@@ -114,8 +136,24 @@ def plot_ida_curves(
     else:
         fig = ax.figure
 
-    for _rid, im, drift in curves:
-        ax.plot(drift, im, color="#9ecae1", linewidth=1.0, alpha=0.7, zorder=1)
+    nonconv_labeled = False
+    for _rid, im, drift, converged in curves:
+        ax.plot(
+            drift[converged], im[converged], color="#9ecae1", linewidth=1.0, alpha=0.7, zorder=1
+        )
+        if not converged.all():
+            ax.scatter(
+                drift[~converged],
+                im[~converged],
+                marker="x",
+                color="#444444",
+                s=24,
+                linewidths=1.1,
+                alpha=0.9,
+                zorder=2,
+                label="non-converged (collapse)" if not nonconv_labeled else None,
+            )
+            nonconv_labeled = True
 
     if show_median:
         grid, med = _median_curve(curves)
