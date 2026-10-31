@@ -216,6 +216,28 @@ from `fea_toolkit.plotting`.  In the **FEA-GUI**, *File ▸ Open generic-frame
 benchmark…* builds and displays the frame in 3-D, and *File ▸ Open results…* on
 the archive registers an "IDA collapse" figure view (the two-panel summary).
 
+### IDA plot markers — how to read the `plot_ida_curves` figure
+
+`plot_ida_curves()` draws each record through its **converged** rungs only and
+**stops the curve at its collapse intensity** — no rung at or past collapse is
+joined to the line (a few frames that re-converge *after* non-convergence, e.g.
+`LP89hch`, would otherwise overshoot their collapse and draw a spurious
+"reversal").  The collapse is then marked **once per record**, by whichever
+criterion tripped first:
+
+| Marker | Criterion | Meaning |
+|---|---|---|
+| `×` (dark grey) | non-convergence | the **first** discrete ladder rung where the NLTH failed to converge — Ibarra–Krawinkler *dynamic instability*.  The recorded drift there is a **lower bound** (peak over converged steps only), not the true flatline response. |
+| `– – >` horizontal flatline (dark grey) | non-convergence | the classic IDA **flatline**: the IM caps out at `Sa,c(T1)/g` and drift runs to infinity (the `>` = "drift → ∞").  The idealised, textbook form of the same `×`. |
+| `⋮ ^` vertical dotted line (green) | drift > `collapse_drift` | the FEMA P-695 **sidesway proxy**: peak interstorey drift crossed `θ = 0.10` while the frame was *still converging*.  A **vertical** limit, drawn at `drift = 0.10` rising to the collapse IM. |
+
+In one sentence: the **horizontal** markers (flatline / `×`) mean *"the IM could
+not be pushed higher — the frame became dynamically unstable"*, while the
+**vertical** marker means *"the drift limit was reached — the frame swayed past
+θ = 0.10"*.  Both are read off `plot_ida_curves`'s per-record `collapse_criterion`
+(see the split table above: 28 non-convergence / 5 drift for `0909`), and the
+choice of `×` vs flatline is the `flatline=` flag (default `False` = `×`).
+
 ## Cross-checks (landed)
 
 * **First-mode shape linearity** — the table's `Ii/I1` ratios are tuned for a
