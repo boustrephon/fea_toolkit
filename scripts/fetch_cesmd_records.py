@@ -63,9 +63,9 @@ LMSR_N_RECORDS: list[tuple[str, int, str, str]] = [
     # Loma Prieta 1989 (Mw 6.9)
     ("LP89agw", 1989, "Agnews", "Agnews State Hospital"),
     ("LP89cap", 1989, "Capitola", "Capitola"),
-    ("LP89g03", 1989, "Gilroy Array #3", "Gilroy Array #3"),
-    ("LP89g04", 1989, "Gilroy Array #4", "Gilroy Array #4"),
-    ("LP89gmr", 1989, "Gilroy Array #7", "Gilroy Array #7"),
+    ("LP89g03", 1989, "Gilroy #3", "Gilroy Array #3"),
+    ("LP89g04", 1989, "Gilroy #4", "Gilroy Array #4"),
+    ("LP89gmr", 1989, "Gilroy #7", "Gilroy Array #7"),
     ("LP89hch", 1989, "Hollister City Hall", "Hollister City Hall"),
     ("LP89hda", 1989, "Hollister Differential", "Hollister Differential Array"),
     ("LP89hvr", 1989, "Halls Valley", "Halls Valley"),
@@ -74,12 +74,12 @@ LMSR_N_RECORDS: list[tuple[str, int, str, str]] = [
     ("LP89svl", 1989, "Sunnyvale", "Sunnyvale - Colton Ave."),
     # Northridge 1994 (Mw 6.7)
     ("NR94cen", 1994, "Centinela", "LA - Centinela St."),
-    ("NR94cnp", 1994, "Canoga Park", "Canoga Park - Topanga Can."),
+    ("NR94cnp", 1994, "Topanga Canyon", "Canoga Park - Topanga Can."),
     ("NR94far", 1994, "Faring", "LA - N Faring Rd."),
     ("NR94fle", 1994, "Fletcher", "LA - Fletcher Dr."),
     ("NR94glp", 1994, "Las Palmas", "Glendale - Las Palmas"),
-    ("NR94hol", 1994, "Hollywood Stor", "LA - Hollywood Stor FF"),
-    ("NR94lh1", 1994, "Lake Hughes", "Lake Hughes #1"),
+    ("NR94hol", 1994, "Hollywood Storage Grounds", "LA - Hollywood Stor FF"),
+    ("NR94lh1", 1994, "Lake Hughes #1", "Lake Hughes #1"),
     ("NR94lv2", 1994, "Leona Valley #2", "Leona Valley #2"),
     ("NR94lv6", 1994, "Leona Valley #6", "Leona Valley #6"),
     ("NR94nya", 1994, "Crescenta", "La Crescenta-New York"),
@@ -88,13 +88,33 @@ LMSR_N_RECORDS: list[tuple[str, int, str, str]] = [
     ("NR94stn", 1994, "Saturn", "LA - Saturn St"),
     ("NR94ver", 1994, "Vernon", "LA - E Vernon Ave"),
     # San Fernando 1971 (Mw 6.6)
-    ("SF71pel", 1971, "Hollywood Stor", "LA - Hollywood Stor Lot"),
+    ("SF71pel", 1971, "Hollywood Storage Lot", "LA - Hollywood Stor Lot"),
     # Superstition Hills 1987 (Mw 6.7)
     ("SH87bra", 1987, "Brawley", "Brawley"),
     ("SH87icc", 1987, "Imperial County", "El Centro Imp. Co. Cent"),
     ("SH87pls", 1987, "Plaster City", "Plaster City"),
     ("SH87wsm", 1987, "Westmorland", "Westmorland Fire Station"),
 ]
+
+#: LMSR-N records that CESMD does **not** expose (Baja-California stations, plus
+#: older CSMIP/USGS records absent from CESMD's web services).  These need PEER
+#: NGA-West2.  (Some may exist under different names; none are retrievable via
+#: the current search keys.)
+NOT_IN_CESMD: set[str] = {
+    "IV79chi",
+    "IV79cmp",
+    "IV79qkp",  # Baja California (Mexico)
+    "IV79nil",  # Niland Fire Station
+    "LP89agw",  # Agnews State Hospital
+    "LP89hch",  # Hollister City Hall
+    "LP89hda",  # Hollister Differential Array
+    "LP89sjw",  # Salinas - John & Work
+    "LP89slc",  # Palo Alto - SLAC Lab.
+    "NR94lv6",  # Leona Valley #6 (CESMD has #1-#5)
+    "SH87bra",
+    "SH87icc",
+    "SH87pls",  # Brawley / El Centro Imp. / Plaster City
+}
 
 #: Where downloaded records are written (the runner's local mirror).
 LOCAL = Path("data/ground_motion/local")
@@ -163,6 +183,9 @@ def cmd_list(delay: float = 1.0, limit: Optional[int] = None) -> int:
     for i, (rid, year, key, station) in enumerate(records):
         if i:
             time.sleep(delay)
+        if rid in NOT_IN_CESMD:
+            print(f"{rid:8s} {station!r} ({year}) -> not in CESMD (needs PEER)")
+            continue
         try:
             matches = _iter_matches(_search(key, year))
         except CESMDError as exc:
@@ -191,6 +214,9 @@ def cmd_download(
     for i, (rid, year, key, station) in enumerate(records):
         if i:
             time.sleep(delay)
+        if rid in NOT_IN_CESMD:
+            print(f"skip   {rid} (not in CESMD — needs PEER NGA-West2)")
+            continue
         csv_path = LOCAL / f"{rid}.csv"
         if csv_path.exists():
             print(f"skip   {rid} (already present)")

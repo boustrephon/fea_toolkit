@@ -149,3 +149,27 @@ def test_lmsr_n_manifest_ids_match_ik2005_table():
     fetch = _load_fetch_script()
     ids = sorted(rid for rid, _, _, _ in fetch.LMSR_N_RECORDS)
     assert ids == sorted(_EXPECTED_IDS)
+
+
+_EXPECTED_NOT_IN_CESMD = {
+    "IV79chi",
+    "IV79cmp",
+    "IV79qkp",  # Baja California (Mexico)
+    "IV79nil",
+    "LP89agw",
+    "LP89hch",
+    "LP89hda",
+    "LP89sjw",
+    "LP89slc",
+    "NR94lv6",
+    "SH87bra",
+    "SH87icc",
+    "SH87pls",
+}
+
+
+def test_not_in_cesmd_subset_of_manifest():
+    fetch = _load_fetch_script()
+    ids = {rid for rid, _, _, _ in fetch.LMSR_N_RECORDS}
+    assert fetch.NOT_IN_CESMD == _EXPECTED_NOT_IN_CESMD
+    assert ids >= fetch.NOT_IN_CESMD
