@@ -12,6 +12,7 @@ converted to m/s² at read time (see :func:`read_peer_record`).
 import pathlib
 import urllib.parse
 from dataclasses import dataclass, fields
+from typing import Any
 
 import numpy as np
 
@@ -288,6 +289,92 @@ def read_time_history_csv(
     """
     data = np.loadtxt(path, delimiter=",", skiprows=skip_header, ndmin=2)
     return data[:, col_time], data[:, col_accel]
+
+
+def parse_smc(text: str) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """Parse a USGS NSMP SMC-format (corrected accelerogram) text.
+
+    The SMC ("Strong Motion Coordinate") format is the USGS National
+    Strong-Motion Project's ASCII strong-motion format: 11 fixed text-header
+    lines, 6 lines of 8 integer-header values (``8I10``), 10 lines of 5
+    real-header values (``5E15.7``), a variable number of comment lines (given
+    by integer-header cell 16), then the time series — 8 fixed-width values of
+    10 characters per line (``8E10.4``).
+
+    Args:
+        text: Raw text of an SMC-format file.
+
+    Returns:
+        ``(times, accel, meta)`` — time (s), acceleration (m/s², converted from
+        the file's cm/s²), and a metadata dict (``station``, ``component``
+        azimuth, ``orientation`` degrees, ``npts``, ``dt``, ``sample_rate``).
+
+    Raises:
+        ValueError: If the header or time series cannot be parsed.
+    """
+    lines = text.replace("\r", "").split("\n")
+    if len(lines) < 27:
+        raise ValueError("SMC file too short to contain the 27 header lines")
+    ints = [int(tok) for ln in lines[11:17] for tok in ln.split()]
+    reals = [float(tok) for ln in lines[17:27] for tok in ln.split()]
+    if len(ints) < 17 or len(reals) < 2:
+        raise ValueError("SMC header is missing the integer/real header values")
+    npts = ints[16]  # number of time-series values (integer cell 17)
+    num_comments = ints[15]  # number of comment lines (integer cell 16)
+    sample_rate = reals[1]  # Hz (real cell 2)
+    if npts <= 0 or sample_rate <= 0:
+        raise ValueError(f"bad SMC header: npts={npts}, sample_rate={sample_rate}")
+    dt = 1.0 / sample_rate
+
+    # Station / component metadata (text-header line 6).
+    st_line = lines[5]
+    if "component=" in st_line:
+        station = st_line.split("component=")[0].replace("station =", "").strip()
+        component = st_line.split("component=")[1].strip()
+    else:
+        station, component = st_line.strip(), ""
+    orientation = ints[13] if len(ints) > 13 else None  # degrees east of north
+
+    # Time series: 8 fixed-width values of 10 characters per line.
+    data_start = 27 + num_comments
+    values: list[float] = []
+    for raw in lines[data_start:]:
+        stripped = raw.rstrip()
+        for i in range(0, len(stripped), 10):
+            chunk = stripped[i : i + 10].strip()
+            if chunk:
+                values.append(float(chunk))
+    if len(values) < npts:
+        raise ValueError(f"SMC data has {len(values)} values, expected {npts}")
+    accel_cms2 = np.asarray(values[:npts], dtype=float)
+    times = np.arange(npts, dtype=float) * dt
+    accel = accel_cms2 / 100.0  # cm/s² → m/s²
+    meta = {
+        "station": station,
+        "component": component,
+        "orientation": orientation,
+        "npts": npts,
+        "dt": dt,
+        "sample_rate": sample_rate,
+    }
+    return times, accel, meta
+
+
+def read_smc_record(path: str) -> tuple[np.ndarray, np.ndarray]:
+    """Read a USGS NSMP SMC-format accelerogram, returning ``(times, accel)``.
+
+    Args:
+        path: Path to the ``.smc`` file.
+
+    Returns:
+        ``(times, accel)`` — time points (s) and acceleration (m/s²).
+
+    Raises:
+        ValueError: If the file cannot be parsed.
+    """
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        times, accel, _ = parse_smc(fh.read())
+    return times, accel
 
 
 # ── Scaling ───────────────────────────────────────────────────────
