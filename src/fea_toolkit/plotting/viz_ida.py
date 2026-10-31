@@ -61,27 +61,33 @@ def _ida_curves(
 
 
 def _median_curve(
-    curves: list[tuple[str, np.ndarray, np.ndarray, np.ndarray]], n_grid: int = 120
+    curves: list[tuple[str, np.ndarray, np.ndarray, np.ndarray]],
+    caps: np.ndarray,
+    n_grid: int = 120,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Median drift across records on a shared log-spaced IM grid.
 
-    Non-converged rungs are excluded: their recorded drift is the peak reached
-    before numerical failure, not the true (unbounded) flatline response.
+    Only converged rungs strictly below each record's collapse IM contribute —
+    the non-converged rungs and any post-collapse rungs are excluded, matching
+    the truncated per-record curves.
     """
-    im_all = np.concatenate([im[c] for _, im, _, c in curves if np.any(c)])
-    if im_all.size == 0:
+    pieces: list[tuple[np.ndarray, np.ndarray]] = []
+    for (_rid, im, drift, c), cap in zip(curves, caps):
+        if not np.any(c):
+            continue
+        keep = c & (im < cap if np.isfinite(cap) else True)
+        if np.any(keep):
+            pieces.append((im[keep], drift[keep]))
+    if not pieces:
         return np.array([]), np.array([])
+    im_all = np.concatenate([im for im, _ in pieces])
     lo, hi = float(im_all.min()), float(im_all.max())
     if lo <= 0 or hi <= 0 or hi <= lo:
         return np.array([]), np.array([])
     grid = np.logspace(np.log10(lo), np.log10(hi), n_grid)
     medians = []
     for g in grid:
-        vals = [
-            float(np.interp(g, im[c], drift[c]))
-            for _, im, drift, c in curves
-            if np.any(c) and im[c][0] <= g <= im[c][-1]
-        ]
+        vals = [float(np.interp(g, im, drift)) for im, drift in pieces if im[0] <= g <= im[-1]]
         medians.append(float(np.median(vals)) if vals else np.nan)
     return grid, np.asarray(medians)
 
@@ -115,15 +121,20 @@ def plot_ida_curves(
 ) -> Optional[Any]:
     """Plot the per-record IDA curves (drift vs ``Sa(T1, 5 %)/g``).
 
-    Draws one thin curve per record through its **converged** rungs only.  The
-    collapse rung is shown either as a distinct ``×`` marker at the failed rung
-    (*flatline* ``False``, the default) or as the classic **flatline** — a
-    horizontal dashed line at the collapse intensity capped with a ``>`` to
-    indicate ``drift → ∞`` (*flatline* ``True``).  Either way the failed rung is
-    never joined to the curve, because its recorded drift is the peak reached
-    before numerical failure (not the true flatline response) and joining it
-    would draw a spurious "reversal".  Also draws the median drift curve and the
-    collapse capacities as markers at the panel edge (optional).
+    Each record's curve is drawn through its **converged** rungs and stops at
+    its collapse intensity (post-collapse rungs are not drawn).  The collapse is
+    then marked according to which criterion tripped first:
+
+    * **non-convergence** (dynamic instability) — either a ``×`` at the first
+      failed rung (*flatline* ``False``, the default) or the classic horizontal
+      **flatline** (IM caps out, ``drift → ∞``) at the collapse intensity
+      (*flatline* ``True``);
+    * **drift** (peak interstorey drift exceeded ``ida/collapse_drift``) — a
+      vertical dotted line at ``θ = collapse_drift`` rising to the collapse
+      intensity.
+
+    Also draws the median drift curve and the collapse capacities as markers at
+    the panel edge (optional).
 
     Args:
         data: Flat NPZ dict carrying the ``ida`` block (schema v5).
@@ -154,24 +165,34 @@ def plot_ida_curves(
     else:
         fig = ax.figure
 
-    caps = _collapse_capacities(data, records) if (flatline or show_collapse) else None
-    criteria = (
-        [_record_str(data, make_ida_key(rid, "ida/{record}/collapse_criterion")) for rid in records]
-        if flatline
-        else None
-    )
+    caps = _collapse_capacities(data, records)
+    criteria = [
+        _record_str(data, make_ida_key(rid, "ida/{record}/collapse_criterion")) for rid in records
+    ]
+    collapse_drift = _scalar(data, "ida/collapse_drift")
+    if collapse_drift is None or collapse_drift <= 0.0:
+        collapse_drift = 0.10
 
     nonconv_labeled = False
     flat_labeled = False
+    drift_labeled = False
     for i, (_rid, im, drift, converged) in enumerate(curves):
-        ax.plot(
-            drift[converged], im[converged], color="#9ecae1", linewidth=1.0, alpha=0.7, zorder=1
-        )
-        if flatline:
-            cap = caps[i] if caps is not None else np.nan
-            crit = criteria[i] if criteria is not None else None
-            if crit == "nonconvergence" and np.isfinite(cap):
-                last_drift = float(drift[converged][-1]) if converged.any() else 0.0
+        cap = caps[i]
+        crit = criteria[i]
+        collapsed = bool(np.isfinite(cap))
+
+        # Stop the curve at the collapse IM: keep only converged rungs strictly
+        # below it (the collapse itself is shown by the indicator below).
+        below = im < cap if collapsed else np.ones_like(im, dtype=bool)
+        keep = converged & below
+        ax.plot(drift[keep], im[keep], color="#9ecae1", linewidth=1.0, alpha=0.7, zorder=1)
+        last_drift = float(drift[keep][-1]) if keep.any() else 0.0
+
+        if not collapsed:
+            continue
+
+        if crit == "nonconvergence":
+            if flatline:
                 if last_drift < max_drift:
                     ax.plot(
                         [last_drift, max_drift],
@@ -194,22 +215,46 @@ def plot_ida_curves(
                         zorder=3,
                     )
                     flat_labeled = True
-        elif not converged.all():
-            ax.scatter(
-                drift[~converged],
-                im[~converged],
-                marker="x",
-                color="#444444",
-                s=24,
-                linewidths=1.1,
+            else:
+                failed = np.flatnonzero(~converged)
+                if failed.size:
+                    j = int(failed[0])
+                    ax.scatter(
+                        [drift[j]],
+                        [im[j]],
+                        marker="x",
+                        color="#444444",
+                        s=24,
+                        linewidths=1.1,
+                        alpha=0.9,
+                        zorder=2,
+                        label="non-converged (collapse)" if not nonconv_labeled else None,
+                    )
+                    nonconv_labeled = True
+        elif crit == "drift":
+            ax.plot(
+                [collapse_drift, collapse_drift],
+                [0.0, cap],
+                color="#2ca02c",
+                linestyle=":",
+                linewidth=1.3,
                 alpha=0.9,
                 zorder=2,
-                label="non-converged (collapse)" if not nonconv_labeled else None,
+                label=f"drift collapse (θ = {collapse_drift:g})" if not drift_labeled else None,
             )
-            nonconv_labeled = True
+            ax.plot(
+                collapse_drift,
+                cap,
+                marker="^",
+                markersize=7,
+                color="#2ca02c",
+                linestyle="none",
+                zorder=3,
+            )
+            drift_labeled = True
 
     if show_median:
-        grid, med = _median_curve(curves)
+        grid, med = _median_curve(curves, caps)
         if grid.size:
             ax.plot(med, grid, color="#d62728", linewidth=2.0, label="median IDA", zorder=3)
 

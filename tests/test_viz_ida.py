@@ -68,19 +68,33 @@ def test_plot_ida_curves_flatline_option(ida_arrays):
 
 
 def test_plot_ida_curves_marks_nonconverged_rungs(ida_arrays):
-    """A non-converged rung is a `×` marker, not part of the curve line."""
+    """A non-converged rung is a `×` marker; curves stop at the collapse IM."""
     fig = plot_ida_curves(ida_arrays)
     assert fig is not None
     import matplotlib.pyplot as plt
 
     ax = fig.axes[0]
-    # IV79cal converged = [T, T, T, F] -> its curve line has only the 3
-    # converged rungs; the failed rung is a separate scatter, not joined.
+    # IV79cal (non-convergence collapse at scale 3.0) -> 3 converged rungs;
+    # the failed rung is a separate scatter, not joined.
     assert len(ax.lines[0].get_xdata()) == 3
-    # IV79chi converged = [T, T, T, T] -> the full 4-rung line.
-    assert len(ax.lines[1].get_xdata()) == 4
-    # A scatter exists for the non-converged rung(s), plus the collapse markers.
+    # IV79chi (drift collapse at scale 2.0) -> curve stops at 2 rungs (drift < 0.10).
+    assert len(ax.lines[1].get_xdata()) == 2
+    # A × scatter marks the failed rung(s), plus the collapse markers.
     assert (
         sum(isinstance(c, plt.matplotlib.collections.PathCollection) for c in ax.collections) >= 2
     )
+    plt.close(fig)
+
+
+def test_plot_ida_curves_drift_collapse_vertical_marker(ida_arrays):
+    """A drift-criterion collapse gets a vertical line at θ = collapse_drift."""
+    fig = plot_ida_curves(ida_arrays)
+    assert fig is not None
+    import matplotlib.pyplot as plt
+
+    ax = fig.axes[0]
+    vertical = [ln for ln in ax.lines if ln.get_linestyle() == ":" and len(ln.get_xdata()) == 2]
+    assert len(vertical) == 1
+    xs = vertical[0].get_xdata()
+    assert xs[0] == xs[1] == pytest.approx(0.10)
     plt.close(fig)
