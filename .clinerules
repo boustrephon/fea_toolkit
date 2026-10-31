@@ -758,6 +758,14 @@ never a project error.  Keep future tool calls clean:
     When an empty-parameter error occurs, re-issue the same call unchanged
     once; if it persists, restructure the call to use shorter parameter
     values rather than re-wording.
+8. **Polling a long-running background job (loop guard).**  `run_commands`
+   times out at ~30 s, so a background job cannot be awaited in one blocking
+   call — but do **not** poll it by repeating the same `sleep N; grep …`
+   command verbatim: Cline aborts after 5 consecutive identical tool calls
+   ("Detected 5 consecutive identical calls … stopping to avoid a loop").
+   Vary every poll (different sleep length, a different progress probe, an
+   added `date`/progress `echo`), or fold several short checks into one
+   command that finishes inside the timeout.
 
 
 ## 11. Known Benign Static-Analysis Warnings (do not spend time on these)
