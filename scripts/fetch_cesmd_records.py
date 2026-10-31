@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import sys
 import time
 import zipfile
@@ -103,6 +104,7 @@ NOT_IN_CESMD: set[str] = {
     "LP89agw",  # Agnews State Hospital (CSMIP; CESMD metadata-only)
     "LP89sjw",  # Salinas - John & Work (CSMIP; CESMD metadata-only)
     "NR94lv6",  # Leona Valley #6 (CESMD has #1-#5)
+    "NR94pic",  # LA - Pico & Sentous (CESMD only has "Pico Canyon Rd., Newhall")
     "SH87bra",  # Brawley (Superstition Hills 1987)
     "SH87icc",  # El Centro Imp. Co. Cent
     "SH87pls",  # Plaster City (Superstition Hills 1987)
@@ -160,14 +162,18 @@ def _search(key: str, year: int):
 
 
 def _first_vol2_member(zf: zipfile.ZipFile) -> Optional[zipfile.ZipInfo]:
-    """Pick the processed-acceleration Volume-2 member out of a dataset ZIP."""
+    """Pick the processed-acceleration member out of a ZIP.
+
+    CSMIP records are named ``<STATION>.V2``; USGS records use other names
+    (e.g. ``USACA74.029``).  Fall back to the first non-directory member.
+    """
+    for info in zf.infolist():
+        if info.filename.upper().endswith(".V2"):
+            return info
     for info in zf.infolist():
         name = info.filename.upper()
-        if name.endswith(("/", ".TXT")) and "VOL" not in name:
-            continue
-        if ("V2" in name or "VOL2" in name or "ACC" in name) and not name.endswith("/"):
+        if not info.is_dir() and ("V2" in name or "VOL2" in name or "ACC" in name):
             return info
-    # Fallback: the first non-directory text member.
     for info in zf.infolist():
         if not info.is_dir():
             return info
@@ -175,12 +181,24 @@ def _first_vol2_member(zf: zipfile.ZipFile) -> Optional[zipfile.ZipInfo]:
 
 
 def _zip_to_csv(zip_path: Path, csv_path: Path) -> None:
-    """Extract the acceleration from a CESMD dataset ZIP and write ``time,accel``."""
-    with zipfile.ZipFile(zip_path) as zf:
-        member = _first_vol2_member(zf)
-        if member is None:
-            raise CESMDError(f"no acceleration member found in {zip_path}")
-        text = zf.read(member).decode("utf-8", errors="replace")
+    """Extract the acceleration from a CESMD dataset ZIP and write ``time,accel``.
+
+    The dataset ZIP nests the waveform in a per-record inner ZIP (``…p.zip``
+    for processed data) whose ``.V2`` member is the accelerogram.
+    """
+    with zipfile.ZipFile(zip_path) as outer:
+        inner_names = [i.filename for i in outer.infolist() if i.filename.lower().endswith(".zip")]
+        if inner_names:
+            with zipfile.ZipFile(io.BytesIO(outer.read(inner_names[0]))) as inner:
+                member = _first_vol2_member(inner)
+                if member is None:
+                    raise CESMDError(f"no .V2 member in {zip_path}")
+                text = inner.read(member).decode("utf-8", errors="replace")
+        else:
+            member = _first_vol2_member(outer)
+            if member is None:
+                raise CESMDError(f"no acceleration member found in {zip_path}")
+            text = outer.read(member).decode("utf-8", errors="replace")
     times, accel = parse_vol2(text)
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("w", newline="") as fh:

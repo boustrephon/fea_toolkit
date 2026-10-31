@@ -19,10 +19,8 @@ address — CESMD's registration form is optional for browsing).  Pass it as the
 ``email`` argument or set the :data:`CESMD_EMAIL_ENV` environment variable.
 
 .. note::
-   The dataset ZIP contains CESMD "Volume 2" corrected accelerograms whose
-   exact column layout is not fully pinned down here; :func:`parse_vol2` is a
-   best-effort reader to be validated against a real file once CESMD is
-   reachable again.
+   The dataset ZIP nests a per-record inner ZIP whose ``.V2`` member is the
+   CSMIP "Volume 2" corrected accelerogram; :func:`parse_vol2` reads it.
 """
 
 from __future__ import annotations
@@ -47,10 +45,7 @@ RECORDS_QUERY = CESMD_BASE + "/wserv/records/query"
 #: dataset downloads.
 CESMD_EMAIL_ENV = "CESMD_EMAIL"
 #: Default request timeout (seconds).
-DEFAULT_TIMEOUT = 60.0
-
-#: Standard gravity (m/s²) for the g → m/s² conversion.
-_G_MS2 = 9.80665
+DEFAULT_TIMEOUT = 120.0
 
 
 class CESMDError(RuntimeError):
@@ -211,44 +206,47 @@ def download_dataset(
 
 # ── Volume-2 (corrected accelerogram) parsing ────────────────────────
 
-_NPTS_RE = re.compile(r"NPTS\s*=\s*(\d+)", re.IGNORECASE)
-_DT_RE = re.compile(r"DT\s*=\s*([\d.]+)", re.IGNORECASE)
-_NUM_RE = re.compile(r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?")
+_ACCEL_MARKER_RE = re.compile(r"(\d+)\s*POINTS\s+OF\s+ACC(?:EL)?\s+DATA", re.IGNORECASE)
+_AT_SEC_RE = re.compile(r"AT\s+([\d.]+)\s*SEC", re.IGNORECASE)
 
 
 def parse_vol2(text: str) -> tuple[np.ndarray, np.ndarray]:
-    """Best-effort parse of a CESMD Volume-2 corrected accelerogram.
+    """Parse a CESMD/CSMIP Volume-2 corrected accelerogram.
 
-    Reads the header for ``NPTS`` and ``DT``, then treats the first ``NPTS``
-    numeric tokens following the header as the acceleration series (in g),
-    converting it to m/s².
+    The CSMIP "Volume 2" file has a prose header and integer/real headers, then
+    blocks of ``NPTS`` acceleration / velocity / displacement values, each
+    introduced by a line like ``"2000 POINTS OF ACCEL DATA EQUALLY SPACED AT
+    .020 SEC.  (UNITS: CM/SEC/SEC)"``.  This reads the acceleration block.
 
     Args:
         text: The raw text of a Volume-2 file.
 
     Returns:
-        ``(times, accel)`` — time points (s) and acceleration (m/s²).
+        ``(times, accel)`` — time points (s) and acceleration (m/s², converted
+        from the file's cm/s²).
 
     Raises:
-        CESMDError: If ``NPTS`` / ``DT`` cannot be read, or too few values.
-
-    Note:
-        Unverified against a real CESMD file (the site was down at the time of
-        writing).  Validate against a real Volume-2 file before trusting it.
+        CESMDError: If the acceleration block or its time step is missing, or
+            the file holds fewer values than ``NPTS``.
     """
-    npts_match = _NPTS_RE.search(text)
-    dt_match = _DT_RE.search(text)
-    if not npts_match or not dt_match:
-        raise CESMDError("could not find NPTS/DT in the Volume-2 header")
-    npts = int(npts_match.group(1))
-    dt = float(dt_match.group(1))
-
-    # Data begins after the header; collect every numeric token from there on.
-    header_end = text.rfind("SEC")  # a common marker at the end of the NPTS line
-    tail = text[header_end:] if header_end != -1 else text
-    values = [float(tok) for tok in _NUM_RE.findall(tail)]
-    if len(values) < npts:
-        raise CESMDError(f"Volume-2 file has {len(values)} numeric values, expected {npts}")
-    accel_g = np.asarray(values[:npts], dtype=float)
-    times = np.arange(npts, dtype=float) * dt
-    return times, accel_g * _G_MS2
+    lines = text.replace("\r", "").split("\n")
+    for i, line in enumerate(lines):
+        match = _ACCEL_MARKER_RE.search(line)
+        if not match:
+            continue
+        npts = int(match.group(1))
+        dt_match = _AT_SEC_RE.search(line)
+        if not dt_match:
+            raise CESMDError("ACCEL DATA marker is missing its time step")
+        dt = float(dt_match.group(1))
+        values: list[float] = []
+        for data_line in lines[i + 1 :]:
+            values.extend(float(tok) for tok in data_line.split())
+            if len(values) >= npts:
+                break
+        if len(values) < npts:
+            raise CESMDError(f"Volume-2 file has {len(values)} values, expected {npts}")
+        accel_cms2 = np.asarray(values[:npts], dtype=float)
+        times = np.arange(npts, dtype=float) * dt
+        return times, accel_cms2 / 100.0  # cm/s² → m/s²
+    raise CESMDError("could not find the ACCEL DATA block")

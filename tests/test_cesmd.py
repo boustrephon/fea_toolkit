@@ -97,12 +97,14 @@ def test_parse_vol2_extracts_acceleration_in_ms2():
     text = (
         "CORRECTED ACCELEROGRAM\n"
         "LOMA PRIETA EARTHQUAKE OF OCTOBER 17, 1989\n"
-        "NPTS=   5, DT= .00500 SEC,\n"
-        "0.1 0.2\n-0.3 0.4\n-0.05\n"
+        "PEAK ACCELERATION = -390.792 CM/SEC/SEC\n"
+        " 5 POINTS OF ACCEL DATA EQUALLY SPACED AT  .005 SEC.  (UNITS: CM/SEC/SEC)\n"
+        "0.1 0.2 -0.3 0.4 -0.05\n"
     )
     times, accel = cesmd.parse_vol2(text)
     np.testing.assert_allclose(times, np.arange(5) * 0.005)
-    np.testing.assert_allclose(accel, np.array([0.1, 0.2, -0.3, 0.4, -0.05]) * 9.80665)
+    # cm/s² → m/s² (÷100)
+    np.testing.assert_allclose(accel, np.array([0.1, 0.2, -0.3, 0.4, -0.05]) / 100.0)
 
 
 def test_parse_vol2_rejects_missing_header():
@@ -176,6 +178,7 @@ _EXPECTED_NOT_IN_CESMD = {
     "LP89agw",  # Agnews State Hospital
     "LP89sjw",  # Salinas - John & Work
     "NR94lv6",  # Leona Valley #6
+    "NR94pic",  # LA - Pico & Sentous
     "SH87bra",  # Brawley
     "SH87icc",  # El Centro Imp. Co. Cent
     "SH87pls",  # Plaster City (Superstition Hills)
