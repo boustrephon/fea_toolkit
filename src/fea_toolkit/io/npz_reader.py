@@ -196,6 +196,7 @@ def describe_results_npz(path: str) -> dict[str, Any]:
         * ``analysis_types`` — recorded types (e.g. ``["static", "modal"]``)
         * ``static_cases`` — static case labels
         * ``transient_cases`` — transient (time-history) case labels
+        * ``ida_records`` — IDA collapse records (the IK-2005 benchmark)
         * ``n_modes`` — number of stored modal periods
         * ``units`` — ``{"force", "length"}`` (or ``None``)
         * ``created`` — ISO-8601 timestamp (or ``None``)
@@ -218,11 +219,12 @@ def describe_results_npz(path: str) -> dict[str, Any]:
         geometry_arrays = sorted(name for name in names if name in GEOMETRY_ARRAY_KEYS)
         force_unit = _scalar("force_unit")
         length_unit = _scalar("length_unit")
-        # Single source of truth for transient-case detection — reuse the
-        # schema helper over a key-only mapping (no array decompression).
-        from .results_schema import transient_case_names
+        # Single source of truth for transient/ida block detection — reuse the
+        # schema helpers over a key-only mapping (no array decompression).
+        from .results_schema import ida_record_names, transient_case_names
 
         transient_cases = transient_case_names(dict.fromkeys(names))
+        ida_records = ida_record_names(dict.fromkeys(names))
         return {
             "path": resolved,
             "n_arrays": len(names),
@@ -236,6 +238,7 @@ def describe_results_npz(path: str) -> dict[str, Any]:
             "analysis_types": _labels("analysis_types"),
             "static_cases": _labels("static_case_labels"),
             "transient_cases": transient_cases,
+            "ida_records": ida_records,
             "n_modes": _size("modal/period"),
             "units": (
                 {"force": force_unit, "length": length_unit} if force_unit or length_unit else None

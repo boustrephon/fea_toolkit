@@ -199,6 +199,23 @@ its five clipped capacities sit mostly *above* the median (4 of 5 > 3.41), so
 the instability-only median would be ≥ 3.41 — i.e. the recorded 3.41 is a lower
 bound and already matches IK-2005's 3.3 within +3 %.
 
+### Results archive (NPZ, schema v5)
+
+The IDA is serialised into the unified NPZ as a first-class `ida` block
+(schema v5 — see `docs/results_schema.md`).  `scripts/run_ik2005_npz.py` runs
+`collapse_ida_curves()` (which now keeps the per-record drift-vs-IM curves, not
+just the collapse scalars) and writes `output/ik2005_<code>.npz` carrying:
+
+* the **model geometry** (nodes + frame members, IMK-enriched) — drawable in 3-D;
+* the **per-record IDA curves** (`ida/<record>/{scale,drift,converged}`) and the
+  collapse capacities (`ida/collapse_Sa_T1_g`) — the median (Sa,c/g)/γ and σ_ln.
+
+Plots are one call away from the archive: `plot_ida_curves()` (IDA curves +
+median) and `plot_collapse_fragility()` (P(collapse) vs Sa(T1)/g), re-exported
+from `fea_toolkit.plotting`.  In the **FEA-GUI**, *File ▸ Open generic-frame
+benchmark…* builds and displays the frame in 3-D, and *File ▸ Open results…* on
+the archive registers an "IDA collapse" figure view (the two-panel summary).
+
 ## Cross-checks (landed)
 
 * **First-mode shape linearity** — the table's `Ii/I1` ratios are tuned for a

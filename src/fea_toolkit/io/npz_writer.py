@@ -27,6 +27,7 @@ from ..utils import force_unit_label, length_unit_label
 from .results_schema import (
     SCHEMA_VERSION,
     case_meta_arrays,
+    make_ida_key,
     make_pushover_key,
     make_static_key,
     make_transient_key,
@@ -549,6 +550,7 @@ def results_arrays(
     mesh_model: Optional["MeshModel"] = None,
     case_meta: Optional[dict[str, dict[str, str]]] = None,
     transient_results: Optional[dict[str, Any]] = None,
+    ida_results: Optional[dict[str, Any]] = None,
 ) -> dict[str, np.ndarray]:
     """Assemble a results archive **in memory** — ``{array_name: np.ndarray}``.
 
@@ -598,6 +600,11 @@ def results_arrays(
             :func:`~fea_toolkit.analysis.nonlinear_dynamic.run_nonlinear_dynamic_analysis`).
             Written under the ``transient/<case>/...`` block via
             :func:`collect_transient_arrays` and listed in ``analysis_types``.
+        ida_results: Optional dict from
+            :func:`~fea_toolkit.benchmarks.generic_frame_run.collapse_ida_curves`
+            (the IK-2005 collapse run).  Written under the ``ida/<record>/...``
+            block via :func:`collect_ida_arrays` and listed in
+            ``analysis_types``.
 
     Returns:
         The archive's arrays, ready to be saved or served to a repository.
@@ -647,6 +654,9 @@ def results_arrays(
     if transient_results:
         analysis_types.append("transient")
         arrays.update(collect_transient_arrays(transient_results))
+    if ida_results:
+        analysis_types.append("ida")
+        arrays.update(collect_ida_arrays(ida_results))
     # NOTE: Legacy flat aliases (shell_fx, shell_fy, ...) were previously
     # written here for backward compatibility.  As of 2026-07 all consumers
     # use the namespaced ``shell_forces/*`` keys or the geometry-native
@@ -679,6 +689,7 @@ def write_results_npz(
     mesh_model: Optional["MeshModel"] = None,
     case_meta: Optional[dict[str, dict[str, str]]] = None,
     transient_results: Optional[dict[str, Any]] = None,
+    ida_results: Optional[dict[str, Any]] = None,
 ) -> str:
     """Write a unified NPZ file with model geometry + analysis results.
 
@@ -704,6 +715,10 @@ def write_results_npz(
         transient_results: Optional ``{case: result}`` mapping of time-history
             runs — written under the ``transient/<case>/...`` block (see
             :func:`collect_transient_arrays`).
+        ida_results: Optional dict from
+            :func:`~fea_toolkit.benchmarks.generic_frame_run.collapse_ida_curves`
+            — written under the ``ida/<record>/...`` block (see
+            :func:`collect_ida_arrays`).
 
     Returns:
         Absolute path to the saved file.
@@ -726,6 +741,7 @@ def write_results_npz(
         forces_coordinate_system=forces_coordinate_system,
         mesh_model=mesh_model,
         transient_results=transient_results,
+        ida_results=ida_results,
         case_meta=case_meta,
     )
     return save_results_arrays(path, arrays)
@@ -1210,6 +1226,82 @@ def collect_transient_arrays(transient_results: dict[str, Any]) -> dict[str, np.
                 arrays[make_transient_key(case, f"transient/{{case}}/{key}")] = (
                     _transient_component_grid(kin, node_tags, n_t, n_rec, comp)
                 )
+
+    return arrays
+
+
+def collect_ida_arrays(ida_result: dict[str, Any]) -> dict[str, np.ndarray]:
+    """Collect an ``ida/<record>/...`` block from a :func:`collapse_ida_curves` result.
+
+    Consumes the rich dict returned by
+    :func:`~fea_toolkit.benchmarks.generic_frame_run.collapse_ida_curves` and
+    emits the arrays declared by
+    :data:`~fea_toolkit.io.results_schema.IDA_PER_RECORD_ARRAYS` /
+    ``IDA_GLOBAL_ARRAYS`` / ``IDA_SCALAR_ARRAYS``.
+
+    Args:
+        ida_result: The ``collapse_ida_curves`` result dict.
+
+    Returns:
+        Dict of ``{array_name: np.ndarray}`` keyed per the ``IDA_*_ARRAYS``
+        schema (empty when *ida_result* is empty).
+    """
+    arrays: dict[str, np.ndarray] = {}
+    if not ida_result:
+        return arrays
+
+    records = [str(rid) for rid in ida_result["records"]]
+    detail = ida_result["records_detail"]
+    collapse_sa_g = ida_result.get("collapse_Sa_T1_g", {})
+
+    arrays["ida/record_id"] = np.array(records, dtype=str)
+    arrays["ida/collapse_Sa_T1_g"] = np.array(
+        [
+            collapse_sa_g.get(rid) if collapse_sa_g.get(rid) is not None else np.nan
+            for rid in records
+        ],
+        dtype=float,
+    )
+    gamma = float(ida_result.get("gamma", 1.0))
+    arrays["ida/collapse_Sa_T1_gamma"] = arrays["ida/collapse_Sa_T1_g"] / gamma
+
+    # ── Summary scalars / provenance (emitted only when present) ──
+    scalar_specs: dict[str, tuple[str, str]] = {
+        "code": ("code", "str"),
+        "T1": ("T1", "float"),
+        "gamma": ("gamma", "float"),
+        "max_scale": ("max_scale", "float"),
+        "tolerance": ("tolerance", "float"),
+        "collapse_drift": ("collapse_drift", "float"),
+        "median_collapse_sa_gamma": ("median_collapse_Sa_T1_gamma", "float"),
+        "sigma_ln": ("sigma_ln", "float"),
+    }
+    for field, (key_name, dtype) in scalar_specs.items():
+        value = ida_result.get(field)
+        if value is None:
+            continue
+        arrays[f"ida/{key_name}"] = np.asarray(value, dtype=dtype)
+
+    # ── Per-record ladder ──
+    for rid in records:
+        det = detail[rid]
+        res = det["ida"]
+        arrays[make_ida_key(rid, "ida/{record}/scale")] = np.asarray(
+            res["intensities"], dtype=float
+        )
+        arrays[make_ida_key(rid, "ida/{record}/drift")] = np.asarray(res["drifts"], dtype=float)
+        arrays[make_ida_key(rid, "ida/{record}/converged")] = np.asarray(
+            res["converged"], dtype=bool
+        )
+        ci = res.get("collapse_intensity")
+        arrays[make_ida_key(rid, "ida/{record}/collapse_scale")] = np.asarray(
+            ci if ci is not None else np.nan, dtype=float
+        )
+        arrays[make_ida_key(rid, "ida/{record}/collapse_criterion")] = np.asarray(
+            str(res.get("collapse_criterion") or "none"), dtype=str
+        )
+        arrays[make_ida_key(rid, "ida/{record}/Sa_T1_g")] = np.asarray(det["Sa_T1_g"], dtype=float)
+        arrays[make_ida_key(rid, "ida/{record}/source")] = np.asarray(det["source"], dtype=str)
 
     return arrays
 

@@ -285,7 +285,7 @@ def run_ida(
     )
 
 
-def collapse_capacity_sa(
+def collapse_ida_curves(
     code: str,
     record_ids: Sequence[str],
     intensities: Sequence[float],
@@ -300,13 +300,14 @@ def collapse_capacity_sa(
     record_channels: Optional[dict[str, str]] = None,
     verbose: bool = False,
 ) -> dict[str, Any]:
-    """Per-record collapse capacity in ``Sa(T1)`` terms + the median, for *code*.
+    """Run the full IDA over *record_ids* and keep the per-record curves.
 
-    Runs :func:`run_ida` for each record and converts each collapse scale factor
-    to a spectral-acceleration capacity ``Sa,c = collapse_scale × Sa(T1)``.  The
-    IK-2005 collapse intensity is the median ``(Sa,c/g)/γ``; since the generic
-    frames have ``γ = Vy/W = 1.0``, this is ``median_collapse_sa / g`` (reported
-    as ``median_collapse_sa_gamma``).
+    Like :func:`collapse_capacity_sa`, but instead of reducing each record to a
+    scalar capacity it retains the complete :func:`_ida_run` result — the ladder
+    ``intensities``, the peak-interstorey-drift ``drifts`` and the per-level
+    ``converged`` flags — together with the record's ``Sa(T1)``, its source
+    mirror, and the collapse dispersion ``sigma_ln``.  This is the data source
+    for the ``ida`` block of the unified NPZ archive.
 
     Args:
         code: Generic-frame code.
@@ -320,18 +321,21 @@ def collapse_capacity_sa(
         pdelta: When True, emit the ``PDelta`` geometric transformation.
         pdelta_gravity: When True, hold the IK-2005 gravity load.
         record_channels: Optional ``record_id → channel suffix`` map for the
-            multi-component mirror (USGS records stored as
-            ``<record_id>_<channel>.csv``).  Records absent from the map are read
-            as single-file ``<record_id>.csv`` / ``.AT2``.
+            multi-component mirror.  Records present in the map are marked
+            ``"USGS"``; the rest are marked ``"CESMD"`` (single-file).
         verbose: When True, print per-record progress.
 
     Returns:
-        ``{"code", "T1", "gamma", "capacities", "median_collapse_sa",
-        "median_collapse_sa_gamma", "records"}``.
+        ``{"code", "T1", "gamma", "g", "ladder", "max_scale", "tolerance",
+        "collapse_drift", "records", "records_detail", "capacities",
+        "collapse_Sa_T1_g", "median_collapse_sa", "median_collapse_sa_gamma",
+        "sigma_ln"}``.
     """
     t1 = period_1(code)
     g = g_from_units(gf.UNITS)
     capacities: dict[str, Optional[float]] = {}
+    records_detail: dict[str, dict[str, Any]] = {}
+    collapse_sa_g: dict[str, Optional[float]] = {}
     for i, rid in enumerate(record_ids):
         if verbose:
             print(f"  [{i + 1}/{len(record_ids)}] {rid}", flush=True)
@@ -353,14 +357,81 @@ def collapse_capacity_sa(
         )
         im = res["collapse_intensity"]
         capacities[rid] = (im * sa_t1) if im is not None else None
+        collapse_sa_g[rid] = (im * sa_t1 / g) if im is not None else None
+        records_detail[rid] = {
+            "Sa_T1": float(sa_t1),
+            "Sa_T1_g": float(sa_t1 / g),
+            "source": "USGS" if (record_channels and rid in record_channels) else "CESMD",
+            "ida": res,
+        }
     collapsed = [v for v in capacities.values() if v is not None]
     median = float(np.median(collapsed)) if collapsed else None
+    sigma_ln = (
+        float(np.std(np.log(np.asarray(collapsed, dtype=float)))) if collapsed else float("nan")
+    )
     return {
         "code": code,
         "T1": t1,
         "gamma": 1.0,  # the Appendix-B design value Vy/W
+        "g": float(g),
+        "ladder": [float(im) for im in intensities],
+        "max_scale": max_scale,
+        "tolerance": tolerance,
+        "collapse_drift": float(collapse_drift),
+        "records": [str(rid) for rid in record_ids],
+        "records_detail": records_detail,
         "capacities": capacities,
+        "collapse_Sa_T1_g": collapse_sa_g,
         "median_collapse_sa": median,
         "median_collapse_sa_gamma": (median / g) if median is not None else None,
-        "records": [str(rid) for rid in record_ids],
+        "sigma_ln": sigma_ln,
+    }
+
+
+def collapse_capacity_sa(
+    code: str,
+    record_ids: Sequence[str],
+    intensities: Sequence[float],
+    *,
+    dt: float = 0.005,
+    collapse_drift: float = _COLLAPSE_DRIFT,
+    damping: float = _DAMPING,
+    tolerance: float = 0.01,
+    max_scale: Optional[float] = None,
+    pdelta: bool = True,
+    pdelta_gravity: bool = True,
+    record_channels: Optional[dict[str, str]] = None,
+    verbose: bool = False,
+) -> dict[str, Any]:
+    """Per-record collapse capacity in ``Sa(T1)`` terms + the median, for *code*.
+
+    Thin wrapper over :func:`collapse_ida_curves` that drops the per-record
+    curves, returning only the scalar capacities and the median.
+
+    Returns:
+        ``{"code", "T1", "gamma", "capacities", "median_collapse_sa",
+        "median_collapse_sa_gamma", "records"}``.
+    """
+    full = collapse_ida_curves(
+        code,
+        record_ids,
+        intensities,
+        dt=dt,
+        collapse_drift=collapse_drift,
+        damping=damping,
+        tolerance=tolerance,
+        max_scale=max_scale,
+        pdelta=pdelta,
+        pdelta_gravity=pdelta_gravity,
+        record_channels=record_channels,
+        verbose=verbose,
+    )
+    return {
+        "code": full["code"],
+        "T1": full["T1"],
+        "gamma": full["gamma"],
+        "capacities": full["capacities"],
+        "median_collapse_sa": full["median_collapse_sa"],
+        "median_collapse_sa_gamma": full["median_collapse_sa_gamma"],
+        "records": full["records"],
     }

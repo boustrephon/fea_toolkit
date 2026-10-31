@@ -45,7 +45,16 @@ SCHEMA_VERSION_LEGACY = 1
 #:   / ``node_accel_*`` (``N_t × N_rec``), the peak reductions and the Rayleigh
 #:   ``period_1`` / ``period_2``.  A ``3`` archive still reads — it simply has no
 #:   ``transient`` block, so ``"transient"`` is absent from its ``analysis_types``.
-SCHEMA_VERSION = 4
+#: * ``5`` — a first-class ``ida`` block for incremental-dynamic-analysis
+#:   collapse results (the IK-2005 generic-frame benchmark).  ``analysis_types``
+#:   may now contain ``"ida"``; each ``ida/<record>/...`` carries the per-record
+#:   ladder ``scale`` / peak-interstorey-drift ``drift`` / ``converged``, the
+#:   collapse scalars (``collapse_scale`` / ``collapse_criterion``) and the
+#:   ``Sa_T1_g`` / ``source`` provenance, alongside the ``ida/record_id`` +
+#:   ``ida/collapse_Sa_T1_g`` summaries and the ``ida/median_collapse_Sa_T1_gamma``
+#:   / ``ida/sigma_ln`` scalars.  A ``4`` archive still reads — it simply has no
+#:   ``ida`` block, so ``"ida"`` is absent from its ``analysis_types``.
+SCHEMA_VERSION = 5
 
 # ── Required array names per result type ──────────────────────────────────
 
@@ -369,6 +378,41 @@ TRANSIENT_NODE_ARRAYS: dict[str, tuple] = {
     "transient/{case}/node_accel_z": ("N_t N_rec", "float"),
 }
 
+# ── IDA (incremental dynamic analysis) collapse results (record-keyed) ────
+# Each ``ida/<record>/...`` block is one ground-motion run over the collapse
+# ladder.  ``N_level`` is the number of intensity levels the record was run at
+# (the seed ladder plus any geometric extension — ragged across records, so it
+# is resolved per record from the ``scale`` anchor).  ``N_rec`` is the number
+# of records (the canonical order of ``ida/record_id``).  The collapse IM is
+# reported two ways: the raw ``collapse_scale`` (a ladder multiplier) and the
+# normalised ``ida/collapse_Sa_T1_g`` = ``collapse_scale × Sa_T1_g``.
+IDA_PER_RECORD_ARRAYS: dict[str, tuple] = {
+    "ida/{record}/scale": ("N_level", "float"),
+    "ida/{record}/drift": ("N_level", "float"),
+    "ida/{record}/converged": ("N_level", "bool"),
+    "ida/{record}/collapse_scale": ("", "float"),
+    "ida/{record}/collapse_criterion": ("", "str"),
+    "ida/{record}/Sa_T1_g": ("", "float"),
+    "ida/{record}/source": ("", "str"),
+}
+
+IDA_GLOBAL_ARRAYS: dict[str, tuple] = {
+    "ida/record_id": ("N_rec", "str"),
+    "ida/collapse_Sa_T1_g": ("N_rec", "float"),
+    "ida/collapse_Sa_T1_gamma": ("N_rec", "float"),
+}
+
+IDA_SCALAR_ARRAYS: dict[str, tuple] = {
+    "ida/code": ("", "str"),
+    "ida/T1": ("", "float"),
+    "ida/gamma": ("", "float"),
+    "ida/max_scale": ("", "float"),
+    "ida/tolerance": ("", "float"),
+    "ida/collapse_drift": ("", "float"),
+    "ida/median_collapse_Sa_T1_gamma": ("", "float"),
+    "ida/sigma_ln": ("", "float"),
+}
+
 META_ARRAYS: dict[str, tuple] = {
     "force_unit": ("", "str"),
     "length_unit": ("", "str"),
@@ -532,6 +576,41 @@ def transient_case_names(data: t.Mapping[str, t.Any]) -> list[str]:
             if len(parts) >= 3:
                 cases.add(parts[1])
     return sorted(cases)
+
+
+def make_ida_key(record_id: str, template: str) -> str:
+    """Build the NPZ key for an IDA result array.
+
+    Args:
+        record_id: The record identifier (an LMSR-N id such as ``"IV79cal"``).
+        template: Key template containing ``{record}``.
+
+    Returns:
+        Formatted array name, e.g. ``ida/IV79cal/drift``.
+    """
+    return template.format(record=record_id)
+
+
+def ida_record_names(data: t.Mapping[str, t.Any]) -> list[str]:
+    """Return the record ids present in *data*, sorted.
+
+    A record is discovered from any ``ida/<record>/...`` key (not only the
+    ``scale`` anchor), so a block missing its ladder is still surfaced and
+    fails validation.  Archives with no IDA block return an empty list.
+
+    Args:
+        data: Flat results dict (NPZ-style keys).
+
+    Returns:
+        Sorted list of record ids, e.g. ``["IV79cal", "IV79chi"]``.
+    """
+    records: set[str] = set()
+    for key in data:
+        if key.startswith("ida/"):
+            parts = key.split("/")
+            if len(parts) >= 3:
+                records.add(parts[1])
+    return sorted(records)
 
 
 def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
@@ -907,6 +986,41 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
                         for k in comp_keys:
                             if data.get(k) is None:
                                 messages.append(f"Missing transient array: {k}")
+        if "ida" in types:
+            records = ida_record_names(data)
+            if not records:
+                messages.append("analysis_types declares 'ida' but no ida record block exists")
+            else:
+                rec_id_arr = data.get("ida/record_id")
+                dims["N_rec"] = len(rec_id_arr) if rec_id_arr is not None else len(records)
+                # ── Required: global summaries ──
+                for template, (shape_desc, dtype_str) in IDA_GLOBAL_ARRAYS.items():
+                    arr = data.get(template)
+                    if arr is None:
+                        messages.append(f"Missing ida array: {template}")
+                    else:
+                        _check_shape(template, arr, shape_desc, dtype_str)
+                # ── Optional: summary scalars / provenance ──
+                for template, (shape_desc, dtype_str) in IDA_SCALAR_ARRAYS.items():
+                    arr = data.get(template)
+                    if arr is not None:
+                        _check_shape(template, arr, shape_desc, dtype_str)
+                # ── Per-record ladder ──
+                # ``N_level`` is ragged across records, so clear it and resolve
+                # per record from the ``scale`` anchor (mirrors the transient
+                # per-case N_t handling above).
+                for record in records:
+                    dims.pop("N_level", None)
+                    scale_arr = data.get(make_ida_key(record, "ida/{record}/scale"))
+                    if scale_arr is not None:
+                        dims["N_level"] = len(scale_arr)
+                    for template, (shape_desc, dtype_str) in IDA_PER_RECORD_ARRAYS.items():
+                        key = make_ida_key(record, template)
+                        arr = data.get(key)
+                        if arr is None:
+                            messages.append(f"Missing ida array: {key}")
+                        else:
+                            _check_shape(key, arr, shape_desc, dtype_str)
 
     return messages
 

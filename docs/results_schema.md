@@ -505,11 +505,52 @@ a reader can tell "not recorded" from a zero).  `transient_case_names()`
 returns the sorted case labels, and `describe_results_npz()` reports them under
 `transient_cases`.
 
+### IDA (incremental dynamic analysis) results
+
+The `ida/<record>/...` block gives the IK-2005 generic-frame collapse IDA a
+first-class home (schema **v5**).  Each ground-motion run is keyed by its
+record id (`ida/<record>/...`), written by `collect_ida_arrays()` from the dict
+returned by `fea_toolkit.benchmarks.generic_frame_run.collapse_ida_curves()`,
+and wired through `write_results_npz()` via the `ida_results` argument.
+`analysis_types` carries `"ida"`.
+
+| Array | Shape | dtype | Description |
+|---|---|---|---|
+| `ida/record_id` | `(N_rec,)` | `str` | Record ids in canonical order (e.g. `["IV79cal", …]`) |
+| `ida/collapse_Sa_T1_g` | `(N_rec,)` | `float` | Per-record collapse capacity `Sa,c(T1)/g` (NaN when a record did not collapse) |
+| `ida/collapse_Sa_T1_gamma` | `(N_rec,)` | `float` | `(Sa,c/g)/γ` per record |
+| `ida/<record>/scale` | `(N_level,)` | `float` | The record scale-factor ladder (seed + geometric extension) |
+| `ida/<record>/drift` | `(N_level,)` | `float` | Peak interstorey-drift ratio at each level (the EDP) |
+| `ida/<record>/converged` | `(N_level,)` | `bool` | Per-level convergence (`converged_steps == num_steps`) |
+| `ida/<record>/collapse_scale` | `()` | `float` | The (bisection-refined) collapse scale factor, or NaN |
+| `ida/<record>/collapse_criterion` | `()` | `str` | `"nonconvergence"` / `"drift"` / `"none"` |
+| `ida/<record>/Sa_T1_g` | `()` | `float` | The record's 5 %-damped `Sa(T1)/g` at scale 1 |
+| `ida/<record>/source` | `()` | `str` | Record provenance `"USGS"` / `"CESMD"` |
+
+**Optional summary scalars** (written when the producer supplies them):
+
+| Array | Shape | dtype | Description |
+|---|---|---|---|
+| `ida/code` | `()` | `str` | Generic-frame code (e.g. `"0909"`) |
+| `ida/T1` | `()` | `float` | Fundamental period (s) |
+| `ida/gamma` | `()` | `float` | Strength coefficient `Vy/W` (= 1.0) |
+| `ida/max_scale` | `()` | `float` | Ladder upper bound |
+| `ida/tolerance` | `()` | `float` | Bisection relative tolerance |
+| `ida/collapse_drift` | `()` | `float` | Peak-drift collapse threshold |
+| `ida/median_collapse_Sa_T1_gamma` | `()` | `float` | Median `(Sa,c/g)/γ` |
+| `ida/sigma_ln` | `()` | `float` | Collapse dispersion `σ_ln` |
+
+`N_level` is resolved **per record** (ragged across records) from the `scale`
+anchor, exactly like the transient block's per-case `N_t`.  `ida_record_names()`
+returns the sorted record ids, and `describe_results_npz()` reports them under
+`ida_records`.  The plotting entry points are
+`fea_toolkit.plotting.plot_ida_curves()` and `plot_collapse_fragility()`.
+
 ### Metadata
 
 | Array | Shape | dtype | Description |
 |---|---|---|---|
-| `schema_version` | `()` | `int` | File-level results-layout version (`results_schema.SCHEMA_VERSION`, currently 4).  Absent in legacy files — read as `SCHEMA_VERSION_LEGACY` (1) via `fea_toolkit.io.get_schema_version()`. |
+| `schema_version` | `()` | `int` | File-level results-layout version (`results_schema.SCHEMA_VERSION`, currently 5).  Absent in legacy files — read as `SCHEMA_VERSION_LEGACY` (1) via `fea_toolkit.io.get_schema_version()`. |
 | `force_unit` | `()` | `str` | e.g. ``"kN"``, ``"N"`` |
 | `length_unit` | `()` | `str` | e.g. ``"m"``, ``"mm"`` |
 | `created` | `()` | `str` | ISO‑8601 timestamp |
@@ -533,6 +574,14 @@ returns the sorted case labels, and `describe_results_npz()` reports them under
 > `transient` block, so `"transient"` is absent from its `analysis_types` and
 > `transient_case_names()` returns `[]`.  The stage-file array layout is again
 > unchanged (a stage file holds geometry, not time-history results).
+
+> **Version 5 — the `ida` block.**  `analysis_types` may now contain `"ida"`,
+> and each `ida/<record>/...` carries the per-record collapse ladder and the
+> `ida/collapse_Sa_T1_g` / `ida/median_collapse_Sa_T1_gamma` / `ida/sigma_ln`
+> summaries described above.  A version-4 archive still reads — it simply has
+> no `ida` block, so `"ida"` is absent from its `analysis_types` and
+> `ida_record_names()` returns `[]`.  The stage-file array layout is unchanged
+> (a stage file holds geometry, not collapse results).
 
 ## Data contract and storage seam
 

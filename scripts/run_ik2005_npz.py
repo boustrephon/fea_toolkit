@@ -1,0 +1,86 @@
+#!/usr/bin/env python
+"""Run the IK-2005 generic-frame collapse IDA and write a unified NPZ.
+
+Produces ``ik2005_<code>.npz`` carrying the model geometry (the generated
+generic frame) plus the ``ida`` block (schema v5): the per-record IDA curves,
+collapse capacities and the median/σ_ln summary.  This archive is what
+:func:`fea_toolkit.plotting.plot_ida_curves` / ``plot_collapse_fragility`` and
+the FEA-GUI's "Open results" path consume.
+
+Usage::
+
+    python scripts/run_ik2005_npz.py --code 0909 --limit 3   # smoke test
+    python scripts/run_ik2005_npz.py --code 0909              # full 33 records
+"""
+
+import argparse
+import importlib.util
+import time
+from pathlib import Path
+from typing import Optional
+
+from fea_toolkit.benchmarks import generic_frame as gf
+from fea_toolkit.benchmarks import generic_frame_run as gfr
+from fea_toolkit.io.npz_writer import write_results_npz
+
+# Reuse the record/channel manifest from the collapse driver (single source of
+# truth).  TODO(promote): move LMSR_N_IDS / PEER_ONLY / USGS_CHANNELS into
+# benchmarks/ so scripts stop importing one another.
+_HERE = Path(__file__).resolve().parent
+_spec = importlib.util.spec_from_file_location(
+    "run_ik2005_collapse", str(_HERE / "run_ik2005_collapse.py")
+)
+_run_ik2005 = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_run_ik2005)
+LMSR_N_IDS: list[str] = _run_ik2005.LMSR_N_IDS
+PEER_ONLY: set[str] = _run_ik2005.PEER_ONLY
+USGS_CHANNELS: dict[str, str] = _run_ik2005.USGS_CHANNELS
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--code", default="0909", help="generic-frame code")
+    parser.add_argument("--tolerance", type=float, default=0.01)
+    parser.add_argument("--max-scale", type=float, default=128.0)
+    parser.add_argument("--ladder", type=str, default="0.5,1,2,4,8,16")
+    parser.add_argument("--limit", type=int, default=None, help="run only the first N records")
+    parser.add_argument("--out", type=str, default=None, help="output .npz path")
+    args = parser.parse_args(argv)
+
+    ladder = [float(x) for x in args.ladder.split(",")]
+    record_ids = [rid for rid in LMSR_N_IDS if rid not in PEER_ONLY]
+    skipped = [rid for rid in LMSR_N_IDS if rid in PEER_ONLY]
+    if args.limit:
+        record_ids = record_ids[: args.limit]
+
+    # 1. Model — the generated generic frame, IMK-enriched.
+    md = gf.enrich_imk(gf.build_model(args.code), args.code)
+
+    # 2. IDA over the records (keeps the per-record curves).
+    t0 = time.time()
+    print(f"Running IDA on {args.code} over {len(record_ids)} records …")
+    ida = gfr.collapse_ida_curves(
+        args.code,
+        record_ids,
+        ladder,
+        tolerance=args.tolerance,
+        max_scale=args.max_scale,
+        record_channels=USGS_CHANNELS,
+        verbose=True,
+    )
+    print(
+        f"  median (Sa,c/g)/γ = {ida['median_collapse_sa_gamma']:.2f}  "
+        f"σ_ln = {ida['sigma_ln']:.2f}  ({time.time() - t0:.0f} s)"
+    )
+
+    # 3. Write the archive.
+    out = args.out or f"ik2005_{args.code}.npz"
+    path = write_results_npz(out, md, ida_results=ida)
+    print(f"wrote {path}")
+    if skipped:
+        print(f"PEER-only (not yet fetched): {', '.join(skipped)}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
