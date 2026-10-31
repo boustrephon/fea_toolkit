@@ -712,6 +712,11 @@ class MainWindow(QMainWindow):
             self._on_open_benchmark,
             tip="Build a FEMA 355C / SAC Phase 2 benchmark model",
         )
+        a["file.open_generic_frame"] = self._real_action(
+            "Open generic-frame benchmark\u2026",
+            self._on_open_generic_frame,
+            tip="Build an IK-2005 generic frame (collapse benchmark)",
+        )
         a["file.open_results"] = self._real_action(
             "Open results\u2026",
             self._on_open_results,
@@ -969,6 +974,7 @@ class MainWindow(QMainWindow):
         m = bar.addMenu("&File")
         m.addAction(a["file.open"])
         m.addAction(a["file.open_benchmark"])
+        m.addAction(a["file.open_generic_frame"])
         m.addAction(a["file.open_results"])
         m.addAction(a["file.open_project"])
         m.addSeparator()
@@ -3539,6 +3545,30 @@ class MainWindow(QMainWindow):
         self.show_model(model)
         self.log(f"Opened benchmark: {source}.")
 
+    def _on_open_generic_frame(self) -> None:
+        """Build an IK-2005 generic frame and display it in 3-D."""
+        from .views.generic_frame_dialog import GenericFrameDialog
+
+        code = GenericFrameDialog.edit(parent=self)
+        if code is None:
+            return
+        from ..benchmarks import generic_frame as gf
+
+        source = f"IK-2005 generic frame {code}"
+        self.log(f"Building {source} \u2026")
+        try:
+            model = gf.enrich_imk(gf.build_model(code), code)
+        except Exception as exc:
+            self.log(f"Failed to build {source}: {exc}", "error")
+            return
+        self._save_view_state()
+        self._remember_source(model, source=source)
+        self.show_model(model)
+        self.log(
+            f"Opened {source}.  Use File \u25b8 Open results\u2026 on its IDA "
+            "archive to view the collapse curves."
+        )
+
     def _on_open_results(self) -> None:
         """**File ▸ Open results…**: choose an archive and register its cases."""
         path, _ = QFileDialog.getOpenFileName(
@@ -3605,6 +3635,22 @@ class MainWindow(QMainWindow):
         if first is not None:
             self._hidden_elem_ids.clear()
             self._show_view(first, rebuild_tree=True)
+
+        # IDA (IK-2005 collapse) — register a figure view when the archive
+        # carries an ``ida`` block (schema v5).
+        try:
+            from ..io.npz_reader import describe_results_npz, read_results_npz
+
+            if describe_results_npz(path).get("ida_records"):
+                from ..plotting.viz_ida import plot_ida_summary
+
+                figure = plot_ida_summary(read_results_npz(path))
+                if figure is not None:
+                    self._views.add_figure(
+                        "ida", "IDA collapse", figure, source=name, activate=False
+                    )
+        except Exception as exc:  # pragma: no cover - defensive
+            self.log(f"Could not build the IDA view: {exc}", "error")
         return True
 
     def _on_save_results(self) -> None:

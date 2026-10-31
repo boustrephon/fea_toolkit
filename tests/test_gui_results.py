@@ -642,3 +642,18 @@ class TestShellResults:
 
         assert _shell_cell_colors(window) is None
         assert window._actions["results.shell_forces"].isChecked() is False
+
+
+def test_open_ida_archive_registers_a_figure_view(window, tmp_path):
+    """An archive carrying an ``ida`` block also registers a figure view."""
+    from examples.sample_model import make_sample_model
+    from fea_toolkit.io.npz_writer import write_results_npz
+    from tests.test_ida_schema import _synthetic_ida_result
+
+    path = write_results_npz(
+        str(tmp_path / "ida.npz"), make_sample_model(), ida_results=_synthetic_ida_result()
+    )
+    assert window.open_results_path(path) is True
+    view = window._views.get("ida")
+    assert view is not None
+    assert view.kind == "figure"

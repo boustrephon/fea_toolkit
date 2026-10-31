@@ -174,6 +174,34 @@ def test_open_benchmark_action_builds_and_displays(window, monkeypatch):
     assert window._model is not None
 
 
+def test_open_generic_frame_action_is_enabled(window):
+    """File ▸ Open generic-frame benchmark… is a live action."""
+    assert window._actions["file.open_generic_frame"].isEnabled()
+
+
+def test_generic_frame_dialog_offers_all_frames(qapp):
+    """The dialog lists all 12 Appendix-A frames; default is the first code."""
+    from fea_toolkit.gui.views.generic_frame_dialog import GenericFrameDialog
+
+    dlg = GenericFrameDialog()
+    try:
+        assert dlg._frame.count() == 12
+        assert dlg.value() == "0303"
+    finally:
+        dlg.close()
+
+
+def test_open_generic_frame_action_builds_and_displays(window, monkeypatch):
+    """File ▸ Open generic-frame benchmark… builds the chosen frame in-process."""
+    from fea_toolkit.gui.views.generic_frame_dialog import GenericFrameDialog
+
+    monkeypatch.setattr(GenericFrameDialog, "edit", staticmethod(lambda parent=None: "0909"))
+    window._actions["file.open_generic_frame"].trigger()
+    assert window._store is not None
+    assert window._source_label == "IK-2005 generic frame 0909"
+    assert window._model is not None
+
+
 def test_show_is_graceful_without_an_interactive_viewport(window):
     """Showing the window never raises, even when the viewport is off-screen.
 
