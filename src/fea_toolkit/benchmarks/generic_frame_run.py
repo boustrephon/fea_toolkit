@@ -29,6 +29,7 @@ from ..io.ground_motion import read_peer_record, read_time_history_csv
 from . import generic_frame as gf
 from .generic_frame_data import FRAME_DATA
 from .sac_run import (
+    collapse_criterion,
     collapse_intensity,
     compute_metrics,
     floor_levels,
@@ -137,7 +138,8 @@ def _ida_run(
 
     Returns:
         ``{"code", "record", "intensities", "drifts", "converged",
-        "collapse_intensity", "collapse_drift", "bisection"}``.
+        "collapse_intensity", "collapse_criterion", "collapse_drift",
+        "bisection"}``.
     """
     from openseespy.opensees import wipe
 
@@ -223,6 +225,7 @@ def _ida_run(
         "drifts": drifts,
         "converged": converged,
         "collapse_intensity": im_collapse,
+        "collapse_criterion": collapse_criterion(ladder, drifts, converged, collapse_drift),
         "collapse_drift": float(collapse_drift),
         "bisection": bisection,
     }

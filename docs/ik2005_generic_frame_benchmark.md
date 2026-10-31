@@ -19,7 +19,7 @@ related: [sac_imk_collapse_benchmark.md, imk_deterioration_model.md, benchmark_r
 > damping, smoke-tested on a synthetic pulse).  33 of the 40 LMSR-N records are
 > now fetched locally (19 CESMD + 14 USGS NSMP); the remaining 7 are PEER
 > NGA-West2-only.  `scripts/run_ik2005_collapse.py` drives the 33-record IDA on
-> `0909`.
+> `0909` — median `(Sa,c/g)/γ = 3.41` vs the ≈ 3.3 target (see "Results").
 
 ## Purpose
 
@@ -124,12 +124,80 @@ Rules applied (`.clinerules` §4.6):
    analytically (first-yield `min(2·Myb1/h, 4·Myc/h)/W`, all 12 frames) and the
    pipeline pushover peak base-shear coefficient lands in `[0.9, 1.4]`
    (`tests/test_generic_frame.py`, `tests/test_generic_frame_pushover.py`).
-3. ⏳ IDA collapse `(Sa,c/g)/γ ≈ 3.3` at `T1 ≈ 1 s` — the runner
-   (`benchmarks/generic_frame_run.py`) is landed and smoke-tested; only the
-   **LMSR-N record fetch** remains (non-redistributable, local).
+3. ✅ IDA collapse `(Sa,c/g)/γ ≈ 3.3` at `T1 ≈ 1 s` — median **3.41** over the
+   33 fetched LMSR-N records (vs ≈ 3.3, +3 %); dispersion σ_ln = 0.56 vs
+   IK-2005's ≈ 0.42 (Fig 5.18c).  See "Results" below.
 
 First target: **`0909`** (N = 9, T1 = 0.9 s) — closest to the SAC 3-story's
 period.
+
+## Results — 33-record IDA (`0909`)
+
+The 33 locally-available LMSR-N records (40 − 7 PEER-only) were run through
+`collapse_capacity_sa("0909", …)` — P-Δ + held `1.4 × seismic mass` gravity,
+5 % mass-proportional damping, peak-oriented IMK hinge, `max_scale = 128` (so
+every record collapses; the five slow records resolve at scales 33–64):
+
+| Statistic | Ours (33 records) | IK-2005 | Δ |
+|---|---|---|---|
+| Median `(Sa,c/g)/γ` | **3.41** | ≈ 3.3 (§5.5) | **+3 %** ✅ |
+| Dispersion σ_ln | **0.56** | ≈ 0.42 (Fig 5.18c) | +33 % ⚠️ |
+
+IK-2005 reports σ_ln only *graphically* (Fig 5.18c, "Dispersion of Collapse
+Capacity Spectra", y-axis "Standard Dev. ln[Sa,c(T1)/g]/γ") — ≈ 0.42 is read
+off the base-case (αc = −0.1) curve at T1 = 0.9 s; there is no tabulated
+value.  The median matches the target within the known caveats (7 PEER-only
+records absent, `LP89gmr`/`NR94stc` on the non-Medina horizontal, CESMD Vol2
+vs PEER NGA processing).  The dispersion is higher, most plausibly from the
+**collapse definition** below.
+
+### Collapse definition — drift proxy vs dynamic instability
+
+`collapse_intensity` (`benchmarks/sac_run.py`) flags collapse at the **first**
+of two tripwires per intensity:
+
+1. **non-convergence** to the end of the record — the Ibarra–Krawinkler
+   dynamic-instability criterion (the IDA curve going flat), or
+2. **peak interstorey-drift ratio > 10 %** — the FEMA P-695 sidesway proxy
+   (`_COLLAPSE_DRIFT = 0.10`).
+
+IK-2005's ≈ 3.3 median and ≈ 0.4 σ_ln were computed with the
+**dynamic-instability** definition only (the relative-intensity–EDP curve
+becoming flat), not a fixed 10 % drift threshold.  The drift proxy fires
+*earlier* than instability for any record whose peak drift reaches 10 % while
+the frame is still numerically stable, which lowers that record's collapse
+capacity.  *A priori* this could also inflate σ_ln — but in practice it does
+not (see the split below).
+
+**Decision.**  Keep the 10 % drift proxy as a failure definition (a clean,
+deterministic lower bound), but make the IK-2005 comparison on the **same
+dynamic-instability measure**.  The detector was instrumented to report which
+tripwire fired for each record (`collapse_criterion`, exposed as the
+`"collapse_criterion"` field of the `_ida_run` result).
+
+### Per-record criterion split (33 records)
+
+The instrumented detector was re-run over the 33 records (no bisection — the
+criterion is read off the first collapsed rung, which bisection does not
+change):
+
+| Criterion | n | Records |
+|---|---|---|
+| non-convergence (instability) | **28** | `IV79cal`, `IV79cmp`, `IV79e01`, `IV79e12`, `IV79e13`, `IV79nil`, `IV79pls`, `IV79qkp`, `IV79wsm`, `LP89g03`, `LP89g04`, `LP89gmr`, `LP89hch`, `LP89hvr`, `LP89slc`, `LP89svl`, `NR94cen`, `NR94cnp`, `NR94fle`, `NR94glp`, `NR94hol`, `NR94lh1`, `NR94lv2`, `NR94nya`, `NR94stn`, `NR94ver`, `SF71pel`, `SH87wsm` |
+| drift (10 % IDR, still converged) | **5** | `IV79chi` (4.5), `LP89cap` (2.0), `LP89hda` (5.1), `NR94far` (5.9), `NR94stc` (5.0) |
+
+*Parentheses are `Sa,c/g` at the recorded (drift-clipped) collapse.*
+
+**Reading.**  Collapse is dominated by dynamic instability (28/33), so the
+detector largely *is* the IK-2005 criterion.  The 10 % drift proxy only clips 5
+records — and it is **not** what inflates σ_ln: recomputing σ_ln over the 28
+instability records alone gives 0.56, unchanged.  The 0.56-vs-0.42 gap therefore
+comes from elsewhere (the 7 absent PEER records, the two wrong-component CESMD
+records `LP89gmr`/`NR94stc`, CESMD Vol2-vs-PEER processing, and/or modelling
+differences).  The drift proxy also does **not** drag the median below target:
+its five clipped capacities sit mostly *above* the median (4 of 5 > 3.41), so
+the instability-only median would be ≥ 3.41 — i.e. the recorded 3.41 is a lower
+bound and already matches IK-2005's 3.3 within +3 %.
 
 ## Cross-checks (landed)
 

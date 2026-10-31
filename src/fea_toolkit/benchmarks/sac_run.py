@@ -502,6 +502,41 @@ def collapse_intensity(
     return None
 
 
+def collapse_criterion(
+    intensities: Sequence[float],
+    drifts: Sequence[float],
+    converged: Sequence[bool],
+    collapse_drift: float = 0.10,
+) -> Optional[str]:
+    """Which collapse criterion tripped first on the ladder.
+
+    Mirrors :func:`collapse_intensity` (same first-wins order): a run collapses
+    when it fails to converge to the end of the record (``"nonconvergence"`` —
+    the Ibarra–Krawinkler dynamic-instability criterion) or its peak
+    interstorey-drift ratio exceeds *collapse_drift* (``"drift"`` — the FEMA
+    P-695 sidesway proxy).  The first intensity to trip either one is the
+    collapse intensity; this returns the criterion that tripped there.
+
+    Args:
+        intensities: The IM ladder (record scale factors), ascending.
+        drifts: Peak interstorey-drift ratio per intensity (``d_max``).
+        converged: ``converged_steps == num_steps`` per intensity.
+        collapse_drift: Peak interstorey-drift ratio above which the structure
+            is deemed collapsed (default ``0.10``).
+
+    Returns:
+        ``"nonconvergence"`` if the first collapsed rung failed to converge,
+        ``"drift"`` if it converged but exceeded *collapse_drift*, or ``None``
+        if no rung in the ladder collapsed.
+    """
+    for _, drift, ok in zip(intensities, drifts, converged):
+        if not ok:
+            return "nonconvergence"
+        if drift > collapse_drift:
+            return "drift"
+    return None
+
+
 def _ida_run(
     building: int,
     record_id: str,
@@ -559,9 +594,11 @@ def _ida_run(
 
     Returns:
         ``{"building", "record", "intensities", "drifts", "converged",
-        "collapse_intensity", "collapse_drift", "bisection"}`` — the IDA curve
-        (drift vs intensity), the per-intensity convergence flags, the collapse
-        intensity (``None`` when none collapsed), and the bisection bracket
+        "collapse_intensity", "collapse_criterion", "collapse_drift",
+        "bisection"}`` — the IDA curve (drift vs intensity), the per-intensity
+        convergence flags, the collapse intensity (``None`` when none
+        collapsed), the tripwire that fired (``"nonconvergence"`` or
+        ``"drift"``, via :func:`collapse_criterion`), and the bisection bracket
         (``None`` when no bisection ran).
     """
     from openseespy.opensees import wipe
@@ -660,6 +697,7 @@ def _ida_run(
         "drifts": drifts,
         "converged": converged,
         "collapse_intensity": im_collapse,
+        "collapse_criterion": collapse_criterion(ladder, drifts, converged, collapse_drift),
         "collapse_drift": float(collapse_drift),
         "bisection": bisection,
     }

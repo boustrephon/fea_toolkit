@@ -21,6 +21,7 @@ import pytest
 
 from fea_toolkit.benchmarks.sac_run import (
     _ida_run,
+    collapse_criterion,
     collapse_intensity,
     sdof_spectral_acceleration,
 )
@@ -36,6 +37,26 @@ def test_collapse_intensity_criteria():
     assert collapse_intensity([1.0, 2.0, 3.0], [0.01, 0.12, 0.15], [True, True, True], 0.10) == 2.0
     # The drift threshold is honoured (a lower threshold collapses earlier).
     assert collapse_intensity([1.0, 2.0], [0.05, 0.08], [True, True], 0.06) == 2.0
+
+
+def test_collapse_criterion_reports_tripwire():
+    """``collapse_criterion`` names the tripwire that fired first."""
+    # No collapse → None.
+    assert collapse_criterion([1.0, 2.0, 3.0], [0.01, 0.02, 0.03], [True, True, True], 0.10) is None
+    # Non-convergence at the second rung → "nonconvergence".
+    assert (
+        collapse_criterion([1.0, 2.0, 3.0], [0.01, 0.02, 0.03], [True, False, True], 0.10)
+        == "nonconvergence"
+    )
+    # Drift beyond the threshold while converged → "drift".
+    assert (
+        collapse_criterion([1.0, 2.0, 3.0], [0.01, 0.12, 0.15], [True, True, True], 0.10) == "drift"
+    )
+    # Non-convergence takes precedence when both would trip (first-wins order).
+    assert (
+        collapse_criterion([1.0, 2.0, 3.0], [0.01, 0.12, 0.15], [True, False, True], 0.10)
+        == "nonconvergence"
+    )
 
 
 def test_ida_synthetic_ladder_collapses_at_top():
