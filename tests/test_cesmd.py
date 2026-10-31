@@ -116,6 +116,20 @@ def test_download_dataset_requires_email(tmp_path, monkeypatch):
         cesmd.download_dataset(tmp_path, "IV79cal", stname="Calipatria Fire Station")
 
 
+def test_query_records_includes_groupby(monkeypatch):
+    """The records query must pass ``groupby`` (required by the live API)."""
+    captured: dict[str, str] = {}
+
+    def fake_fetch(url: str, timeout: float) -> dict:
+        captured["url"] = url
+        return {"count": 0, "results": {}}
+
+    monkeypatch.setattr(cesmd, "_fetch_json", fake_fetch)
+    cesmd.query_records(stname="Capitola", groupby="event")
+    assert "groupby=event" in captured["url"]
+    assert "nodata" not in captured["url"]
+
+
 # ── fetch script manifest ───────────────────────────────────────────
 
 
@@ -123,14 +137,15 @@ def test_lmsr_n_manifest_has_40_unique_records():
     fetch = _load_fetch_script()
     records = fetch.LMSR_N_RECORDS
     assert len(records) == 40
-    ids = [rid for rid, _, _ in records]
+    ids = [rid for rid, _, _, _ in records]
     assert len(set(ids)) == 40, "duplicate record ids in the manifest"
-    for _, year, station in records:
+    for _, year, key, station in records:
         assert 1900 <= year <= 2100
+        assert key.strip()
         assert station.strip()
 
 
 def test_lmsr_n_manifest_ids_match_ik2005_table():
     fetch = _load_fetch_script()
-    ids = sorted(rid for rid, _, _ in fetch.LMSR_N_RECORDS)
+    ids = sorted(rid for rid, _, _, _ in fetch.LMSR_N_RECORDS)
     assert ids == sorted(_EXPECTED_IDS)

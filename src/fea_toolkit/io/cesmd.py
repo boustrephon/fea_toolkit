@@ -73,9 +73,13 @@ def _fetch_json(url: str, timeout: float) -> dict[str, Any]:
             f"could not reach CESMD ({url}): {exc}. "
             "The CESMD site may be down (DNS or network outage)."
         ) from exc
+    text = raw.decode("utf-8").strip()
+    if not text:
+        # A no-match query returns an empty body — treat it as zero results.
+        return {"count": 0, "results": {}}
     try:
-        return json.loads(raw.decode("utf-8"))
-    except (ValueError, UnicodeDecodeError) as exc:
+        return json.loads(text)
+    except ValueError as exc:
         raise CESMDError(f"invalid JSON from CESMD ({url}): {exc}") from exc
 
 
@@ -87,22 +91,28 @@ def query_records(
     enddate: Optional[str] = None,
     minmag: Optional[float] = None,
     maxmag: Optional[float] = None,
+    groupby: str = "event",
     timeout: float = DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
     """Query record *metadata* for records matching the given criteria.
 
     Args:
-        evname: Event name (accepts wildcards, e.g. ``"Imperial Valley"``).
-        stname: Station name (accepts wildcards, e.g. ``"Calipatria*"``).
+        evname: Event name (accepts wildcards, e.g. ``"Loma Prieta"``).
+        stname: Station name (substring match, e.g. ``"Capitola"``).
         startdate: Earliest origin time ``"YYYY-MM-DD HH:MM:SS"`` (UTC).
         enddate: Latest origin time ``"YYYY-MM-DD HH:MM:SS"`` (UTC).
         minmag: Minimum magnitude (inclusive).
         maxmag: Maximum magnitude (inclusive).
+        groupby: Grouping of the results — ``"event"`` (default) nests stations
+            under ``results.events``, ``"station"`` nests events under
+            ``results.stations``.
         timeout: Request timeout (s).
 
     Returns:
-        The parsed JSON response — ``{"status", "count", "events", ...}`` where
-        ``events`` nests ``stations`` which nest ``records``.
+        The parsed JSON response — ``{"details", "count", "results"}`` where
+        ``results.events[*].stations[*]`` carry a singular ``record`` dict
+        (``pgav2``, ``epidist``, ``data_availability``, …).  A no-match query
+        returns ``{"count": 0, "results": {}}``.
 
     Raises:
         CESMDError: On network failure, an HTTP error, or invalid JSON.
@@ -117,7 +127,7 @@ def query_records(
             maxmag=maxmag,
             rettype="metadata",
             format="json",
-            nodata=404,
+            groupby=groupby,
         ),
         timeout,
     )
@@ -138,6 +148,7 @@ def download_dataset(
     enddate: Optional[str] = None,
     email: Optional[str] = None,
     download: str = "P",
+    groupby: str = "event",
     timeout: float = DEFAULT_TIMEOUT,
 ) -> Path:
     """Download a zipped record dataset into *dest* and return the saved path.
@@ -152,6 +163,8 @@ def download_dataset(
         email: Registered e-mail authenticating the download (defaults to the
             :data:`CESMD_EMAIL_ENV` environment variable).
         download: ``"P"`` processed (Vol2), ``"R"`` raw, or ``"T"`` plot.
+        groupby: Grouping of the returned dataset — ``"event"`` (default) or
+            ``"station"``.
         timeout: Request timeout (s).
 
     Returns:
@@ -173,6 +186,7 @@ def download_dataset(
         enddate=enddate,
         rettype="dataset",
         download=download,
+        groupby=groupby,
         email=email,
     )
     dest.mkdir(parents=True, exist_ok=True)
