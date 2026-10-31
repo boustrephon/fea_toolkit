@@ -14,27 +14,17 @@ Usage::
 """
 
 import argparse
-import importlib.util
 import time
-from pathlib import Path
 from typing import Optional
 
 from fea_toolkit.benchmarks import generic_frame as gf
 from fea_toolkit.benchmarks import generic_frame_run as gfr
-from fea_toolkit.io.npz_writer import write_results_npz
-
-# Reuse the record/channel manifest from the collapse driver (single source of
-# truth).  TODO(promote): move LMSR_N_IDS / PEER_ONLY / USGS_CHANNELS into
-# benchmarks/ so scripts stop importing one another.
-_HERE = Path(__file__).resolve().parent
-_spec = importlib.util.spec_from_file_location(
-    "run_ik2005_collapse", str(_HERE / "run_ik2005_collapse.py")
+from fea_toolkit.benchmarks.ik2005_records import (
+    USGS_CHANNELS,
+    fetched_ids,
+    peer_only_ids,
 )
-_run_ik2005 = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_run_ik2005)
-LMSR_N_IDS: list[str] = _run_ik2005.LMSR_N_IDS
-PEER_ONLY: set[str] = _run_ik2005.PEER_ONLY
-USGS_CHANNELS: dict[str, str] = _run_ik2005.USGS_CHANNELS
+from fea_toolkit.io.npz_writer import write_results_npz
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -48,8 +38,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     ladder = [float(x) for x in args.ladder.split(",")]
-    record_ids = [rid for rid in LMSR_N_IDS if rid not in PEER_ONLY]
-    skipped = [rid for rid in LMSR_N_IDS if rid in PEER_ONLY]
+    record_ids = fetched_ids()
+    skipped = peer_only_ids()
     if args.limit:
         record_ids = record_ids[: args.limit]
 

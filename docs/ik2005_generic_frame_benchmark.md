@@ -371,7 +371,7 @@ selected *one* horizontal component per station at random.  Exact reproduction
 needs that per-record component (Medina 2002 thesis); until it is transcribed,
 the runner picks the horizontal component whose PGA matches Table 4.2 — for the
 multi-component USGS records via ``USGS_CHANNELS`` in
-`scripts/run_ik2005_collapse.py`, and for the CESMD records the single ``CH1``
+`fea_toolkit.benchmarks.ik2005_records`, and for the CESMD records the single ``CH1``
 channel — rather than silently assuming a component.  (Two CESMD ``CH1`` records,
 `LP89gmr` and `NR94stc`, landed on the *other* horizontal than Table 4.2; the
 rest match within ~5 %.)
