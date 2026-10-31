@@ -2,17 +2,21 @@
 """Download USGS NSMP corrected SMA-1 records for the IK-2005 LMSR-N set.
 
 CESMD's EDC holds no waveform for several LMSR-N records.  The USGS National
-Strong-Motion Project archive (``escweb.wr.usgs.gov/nsmp-data``) has them as
-SMC-format files inside per-event ZIPs — ``corr_sma-1.zip`` is the corrected
-SMA-1 (free-field) accelerograms, ``vol_2/<instrument><channel>.smc``.
+Strong-Motion Project archive (``escweb.wr.usgs.gov/nsmp-data``) has them, in
+two layouts:
 
-This fetches those, parses the SMC format
-(:func:`fea_toolkit.io.ground_motion.parse_smc`), and writes
+* **1986+ events** — SMC-format files inside a per-event
+  ``corr_sma-1.zip`` (``vol_2/<instrument><channel>.smc``), e.g. Loma Prieta.
+* **pre-1986 events** — the DDS-7 CD-ROM ``data2/cdrom_sm_1933-1986/<year>/<year>.zip``,
+  one file per component named ``DDDHHMMSS.SSc`` (day, hour, minute, station,
+  component), e.g. Imperial Valley 1979.
+
+Both are parsed by :func:`fea_toolkit.io.ground_motion.parse_smc` and written to
 ``data/ground_motion/local/<record_id>_<channel>.csv`` (``time,accel`` in m/s²).
 
 Usage::
 
-    python scripts/fetch_usgs_records.py --download [--keep-zip]
+    python scripts/fetch_usgs_records.py --download
 """
 
 from __future__ import annotations
@@ -27,47 +31,46 @@ from typing import Optional
 
 from fea_toolkit.io.ground_motion import parse_smc
 
-#: The LMSR-N records that CESMD lacks but the USGS NSMP archive holds:
-#: ``(record_id, event_id, instrument_number, station)``.  The corrected SMA-1
-#: data for an event is ``ca.water.usgs.gov/nsmp/<event_id>/sma-1/zips/corr_sma-1.zip``.
-USGS_RECORDS: list[tuple[str, str, int, str]] = [
-    # Loma Prieta 1989 (event 891018_1)
+#: The USGS archive is Cloudflare-fronted and rejects urllib's default
+#: ``Python-urllib/3.x`` user agent with HTTP 403 — send an explicit one.
+USER_AGENT = "fea_toolkit/1.0 (ground-motion fetcher)"
+
+#: Where downloaded records are written (the runner's local mirror).
+LOCAL = Path("data/ground_motion/local")
+
+#: Loma Prieta 1989 (SMC): ``(record_id, event_id, instrument, station)``.
+LOMA_PRIETA: list[tuple[str, str, int, str]] = [
     ("LP89hch", "891018_1", 2504, "Hollister City Hall"),
     ("LP89hda", "891018_1", 3928, "Hollister Airport Differential Array"),
     ("LP89slc", "891018_1", 4766, "Palo Alto SLAC Test Lab"),
     ("LP89svl", "891018_1", 4053, "Sunnyvale Colton Ave"),
 ]
 
-#: Where downloaded records are written (the runner's local mirror).
-LOCAL = Path("data/ground_motion/local")
+#: Imperial Valley 1979 (DDS-7): ``(record_id, member_base, station)`` where
+#: ``member_base`` is the DDS-7 filename minus the trailing channel char.
+IMPERIAL_VALLEY: list[tuple[str, str, str]] = [
+    ("IV79e01", "288x16e0.10", "El Centro Array #1"),
+    ("IV79e12", "288x16e1.20", "El Centro Array #12"),
+    ("IV79e13", "288x16e1.30", "El Centro Array #13"),
+    ("IV79cal", "288x16ca.l0", "Calipatria Fire Station"),
+    ("IV79nil", "288x16ni.l0", "Niland Fire Station"),
+    ("IV79pls", "288x16pl.s0", "Plaster City"),
+    ("IV79wsm", "288x16ws.m0", "Westmoreland Fire Station"),
+    ("IV79chi", "288x16ch.ih", "Chihuahua"),
+    ("IV79cmp", "288x16cm.pt", "Compuertas"),
+    ("IV79qkp", "288x16cu.ca", "Cucapah"),
+]
 
-#: The USGS archive is Cloudflare-fronted and rejects urllib's default
-#: ``Python-urllib/3.x`` user agent with HTTP 403 — send an explicit one.
-USER_AGENT = "fea_toolkit/1.0 (ground-motion fetcher)"
-
-
-def _zip_url(event_id: str) -> str:
-    return f"https://ca.water.usgs.gov/nsmp/{event_id}/sma-1/zips/corr_sma-1.zip"
-
-
-def _event_zip(event_id: str) -> Path:
-    """Download (once, cached) and return the ``corr_sma-1.zip`` for an event."""
-    path = LOCAL / f"{event_id}_corr_sma1.zip"
-    if not path.exists():
-        url = _zip_url(event_id)
-        print(f"fetch  {url}")
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=180) as resp:
-            path.write_bytes(resp.read())
-    return path
+LOMA_PRIETA_ZIP_URL = "https://ca.water.usgs.gov/nsmp/891018_1/sma-1/zips/corr_sma-1.zip"
+IV79_ZIP_URL = "https://escweb.wr.usgs.gov/nsmp-data/data2/cdrom_sm_1933-1986/1979/1979.zip"
 
 
-def _smc_member(zf: zipfile.ZipFile, instrument: int, channel: str):
-    suffix = f"vol_2/{instrument:04d}{channel}.smc"
-    for info in zf.infolist():
-        if info.filename.endswith(suffix):
-            return info
-    return None
+def _download(url: str, dest: Path) -> None:
+    """Download *url* to *dest* (with an explicit User-Agent)."""
+    print(f"fetch  {url}")
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=300) as resp:
+        dest.write_bytes(resp.read())
 
 
 def _write_csv(csv_path: Path, times, accel) -> None:
@@ -79,48 +82,71 @@ def _write_csv(csv_path: Path, times, accel) -> None:
             writer.writerow([f"{t:.6f}", f"{a:.6e}"])
 
 
-def cmd_download(keep_zip: bool = False) -> int:
+def _extract_and_write(zf: zipfile.ZipFile, member, rid: str, channel: str, csv_path: Path) -> None:
+    text = zf.read(member).decode("utf-8", errors="replace")
+    try:
+        times, accel, meta = parse_smc(text)
+    except ValueError as exc:
+        print(f"{rid:8s} {channel}: {exc}", file=sys.stderr)
+        return
+    _write_csv(csv_path, times, accel)
+    print(
+        f"fetch  {rid}_{channel} -> {csv_path} (comp={meta['component']}, orient={meta['orientation']})"
+    )
+
+
+def cmd_download() -> int:
     """Download and convert every USGS record into ``local/<id>_<channel>.csv``."""
-    failed = 0
-    zips: dict[str, Path] = {}
-    for rid, event_id, instrument, station in USGS_RECORDS:
-        if event_id not in zips:
-            zips[event_id] = _event_zip(event_id)
-        with zipfile.ZipFile(zips[event_id]) as zf:
+    # ── Loma Prieta 1989 (SMC, corr_sma-1.zip) ──
+    lp_zip = LOCAL / "891018_1_corr_sma1.zip"
+    if not lp_zip.exists():
+        _download(LOMA_PRIETA_ZIP_URL, lp_zip)
+    with zipfile.ZipFile(lp_zip) as zf:
+        for rid, _event_id, instrument, _station in LOMA_PRIETA:
             for channel in "abc":
                 csv_path = LOCAL / f"{rid}_{channel}.csv"
                 if csv_path.exists():
                     print(f"skip   {rid}_{channel} (already present)")
                     continue
-                member = _smc_member(zf, instrument, channel)
-                if member is None:
-                    print(f"{rid:8s} {channel}: not found", file=sys.stderr)
-                    failed += 1
-                    continue
-                text = zf.read(member).decode("utf-8", errors="replace")
-                try:
-                    times, accel, meta = parse_smc(text)
-                except ValueError as exc:
-                    print(f"{rid:8s} {channel}: {exc}", file=sys.stderr)
-                    failed += 1
-                    continue
-                _write_csv(csv_path, times, accel)
-                print(
-                    f"fetch  {rid}_{channel} -> {csv_path} "
-                    f"(comp={meta['component']}, orient={meta['orientation']})"
+                member = next(
+                    (
+                        i
+                        for i in zf.infolist()
+                        if i.filename.endswith(f"vol_2/{instrument:04d}{channel}.smc")
+                    ),
+                    None,
                 )
-    if not keep_zip:
-        for path in zips.values():
-            path.unlink(missing_ok=True)
-    return 1 if failed else 0
+                if member is None:
+                    continue  # a station may lack a channel
+                _extract_and_write(zf, member, rid, channel, csv_path)
+
+    # ── Imperial Valley 1979 (DDS-7 CD-ROM, 1979.zip) ──
+    iv_zip = LOCAL / "1979.zip"
+    if not iv_zip.exists():
+        _download(IV79_ZIP_URL, iv_zip)
+    with zipfile.ZipFile(iv_zip) as zf:
+        for rid, base, _station in IMPERIAL_VALLEY:
+            for channel in "abc":
+                csv_path = LOCAL / f"{rid}_{channel}.csv"
+                if csv_path.exists():
+                    print(f"skip   {rid}_{channel} (already present)")
+                    continue
+                name = f"{base}{channel}"
+                member = next((i for i in zf.infolist() if i.filename == name), None)
+                if member is None:
+                    continue  # Cucapah has only two channels
+                _extract_and_write(zf, member, rid, channel, csv_path)
+    return 0
 
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--download", action="store_true", help="download and convert")
-    parser.add_argument("--keep-zip", action="store_true", help="keep the event .zip files")
     args = parser.parse_args(argv)
-    return cmd_download(keep_zip=args.keep_zip)
+    if not args.download:
+        parser.print_help()
+        return 0
+    return cmd_download()
 
 
 if __name__ == "__main__":
