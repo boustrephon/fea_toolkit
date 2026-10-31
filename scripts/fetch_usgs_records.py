@@ -41,6 +41,10 @@ USGS_RECORDS: list[tuple[str, str, int, str]] = [
 #: Where downloaded records are written (the runner's local mirror).
 LOCAL = Path("data/ground_motion/local")
 
+#: The USGS archive is Cloudflare-fronted and rejects urllib's default
+#: ``Python-urllib/3.x`` user agent with HTTP 403 — send an explicit one.
+USER_AGENT = "fea_toolkit/1.0 (ground-motion fetcher)"
+
 
 def _zip_url(event_id: str) -> str:
     return f"https://ca.water.usgs.gov/nsmp/{event_id}/sma-1/zips/corr_sma-1.zip"
@@ -52,7 +56,8 @@ def _event_zip(event_id: str) -> Path:
     if not path.exists():
         url = _zip_url(event_id)
         print(f"fetch  {url}")
-        with urllib.request.urlopen(url, timeout=180) as resp:
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=180) as resp:
             path.write_bytes(resp.read())
     return path
 
