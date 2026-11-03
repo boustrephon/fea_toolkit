@@ -99,3 +99,10 @@ TABLE:  "AREA LOAD ASSIGNMENTS - UNIFORM"
 
 TABLE:  "ANALYSIS OPTIONS - AUTOMATIC MESH SETTINGS FOR FLOORS"
    "Mesh Option"=General   "Maximum Mesh Size"=0.25
+
+TABLE:  "AREA ASSIGNMENTS - FLOOR AUTO MESH OPTIONS"
+   UniqueName=100   "Mesh Option"=General   "Add Restraints"=No
+
+TABLE:  "AREA ASSIGNMENTS - WALL AUTO MESH OPTIONS"
+   UniqueName=200   "Mesh Option"="Auto Rectangular"   "Add Restraints"=Yes
+

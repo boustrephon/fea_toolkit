@@ -112,6 +112,15 @@ def _spring_rows(obj: Any, model: Any) -> list:
     return spring_rows(model, obj)
 
 
+def _meshing_rows(obj: Any, model: Any) -> list:
+    """An element's meshing settings (role, mesh option, size, …)."""
+    from ...model.meshing import meshing_rows
+
+    if model is None:
+        return []
+    return meshing_rows(model, obj)
+
+
 class PropertyInspector(QWidget):
     """Read-only property table for the current selection.
 
@@ -185,6 +194,7 @@ class PropertyInspector(QWidget):
             describe(obj)
             + _support_rows(obj, self._source_model)
             + _spring_rows(obj, self._source_model)
+            + _meshing_rows(obj, self._source_model)
             + _context_rows(obj, self._source_model)
             + load_rows(self._source_model, obj, self._load_factors)
         )

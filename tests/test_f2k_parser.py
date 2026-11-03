@@ -133,6 +133,14 @@ def test_loads_cases_combos(model):
 def test_floor_mesh_options(model):
     assert model.floor_mesh_options["mesh_option"] == "General"
     assert model.floor_mesh_options["max_size"] == pytest.approx(0.25)
+    assert model.floor_mesh_options["per_area"]["100"] == {
+        "mesh_option": "General",
+        "add_restraints": False,
+    }
+    assert model.floor_mesh_options["wall_per_area"]["200"] == {
+        "mesh_option": "Auto Rectangular",
+        "add_restraints": True,
+    }
 
 
 def test_model_loader_routes_f2k(tmp_path):

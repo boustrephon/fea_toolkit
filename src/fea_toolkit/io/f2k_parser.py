@@ -697,6 +697,17 @@ class SAFEF2KParser:
             }
         if per_area:
             opts["per_area"] = per_area
+        wall_per_area: dict[str, dict[str, Any]] = {}
+        for rec in self._raw_tables.get("AREA ASSIGNMENTS - WALL AUTO MESH OPTIONS", []):
+            aid = self._id(rec, ("UniqueName", "Unique Name"))
+            if aid is None:
+                continue
+            wall_per_area[str(aid)] = {
+                "mesh_option": str(rec.get("Mesh Option", "Default")),
+                "add_restraints": self._to_bool(rec.get("Add Restraints", False)),
+            }
+        if wall_per_area:
+            opts["wall_per_area"] = wall_per_area
         for rec in self._raw_tables.get(
             "ANALYSIS OPTIONS - AUTOMATIC RECTANGULAR MESH OPTIONS FOR WALLS", []
         ):
