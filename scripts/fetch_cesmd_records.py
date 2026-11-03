@@ -40,7 +40,7 @@ from typing import Optional
 from fea_toolkit.io.cesmd import (
     CESMDError,
     download_dataset,
-    parse_vol2,
+    parse_vol2_channel,
     query_records,
     year_bounds,
 )
@@ -141,8 +141,10 @@ LOCAL = Path("data/ground_motion/local")
 #: Expected CESMD Volume-2 horizontal component.  Table 4.2 lists no component
 #: azimuth, and the runner uses the single ``CH1`` (first horizontal) channel for
 #: every CESMD record (see the component caveat in the benchmark doc).  The
-#: selected dataset member is checked against this before its accelerogram is
-#: read, so a multi-channel dataset cannot silently bind to the wrong component.
+#: selected dataset member — and, for a bare multichannel ``.V2`` member, the
+#: channel block identified by its header — is checked against this before its
+#: accelerogram is read, so a multi-channel dataset cannot silently bind to the
+#: wrong component.
 EXPECTED_CHANNEL = "CH1"
 
 #: Mainshock name per record-id prefix, used to constrain the CESMD query to the
@@ -165,14 +167,17 @@ def _event_for(record_id: str) -> Optional[str]:
     return None
 
 
-def _vol2_channel(filename: str) -> str:
+def _vol2_channel(filename: str) -> Optional[str]:
     """Channel label of a Volume-2 member, read from its filename.
 
-    A bare ``<STATION>.V2`` is the CSMIP single-horizontal (channel 1) record;
-    an explicit ``CHn`` / ``-n.V2`` marker names that channel; a vertical marker
-    (``UP`` / ``VERT`` / channel ≥ 3) yields ``""`` so it is never selected as a
-    horizontal.  Anything else (a USGS ``.029``-style member) is a
-    single-horizontal record and is treated as channel 1.
+    Only an *unambiguous* filename marker is trusted, so a station-number
+    suffix (e.g. ``CIWTT2.V2`` — station "Watts") is never read as a channel
+    label nor used to reject a record as vertical: an explicit ``CHn`` /
+    ``-n.V2`` marker names that channel; a vertical marker (``UP`` / ``VERT`` /
+    ``VRT``, or channel ≥ 3) yields ``""`` so it is never selected as a
+    horizontal.  ``None`` means the filename carries no channel marker — the
+    member's channel is then identified from the file header (see
+    :func:`fea_toolkit.io.cesmd.parse_vol2_channel`).
     """
     upper = filename.upper()
     if "UP" in upper or "VERT" in upper or "VRT" in upper:
@@ -181,11 +186,16 @@ def _vol2_channel(filename: str) -> str:
     if match:
         n = int(match.group(1))
         return "" if n >= 3 else f"CH{n}"
-    match = re.search(r"(\d)\.V2$", upper)
+    match = re.search(r"[-_](\d)\.V2$", upper)
     if match:
         n = int(match.group(1))
         return "" if n >= 3 else f"CH{n}"
-    return EXPECTED_CHANNEL
+    return None
+
+
+def _channel_number(channel: str) -> int:
+    """The 1-based channel number encoded by a ``CHn`` label."""
+    return int(channel.removeprefix("CH"))
 
 
 def _iter_matches(res: dict) -> list[dict]:
@@ -219,10 +229,13 @@ def _first_vol2_member(
     """Pick the *channel* processed-acceleration member out of a ZIP.
 
     CSMIP records are named ``<STATION>.V2``; USGS records use other names
-    (e.g. ``USACA74.029``).  A member's channel label (from its filename) must
-    match *channel*, so a multi-channel dataset cannot silently bind to the
-    wrong component; a member marked vertical is skipped.  Falls back to any
-    non-directory member only when no acceleration member is present.
+    (e.g. ``USACA74.029``).  A member with an explicit channel label in its
+    filename (``CHn`` / ``-n.V2``) is selected when it matches *channel*, and a
+    member marked vertical is always skipped.  A bare member (no channel label)
+    is a multichannel or single-horizontal record whose channel is resolved from
+    the file header by the caller — it is returned only when no explicit match
+    exists.  Falls back to any non-directory member only when no acceleration
+    member is present.
     """
     candidates = [
         info
@@ -240,6 +253,9 @@ def _first_vol2_member(
     for info in candidates:
         if _vol2_channel(info.filename) == channel:
             return info
+    for info in candidates:
+        if _vol2_channel(info.filename) is None:
+            return info
     return None
 
 
@@ -249,8 +265,9 @@ def _zip_to_csv(zip_path: Path, csv_path: Path, *, channel: str = EXPECTED_CHANN
     The dataset ZIP nests the waveform in a per-record inner ZIP (``…p.zip``
     for processed data) whose ``.V2`` member is the accelerogram.  The selected
     member is verified against the expected *channel* (``CH1`` — see
-    :data:`EXPECTED_CHANNEL`), so an arbitrary first ZIP or ACCEL DATA block is
-    never silently associated with the record.
+    :data:`EXPECTED_CHANNEL`), and a bare (multichannel) ``.V2`` member has its
+    matching channel block chosen from the file header, so an arbitrary first
+    ZIP or ACCEL DATA block is never silently associated with the record.
     """
     with zipfile.ZipFile(zip_path) as outer:
         inner_names = [i.filename for i in outer.infolist() if i.filename.lower().endswith(".zip")]
@@ -265,7 +282,7 @@ def _zip_to_csv(zip_path: Path, csv_path: Path, *, channel: str = EXPECTED_CHANN
             if member is None:
                 raise CESMDError(f"no {channel} acceleration member found in {zip_path}")
             text = outer.read(member).decode("utf-8", errors="replace")
-    times, accel = parse_vol2(text)
+    times, accel = parse_vol2_channel(text, _channel_number(channel))
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("w", newline="") as fh:
         writer = csv.writer(fh)

@@ -20,7 +20,8 @@ address — CESMD's registration form is optional for browsing).  Pass it as the
 
 .. note::
    The dataset ZIP nests a per-record inner ZIP whose ``.V2`` member is the
-   CSMIP "Volume 2" corrected accelerogram; :func:`parse_vol2` reads it.
+   CSMIP "Volume 2" corrected accelerogram; :func:`parse_vol2` reads its first
+   channel block, and :func:`parse_vol2_channel` selects a named channel.
 """
 
 from __future__ import annotations
@@ -208,40 +209,68 @@ def download_dataset(
 
 _ACCEL_MARKER_RE = re.compile(r"(\d+)\s*POINTS\s+OF\s+ACC(?:EL)?\s+DATA", re.IGNORECASE)
 _AT_SEC_RE = re.compile(r"AT\s+([\d.]+)\s*SEC", re.IGNORECASE)
+#: A ``Corrected accelerogram`` line opens each channel block of a (possibly
+#: multichannel) CSMIP/CESMD Volume-2 file; single-channel files may omit it.
+_BLOCK_START_RE = re.compile(r"corrected\s+accelerogram", re.IGNORECASE)
+#: The channel number in a block's header, e.g. ``Chan  1:  90 Deg``.
+_CHANNEL_RE = re.compile(r"\bchan(?:nel)?\s+(\d+)\s*:", re.IGNORECASE)
 
 
-def parse_vol2(text: str) -> tuple[np.ndarray, np.ndarray]:
-    """Parse a CESMD/CSMIP Volume-2 corrected accelerogram.
+def parse_vol2_channels(text: str) -> dict[int, tuple[np.ndarray, np.ndarray]]:
+    """Parse every channel block of a (possibly multichannel) Volume-2 file.
 
-    The CSMIP "Volume 2" file has a prose header and integer/real headers, then
-    blocks of ``NPTS`` acceleration / velocity / displacement values, each
-    introduced by a line like ``"2000 POINTS OF ACCEL DATA EQUALLY SPACED AT
-    .020 SEC.  (UNITS: CM/SEC/SEC)"``.  This reads the acceleration block.
+    A CSMIP/CESMD Volume-2 file holds one or more channel blocks, each opened
+    by a ``Corrected accelerogram`` line and, in multichannel files, carrying
+    its channel number in a ``Chan  N:`` header line (e.g.
+    ``Chan  1:  90 Deg``).  Each block's acceleration is returned keyed by that
+    channel number; a block with no ``Chan  N:`` line is numbered by its
+    position (1, 2, …), which keeps single-channel files addressable as
+    channel 1.
 
     Args:
         text: The raw text of a Volume-2 file.
 
     Returns:
-        ``(times, accel)`` — time points (s) and acceleration (m/s², converted
-        from the file's cm/s²).
+        ``{channel_number: (times, accel)}`` — times (s) and acceleration
+        (m/s², converted from the file's cm/s²) for each channel block, in file
+        order.
 
     Raises:
-        CESMDError: If the acceleration block or its time step is missing, if
-            the file holds fewer values than ``NPTS``, or if a non-numeric
-            token appears in the acceleration block.
+        CESMDError: If no acceleration block is present, if a block's time step
+            is missing, if a block holds fewer values than ``NPTS``, or if a
+            non-numeric token appears in a block's values.
     """
     lines = text.replace("\r", "").split("\n")
-    for i, line in enumerate(lines):
-        match = _ACCEL_MARKER_RE.search(line)
+    starts = [i for i, line in enumerate(lines) if _BLOCK_START_RE.search(line)]
+    if not starts:
+        starts = [0]
+    blocks = list(zip(starts, [*starts[1:], len(lines)]))
+
+    channels: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+    for fallback, (start, end) in enumerate(blocks, start=1):
+        chan: Optional[int] = None
+        for line in lines[start:end]:
+            match = _CHANNEL_RE.search(line)
+            if match:
+                chan = int(match.group(1))
+                break
+        channels[chan if chan is not None else fallback] = _parse_vol2_block(lines, start, end)
+    return channels
+
+
+def _parse_vol2_block(lines: list[str], start: int, end: int) -> tuple[np.ndarray, np.ndarray]:
+    """Parse the acceleration block between ``lines[start]`` and ``lines[end]``."""
+    for i in range(start, end):
+        match = _ACCEL_MARKER_RE.search(lines[i])
         if not match:
             continue
         npts = int(match.group(1))
-        dt_match = _AT_SEC_RE.search(line)
+        dt_match = _AT_SEC_RE.search(lines[i])
         if not dt_match:
             raise CESMDError("ACCEL DATA marker is missing its time step")
         dt = float(dt_match.group(1))
         values: list[float] = []
-        for data_line in lines[i + 1 :]:
+        for data_line in lines[i + 1 : end]:
             for tok in data_line.split():
                 try:
                     values.append(float(tok))
@@ -257,3 +286,56 @@ def parse_vol2(text: str) -> tuple[np.ndarray, np.ndarray]:
         times = np.arange(npts, dtype=float) * dt
         return times, accel_cms2 / 100.0  # cm/s² → m/s²
     raise CESMDError("could not find the ACCEL DATA block")
+
+
+def parse_vol2(text: str) -> tuple[np.ndarray, np.ndarray]:
+    """Parse the first channel block of a CESMD/CSMIP Volume-2 accelerogram.
+
+    The CSMIP "Volume 2" file has a prose header and integer/real headers, then
+    blocks of ``NPTS`` acceleration / velocity / displacement values, each
+    introduced by a line like ``"2000 POINTS OF ACCEL DATA EQUALLY SPACED AT
+    .020 SEC.  (UNITS: CM/SEC/SEC)"``.  This reads the acceleration block.
+    For a multichannel file, the first block in file order is returned; use
+    :func:`parse_vol2_channel` to select a specific channel.
+
+    Args:
+        text: The raw text of a Volume-2 file.
+
+    Returns:
+        ``(times, accel)`` — time points (s) and acceleration (m/s², converted
+        from the file's cm/s²).
+
+    Raises:
+        CESMDError: If the acceleration block or its time step is missing, if
+            the file holds fewer values than ``NPTS``, or if a non-numeric
+            token appears in the acceleration block.
+    """
+    return next(iter(parse_vol2_channels(text).values()))
+
+
+def parse_vol2_channel(text: str, channel: int) -> tuple[np.ndarray, np.ndarray]:
+    """Parse the *channel* block of a (possibly multichannel) Volume-2 file.
+
+    Selects the channel block whose ``Chan  N:`` header line matches *channel*;
+    a single-channel file with no such line is addressable as channel 1 (its
+    block is numbered by position — see :func:`parse_vol2_channels`).
+
+    Args:
+        text: The raw text of a Volume-2 file.
+        channel: The 1-based channel number to select (``1`` for ``CH1``).
+
+    Returns:
+        ``(times, accel)`` — time points (s) and acceleration (m/s²) for the
+        requested channel.
+
+    Raises:
+        CESMDError: If the file has no acceleration block, or no block matching
+            *channel*.
+    """
+    channels = parse_vol2_channels(text)
+    try:
+        return channels[channel]
+    except KeyError:
+        raise CESMDError(
+            f"Volume-2 file has no channel {channel} block (channels: {sorted(channels)})"
+        ) from None

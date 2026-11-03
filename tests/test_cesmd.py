@@ -230,19 +230,90 @@ def test_event_for_maps_every_record_to_its_mainshock():
 
 
 def test_first_vol2_member_verifies_channel_and_skips_vertical():
-    """The member picker binds to the requested channel, never a vertical one."""
+    """The member picker binds to an explicit channel marker, never a vertical one."""
     import io
     import zipfile
 
     fetch = _load_fetch_script()
     data = io.BytesIO()
     with zipfile.ZipFile(data, "w") as zf:
-        zf.writestr("station.V2", "1 2 3")  # bare .V2 → CH1
-        zf.writestr("station2.V2", "4 5 6")  # CH2
+        zf.writestr("station.V2", "1 2 3")  # bare .V2 → no marker (header-resolved)
+        zf.writestr("station-2.V2", "4 5 6")  # explicit CH2 marker
         zf.writestr("stationUP.V2", "7 8 9")  # vertical marker
     data.seek(0)
     with zipfile.ZipFile(data) as zf:
         member1 = fetch._first_vol2_member(zf, channel="CH1")
         assert member1 is not None and member1.filename == "station.V2"
         member2 = fetch._first_vol2_member(zf, channel="CH2")
-        assert member2 is not None and member2.filename == "station2.V2"
+        assert member2 is not None and member2.filename == "station-2.V2"
+
+
+def test_vol2_channel_ignores_station_number_suffix():
+    """A trailing station-number digit is not read as a channel label."""
+    fetch = _load_fetch_script()
+    assert fetch._vol2_channel("CIWTT2.V2") is None  # station "Watts" (code WTT2)
+    assert fetch._vol2_channel("CIWTT3.V2") is None  # not rejected as vertical
+    assert fetch._vol2_channel("station-3.V2") == ""  # explicit CH3 marker → vertical
+    assert fetch._vol2_channel("station_1.V2") == "CH1"
+    assert fetch._vol2_channel("station-CH2.V2") == "CH2"
+
+
+def test_parse_vol2_channel_selects_block_by_header():
+    """A multichannel Vol2 file resolves a channel from its ``Chan  N:`` header."""
+    text = (
+        "Corrected accelerogram  38457511.CI.WTT2.--.H      Chan  2:   0 Deg\n"
+        "Chan  2:   0 Deg\n"
+        " 2 POINTS OF ACCEL DATA EQUALLY SPACED AT .005 SEC. (UNITS: CM/SEC/SEC)\n"
+        "0.6 0.7\n"
+        "Corrected accelerogram  38457511.CI.WTT2.--.H      Chan  1:  90 Deg\n"
+        "Chan  1:  90 Deg\n"
+        " 2 POINTS OF ACCEL DATA EQUALLY SPACED AT .005 SEC. (UNITS: CM/SEC/SEC)\n"
+        "0.1 0.2\n"
+    )
+    times, accel = cesmd.parse_vol2_channel(text, 1)
+    np.testing.assert_allclose(times, np.arange(2) * 0.005)
+    np.testing.assert_allclose(accel, np.array([0.1, 0.2]) / 100.0)
+
+
+def test_parse_vol2_channel_single_block_falls_back_to_1():
+    """A single-channel file with no ``Chan N:`` header is addressable as channel 1."""
+    text = (
+        "Corrected accelerogram\n"
+        " 2 POINTS OF ACCEL DATA EQUALLY SPACED AT .005 SEC. (UNITS: CM/SEC/SEC)\n"
+        "0.1 0.2\n"
+    )
+    _times, accel = cesmd.parse_vol2_channel(text, 1)
+    np.testing.assert_allclose(accel, np.array([0.1, 0.2]) / 100.0)
+    with pytest.raises(CESMDError):
+        cesmd.parse_vol2_channel(text, 2)
+
+
+def test_zip_to_csv_selects_channel_block_by_header(tmp_path):
+    """A bare multichannel .V2 member writes the CH1 block, not the first block."""
+    import io
+    import zipfile
+
+    fetch = _load_fetch_script()
+    text = (
+        "Corrected accelerogram  38457511.CI.WTT2.--.H      Chan  2:   0 Deg\n"
+        "Chan  2:   0 Deg\n"
+        " 2 POINTS OF ACCEL DATA EQUALLY SPACED AT .005 SEC. (UNITS: CM/SEC/SEC)\n"
+        "0.6 0.7\n"
+        "Corrected accelerogram  38457511.CI.WTT2.--.H      Chan  1:  90 Deg\n"
+        "Chan  1:  90 Deg\n"
+        " 2 POINTS OF ACCEL DATA EQUALLY SPACED AT .005 SEC. (UNITS: CM/SEC/SEC)\n"
+        "0.1 0.2\n"
+    )
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w") as zf:
+        zf.writestr("station.V2", text)
+    data.seek(0)
+    zip_path = tmp_path / "dataset.zip"
+    zip_path.write_bytes(data.getvalue())
+    csv_path = tmp_path / "record.csv"
+    fetch._zip_to_csv(zip_path, csv_path, channel="CH1")
+    rows = csv_path.read_text().splitlines()
+    assert rows[0] == "time,accel"
+    # The first block is CH2; the CH1 block must be selected, not the first one.
+    assert float(rows[1].split(",")[1]) == pytest.approx(0.1 / 100.0)
+    assert float(rows[2].split(",")[1]) == pytest.approx(0.2 / 100.0)
