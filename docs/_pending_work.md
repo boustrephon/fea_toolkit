@@ -958,6 +958,46 @@ contract (§3.2); 4) re-measure and record the numbers in
 `docs/safe_import.md` § Performance.
 
 
+#### P45 — Structured (rectangular) meshing for SAFE walls
+
+Source: `docs/safe_import.md` § Floor meshing; raised 2026-03-11 (Trial v1.0.f2k).
+
+**What.** SAFE's "Auto Rectangular" wall meshing is a *structured* grid — walls
+are meant to stay rectangles.  The `.f2k` export normally bakes that grid in
+(small ≈0.23 m² quads), but a few large wall objects (e.g. areas 49 / 62, 46 /
+40 m² in Trial v1.0) are exported *unmeshed*, and `mesh_floors` deliberately
+skips walls (`area_roles == "wall"`), so those parents reach the builder as a
+single oversized shell.  Floors, by contrast, are arbitrary `n`-gons that must
+go through gmsh's general mesher.
+
+**Plan.** Keep the two meshing paths separate and role-gated:
+
+* **walls → structured subdivision, never gmsh**: for each wall area whose edge
+  length exceeds `floor_mesh_options["wall_max_size"]`, synthesize an
+  `AreaMesh(auto_mesh=True, max_size=wall_max_size)` and run the existing
+  `mesh_area_elements` (u×v rectangular grid, already honours openings and
+  edge-restraint propagation).  Walls already ≤ `wall_max_size` (SAFE's baked
+  sub-elements) are left as-is.
+* **floors → gmsh `mesh_floors`** at `floor_mesh_options["max_size"]`
+  (unchanged).
+
+The Inspector now surfaces the inputs (`Role`, `Mesh Option`, `Mesh Size`,
+`Auto Edge Constraint`, frame `Auto Mesh …`, node `Include In Mesh`) so the two
+target sizes can be checked against the produced mesh before the build.
+
+**Where.** `src/fea_toolkit/opensees/preprocessor.py` (`_mesh_areas` /
+`_mesh_floors`), `src/fea_toolkit/model/geometry_mesh.py`
+(`mesh_area_elements`), `src/fea_toolkit/mesh/floors.py`.
+
+**Outline steps.** 1) after the gmsh pass in `_mesh_floors`, collect wall areas
+with an edge length > `wall_max_size`; 2) build `AreaMesh` stubs and call
+`mesh_area_elements` (or add a thin `mesh_walls` wrapper that reuses it); 3)
+mark the parent walls `inactive` and merge the new wall sub-elements + nodes
+into `md`; 4) re-run the SAFE integration test and inspect a large wall in the
+GUI — it should subdivide into ≈0.25 m rectangles.
+
+
+
 #### Closed items (README reconciliation, 2026-08-25)
 - **Deeper opstool result-post-processing integration** — closed as **no
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB

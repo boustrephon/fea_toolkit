@@ -73,6 +73,17 @@ The Preprocessor runs `mesh_floors` when `floor_mesh_options` is present, then
 marks the embedded beams `AtJoints=True` so the existing frame-splitting pass
 connects every beam to the slab mesh along its length.
 
+**Walls are deliberately excluded** from the gmsh pass (`area_roles == "wall"`
+are skipped): SAFE's "Auto Rectangular" wall mesh is *structured*, and its
+`.f2k` export already contains the small rectangular sub-elements.  The few
+large wall objects SAFE left unmeshed (e.g. areas 49 / 62 in Trial v1.0) are
+tracked as **P45** in `docs/_pending_work.md` — they should be subdivided
+structurally (via `mesh_area_elements`) at `wall_max_size`, never by gmsh.
+
+The meshing inputs are surfaced in the GUI Inspector (`model/meshing.py`):
+per-area `Role`, `Mesh Option`, `Add Restraints`, `Mesh Size`, `Auto Edge
+Constraint`, frame `Auto Mesh …`, and node `Include In Mesh`.
+
 ## Soil / foundation springs
 
 Springs are resolved **in the Preprocessor** (declarative, §3.2) into
