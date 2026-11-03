@@ -64,6 +64,8 @@ def test_imk_peak_oriented_lumped_hinge_builds():
         mesh = preprocess_model(md, sac.preprocess_config())
         b = AnalysisBuilder(mesh, sac.builder_config("imk_peak", "lumped"))
         b.build_domain()
-        assert b is not None
+        # The lumped-hinge path must have emitted a zeroLength spring per hinge
+        # location — the build only succeeds when those springs are created.
+        assert b._hinge_tags
     finally:
         wipe()

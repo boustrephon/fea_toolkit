@@ -283,8 +283,10 @@ def _elastic_rayleigh_periods(building: int) -> tuple[Optional[float], Optional[
     Appendix B.4 Eq B.8: ``C = αM + βK₀``).  The periods come from the elastic
     model — the lumped hinge model is ~3× larger (hinge nodes), so an eigen
     solve on it is impractically slow, and the benchmark's damping is an
-    elastic property anyway.  ``None`` falls back to the runner's own 2-mode
-    solve.
+    elastic property anyway.  ``None`` (the elastic solve produced no periods)
+    is handed to the transient runner, which falls back to its own 2-mode
+    solve; :func:`collapse_capacity_sa` instead raises, because its ``Sa(T1)``
+    capacity needs a definite period.
 
     The default (ARPACK) solver is used: it is exact for the elastic model
     (healthy, non-singular stiffness) and returns in milliseconds, whereas
@@ -891,18 +893,33 @@ def collapse_capacity_sa(
             (``1.4 × seismic mass``) through the analysis.
 
     Returns:
-        ``{"building", "T1", "capacities", "median_collapse_sa", "records"}``
-        where ``capacities`` maps each record to its ``Sa(T1)`` collapse
-        capacity (or ``None``) and ``median_collapse_sa`` is the median over
-        the collapsed records (or ``None``).
+        ``{"building", "T1", "capacities", "Sa_T1", "collapse_scale",
+        "median_collapse_sa", "records"}`` — ``capacities`` maps each record to
+        its ``Sa(T1)`` collapse capacity (or ``None``), ``Sa_T1`` maps each
+        record to its unscaled spectral acceleration, ``collapse_scale`` maps
+        each record to its collapse scale factor (or ``None``), and
+        ``median_collapse_sa`` is the median over the collapsed records (or
+        ``None``).
+
+    Raises:
+        ValueError: If the elastic model yields no fundamental period — the
+            ``Sa(T1)`` capacity needs a definite ``T1``, so there is no silent
+            fallback.
     """
     period_1, _ = _elastic_rayleigh_periods(building)
-    t1 = float(period_1) if period_1 else 1.0
+    if period_1 is None:
+        raise ValueError(
+            f"could not resolve a fundamental period for the SAC {building}-story model"
+        )
+    t1 = float(period_1)
     capacities: dict[str, Optional[float]] = {}
+    sa_t1s: dict[str, float] = {}
+    collapse_scales: dict[str, Optional[float]] = {}
     for rid in record_ids:
         accel_raw, dt = sac.load_benchmark_record(str(record_path(rid)), integration_dt)
         accel_base = np.asarray(accel_raw, dtype=float)
         sa_t1 = sdof_spectral_acceleration(accel_base, dt, t1, zeta=0.05)
+        sa_t1s[rid] = float(sa_t1)
         res = _ida_run(
             building,
             rid,
@@ -919,12 +936,15 @@ def collapse_capacity_sa(
         )
         im = res["collapse_intensity"]
         capacities[rid] = (im * sa_t1) if im is not None else None
+        collapse_scales[rid] = im
     collapsed = [v for v in capacities.values() if v is not None]
     median = float(np.median(collapsed)) if collapsed else None
     return {
         "building": building,
         "T1": t1,
         "capacities": capacities,
+        "Sa_T1": sa_t1s,
+        "collapse_scale": collapse_scales,
         "median_collapse_sa": median,
         "records": [str(rid) for rid in record_ids],
     }

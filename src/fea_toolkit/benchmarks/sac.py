@@ -1007,14 +1007,16 @@ def load_model(
             bilinear hinge, or the trilinear backbone).  When False, return the
             bare elastic model (the T2/B1 modal anchor's input).
         backbone: ``"bilinear"`` (default), ``"trilinear"``,
-            ``"trilinear_steel02"``, ``"trilinear_clough"`` or ``"imk"``.  The
-            three trilinear spellings all call :func:`enrich_trilinear` so the
-            sections carry the transcribed ``mat_tbl`` backbone; they differ
-            only in the hinge material the builder emits (``Hysteretic``,
-            two-``Steel02``-in-parallel, or ``Hysteretic`` with
-            unloading-stiffness degradation).  ``"imk"`` calls :func:`enrich_imk`
-            to stamp the Lignos-Krawinkler ``IMKBilin`` ``imk_params`` onto the
-            sections.
+            ``"trilinear_steel02"``, ``"trilinear_clough"``, ``"imk"`` or
+            ``"imk_peak"``.  The three trilinear spellings all call
+            :func:`enrich_trilinear` so the sections carry the transcribed
+            ``mat_tbl`` backbone; they differ only in the hinge material the
+            builder emits (``Hysteretic``, two-``Steel02``-in-parallel, or
+            ``Hysteretic`` with unloading-stiffness degradation).  ``"imk"`` and
+            ``"imk_peak"`` both call :func:`enrich_imk` to stamp the
+            Lignos-Krawinkler ``IMKBilin`` ``imk_params`` onto the sections; they
+            differ only in the hinge material the builder emits (``IMKBilin`` vs
+            the peak-oriented ``IMKPeakOriented``).
         column_axial_ratios: Optional ``{section_name: Pg/Pye}`` passed to
             :func:`enrich_imk` (``"imk"`` backbone only); see
             :func:`derive_column_axial_ratios`.
@@ -1053,14 +1055,16 @@ def load_model(
             "trilinear_steel02",
             "trilinear_clough",
             "imk",
+            "imk_peak",
         ):
             raise ValueError(
                 f"unknown SAC backbone {backbone!r} (expected 'bilinear', "
-                "'trilinear', 'trilinear_steel02', 'trilinear_clough' or 'imk')"
+                "'trilinear', 'trilinear_steel02', 'trilinear_clough', 'imk' "
+                "or 'imk_peak')"
             )
         if building == 3:
             enrich_nonlinear(md)
-        if backbone == "imk":
+        if backbone in ("imk", "imk_peak"):
             pass  # enrich_display_sections + enrich_imk handle 3/9/20 below
         elif backbone in ("trilinear", "trilinear_steel02", "trilinear_clough"):
             enrich_trilinear(md, building=building)
@@ -1070,7 +1074,7 @@ def load_model(
                 "AISC Z33/depth/tw (not yet transcribed); use backbone='trilinear'"
             )
         enrich_display_sections(md, building=building)
-        if backbone == "imk":
+        if backbone in ("imk", "imk_peak"):
             # Derive-flag handling: a caller-supplied axial-ratio dict wins for
             # any key it names; derivation only fills the members/sections the
             # caller left unspecified (never overwrites an explicit value).

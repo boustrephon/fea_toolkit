@@ -21,8 +21,6 @@ import json
 import time
 from typing import Optional
 
-import numpy as np
-
 from fea_toolkit._unit_scaling import g_from_units
 from fea_toolkit.benchmarks import sac, sac_run
 
@@ -122,13 +120,11 @@ def main(argv=None) -> int:
         f"tolerance = {args.tolerance}"
     )
     print(f"  {'record':<12}{'Sa(T1) [g]':>14}{'collapse scale':>16}{'Sa,c(T1) [g]':>14}")
-    scales: dict[str, Optional[float]] = {}
+    scales: dict[str, Optional[float]] = result["collapse_scale"]
     for rid in records:
-        accel, dt = sac.load_benchmark_record(str(sac_run.record_path(rid)), args.dt)
-        sa_t1 = sac_run.sdof_spectral_acceleration(np.asarray(accel, float), dt, result["T1"])
+        sa_t1 = result["Sa_T1"][rid]
         cap = result["capacities"][rid]
-        scale = (cap / sa_t1) if cap is not None else None
-        scales[rid] = scale
+        scale = scales[rid]
         print(
             f"  {rid:<12}{sa_t1 / g:>14.3f}{_fmt(scale):>16}{_fmt((cap / g) if cap else None):>14}"
         )

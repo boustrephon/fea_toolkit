@@ -14,7 +14,6 @@ Usage::
 
 import argparse
 import json
-from pathlib import Path
 
 import matplotlib
 
@@ -33,7 +32,8 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     buildings = [int(b) for b in args.buildings.split(",") if b.strip()]
 
-    out_dir = Path("output/sac_pushover")
+    repo_root = sac_run._repo_root()
+    out_dir = repo_root / "output" / "sac_pushover"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     fig, ax = plt.subplots(figsize=(8, 5))
@@ -77,8 +77,11 @@ def main(argv=None) -> int:
     ax.grid(True, alpha=0.3)
     ax.legend()
     fig.tight_layout()
-    fig.savefig("docs/assets/sac_pushover_curves.png", dpi=150)
-    print("wrote docs/assets/sac_pushover_curves.png")
+    assets_dir = repo_root / "docs" / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    fig_path = assets_dir / "sac_pushover_curves.png"
+    fig.savefig(fig_path, dpi=150)
+    print(f"wrote {fig_path}")
 
     print(f"\n{'bld':<4}{'W (MN)':>10}{'γ_eq-energy':>13}{'γ_first-yield':>15}{'drift@fy (%)':>15}")
     for r in rows:
