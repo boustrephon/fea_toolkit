@@ -69,8 +69,9 @@ def _download(url: str, dest: Path) -> None:
     """Download *url* to *dest* (with an explicit User-Agent).
 
     The response is written to a temporary file first and promoted to *dest*
-    only once it is a readable ZIP archive, so a failed or truncated download
-    can never leave a bad cached archive at *dest*.
+    only once it is a readable ZIP archive whose members pass CRC validation,
+    so a failed or truncated download can never leave a bad cached archive at
+    *dest*.
     """
     print(f"fetch  {url}")
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -79,9 +80,12 @@ def _download(url: str, dest: Path) -> None:
     try:
         with urllib.request.urlopen(req, timeout=300) as resp:
             tmp.write_bytes(resp.read())
-        # Only promote a body that is a readable ZIP archive.
+        # Only promote a body that is a readable ZIP archive whose members all
+        # pass CRC validation — a truncated download must never be promoted.
         with zipfile.ZipFile(tmp) as zf:
-            zf.infolist()
+            bad_member = zf.testzip()
+            if bad_member is not None:
+                raise zipfile.BadZipFile(f"corrupt member {bad_member!r} in {url}")
         tmp.replace(dest)
     finally:
         tmp.unlink(missing_ok=True)
