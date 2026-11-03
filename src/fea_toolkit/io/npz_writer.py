@@ -1251,6 +1251,12 @@ def collect_ida_arrays(ida_result: dict[str, Any]) -> dict[str, np.ndarray]:
         return arrays
 
     records = [str(rid) for rid in ida_result["records"]]
+    for rid in records:
+        if "/" in rid:
+            raise ValueError(
+                f"IDA record id {rid!r} must not contain '/': "
+                "record ids become flat NPZ key segments"
+            )
     detail = ida_result["records_detail"]
     collapse_sa_g = ida_result.get("collapse_Sa_T1_g", {})
 

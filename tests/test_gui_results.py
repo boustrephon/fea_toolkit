@@ -657,3 +657,6 @@ def test_open_ida_archive_registers_a_figure_view(window, tmp_path):
     view = window._views.get("ida")
     assert view is not None
     assert view.kind == "figure"
+    # The figure is also exposed through the Model Tree's view lookup (labelled
+    # by its display name).
+    assert window._tree_model.index_for("views", "IDA collapse") is not None

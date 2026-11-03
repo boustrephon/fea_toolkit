@@ -3637,18 +3637,21 @@ class MainWindow(QMainWindow):
             self._show_view(first, rebuild_tree=True)
 
         # IDA (IK-2005 collapse) — register a figure view when the archive
-        # carries an ``ida`` block (schema v5).
+        # carries an ``ida`` block (schema v5).  Detected from the arrays the
+        # repository already holds, so an HDF5 archive never re-opens the NPZ
+        # reader (or logs its errors).
         try:
-            from ..io.npz_reader import describe_results_npz, read_results_npz
+            from ..io.results_schema import ida_record_names
 
-            if describe_results_npz(path).get("ida_records"):
+            if ida_record_names(repository.raw()):
                 from ..plotting.viz_ida import plot_ida_summary
 
-                figure = plot_ida_summary(read_results_npz(path))
+                figure = plot_ida_summary(repository.raw())
                 if figure is not None:
                     self._views.add_figure(
                         "ida", "IDA collapse", figure, source=name, activate=False
                     )
+                    self._rebuild_tree()
         except Exception as exc:  # pragma: no cover - defensive
             self.log(f"Could not build the IDA view: {exc}", "error")
         return True
