@@ -176,6 +176,38 @@ class PanelZoneSpec:
 
 
 @dataclass
+class NodalSpring:
+    """Resolved point-support spring at one node (SAFE soil / foundation).
+
+    Computed once by the
+    :class:`~fea_toolkit.opensees.preprocessor.Preprocessor` from the SAFE
+    point/line/area spring definitions + assignments, and carried on the
+    :class:`MeshModel` so the
+    :class:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder` only has to
+    emit the OpenSees commands (a coincident fixed ground node + a
+    ``zeroLength`` element with one uniaxial material per enabled DOF).
+
+    Line and area springs are *distributed* to their supporting nodes during
+    resolution (per tributary length / area), so every entry here is already
+    a node-level stiffness in model units.
+
+    Attributes:
+        node_id: The model node the spring attaches to.
+        stiffness: Six-element list in OpenSees DOF order (index 0 → DOF 1),
+            i.e. ``[UX, UY, UZ, RX, RY, RZ]`` in model units; ``0.0`` means no
+            spring in that DOF.
+        compression_only: Subset of DOFs (1..6) that only resist compression
+            (SAFE "Compression Only" option) — emitted as an elastic-no-tension
+            (``ENT``) material when the builder enables
+            ``soil_spring_compression_only``.
+    """
+
+    node_id: str
+    stiffness: list[float] = field(default_factory=lambda: [0.0] * 6)
+    compression_only: set[int] = field(default_factory=set)
+
+
+@dataclass
 class MeshModel:
     """Prepared model topology — the bridge between preprocessor and analysis.
 
@@ -284,6 +316,11 @@ class MeshModel:
     sections: dict[str, Section] = field(default_factory=dict)
     groups: dict[str, Group] = field(default_factory=dict)
     restraints: dict[str, Restraint] = field(default_factory=dict)
+    # ── Soil / foundation point supports (SAFE springs, resolved) ──
+    # Populated by the Preprocessor from SAFE point/line/area spring
+    # definitions + assignments (distributed to nodes); emitted by the
+    # AnalysisBuilder as coincident-ground-node zeroLength elements.
+    point_springs: list[NodalSpring] = field(default_factory=list)
     base_z: Optional[float] = None
 
     # ── Tag maps (pre-computed for deterministic Ops recreation) ──
