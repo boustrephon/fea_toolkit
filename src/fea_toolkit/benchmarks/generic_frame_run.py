@@ -611,13 +611,27 @@ def collapse_ida_curves(
             "source": "USGS" if (record_channels and rid in record_channels) else "CESMD",
             "ida": res,
         }
-    collapsed = [v for v in capacities.values() if v is not None]
+    collapsed = sorted(v for v in capacities.values() if v is not None)
+    n_records = len(capacities)
     n_collapsed = len(collapsed)
-    n_survived = len(capacities) - n_collapsed
-    # Survivors are right-censored: the median is only meaningful once at least
-    # half the records collapsed, and a σ_ln computed from the collapsed subset
-    # alone must not be reported as though it described every record.
-    median = float(np.median(collapsed)) if collapsed and n_survived <= n_collapsed else None
+    n_survived = n_records - n_collapsed
+    # Survivors are right-censored: their collapse capacity lies above the
+    # tested ladder, so they occupy the upper tail of the full-set order
+    # statistics.  The median of the full record set is therefore determined
+    # only when the required middle rank(s) are known — the single middle rank
+    # for an odd count, both middle ranks for an even count.  Censoring that
+    # leaves either required rank undetermined makes the median unknowable, so
+    # report ``None`` then (the all-collapsed case reduces to the ordinary
+    # ``np.median``).  A σ_ln computed from the collapsed subset alone must not
+    # be reported as though it described every record, so it is kept only when
+    # nothing is censored.
+    if n_collapsed > n_records // 2:
+        if n_records % 2 == 1:
+            median = float(collapsed[n_records // 2])
+        else:
+            median = float(0.5 * (collapsed[n_records // 2 - 1] + collapsed[n_records // 2]))
+    else:
+        median = None
     sigma_ln = (
         float(np.std(np.log(np.asarray(collapsed, dtype=float))))
         if collapsed and n_survived == 0
