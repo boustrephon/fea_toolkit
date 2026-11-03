@@ -1371,20 +1371,17 @@ class MainWindow(QMainWindow):
         for widget in (self._units_label, self._elem_label, self._coord_label, self._progress):
             bar.addPermanentWidget(widget)
 
-    # ── View decoration (view cube + cursor readout) ────────────────
+    # ── View decoration (cursor readout) ─────────────────────────────
 
     def _decorate_view(self) -> None:
-        """Add the orientation (view) cube and prepare the cursor readout.
+        """Prepare the status-bar cursor readout.
 
-        PyVista's ``add_camera_orientation_widget`` provides the interactive
-        view cube.  The *interaction* extras -- ``enable_terrain_style`` (which
-        keeps the model's Z axis vertical while orbiting) and
-        ``track_mouse_position`` (which feeds the status-bar coordinates) --
-        both need a live interactor, so they are installed from
-        :meth:`showEvent`: pyvista raises ``RuntimeError`` for an off-screen or
-        never-shown plotter.
+        The *interaction* extras -- ``enable_terrain_style`` (which keeps the
+        model's Z axis vertical while orbiting) and ``track_mouse_position``
+        (which feeds the status-bar coordinates) -- both need a live
+        interactor, so they are installed from :meth:`showEvent`: pyvista
+        raises ``RuntimeError`` for an off-screen or never-shown plotter.
         """
-        self._interactor.add_camera_orientation_widget()
         self._cursor_timer = QTimer(self)
         self._cursor_timer.setInterval(_CURSOR_POLL_MS)
         self._cursor_timer.timeout.connect(self._update_cursor_position)
