@@ -1,12 +1,16 @@
 """Load a model from any supported on-disk representation.
 
-Four inputs are recognised, all producing the object a ``.s2k`` parse would
+Six inputs are recognised, all producing the object a ``.s2k`` parse would
 (so every downstream consumer — viewer, review, preprocessing — behaves
 identically):
 
 * **``.s2k`` / ``.$2k``** — the SAP2000 text export, parsed directly.
 * **``.e2k`` / ``.$et``** — the ETABS text export, parsed by the sibling
   :class:`~fea_toolkit.io.e2k_parser.ETABSParser`.
+* **``.f2k``** — the SAFE tabular text export, parsed by
+  :class:`~fea_toolkit.io.f2k_parser.SAFEF2KParser`.
+* **``.$sf``** — the SAFE native-database text export, parsed by
+  :class:`~fea_toolkit.io.safe_db_parser.SAFEDBParser`.
 * **Raw-table JSON** — as written by
   :meth:`~fea_toolkit.io.s2k_parser.SAP2000Parser.to_json`: the parsed
   tables are restored and the model rebuilt exactly as from text.
@@ -32,7 +36,9 @@ from typing import Union
 from ..model.mesh_model import MeshModel
 from ..model.sap_data import SAPModelData
 from .e2k_parser import ETABSParser
+from .f2k_parser import SAFEF2KParser
 from .s2k_parser import SAP2000Parser
+from .safe_db_parser import SAFEDBParser
 
 #: Suffixes routed to the SAP2000 text parser.
 TEXT_SUFFIXES: tuple[str, ...] = (".s2k", ".$2k")
@@ -40,17 +46,24 @@ TEXT_SUFFIXES: tuple[str, ...] = (".s2k", ".$2k")
 #: Suffixes routed to the ETABS text parser.
 ETABS_SUFFIXES: tuple[str, ...] = (".e2k", ".$et")
 
+#: Suffixes routed to the SAFE ``.f2k`` text parser.
+SAFE_SUFFIXES: tuple[str, ...] = (".f2k",)
+
+#: Suffixes routed to the SAFE ``.$sf`` native-database parser.
+SAFE_DB_SUFFIXES: tuple[str, ...] = (".$sf",)
+
 #: Top-level marker keys identifying a model-codec payload.
 CODEC_MARKER_KEYS: tuple[str, ...] = ("__schema_version__", "__type__")
 
 
 def load_model_data(path: Union[str, Path]) -> Union[SAPModelData, MeshModel]:
-    """Load a model from a ``.s2k``, ``.e2k``, raw-table JSON or model-codec JSON file.
+    """Load a model from a ``.s2k``, ``.e2k``, ``.f2k``, ``.$sf``, raw-table JSON or model-codec JSON file.
 
     Args:
         path: Path to the model file.  Recognised forms are the SAP2000 text
             export (``.s2k`` / ``.$2k``), the ETABS text export (``.e2k`` /
-            ``.$et``), a raw-table cache written by
+            ``.$et``), the SAFE tabular export (``.f2k``) and SAFE native
+            database (``.$sf``), a raw-table cache written by
             :meth:`~fea_toolkit.io.s2k_parser.SAP2000Parser.to_json`, and a
             model-codec snapshot written by
             :func:`~fea_toolkit.io.model_codec.model_to_json`.
@@ -84,11 +97,22 @@ def load_model_data(path: Union[str, Path]) -> Union[SAPModelData, MeshModel]:
         parser.parse()
         return parser.get_model_data()
 
+    if suffix in SAFE_SUFFIXES:
+        parser = SAFEF2KParser(path)
+        parser.parse()
+        return parser.get_model_data()
+
+    if suffix in SAFE_DB_SUFFIXES:
+        parser = SAFEDBParser(path)
+        parser.parse()
+        return parser.get_model_data()
+
     if suffix != ".json":
         raise ValueError(
             f"unsupported model file {path.name!r}: expected a SAP2000 text export "
             f"({' / '.join(TEXT_SUFFIXES)}), an ETABS text export "
-            f"({' / '.join(ETABS_SUFFIXES)}) or a parsed-model .json"
+            f"({' / '.join(ETABS_SUFFIXES)}), a SAFE text export "
+            f"({' / '.join(SAFE_SUFFIXES + SAFE_DB_SUFFIXES)}) or a parsed-model .json"
         )
 
     try:

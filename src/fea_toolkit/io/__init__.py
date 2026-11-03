@@ -7,7 +7,10 @@ Modules
 -------
 s2k_parser — Parse SAP2000 .S2K / .$2K text files into SAPModelData.
 e2k_parser — Parse ETABS .E2K / .$ET text files into SAPModelData.
+f2k_parser — Parse SAFE .f2k text files into SAPModelData.
+safe_db_parser — Parse SAFE .$sf native-database files into SAPModelData.
 table_registry — SAP2000 table-coverage registry + unhandled-table detection.
+safe_table_registry — SAFE (.f2k / .$sf) table-coverage registry + triage.
 npz_writer — Serialise analysis results to NPZ archives.
 npz_reader — Deserialise NPZ archives and convert to PyVista meshes.
 results_schema — NPZ key layout and validation.
@@ -22,6 +25,7 @@ helper — File-chooser dialogs (tkinter / macOS native).
 from ._serial import collect_geometry_arrays
 from .combination_set import read_combination_set, write_combination_set
 from .e2k_parser import ETABSParser
+from .f2k_parser import SAFEF2KParser
 from .ground_motion import (
     GroundMotionManifest,
     baseline_correct,
@@ -65,6 +69,7 @@ from .results_schema import (
     validate_npz,
 )
 from .s2k_parser import SAP2000Parser
+from .safe_db_parser import SAFEDBParser
 from .stage_reader import (
     flatten_stage,
     read_dictionary_arrays,
@@ -149,6 +154,8 @@ __all__ = [
     "ModelStore",
     "NpzResultsRepository",
     "ResultsRepository",
+    "SAFEDBParser",
+    "SAFEF2KParser",
     "SAP2000Parser",
     "TableCoverage",
     "area_section_summary",
