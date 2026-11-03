@@ -45,6 +45,31 @@ def test_floor_and_wall_areas(model):
     assert model.area_roles == {"100": "floor", "200": "wall"}
 
 
+def test_multi_record_polygon_merge(tmp_path):
+    """A floor polygon with >4 corners spans two ``Order`` continuation rows.
+
+    Regression: the parser used to read only ``UniquePt1..4`` and let the
+    ``Order=2`` row overwrite the first, leaving 1–2 node slivers where the
+    column-zone pentagon/hexagon slabs should be.
+    """
+    src = tmp_path / "polygon.f2k"
+    src.write_text(
+        "File polygon.f2k was saved on 1/1/24 at 12:00:00\n"
+        'TABLE:  "FLOOR OBJECT CONNECTIVITY"\n'
+        '   "Unique Name"=1   UniquePt1=1   UniquePt2=2   UniquePt3=3   UniquePt4=4'
+        "   Perimeter=16   Area=16   Order=1\n"
+        '   "Unique Name"=1   UniquePt1=5   UniquePt2=6   Order=2\n'
+        'TABLE:  "WALL OBJECT CONNECTIVITY"\n'
+        "   UniqueName=10   UniquePt1=1   UniquePt2=6   UniquePt3=5   UniquePt4=4"
+        "   Perimeter=14   Area=12\n",
+        encoding="utf-8",
+    )
+    md = SAFEF2KParser(src).parse().get_model_data()
+    assert md.area_elements["1"].node_ids == ["1", "2", "3", "4", "5", "6"]
+    assert md.area_elements["10"].node_ids == ["1", "6", "5", "4"]
+    assert md.area_roles == {"1": "floor", "10": "wall"}
+
+
 def test_null_lines_become_frames(model):
     assert set(model.frame_elements) == {"10", "11"}
     assert model.frame_elements["10"].node_i == "1"

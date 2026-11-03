@@ -376,16 +376,44 @@ class SAFEF2KParser:
         return elements
 
     def _get_area_elements(self) -> dict[str, AreaElement]:
-        """Area elements from ``FLOOR`` / ``WALL OBJECT CONNECTIVITY``."""
+        """Area elements from ``FLOOR`` / ``WALL OBJECT CONNECTIVITY``.
+
+        SAFE stores a floor or wall polygon with more than four corners as
+        several continuation rows: an ``Order=1`` row carrying ``UniquePt1..4``
+        followed by ``Order=2`` … rows carrying the remaining corners.  Rows are
+        consolidated by area id in ``Order`` sequence so an ``n``-gon keeps every
+        corner instead of the last row silently overwriting the first (which is
+        how pentagonal column-zone slabs used to render as 1–2 node slivers).
+        """
         areas: dict[str, AreaElement] = {}
         tag = 1
         for table_name in ("FLOOR OBJECT CONNECTIVITY", "WALL OBJECT CONNECTIVITY"):
+            # area id -> list of (order, node ids)
+            grouped: dict[str, list[tuple[int, list[str]]]] = {}
             for rec in self._raw_tables.get(table_name, []):
                 aid = self._id(rec, ("Unique Name", "UniqueName"))
                 if aid is None:
                     continue
-                node_ids = [str(rec.get(f"UniquePt{i}", "")) for i in (1, 2, 3, 4)]
-                areas[str(aid)] = AreaElement(area_id=str(aid), area_tag=tag, node_ids=node_ids)
+                order = rec.get("Order")
+                order = order if isinstance(order, int) else 1
+                node_ids: list[str] = []
+                for i in (1, 2, 3, 4):
+                    value = rec.get(f"UniquePt{i}")
+                    if value in (None, ""):
+                        continue
+                    node_ids.append(str(value))
+                grouped.setdefault(str(aid), []).append((order, node_ids))
+
+            for aid, rows in grouped.items():
+                rows.sort(key=lambda row: row[0])
+                node_ids: list[str] = []
+                for _order, ids in rows:
+                    for nid in ids:
+                        if nid not in node_ids:
+                            node_ids.append(nid)
+                if len(node_ids) < 3:
+                    continue
+                areas[aid] = AreaElement(area_id=aid, area_tag=tag, node_ids=node_ids)
                 tag += 1
         return areas
 
