@@ -11,6 +11,12 @@ from ..model.sap_data import FrameElement
 
 logger = logging.getLogger(__name__)
 
+#: Base tag for soil/foundation-spring uniaxial materials — a dedicated band
+#: clear of the other material blocks (panel zones 900001, merged
+#: hinge+release 500000, brace-truss Hysteretic 100000, fiber 1000001, and the
+#: standalone release block ``max(material_tags) + 1000``).
+_SOIL_SPRING_MAT_BASE = 600000
+
 
 class ConstraintMixin:
     """Edge-constraint application, node/restraint creation, and connectivity diagnostics."""
@@ -757,6 +763,89 @@ class ConstraintMixin:
             tag = node.node_tag
             ops.node(tag, node.x, node.y, node.z)
             self._created_node_tags.add(tag)
+
+    def _create_point_springs(self) -> None:
+        """Emit SAFE soil/foundation point supports as ``zeroLength`` elements.
+
+        Each resolved :class:`~fea_toolkit.model.mesh_model.NodalSpring`
+        anchors a coincident, fully-fixed ground node to its model node via a
+        ``zeroLength`` carrying one uniaxial material per enabled DOF.  Linear
+        DOFs use ``Elastic``; DOFs flagged ``compression_only`` use the
+        elastic-no-tension ``ENT`` material when ``soil_spring_compression_only``
+        is enabled (otherwise they stay linear, so the domain still solves under
+        a linear static analysis).  Runs last in ``build_domain`` so its tag
+        allocation sees every element already created.
+        """
+        springs = getattr(self.mesh_model, "point_springs", None) or []
+        if not springs or not self.config.get("build_soil_springs", True):
+            return
+
+        use_ent = bool(self.config.get("soil_spring_compression_only", False))
+
+        # Fresh node tags above everything created so far (model + hinge /
+        # release / bond-slip nodes all recorded in _created_node_tags).
+        next_node_tag = max(self._created_node_tags, default=0) + 1
+
+        # Element tags must clear every tag already in the OpenSees domain plus
+        # reserved rigid-offset-link tags (cf. _create_member_releases).
+        try:
+            max_ops_tag = max(ops.getEleTags(), default=0)
+        except Exception:
+            max_ops_tag = 0
+        max_rigid_tag = max((r[3] for r in self._offset_rigid_links), default=0)
+        next_tag = (
+            max(
+                max(
+                    (e.elem_tag for e in self.mesh_model.frame_elements.values() if not e.inactive),
+                    default=0,
+                ),
+                max_ops_tag,
+                max_rigid_tag,
+                max(self.frame_tag_map.values(), default=0),
+            )
+            + 1
+        )
+
+        next_mat_tag = _SOIL_SPRING_MAT_BASE
+        mat_cache: dict[tuple, int] = {}
+
+        for spring in springs:
+            nd = self.mesh_model.nodes.get(spring.node_id)
+            if nd is None or not spring.stiffness:
+                continue
+
+            ground_tag = next_node_tag
+            next_node_tag += 1
+            ops.node(ground_tag, nd.x, nd.y, nd.z)
+            ops.fix(ground_tag, 1, 1, 1, 1, 1, 1)
+            self._created_node_tags.add(ground_tag)
+
+            dirs: list[int] = []
+            mats: list[int] = []
+            for dof in range(1, 7):
+                k = spring.stiffness[dof - 1]
+                if k == 0.0:
+                    continue
+                compression = use_ent and dof in spring.compression_only
+                key = (round(k, 6), compression)
+                mat_tag = mat_cache.get(key)
+                if mat_tag is None:
+                    mat_tag = next_mat_tag
+                    next_mat_tag += 1
+                    if compression:
+                        ops.uniaxialMaterial("ENT", mat_tag, k)
+                    else:
+                        ops.uniaxialMaterial("Elastic", mat_tag, k)
+                    mat_cache[key] = mat_tag
+                dirs.append(dof)
+                mats.append(mat_tag)
+
+            ops.element(
+                "zeroLength", next_tag, nd.node_tag, ground_tag, "-mat", *mats, "-dir", *dirs
+            )
+            next_tag += 1
+
+        self._log.info("constraints", f"Created {len(springs)} soil/foundation point spring(s)")
 
     def _apply_restraints(self) -> None:
         """Apply boundary conditions from MeshModel restraints.

@@ -307,6 +307,12 @@ class AnalysisBuilder(
             "beam_integration": "Lobatto",
             "simplify_distributed_loads": False,
             "constraint_method": "spring",
+            # SAFE soil/foundation springs (resolved on the MeshModel) — build
+            # them by default; compression-only DOFs stay linear unless
+            # soil_spring_compression_only enables the elastic-no-tension (ENT)
+            # material for uplift-gauged soil.
+            "build_soil_springs": True,
+            "soil_spring_compression_only": False,
             "hinge_model": "fiber",  # Distributed plasticity by default
             # ── Hinge backbones (hinge_model='lumped' or 'beam_with_hinges') ──
             # Lumped (zeroLength) hinge backbones — "asce41" (default):
@@ -646,6 +652,7 @@ class AnalysisBuilder(
             self._apply_rigid_diaphragms()
             self._apply_floor_ux_ties()
             self._apply_rigid_bodies()
+            self._create_point_springs()
             return self
         finally:
             # Restore any overridden config values

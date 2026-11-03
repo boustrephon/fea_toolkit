@@ -32,7 +32,7 @@ from ..model.geometry import (
     subdivide_area_mesh,
 )
 from ..model.gravity_axial import fill_column_gravity_axial
-from ..model.mesh_model import MeshModel, PanelZoneSpec, WallElement
+from ..model.mesh_model import MeshModel, NodalSpring, PanelZoneSpec, WallElement
 from ..model.openings import collect_opening_areas
 from ..model.sap_data import (
     AreaElementProperties,
@@ -416,6 +416,38 @@ def _redistribute_frame_point_loads(
                 stacklevel=2,
             )
     return out
+
+
+# ── SAFE spring DOF maps (SAFE label → OpenSees local DOF 1..6) ──
+_POINT_SPRING_DOF = {"UX": 1, "UY": 2, "UZ": 3, "RX": 4, "RY": 5, "RZ": 6}
+_AREA_SPRING_DOF = {"U1": 1, "U2": 2, "U3": 3}
+
+
+def _line_rot_dof(a: "Node", b: "Node") -> int:
+    """Rotational DOF about a line's longitudinal (dominant) axis: 4/5/6."""
+    dx = abs(b.x - a.x)
+    dy = abs(b.y - a.y)
+    dz = abs(b.z - a.z)
+    if dx >= dy and dx >= dz:
+        return 4  # line along X → torsion about X
+    if dy >= dz:
+        return 5  # line along Y → torsion about Y
+    return 6  # vertical line → torsion about Z
+
+
+def _polygon_area_3d(points: list[tuple[float, float, float]]) -> float:
+    """Planar polygon area via the half-norm of the summed cross products."""
+    if len(points) < 3:
+        return 0.0
+    p0 = points[0]
+    total = [0.0, 0.0, 0.0]
+    for i in range(1, len(points) - 1):
+        a = [points[i][k] - p0[k] for k in range(3)]
+        b = [points[i + 1][k] - p0[k] for k in range(3)]
+        total[0] += a[1] * b[2] - a[2] * b[1]
+        total[1] += a[2] * b[0] - a[0] * b[2]
+        total[2] += a[0] * b[1] - a[1] * b[0]
+    return 0.5 * math.sqrt(sum(c * c for c in total))
 
 
 class Preprocessor:
@@ -880,6 +912,9 @@ class Preprocessor:
             referenced.update(ae.node_ids)
         for jl in getattr(md, "joint_loads", []):
             referenced.add(str(jl.node_id))
+        # Point-spring nodes are supports — retain them even when no frame or
+        # area element references them (a standalone soil point support).
+        referenced.update(getattr(md, "point_spring_assignments", {}).keys())
         # Joint nodes referenced only by the rigid links (from frame end
         # offsets) must be retained — the links connect the shortened
         # member ends back to the original joint node, so dropping them
@@ -955,6 +990,9 @@ class Preprocessor:
         redistributed_point_loads = _redistribute_frame_point_loads(
             getattr(md, "frame_point_loads", []), new_elems, md.nodes
         )
+        # Resolve SAFE soil/foundation springs to node-level supports (point
+        # springs 1:1; line/area springs distributed to their nodes).
+        point_springs = self._resolve_springs(md, new_elems)
         mesh_model = MeshModel(
             nodes=md.nodes,
             frame_elements=new_elems,
@@ -979,6 +1017,7 @@ class Preprocessor:
             sections=md.sections,
             groups=getattr(md, "groups", {}),
             restraints=md.restraints,
+            point_springs=point_springs,
             base_z=base_z,
             units=md.units,
             model_name=getattr(md, "name", ""),
@@ -1430,6 +1469,100 @@ class Preprocessor:
         # node along their length.
         for fid in getattr(md, "frame_assignments", {}) or {}:
             md.frame_auto_mesh.setdefault(fid, {})["AtJoints"] = True
+
+    def _resolve_springs(
+        self, md: SAPModelData, frame_elements: dict[str, "FrameElement"]
+    ) -> list[NodalSpring]:
+        """Collapse SAFE point/line/area springs into node-level supports.
+
+        Point springs map 1:1 onto their assigned node.  Line springs are
+        distributed to the endpoints of every active frame leaf assigned the
+        spring (vertical → UZ, rotational → torsion about the line axis) per
+        tributary half-length; area springs are distributed evenly over the
+        corners of the (meshed) area per tributary area (U1/U2/U3 → DOF 1/2/3).
+
+        Stiffnesses targeting the same node accumulate, and a DOF is marked
+        ``compression_only`` when any contributing SAFE spring is flagged
+        "Compression Only" for that direction.  Returns a ``NodalSpring`` per
+        resolved node, sorted by node id for deterministic output.
+        """
+        from collections import defaultdict
+
+        acc: dict[str, list[float]] = defaultdict(lambda: [0.0] * 6)
+        comp_only: dict[str, set[int]] = defaultdict(set)
+        nodes = md.nodes
+
+        def _add(node_id: str, dof: int, k: float, compression: bool) -> None:
+            if k is None or k == 0.0 or node_id not in nodes:
+                return
+            acc[node_id][dof - 1] += k
+            if compression:
+                comp_only[node_id].add(dof)
+
+        # ── Point springs ──────────────────────────────────────────
+        for pid, name in getattr(md, "point_spring_assignments", {}).items():
+            sp = getattr(md, "point_springs", {}).get(name)
+            if sp is None:
+                continue
+            # SAFE "Compression Only" applies to the vertical (UZ) bearing
+            # direction; horizontal and rotational DOFs stay linear.
+            compression = "compression" in sp.nonlinear_option.lower()
+            for label, k in sp.stiffness.items():
+                dof = _POINT_SPRING_DOF.get(label.upper())
+                if dof is not None:
+                    _add(pid, dof, k, compression and dof == 3)
+
+        # ── Line springs ───────────────────────────────────────────
+        for lid, name in getattr(md, "line_spring_assignments", {}).items():
+            sp = getattr(md, "line_springs", {}).get(name)
+            if sp is None:
+                continue
+            compression = "compression" in sp.nonlinear_option.lower()
+            for eid, elem in frame_elements.items():
+                if getattr(elem, "inactive", False):
+                    continue
+                if eid.split("-")[0] != lid:
+                    continue
+                a, b = nodes.get(elem.node_i), nodes.get(elem.node_j)
+                if a is None or b is None:
+                    continue
+                length = math.dist((a.x, a.y, a.z), (b.x, b.y, b.z))
+                half = length / 2.0
+                if sp.vertical_stiffness:
+                    k = sp.vertical_stiffness * half
+                    _add(elem.node_i, 3, k, compression)
+                    _add(elem.node_j, 3, k, compression)
+                if sp.rotational_stiffness:
+                    k = sp.rotational_stiffness * half
+                    dof = _line_rot_dof(a, b)
+                    _add(elem.node_i, dof, k, False)
+                    _add(elem.node_j, dof, k, False)
+
+        # ── Area springs ───────────────────────────────────────────
+        for aid, name in getattr(md, "area_spring_assignments", {}).items():
+            sp = getattr(md, "area_springs", {}).get(name)
+            if sp is None:
+                continue
+            area = md.area_elements.get(aid)
+            if area is None or getattr(area, "inactive", False):
+                continue
+            nids = [n for n in area.node_ids if n in nodes]
+            if not nids:
+                continue
+            area_val = _polygon_area_3d([(nodes[n].x, nodes[n].y, nodes[n].z) for n in nids])
+            per_node = area_val / len(nids)
+            for label, k in sp.stiffness.items():
+                dof = _AREA_SPRING_DOF.get(label.upper())
+                if dof is None:
+                    continue
+                compression = "compression" in sp.nonlinear_options.get(label, "").lower()
+                for nid in nids:
+                    _add(nid, dof, k * per_node, compression)
+
+        return [
+            NodalSpring(node_id=nid, stiffness=vec, compression_only=comp_only.get(nid, set()))
+            for nid, vec in sorted(acc.items())
+        ]
 
     def _merge_coincident_nodes(self, md):
         """Merge mesh-created nodes at the same coordinates.
