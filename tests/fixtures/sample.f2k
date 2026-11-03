@@ -1,0 +1,101 @@
+File C:\fake\sample.f2k was saved on 1/1/2026 at 12:00:00
+
+TABLE:  "PROGRAM CONTROL"
+   ProgramName=SAFE   Version=23.1.0   ProgLevel=Standard   CurrUnits="kN, m, C"
+
+TABLE:  "MATERIAL PROPERTIES - GENERAL"
+   Material=C35/45   Type=Concrete   SymType=Isotropic   Grade=C35/45
+
+TABLE:  "MATERIAL PROPERTIES - BASIC MECHANICAL PROPERTIES"
+   Material=C35/45   DensityType=Weight   UnitWeight=24.99   UnitMass=2.548   E1=26399999.999999996   G12=10999999.999999998   U12=0.2   A1=1E-05
+
+TABLE:  "MATERIAL PROPERTIES - CONCRETE DATA"
+   Material=C35/45   Fc=34999.99999999999   LtWtConc=No
+
+TABLE:  "AREA SECTION PROPERTY DEFINITIONS - SUMMARY"
+   Name="200mm SLAB"   Type=Slab   "Element Type"=Shell-Thin   Material=C35/45   "Total Thickness"=0.2
+   Name="250mm WALL"   Type=Wall   "Element Type"=Shell-Thin   Material=C35/45   "Total Thickness"=0.25
+   Name=Deck1   Type=Deck   "Element Type"=Membrane   Material=C35/45   "Total Thickness"=0.1625   "Deck Material"=S355   "Deck Depth"=0.075
+
+TABLE:  "FRAME SECTION PROPERTY DEFINITIONS - SUMMARY"
+   Name=ConcBm   Material=C35/45   Shape="Concrete Rectangular"   Area=0.1875   J=0.0047   I33=0.0039   I22=0.0021
+
+TABLE:  "FRAME SECTION PROPERTY DEFINITIONS - CONCRETE RECTANGULAR"
+   Name=ConcBm   Material=C35/45   Depth=0.5   Width=0.375   "Cover Top"=0.06   "Cover Bottom"=0.06
+
+TABLE:  "TENDON SECTION PROPERTIES"
+   Name=Tendon1   Material=A416Gr270   StrandArea=9.870948E-05
+
+TABLE:  "SPRING PROPERTY DEFINITIONS - POINT SPRINGS"
+   Name="X-dir Side Friction"   "Stiffness UX"=0.5   "Stiffness UY"=0   "Nonlinear Option"="None (Linear)"
+
+TABLE:  "SPRING PROPERTY DEFINITIONS - LINE SPRINGS"
+   Name=LSpr1   "Vertical Stffness"=1500   "Rotational Stffness"=0   "Nonlinear Option"="Compression Only"
+
+TABLE:  "SPRING PROPERTY DEFINITIONS - AREA SPRINGS"
+   Name=ASpr1   "Stiffnes U1"=0   "Stiffnes U2"=0   "Stiffnes U3"=1500   "Nonlinear Option for U3"="Compression Only"
+
+TABLE:  "LOAD PATTERN DEFINITIONS"
+   Name=Dead   Type=Dead   "Self Weight Multiplier"=1
+   Name=Live   Type=Live   "Self Weight Multiplier"=0
+
+TABLE:  "MASS SOURCE DEFINITION"
+   Name=MsSrc1   "Is Default"=Yes   "Source Self Mass?"=Yes   "Source Added Mass?"=Yes   "Source Load Patterns?"=No
+
+TABLE:  "LOAD CASE DEFINITIONS - SUMMARY"
+   Name=Dead   Type="Linear Static"
+   Name=Live   Type="Linear Static"
+
+TABLE:  "LOAD CASE DEFINITIONS - LINEAR STATIC"
+   Name=Dead   "Load Type"=Load   "Load Name"=Dead   "Load SF"=1
+   Name=Live   "Load Type"=Load   "Load Name"=Live   "Load SF"=1
+
+TABLE:  "LOAD COMBINATION DEFINITIONS"
+   Name=Comb1   Type="Linear Add"   "Load Name"=Dead   SF=1.4
+   Name=Comb1   "Load Name"=Live   SF=1.6
+
+TABLE:  "POINT OBJECT CONNECTIVITY"
+   UniqueName=1   X=0   Y=0   Z=0
+   UniqueName=2   X=4   Y=0   Z=0
+   UniqueName=3   X=4   Y=4   Z=0
+   UniqueName=4   X=0   Y=4   Z=0
+   UniqueName=5   X=0   Y=0   Z=3
+   UniqueName=6   X=4   Y=0   Z=3
+   UniqueName=7   X=4   Y=4   Z=3
+   UniqueName=8   X=0   Y=4   Z=3
+
+TABLE:  "NULL LINE OBJECT CONNECTIVITY"
+   "Unique Name"=10   UniquePtI=1   UniquePtJ=2   Length=4
+   "Unique Name"=11   UniquePtI=4   UniquePtJ=3   Length=4
+
+TABLE:  "FLOOR OBJECT CONNECTIVITY"
+   "Unique Name"=100   UniquePt1=1   UniquePt2=2   UniquePt3=3   UniquePt4=4   Perimeter=16   Area=16
+
+TABLE:  "WALL OBJECT CONNECTIVITY"
+   UniqueName=200   UniquePt1=1   UniquePt2=2   UniquePt3=6   UniquePt4=5   Perimeter=14   Area=12
+
+TABLE:  "STRIP OBJECT CONNECTIVITY"
+   Name=CSA1   "Number Segments"=1   "Strip Start Point"=1   "Segment End Point"=2   "Start Width Left"=0.56   "Start Width Right"=0.56   "End Width Left"=0.56   "End Width Right"=0.56   Layer=A
+
+TABLE:  "FRAME ASSIGNMENTS - SECTION PROPERTIES"
+   UniqueName=10   "Section Property"=ConcBm
+   UniqueName=11   "Section Property"=None
+
+TABLE:  "AREA ASSIGNMENTS - SECTION PROPERTIES"
+   UniqueName=100   "Section Property"="200mm SLAB"   "Property Type"=Slab
+   UniqueName=200   "Section Property"="250mm WALL"   "Property Type"=Wall
+
+TABLE:  "JOINT ASSIGNMENTS - SPRINGS"
+   UniqueName=1   SpringProp="X-dir Side Friction"
+
+TABLE:  "FRAME ASSIGNMENTS - LINE SPRINGS"
+   UniqueName=11   "Spring Property"=LSpr1
+
+TABLE:  "AREA ASSIGNMENTS - AREA SPRINGS"
+   UniqueName=100   "Spring Property"=ASpr1
+
+TABLE:  "AREA LOAD ASSIGNMENTS - UNIFORM"
+   UniqueName=100   "Load Pattern"=Live   Direction=Gravity   Load=5
+
+TABLE:  "ANALYSIS OPTIONS - AUTOMATIC MESH SETTINGS FOR FLOORS"
+   "Mesh Option"=General   "Maximum Mesh Size"=0.25
