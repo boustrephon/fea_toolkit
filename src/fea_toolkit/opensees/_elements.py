@@ -263,6 +263,40 @@ def _imk_peak_oriented_args(
     )
 
 
+def _imk_member_params(elem: "FrameElement", sec) -> Optional[dict[str, float]]:
+    """Resolve element- then section-level ``imk_params`` for *elem*.
+
+    The element-level ``imk_params`` (per-member, length-corrected) is
+    authoritative; the section-level ``Section.imk_params`` is a summary fallback
+    (stamped on the 3-story SAC sections for readability).  Returns ``None`` when
+    the member carries no IMK calibration.
+    """
+    params = getattr(elem, "imk_params", None)
+    if params is None:
+        params = getattr(sec, "imk_params", None)
+    return params
+
+
+def _imk_end_params(elem: "FrameElement", sec, k: int, n: int) -> Optional[dict[str, float]]:
+    """Resolve the IMK calibration for member end ``k`` (``0`` = start, ``n`` = end).
+
+    Mirrors :meth:`ElementMixin._create_segment_hinge_materials`'s resolution
+    order — the per-end override (``imk_params_i`` at ``k == 0``,
+    ``imk_params_j`` at ``k == n``), then the element-, then the section-level
+    ``imk_params``.  Returns ``None`` when the end carries no IMK calibration
+    (a plain elastic connection, no hinge).
+    """
+    if k == 0:
+        params = getattr(elem, "imk_params_i", None)
+    elif k == n:
+        params = getattr(elem, "imk_params_j", None)
+    else:
+        params = None
+    if params is None:
+        params = _imk_member_params(elem, sec)
+    return params
+
+
 class ElementMixin:
     """Frame/wall/shell element creation, brace selection, and lumped hinges."""
 
@@ -1323,7 +1357,7 @@ class ElementMixin:
             # ``IMKPeakOriented`` (peak-oriented — the IK-2005 reference law).
             backbone = self.config.get("hinge_backbone")
             if params is None:
-                params = getattr(elem, "imk_params", None) or getattr(sec, "imk_params", None)
+                params = _imk_member_params(elem, sec)
             stiff_factor = float(self.config.get("hinge_stiffness_factor", 10.0))
             k0 = stiff_factor * 6.0 * E * max(I33, 1e-12) / max(L, 1e-12)
             if params:
@@ -1632,6 +1666,27 @@ class ElementMixin:
                     continue
                 if k == n and segments[-1].release_j:
                     continue
+                # ── Skip plain-elastic member ends (no hinge) in the IMK model ──
+                # A member end with no IMK calibration (element- or end-level) is
+                # a plain elastic connection, not a hinge: MK-2003's columns are
+                # continuous elastic above the base spring (no end springs).  Do
+                # not stamp a near-rigid elastic zeroLength there — it was a
+                # lumped-hinge bookkeeping artefact (34 redundant elements on the
+                # generic frames, and spurious βK damping in a DRAIN-2DX-style
+                # model).  A non-M3 release (M3 retained) still needs its spring
+                # to carry the release, so only skip when the end carries none.
+                # Interior framing points are left alone (they still carry their
+                # shared segment spring).
+                is_imk = self.config.get("hinge_backbone") in ("imk", "imk_peak")
+                if is_imk and k in (0, n) and _imk_end_params(elem, sec, k, n) is None:
+                    leaf_id = (
+                        segments[0].sub_element_ids[0]
+                        if k == 0
+                        else segments[n - 1].sub_element_ids[-1]
+                    )
+                    end_label = "I" if k == 0 else "J"
+                    if not end_released_dofs(self.mesh_model, leaf_id, end_label, self.config):
+                        continue
                 end_params = None
                 if k == 0:
                     end_params = getattr(elem, "imk_params_i", None)

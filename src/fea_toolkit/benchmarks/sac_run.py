@@ -27,8 +27,10 @@ from typing import Any, Optional
 
 import numpy as np
 
+from .._unit_scaling import g_from_units
 from ..io.npz_reader import read_results_npz
 from ..io.npz_writer import save_results_arrays
+from ..model.csm import bilinearize_equal_energy
 from . import sac
 from .sac_response_data import CASE_ORDER
 
@@ -274,13 +276,15 @@ def compute_metrics(
 
 
 def _elastic_rayleigh_periods(building: int) -> tuple[Optional[float], Optional[float]]:
-    """Rayleigh anchor periods from the *elastic* model.
+    """Rayleigh anchor periods ``(T1, T95)`` from the *elastic* model.
 
-    The benchmark's Rayleigh ζ=2 % is anchored at mode 1 + mode 2 (3/9-story) or
-    mode 5 (20-story).  The periods come from the elastic model — the lumped
-    hinge model is ~3× larger (hinge nodes), so an eigen solve on it is
-    impractically slow, and the benchmark's damping is an elastic property
-    anyway.  ``None`` falls back to the runner's own 2-mode solve.
+    IK-2005 assigns 5 % Rayleigh damping to the first mode and to the mode at
+    which the cumulative X-direction mass participation exceeds 95 % (§5.3.1,
+    Appendix B.4 Eq B.8: ``C = αM + βK₀``).  The periods come from the elastic
+    model — the lumped hinge model is ~3× larger (hinge nodes), so an eigen
+    solve on it is impractically slow, and the benchmark's damping is an
+    elastic property anyway.  ``None`` falls back to the runner's own 2-mode
+    solve.
 
     The default (ARPACK) solver is used: it is exact for the elastic model
     (healthy, non-singular stiffness) and returns in milliseconds, whereas
@@ -291,7 +295,7 @@ def _elastic_rayleigh_periods(building: int) -> tuple[Optional[float], Optional[
     """
     from openseespy.opensees import wipe
 
-    num_modes = 5 if building == 20 else 2
+    num_modes = building  # N storeys → N X-translational modes (full X participation)
     wipe()
     try:
         elastic = sac.build_builder(building=building, nonlinear=False)
@@ -299,14 +303,35 @@ def _elastic_rayleigh_periods(building: int) -> tuple[Optional[float], Optional[
             num_modes=num_modes, print_results=False, eigen_solver="default"
         )
         periods = list(modal.get("periods", []))
+        # ``partiMassRatiosMX`` is already in percent (OpenSees ``-unorm``).
+        ratios = list(modal.get("modal_props", {}).get("partiMassRatiosMX", []))
     finally:
         wipe()
 
-    if len(periods) < num_modes:
+    if not periods:
         return None, None
-    if building == 20:
-        return float(periods[0]), float(periods[4])
-    return float(periods[0]), float(periods[1])
+    t1 = float(periods[0])
+    vals: list[float] = []
+    for r in ratios:
+        try:
+            vals.append(float(r))
+        except (TypeError, ValueError):
+            vals.append(0.0)
+    # The SAC leaning column carries mass whose inertia does not enter the
+    # frame's X-lateral modes, so the raw cumulative X participation can
+    # plateau just below 95 % (≈ 94 % for the 20-story).  Anchor at 95 % of
+    # the *achievable* participation in that case; otherwise the faithful
+    # IK-2005 95 % threshold.
+    final = sum(vals)
+    target = 95.0 if final >= 95.0 else 0.95 * final
+    cum = 0.0
+    t95 = t1
+    for p, v in zip(periods, vals):
+        cum += v
+        if cum >= target:
+            t95 = float(p)
+            break
+    return t1, t95
 
 
 def _cache_dir() -> Path:
@@ -473,7 +498,7 @@ def collapse_intensity(
     intensities: Sequence[float],
     drifts: Sequence[float],
     converged: Sequence[bool],
-    collapse_drift: float = 0.10,
+    collapse_drift: Optional[float] = 0.10,
 ) -> Optional[float]:
     """First intensity at which the structure collapses.
 
@@ -490,14 +515,15 @@ def collapse_intensity(
         converged: ``converged_steps == num_steps`` per intensity.
         collapse_drift: Peak interstorey-drift ratio above which the structure
             is deemed collapsed (default ``0.10`` — the FEMA P-695 sidesway
-            proxy).
+            proxy).  ``None`` disables the drift proxy, so only non-convergence
+            (dynamic instability) trips collapse.
 
     Returns:
         The collapse intensity (scale factor), or ``None`` if no run in the
         ladder collapsed.
     """
     for im, drift, ok in zip(intensities, drifts, converged):
-        if not ok or drift > collapse_drift:
+        if not ok or (collapse_drift is not None and drift > collapse_drift):
             return float(im)
     return None
 
@@ -506,7 +532,7 @@ def collapse_criterion(
     intensities: Sequence[float],
     drifts: Sequence[float],
     converged: Sequence[bool],
-    collapse_drift: float = 0.10,
+    collapse_drift: Optional[float] = 0.10,
 ) -> Optional[str]:
     """Which collapse criterion tripped first on the ladder.
 
@@ -522,7 +548,8 @@ def collapse_criterion(
         drifts: Peak interstorey-drift ratio per intensity (``d_max``).
         converged: ``converged_steps == num_steps`` per intensity.
         collapse_drift: Peak interstorey-drift ratio above which the structure
-            is deemed collapsed (default ``0.10``).
+            is deemed collapsed (default ``0.10``).  ``None`` disables the drift
+            proxy (non-convergence only).
 
     Returns:
         ``"nonconvergence"`` if the first collapsed rung failed to converge,
@@ -532,7 +559,7 @@ def collapse_criterion(
     for _, drift, ok in zip(intensities, drifts, converged):
         if not ok:
             return "nonconvergence"
-        if drift > collapse_drift:
+        if collapse_drift is not None and drift > collapse_drift:
             return "drift"
     return None
 
@@ -544,8 +571,9 @@ def _ida_run(
     dt: float,
     intensities: Sequence[float],
     *,
-    collapse_drift: float = 0.10,
+    collapse_drift: Optional[float] = 0.10,
     damping: float = 0.02,
+    damping_type: str = "rayleigh",
     tolerance: Optional[float] = None,
     max_scale: Optional[float] = None,
     pdelta: bool = False,
@@ -579,7 +607,8 @@ def _ida_run(
         dt: Integration time step (s).
         intensities: The IM ladder (ascending scale factors on *accel_base*).
         collapse_drift: Peak interstorey-drift ratio collapse threshold.
-        damping: Rayleigh damping ratio.
+        damping: Damping ratio ξ (Rayleigh or mass-proportional).
+        damping_type: ``"rayleigh"`` (default) or ``"mass_proportional"``.
         tolerance: Relative tolerance for the bisection refinement of the
             collapse intensity (``None`` disables bisection — the ladder rung
             is reported as-is).
@@ -630,6 +659,7 @@ def _ida_run(
                 dt,
                 direction="X",
                 damping_ratio=damping,
+                damping_type=damping_type,
                 period_1=period_1,
                 period_2=period_2,
                 gravity_patterns={"GRAV": 1.0} if pdelta_gravity else None,
@@ -660,7 +690,7 @@ def _ida_run(
                 ladder.append(top)
                 drifts.append(d)
                 converged.append(c)
-                if (not c) or d > collapse_drift:
+                if (not c) or (collapse_drift is not None and d > collapse_drift):
                     im_collapse = top
                     break
 
@@ -676,7 +706,7 @@ def _ida_run(
                     mid = 0.5 * (lo + hi)
                     d, c = _eval(mid)
                     evaluations.append({"intensity": mid, "drift": d, "converged": c})
-                    if (not c) or d > collapse_drift:
+                    if (not c) or (collapse_drift is not None and d > collapse_drift):
                         hi = mid
                     else:
                         lo = mid
@@ -698,7 +728,7 @@ def _ida_run(
         "converged": converged,
         "collapse_intensity": im_collapse,
         "collapse_criterion": collapse_criterion(ladder, drifts, converged, collapse_drift),
-        "collapse_drift": float(collapse_drift),
+        "collapse_drift": collapse_drift,
         "bisection": bisection,
     }
 
@@ -708,8 +738,10 @@ def run_ida(
     record_id: str,
     intensities: Sequence[float],
     *,
-    collapse_drift: float = 0.10,
+    collapse_drift: Optional[float] = 0.10,
     damping: float = 0.02,
+    damping_type: str = "rayleigh",
+    integration_dt: float = sac.SAC_DT_CAL,
     tolerance: float = 0.01,
     max_scale: Optional[float] = None,
     pdelta: bool = False,
@@ -731,7 +763,10 @@ def run_ida(
             ``"ELCENTRO"``).
         intensities: Ascending record scale factors (the IM ladder).
         collapse_drift: Peak interstorey-drift ratio collapse threshold.
-        damping: Rayleigh damping ratio.
+        damping: Damping ratio ξ (Rayleigh or mass-proportional).
+        damping_type: ``"rayleigh"`` (default) or ``"mass_proportional"``.
+        integration_dt: Record resampling / integration step (s; default
+            :data:`~fea_toolkit.benchmarks.sac.SAC_DT_CAL`).
         tolerance: Relative tolerance for the bisection refinement of the
             collapse intensity (default ``0.01`` — 1 %).
         max_scale: Optional upper bound on the ladder; when the ladder does not
@@ -747,7 +782,7 @@ def run_ida(
         intensity at which the structure collapsed, refined by bisection, or
         ``None``).
     """
-    accel_raw, dt = sac.load_benchmark_record(str(record_path(record_id)), sac.SAC_DT_CAL)
+    accel_raw, dt = sac.load_benchmark_record(str(record_path(record_id)), integration_dt)
     accel_base = np.asarray(accel_raw, dtype=float)
     return _ida_run(
         building,
@@ -757,6 +792,7 @@ def run_ida(
         intensities,
         collapse_drift=collapse_drift,
         damping=damping,
+        damping_type=damping_type,
         tolerance=tolerance,
         max_scale=max_scale,
         pdelta=pdelta,
@@ -807,8 +843,10 @@ def collapse_capacity_sa(
     record_ids: Sequence[str],
     intensities: Sequence[float],
     *,
-    collapse_drift: float = 0.10,
+    collapse_drift: Optional[float] = 0.10,
     damping: float = 0.02,
+    damping_type: str = "rayleigh",
+    integration_dt: float = sac.SAC_DT_CAL,
     tolerance: float = 0.01,
     max_scale: Optional[float] = None,
     pdelta: bool = False,
@@ -841,7 +879,10 @@ def collapse_capacity_sa(
         record_ids: Benchmark record identifiers.
         intensities: Ascending record scale factors (the IM ladder).
         collapse_drift: Peak interstorey-drift ratio collapse threshold.
-        damping: Rayleigh damping ratio.
+        damping: Damping ratio ξ (Rayleigh or mass-proportional).
+        damping_type: ``"rayleigh"`` (default) or ``"mass_proportional"``.
+        integration_dt: Record resampling / integration step (s; default
+            :data:`~fea_toolkit.benchmarks.sac.SAC_DT_CAL`).
         tolerance: Bisection relative tolerance on the collapse intensity.
         max_scale: Optional upper bound on the ladder (see :func:`run_ida`).
         pdelta: When True, emit the ``PDelta`` geometric transformation (global
@@ -859,7 +900,7 @@ def collapse_capacity_sa(
     t1 = float(period_1) if period_1 else 1.0
     capacities: dict[str, Optional[float]] = {}
     for rid in record_ids:
-        accel_raw, dt = sac.load_benchmark_record(str(record_path(rid)), sac.SAC_DT_CAL)
+        accel_raw, dt = sac.load_benchmark_record(str(record_path(rid)), integration_dt)
         accel_base = np.asarray(accel_raw, dtype=float)
         sa_t1 = sdof_spectral_acceleration(accel_base, dt, t1, zeta=0.05)
         res = _ida_run(
@@ -870,6 +911,7 @@ def collapse_capacity_sa(
             intensities,
             collapse_drift=collapse_drift,
             damping=damping,
+            damping_type=damping_type,
             tolerance=tolerance,
             max_scale=max_scale,
             pdelta=pdelta,
@@ -885,6 +927,151 @@ def collapse_capacity_sa(
         "capacities": capacities,
         "median_collapse_sa": median,
         "records": [str(rid) for rid in record_ids],
+    }
+
+
+def _first_yield(
+    control_disp: np.ndarray,
+    base_shear: np.ndarray,
+    W: float,
+    drop: float = 0.05,
+) -> tuple[Optional[float], Optional[float]]:
+    """First-yield strength ratio and drift from a secant-stiffness drop.
+
+    Returns ``(gamma, drift)`` at the first point where the secant stiffness
+    falls below ``(1 - drop)`` of the initial elastic stiffness — the first
+    hinge formation, matching IK-2005's first-yield ``Vy/W`` definition
+    (``min(2·Myb1/h, 4·Myc/h)/W`` for a single-bay frame).  ``(None, None)``
+    when no clear yield is detected.
+    """
+    if base_shear.size < 3:
+        return None, None
+    i0 = 0
+    for i in range(len(control_disp)):
+        if control_disp[i] > 1e-12 and base_shear[i] > 1e-12:
+            i0 = i
+            break
+    k0 = base_shear[i0] / control_disp[i0]
+    if k0 <= 1e-12:
+        return None, None
+    target = (1.0 - drop) * k0
+    for i in range(i0 + 1, len(base_shear)):
+        if control_disp[i] <= 1e-12:
+            continue
+        k = base_shear[i] / control_disp[i]
+        if k >= target:
+            continue
+        d_prev = control_disp[i - 1]
+        k_prev = base_shear[i - 1] / max(d_prev, 1e-12)
+        denom = k - k_prev
+        frac = (target - k_prev) / denom if abs(denom) > 1e-12 else 0.0
+        d_y = d_prev + frac * (control_disp[i] - d_prev)
+        return float(target * d_y / W), float(d_y)
+    return None, None
+
+
+def pushover_strength_ratio(
+    building: int,
+    *,
+    max_disp: Optional[float] = None,
+    num_steps: int = 100,
+    lateral_load_type: str = "triangular",
+    first_yield_drop: float = 0.05,
+) -> dict[str, Any]:
+    """Strength ratio ``γ = Vy/W`` from a pushover (IK-2005 convention).
+
+    Runs a displacement-controlled pushover of the IMK-hinge SAC building under
+    P-Δ + held ``1.4 × seismic mass`` gravity — the same model the IDA collapse
+    uses — and reports two yield definitions:
+
+    * ``gamma`` — equal-energy EPP idealisation
+      (:func:`~fea_toolkit.model.csm.bilinearize_equal_energy`); degenerates to
+      the *peak* base shear when the curve hardens (the IMK post-yield
+      hardening), so it is an upper bound on the yield strength.
+    * ``gamma_first_yield`` — first hinge formation, detected as the first
+      *first_yield_drop* (default 5 %) secant-stiffness reduction
+      (:func:`_first_yield`); matches IK-2005's first-yield ``Vy/W``.
+
+    Mirrors ``docs/sac_imk_collapse_benchmark.md`` §"Strength ratio γ":
+    triangular lateral pattern, X direction.
+
+    Args:
+        building: SAC building number (3, 9 or 20).
+        max_disp: Target roof displacement (m).  ``None`` → 3 % roof drift
+            (``0.03 × building × 3.96 m`` — the 13 ft storey height).
+        num_steps: Number of push steps.
+        lateral_load_type: Lateral load pattern (default ``"triangular"``).
+        first_yield_drop: Fractional secant-stiffness drop that defines first
+            yield (default ``0.05``).
+
+    Returns:
+        ``{"building", "W", "Vy", "gamma", "gamma_first_yield",
+        "disp_first_yield", "V_peak", "roof_drift_peak", "method",
+        "control_disp", "base_shear"}``.
+    """
+    from openseespy.opensees import wipe
+
+    g = g_from_units(sac.SAC3_UNITS)
+    if max_disp is None:
+        max_disp = 0.03 * building * 3.96
+
+    wipe()
+    try:
+        builder = sac.build_builder(
+            building=building,
+            nonlinear=True,
+            backbone="imk",
+            hinge_model="lumped",
+            derive_column_axial_ratio_by_member=True,
+            pdelta=True,
+            pdelta_gravity=True,
+        )
+        masses = builder.compute_seismic_masses()
+        W = sum(masses.values()) * g
+        res = builder.run_pushover_analysis(
+            gravity_patterns={"GRAV": 1.0},
+            lateral_load_type=lateral_load_type,
+            max_disp=max_disp,
+            num_steps=num_steps,
+            print_progress=False,
+        )
+        base_shear = np.asarray(res["base_shear"], dtype=float)
+        control_disp = np.asarray(res["control_disp"], dtype=float)
+    finally:
+        wipe()
+
+    empty = {
+        "building": building,
+        "W": float(W),
+        "Vy": None,
+        "gamma": None,
+        "gamma_first_yield": None,
+        "disp_first_yield": None,
+        "V_peak": None,
+        "roof_drift_peak": None,
+        "method": None,
+        "control_disp": control_disp,
+        "base_shear": base_shear,
+    }
+    if base_shear.size == 0:
+        return empty
+
+    S_a = base_shear / W
+    _, S_ay, method = bilinearize_equal_energy(control_disp, S_a)
+    gamma_fy, drift_fy = _first_yield(control_disp, base_shear, W, first_yield_drop)
+    peak = int(np.argmax(base_shear))
+    return {
+        "building": building,
+        "W": float(W),
+        "Vy": float(S_ay * W),
+        "gamma": float(S_ay),
+        "gamma_first_yield": gamma_fy,
+        "disp_first_yield": drift_fy,
+        "V_peak": float(base_shear[peak]),
+        "roof_drift_peak": float(control_disp[peak] / (building * 3.96)),
+        "method": method,
+        "control_disp": control_disp,
+        "base_shear": base_shear,
     }
 
 

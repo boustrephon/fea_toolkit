@@ -174,6 +174,80 @@ strength).  A **point** comparison is not available — IK-2005 publishes an SDO
 statistically meaningful, quantitative comparison; the four-record value above
 is the benchmark-scale first step.
 
+## 9/20-story extension — approaches record
+
+*Working record of the 9/20-story collapse runs, the strength-ratio (γ) yield
+definitions and the damping/criterion choices, so the approaches can be
+revisited and discussed.  Headline numbers below; curves are in
+`docs/assets/sac_pushover_curves.png` and `output/sac_pushover/*.json`.*
+
+### Collapse capacity — 4-record median (P-Δ + held 1.4×mass gravity, dt 0.01, non-convergence)
+
+| building | T1 (s) | mass-proportional 5 % | Rayleigh 5 % on (T1, T95) | Δ |
+|---|---|---|---|---|
+| 9-story | 2.26 | 0.867 g | **0.913 g** | +5 % |
+| 20-story | 3.83 | 0.176 g | **0.179 g** | +2 % |
+
+**Finding — damping formulation is a small lever here.**  The
+mass-proportional → Rayleigh-on-(T1,T95) switch moves the median only 2–5 %.
+These flexible SAC frames collapse in a first-mode / P-Δ-dominated way, so the
+higher modes the two formulations damp differently barely matter.  (This
+contrasts with IK-2005's single-bay generic frames, where the damping
+formulation was flagged as a suspect for the long-period undershoot — see
+`ik2005_generic_frame_benchmark.md` §"Known deviations".)
+
+### Strength ratio γ — two yield definitions
+
+Both from a triangular-pattern displacement pushover of the *same* IMK model
+under P-Δ + held gravity (`sac_run.pushover_strength_ratio`).
+
+| building | W (one frame) | γ equal-energy | γ first-yield (5 % drop) | drift at first yield |
+|---|---|---|---|---|
+| 3-story | 14.46 MN | 0.282 | **0.236** | 0.87 % |
+| 9-story | 48.86 MN | 0.116 | **0.106** | 0.83 % |
+| 20-story | 59.52 MN | 0.049 | **0.047** | 0.51 % |
+
+- **Equal-energy EPP** (`bilinearize_equal_energy`): the IMK curves harden
+  post-yield, so this degenerates to the *peak* base shear — an upper bound on
+  yield strength (and hence a lower bound on `(Sa,c/g)/γ`).
+- **First-yield** (`_first_yield`, first 5 % secant-stiffness drop): first
+  hinge formation, matching IK-2005's first-yield `min(2·Myb1/h, 4·Myc/h)/W`.
+  It is 4–16 % below the equal-energy value.
+
+### Normalised collapse `(Sa,c/g)/γ` vs IK-2005 Fig 5.16
+
+Using the first-yield γ (the conservative choice):
+
+| building | T1 (s) | `(Sa,c/g)/γ` | IK-2005 Fig 5.16 | ratio |
+|---|---|---|---|---|
+| 3-story | 1.0 | ≈ 9.3 (doc 2.20 / 0.236) | ≈ 3.3 | ~2.8× |
+| 9-story | 2.26 | **8.6** | ≈ 3.0 | ~2.9× |
+| 20-story | 3.83 | **3.8** | ≈ 2.8 | ~1.4× |
+
+**Finding — structural overshoot, shrinking with height.**  The SAC buildings
+overshoot IK-2005's normalised collapse capacity by ~2.8× (3/9-story) and
+~1.4× (20-story).  The overshoot is robust to the γ definition (first-yield vs
+peak differ only 4–16 %), so it is *not* a γ or damping or detector artefact —
+it is the same structural mismatch the 3-story result flagged: the SAC
+perimeter frames (with their leaning column and redundancy) are unusually
+flexible-and-strong for their period, whereas IK-2005's single-bay γ = 1.0
+frames are not.  The 20-story, the most P-Δ-dominated (T1 = 3.83 s ≈ 0.19·N,
+near IK-2005's flexible 0.2·N frames), is the closest match.
+
+### Open questions (to revisit)
+
+1. **γ definition** — first-yield vs peak.  First-yield is IK-2005-faithful and
+   conservative; the peak is the codebase's existing equal-energy default.
+   The 4–16 % spread propagates straight into `(Sa,c/g)/γ`.
+2. **20-story pushover is fragile** — its P-Δ collapse is abrupt (the
+   displacement-controlled push fails to converge past ~0.5 % drift), so
+   γ₂₀ = 0.047 is approximate.  An arc-length or force-controlled push may be
+   needed.
+3. **4 records only** — the SAC set (El Centro / Hachinohe / Northridge /
+   Kobe), not the 40-record LMSR-N median IK-2005 uses.
+4. **dt = 0.01** (not the full-fidelity 0.005) — within ~3 % run-to-run noise
+   (see the archived comparison in `ik2005_generic_frame_benchmark.md`).
+
 ## References
 
 - Ibarra & Krawinkler (2005), *Global Collapse of Frame Structures under

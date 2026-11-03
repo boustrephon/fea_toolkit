@@ -59,6 +59,17 @@ def test_collapse_criterion_reports_tripwire():
     )
 
 
+def test_collapse_drift_none_disables_proxy():
+    """``collapse_drift=None`` collapses on non-convergence only (IK-2005 §5.5)."""
+    # Drift alone never trips when the proxy is disabled.
+    assert collapse_intensity([1.0, 2.0, 3.0], [0.5, 5.0, 9.0], [True, True, True], None) is None
+    # Non-convergence still trips (at the first rung that fails).
+    assert collapse_intensity([1.0, 2.0, 3.0], [0.01, 0.02, 0.03], [True, False, True], None) == 2.0
+    # And the criterion is always "nonconvergence" when it fires — never "drift".
+    assert collapse_criterion([1.0, 2.0], [0.9, 9.0], [True, True], None) is None
+    assert collapse_criterion([1.0, 2.0], [0.01, 0.02], [True, False], None) == "nonconvergence"
+
+
 def test_ida_synthetic_ladder_collapses_at_top():
     """A monotonic pulse ladder yields, then collapses at the top rung (always-on)."""
     dt, n = 0.005, 300
