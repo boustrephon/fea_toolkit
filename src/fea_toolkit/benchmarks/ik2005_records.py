@@ -92,9 +92,37 @@ USGS_CHANNELS: dict[str, str] = {
 }
 
 
+def peer_only_present() -> list[str]:
+    """Return the PEER-only IDs whose waveform is already in the mirror.
+
+    PEER NGA-West2 records are downloaded as ``<record_id>.AT2`` (or ``.csv``)
+    into ``data/ground_motion/{local,public}/``.  This returns, in table order,
+    the :data:`PEER_ONLY` IDs for which such a file exists — the 40-record re-run
+    happens automatically once all seven are dropped in.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent.parent.parent / "data" / "ground_motion"
+    present = {
+        rid
+        for rid in PEER_ONLY
+        for sub in ("local", "public")
+        for ext in (".AT2", ".csv")
+        if (root / sub / f"{rid}{ext}").exists()
+    }
+    return [rid for rid in LMSR_N_IDS if rid in present]
+
+
 def fetched_ids() -> list[str]:
-    """Return the locally-fetched LMSR-N record IDs (PEER-only excluded), in table order."""
-    return [rid for rid in LMSR_N_IDS if rid not in PEER_ONLY]
+    """Return the LMSR-N record IDs available to the runner, in table order.
+
+    The 33 open-archive records (CESMD + USGS NSMP) are always included; a
+    PEER-only record joins once its ``.AT2`` / ``.csv`` waveform is present in
+    the mirror (see :func:`peer_only_present`).  So this returns 33 today and 40
+    once the 7 NGA-West2 records are fetched.
+    """
+    present = set(peer_only_present())
+    return [rid for rid in LMSR_N_IDS if rid not in PEER_ONLY or rid in present]
 
 
 def peer_only_ids() -> list[str]:

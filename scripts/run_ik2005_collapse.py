@@ -52,12 +52,18 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="comma-separated ascending seed ladder (record scale factors)",
     )
     parser.add_argument("--limit", type=int, default=None, help="run only the first N records")
+    parser.add_argument(
+        "--damping-type",
+        choices=["rayleigh", "mass_proportional"],
+        default="rayleigh",
+        help="damping formulation (default rayleigh)",
+    )
     parser.add_argument("--json", type=str, default=None, help="optional JSON output path")
     args = parser.parse_args(argv)
 
     ladder = [float(x) for x in args.ladder.split(",")]
     record_ids = fetched_ids()
-    skipped = peer_only_ids()
+    skipped = [rid for rid in peer_only_ids() if rid not in record_ids]
     if args.limit:
         record_ids = record_ids[: args.limit]
 
@@ -71,6 +77,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         max_scale=args.max_scale,
         record_channels=USGS_CHANNELS,
         verbose=True,
+        damping_type=args.damping_type,
     )
 
     print(f"IK-2005 generic-frame collapse capacity — code {args.code}, T1 = {result['T1']:.2f} s")

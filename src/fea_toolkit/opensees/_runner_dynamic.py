@@ -211,6 +211,14 @@ class TransientRunnerMixin:
             ops.remove("loadPattern", pattern_tag)
         with contextlib.suppress(Exception):
             ops.remove("timeSeries", ts_tag)
+        # ── Damping: C = a0·M + a1·K₀ (initial-stiffness Rayleigh) ──
+        # The lumped-hinge zeroLength springs need no βK exclusion: OpenSees
+        # ZeroLength elements ignore stiffness-proportional Rayleigh damping by
+        # default (``doRayleighDamping = 0`` at element creation), so the βK₀
+        # term lands on the elastic members only — exactly the IK-2005 Appendix
+        # B.4 / MK-2003 Appendix A.4 prescription of zero βK on the plastic-hinge
+        # springs.  (DRAIN-2DX needs an explicit zero-βK rule because its springs
+        # carry βK; OpenSees gives it for free.)
         ops.rayleigh(a0, 0.0, a1, 0.0)
         ops.timeSeries("Path", ts_tag, "-dt", dt, "-values", *accel)
         ops.pattern("UniformExcitation", pattern_tag, dof, "-accel", ts_tag)
@@ -301,6 +309,16 @@ class TransientRunnerMixin:
         hinge_peak_rotation = [0.0] * n_hinges
         hinge_yielded = [False] * n_hinges
         peak_plastic_rotation = 0.0
+        # Opt-in full M-θ trace (deformation + basicForce per hinge per step),
+        # for backbone-path diagnostics.  Off by default: it costs n_hinges ×
+        # num_steps × 2 floats and is only wanted for hinge-behaviour studies.
+        record_hinge_trace = bool(self.config.get("transient_record_hinge_trace", False))
+        hinge_deform_trace: list[list[float]] = (
+            [[] for _ in range(n_hinges)] if record_hinge_trace else []
+        )
+        hinge_moment_trace: list[list[float]] = (
+            [[] for _ in range(n_hinges)] if record_hinge_trace else []
+        )
 
         base_shear_steps: list[float] = []
         converged_steps = 0
@@ -347,6 +365,9 @@ class TransientRunnerMixin:
                 )
                 if hinge_theta_y and abs(deform) > hinge_theta_y[i]:
                     hinge_yielded[i] = True
+                if record_hinge_trace:
+                    hinge_deform_trace[i].append(deform)
+                    hinge_moment_trace[i].append(moment)
                 hinge_prev_theta[i] = deform
                 hinge_prev_moment[i] = moment
             converged_steps += 1
@@ -377,7 +398,7 @@ class TransientRunnerMixin:
             if denom > 0.0:
                 max_damage_energy = max(max_damage_energy, hinge_energy[i] / denom)
 
-        return {
+        result = {
             "times": times,
             "direction": direction,
             "dt": dt,
@@ -395,4 +416,24 @@ class TransientRunnerMixin:
             "converged_steps": converged_steps,
             "period_1": period_1,
             "period_2": period_2,
+            # Per-hinge diagnostics (backbone-path studies).  ``hinge_tags``
+            # aligns element tag i with ``hinge_yield_rotations[i]`` (θy),
+            # ``hinge_yield_moments[i]`` (My), ``hinge_peak_rotations[i]``
+            # (peak |θ|) and ``hinge_damage_rotations[i]`` (peak θ/θy).
+            "hinge_tags": list(hinge_tags),
+            "hinge_yield_rotations": list(hinge_theta_y),
+            "hinge_yield_moments": list(hinge_my),
+            "hinge_peak_rotations": list(hinge_peak_rotation),
+            "hinge_damage_rotations": [
+                hinge_peak_rotation[i] / hinge_theta_y[i]
+                if i < len(hinge_theta_y) and hinge_theta_y[i] > 0.0
+                else 0.0
+                for i in range(n_hinges)
+            ],
         }
+        if record_hinge_trace:
+            result["hinge_traces"] = {
+                "deformation": hinge_deform_trace,
+                "moment": hinge_moment_trace,
+            }
+        return result

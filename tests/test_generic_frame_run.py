@@ -3,7 +3,7 @@
 The real validation needs the LMSR-N record set (non-redistributable, fetched
 locally).  This smoke test drives :func:`~fea_toolkit.benchmarks.generic_frame_run._ida_run`
 end-to-end with a synthetic sine pulse so the plumbing — P-Δ + held gravity,
-mass-proportional damping, and the drift/metric extraction — is exercised
+Rayleigh damping, and the drift/metric extraction — is exercised
 without any record on disk.
 """
 
@@ -52,6 +52,66 @@ def test_collapse_capacity_result_shape():
     assert res["median_collapse_sa"] is None  # no records collapsed
     assert res["median_collapse_sa_gamma"] is None
     assert res["records"] == []
+
+
+@pytest.mark.parametrize(
+    ("code", "t1_target", "t95"),
+    [
+        ("0909", 0.9, 0.2077),
+        ("0918", 1.8, 0.4154),
+        ("1224", 2.4, 0.3931),
+    ],
+)
+def test_rayleigh_periods(code, t1_target, t95):
+    """Rayleigh anchor = T1 + the period at 95 % cumulative X participation.
+
+    IK-2005 anchors 5 % Rayleigh at T1 and the mode where cumulative X mass
+    participation first exceeds 95 % (§5.3.1, Appendix B.4).  For the 9-storey
+    frames that is the third lateral mode (cumulative 78.9 + 11.7 + 4.5 % =
+    95.2 %), for the 12-storey frame the fourth (77.9 + 11.5 + 4.6 + 2.3 % =
+    96.4 %) — not the ``T1·0.5`` mass-proportional fallback.
+    """
+    t1, t95_actual = gfr._rayleigh_periods(code)
+    assert t1 == pytest.approx(t1_target, abs=0.02)
+    assert t95_actual == pytest.approx(t95, abs=0.01)
+    assert t95_actual < t1
+
+
+@pytest.mark.parametrize(
+    ("code", "pf1"),
+    [
+        ("0303", 1.286),
+        ("0909", 1.421),
+        ("0918", 1.421),
+        ("1224", 1.440),
+    ],
+)
+def test_first_mode_participation(code, pf1):
+    """PF1 ≈ 3N/(2N+1) — the roof-normalised first-mode participation factor."""
+    assert gfr.first_mode_participation(code) == pytest.approx(pf1, abs=0.01)
+
+
+def test_drift_demands_returns_structure():
+    """``drift_demands`` reports PF1 and per-ratio normalised roof drifts."""
+    from pathlib import Path
+
+    root = Path(gfr.__file__).resolve().parent.parent.parent.parent
+    local = root / "data" / "ground_motion" / "local"
+    local.mkdir(parents=True, exist_ok=True)
+    rid = "_test_drift_demands"
+    path = local / f"{rid}.csv"
+    t = np.arange(120) * 0.005  # 0.6 s
+    acc = 0.3 * _G * np.sin(2 * math.pi * t / 0.9)
+    path.write_text("time,accel\n" + "".join(f"{tt},{aa}\n" for tt, aa in zip(t, acc)))
+    try:
+        res = gfr.drift_demands("0909", [rid], ratios=(1.0,))
+    finally:
+        path.unlink(missing_ok=True)
+
+    assert res["code"] == "0909"
+    assert res["PF1"] == pytest.approx(1.421, abs=0.01)
+    assert set(res["ratios"]) == {1.0}
+    assert res["median"][1.0] > 0.0
 
 
 def test_load_record_reads_at2_and_csv():

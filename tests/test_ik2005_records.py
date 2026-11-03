@@ -11,6 +11,7 @@ from fea_toolkit.benchmarks.ik2005_records import (
     USGS_CHANNELS,
     fetched_ids,
     peer_only_ids,
+    peer_only_present,
 )
 
 
@@ -35,13 +36,16 @@ def test_peer_only_is_the_seven_nga_west2_records():
 def test_fetched_and_peer_only_partition_the_set():
     got = fetched_ids()
     skipped = peer_only_ids()
-    assert len(got) == 33
-    assert len(skipped) == 7
+    # The 33 open-archive records are always "fetched"; a PEER-only record joins
+    # fetched_ids() once its waveform is in the mirror (peer_only_present).  In a
+    # clean checkout (no PEER files) that is exactly the 33/7 split.
     assert set(got) | set(skipped) == set(LMSR_N_IDS)
-    assert not (set(got) & set(skipped))
-    # table order is preserved
-    assert got == [rid for rid in LMSR_N_IDS if rid not in PEER_ONLY]
+    assert got == [rid for rid in LMSR_N_IDS if rid not in PEER_ONLY or rid in peer_only_present()]
     assert skipped == [rid for rid in LMSR_N_IDS if rid in PEER_ONLY]
+
+
+def test_peer_only_present_is_subset_of_peer_only():
+    assert set(peer_only_present()) <= PEER_ONLY
 
 
 def test_usgs_channels_reference_only_fetched_records():

@@ -11,14 +11,15 @@ Reuses the record-free collapse machinery from
 :mod:`~fea_toolkit.benchmarks.sac_run` (``collapse_intensity``,
 ``sdof_spectral_acceleration``, ``floor_levels``, ``compute_metrics``,
 ``record_path``).  The IK-2005-specific settings are the P-Δ + held
-``1.4 × seismic mass`` gravity, **5 % mass-proportional** damping (§4.3,
-``damping_type="mass_proportional"``) and the peak-oriented
+``1.4 × seismic mass`` gravity, **5 % Rayleigh** damping on ``T1`` + the
+95 %-participation mode (§5.3.1, Appendix B.4) and the peak-oriented
 ``IMKPeakOriented`` hinge (already in
 :func:`~fea_toolkit.benchmarks.generic_frame.builder_config`).
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from typing import Any, Optional
 
@@ -36,16 +37,255 @@ from .sac_run import (
     sdof_spectral_acceleration,
 )
 
-#: IK-2005 damping ratio (§4.3: ξ = 5 %).
+#: IK-2005 damping ratio (ξ = 5 %, Rayleigh — §5.3.1, Appendix B.4 Eq B.8).
 _DAMPING = 0.05
-#: Peak interstorey-drift ratio collapse threshold (FEMA P-695 sidesway proxy,
-#: the same value ``sac_run`` uses).
-_COLLAPSE_DRIFT = 0.10
+#: Peak interstorey-drift ratio collapse threshold.  ``None`` disables the
+#: drift proxy so collapse is judged by non-convergence (dynamic instability)
+#: alone — the IK-2005 §5.5 definition.  The FEMA P-695 sidesway proxy (0.10)
+#: remains available for the SAC path via ``sac_run``'s default.
+_COLLAPSE_DRIFT: Optional[float] = None
 
 
 def period_1(code: str) -> float:
     """The frame's fundamental period ``T1 = 0.1N`` / ``0.2N`` (s)."""
     return float(FRAME_DATA[code]["T1"])
+
+
+def _trips_collapse(converged: bool, drift: float, collapse_drift: Optional[float]) -> bool:
+    """Whether a ladder rung trips collapse.
+
+    ``True`` when the rung failed to converge (dynamic instability) or — when
+    the drift proxy is enabled — its peak interstorey-drift ratio exceeds
+    *collapse_drift*.  ``collapse_drift=None`` disables the proxy, so only
+    non-convergence trips collapse (the IK-2005 §5.5 definition).
+    """
+    if not converged:
+        return True
+    return collapse_drift is not None and drift > collapse_drift
+
+
+def _rayleigh_periods(code: str) -> tuple[float, float]:
+    """Rayleigh anchor periods ``(T1, T95)`` for *code*.
+
+    IK-2005 assigns 5 % Rayleigh damping to the first mode and to the mode at
+    which the cumulative X-direction mass participation exceeds 95 % (§5.3.1,
+    Appendix B.4 Eq B.8: ``C = αM + βK₀``).  The periods come from the
+    elastic-initial model (P-Δ off; the IMK springs sit at their elastic
+    stiffness before loading, so the full
+    :func:`~fea_toolkit.benchmarks.generic_frame.build_builder` eigen-solve
+    already yields the elastic periods).
+
+    Returns:
+        ``(T1, T95)`` in seconds; ``T95`` falls back to ``T1`` when the modal
+        solve returns no periods.
+    """
+    from openseespy.opensees import wipe
+
+    n = int(FRAME_DATA[code]["N"])
+    wipe()
+    try:
+        builder = gf.build_builder(code, pdelta=False)
+        modal = builder.run_modal_analysis(num_modes=n, print_results=False, eigen_solver="default")
+        periods = list(modal.get("periods", []))
+        # ``partiMassRatiosMX`` is already in percent (OpenSees ``-unorm``).
+        ratios = list(modal.get("modal_props", {}).get("partiMassRatiosMX", []))
+    finally:
+        wipe()
+
+    if not periods:
+        return period_1(code), period_1(code) * 0.5
+    t1 = float(periods[0])
+    cum = 0.0
+    t95 = t1
+    for p, r in zip(periods, ratios):
+        try:
+            cum += float(r)
+        except (TypeError, ValueError):
+            continue
+        if cum >= 95.0:
+            t95 = float(p)
+            break
+    return t1, t95
+
+
+def first_mode_participation(code: str) -> float:
+    """First-mode participation factor ``PF1`` (mode normalised to 1 at the roof).
+
+    IK-2003 (PEER 2003/15) §4.3 anchors the elastic roof-drift demand at
+    ``PF1``: for ``[Sa(T1)/g]/γ ≈ 1`` the median normalised roof drift
+    ``θr,max / [Sd(T1)/H] ≈ PF1``.  ``PF1`` is ``Γ1 = Σ mᵢφᵢ / Σ mᵢφᵢ²`` over
+    the lumped masses ``mᵢ`` and the roof-normalised X-mode shape ``φᵢ``.
+    Because the generic frames are tuned to a straight-line first mode with
+    near-uniform floor masses, ``PF1 ≈ 3N/(2N+1)`` (≈ 1.29 → 1.46 for
+    N = 3 → 18).
+    """
+    from openseespy.opensees import wipe
+
+    n = int(FRAME_DATA[code]["N"])
+    wipe()
+    try:
+        builder = gf.build_builder(code, pdelta=False)
+        modal = builder.run_modal_analysis(num_modes=1, print_results=False)
+        masses = modal.get("nodal_masses", {})
+        shapes = builder.extract_mode_shapes(1)
+        roof_tag = builder.mesh_model.nodes[f"{n}-0"].node_tag
+        roof_dx = shapes[0][roof_tag][0]
+        num = den = 0.0
+        for tag, (dx, _dy, _dz) in shapes[0].items():
+            phi = dx / roof_dx
+            m = float(masses.get(tag, 0.0))
+            num += m * phi
+            den += m * phi * phi
+    finally:
+        wipe()
+
+    return num / den if den > 0.0 else float("nan")
+
+
+def modal_participation_factors(code: str, num_modes: int = 5) -> list[float]:
+    """Participation factors ``PF1..PFk`` in the paper's mode normalisation.
+
+    MK-2003 (PEER 2003/15) Tables A.1--A.6 report participation factors for the
+    first five modes.  Their normalisation is: mode 1 to unit roof displacement
+    (a straight-line ``φ1``); every higher mode to unit ``max|φ|`` over the
+    floor levels (base = 0).  ``Γi = Σ mᵢφᵢ / Σ mᵢφᵢ²`` over the floor masses
+    with ``φ`` re-normalised to that convention.
+
+    Args:
+        code: Generic-frame code (used for ``N`` and the mass/stiffness layout).
+        num_modes: Number of modes to return (default 5).
+
+    Returns:
+        ``[PF1, PF2, ...]`` — ``NaN`` for a mode with a vanishing normalisation
+        (not expected for the first ``min(N, 5)`` lateral modes).
+    """
+    from openseespy.opensees import wipe
+
+    n = int(FRAME_DATA[code]["N"])
+    wipe()
+    try:
+        builder = gf.build_builder(code, pdelta=False)
+        modal = builder.run_modal_analysis(num_modes=num_modes, print_results=False)
+        masses = modal.get("nodal_masses", {})
+        shapes = builder.extract_mode_shapes(num_modes)
+        floor_tags = [builder.mesh_model.nodes[f"{level}-0"].node_tag for level in range(1, n + 1)]
+        pfs: list[float] = []
+        for mode in range(num_modes):
+            dxs = [shapes[mode][tag][0] for tag in floor_tags]
+            # Paper convention: mode 1 → roof = 1; modes 2+ → max|φ| = 1.
+            scale = dxs[-1] if mode == 0 else max(abs(d) for d in dxs)
+            if abs(scale) < 1e-12:
+                pfs.append(float("nan"))
+                continue
+            num = den = 0.0
+            for tag, dx in zip(floor_tags, dxs):
+                phi = dx / scale
+                m = float(masses.get(tag, 0.0))
+                num += m * phi
+                den += m * phi * phi
+            pfs.append(num / den if den > 0.0 else float("nan"))
+    finally:
+        wipe()
+    return pfs
+
+
+def drift_demands(
+    code: str,
+    record_ids: Sequence[str],
+    ratios: Sequence[float] = (1.0, 2.0, 4.0),
+    *,
+    dt: float = 0.005,
+    damping: float = _DAMPING,
+    pdelta: bool = True,
+    pdelta_gravity: bool = True,
+    record_channels: Optional[dict[str, str]] = None,
+) -> dict[str, Any]:
+    """Median normalised roof-drift demand vs ``[Sa(T1)/g]/γ`` (IK-2003 §4.3).
+
+    For each record and each target relative-intensity ratio ``R``, scales the
+    record so ``[Sa(T1)/g]/γ = R`` (with ``γ = Vy/W = 1.0``), runs one NLTH and
+    reports the normalised maximum roof-drift angle ``θr,max / [Sd(T1)/H] =
+    roof_disp / Sd(T1)``.  IK-2003 (PEER 2003/15) §4.3 anchors this at ``PF1``
+    for ``R ≈ 1`` (the elastic roof drift is dominated by the first mode); it
+    then grows with ``R`` as P-Δ / higher modes contribute.  Same frame, P-Δ +
+    held gravity and Rayleigh damping as the collapse runner, but **no collapse
+    detection** — just the peak roof drift at each target ratio.
+
+    Args:
+        code: Generic-frame code.
+        record_ids: Record identifiers (the LMSR-N set).
+        ratios: Target ``[Sa(T1)/g]/γ`` levels (default ``(1, 2, 4)``).
+        dt: Integration/resampling step (s).
+        damping: Damping ratio (Rayleigh).
+        pdelta: When True, emit the ``PDelta`` geometric transformation.
+        pdelta_gravity: When True, hold the IK-2005 gravity load.
+        record_channels: Optional ``record_id → channel`` map (see
+            :func:`_load_record`).
+
+    Returns:
+        ``{"code", "T1", "T95", "PF1", "H", "ratios", "normalized", "median"}``
+        — ``normalized`` maps ``ratio → {record_id: (normalized_drift,
+        converged)}`` and ``median`` maps ``ratio → median over converged
+        records`` (``NaN`` when none converged).
+    """
+    from openseespy.opensees import wipe
+
+    g = g_from_units(gf.UNITS)
+    t1, t2 = _rayleigh_periods(code)
+    pf1 = first_mode_participation(code)
+    h = gf.storey_height_m() * float(FRAME_DATA[code]["N"])
+
+    normalized: dict[float, dict[str, tuple[float, bool]]] = {float(r): {} for r in ratios}
+    for rid in record_ids:
+        channel = record_channels.get(rid) if record_channels else None
+        accel_base, dt_ = _load_record(rid, dt, channel=channel)
+        sa = sdof_spectral_acceleration(accel_base, dt_, t1, zeta=0.05)
+        for r in ratios:
+            im = float(r) * 1.0 * g / sa  # γ = 1.0
+            accel = np.asarray(accel_base, dtype=float) * im
+            wipe()
+            try:
+                builder = gf.build_builder(code, pdelta=pdelta, pdelta_gravity=pdelta_gravity)
+                levels = floor_levels(builder)
+                tags = [t for _, t in levels]
+                builder.config["transient_record_node_tags"] = tags
+                builder.config["transient_record_kinematics"] = True
+                res = builder.run_transient_analysis(
+                    accel,
+                    dt_,
+                    direction="X",
+                    damping_ratio=damping,
+                    damping_type="rayleigh",
+                    period_1=t1,
+                    period_2=t2,
+                    gravity_patterns={"GRAV": 1.0} if pdelta_gravity else None,
+                )
+                m = compute_metrics(res, accel, levels)
+            finally:
+                wipe()
+
+            # Sd(T1) at the scaled intensity: Sa = im·sa = r·γ·g = r·g.
+            sd = (im * sa) * (t1 / (2.0 * math.pi)) ** 2
+            converged = bool(m["converged_steps"] == m["num_steps"])
+            normalized[float(r)][rid] = (
+                m["roof_disp"] / sd if sd > 0.0 else float("nan"),
+                converged,
+            )
+
+    median: dict[float, float] = {}
+    for r, per_record in normalized.items():
+        vals = [v for v, ok in per_record.values() if ok and not math.isnan(v)]
+        median[r] = float(np.median(vals)) if vals else float("nan")
+    return {
+        "code": code,
+        "T1": t1,
+        "T95": t2,
+        "PF1": pf1,
+        "H": h,
+        "ratios": [float(r) for r in ratios],
+        "normalized": normalized,
+        "median": median,
+    }
 
 
 def _load_record(
@@ -106,18 +346,19 @@ def _ida_run(
     dt: float,
     intensities: Sequence[float],
     *,
-    collapse_drift: float = _COLLAPSE_DRIFT,
+    collapse_drift: Optional[float] = _COLLAPSE_DRIFT,
     damping: float = _DAMPING,
     tolerance: Optional[float] = None,
     max_scale: Optional[float] = None,
     pdelta: bool = True,
     pdelta_gravity: bool = True,
+    damping_type: str = "rayleigh",
 ) -> dict[str, Any]:
     """Run one IDA ladder for *code* (a base record scaled over *intensities*).
 
     Mirrors :func:`fea_toolkit.benchmarks.sac_run._ida_run`, with the generic
     frame (``gf.build_builder``, peak-oriented IMK, P-Δ + held gravity) and
-    mass-proportional damping in place of the SAC building.  Each
+    Rayleigh damping in place of the SAC building.  Each
     ``run_transient_analysis`` call rebuilds the domain, so no intensity sees
     the previous intensity's state.
 
@@ -127,8 +368,9 @@ def _ida_run(
         accel_base: Base acceleration samples (length/s²), one per time step.
         dt: Integration time step (s).
         intensities: The IM ladder (ascending scale factors on *accel_base*).
-        collapse_drift: Peak interstorey-drift ratio collapse threshold.
-        damping: Damping ratio (mass-proportional).
+        collapse_drift: Peak interstorey-drift ratio collapse threshold (``None`` disables the drift proxy).
+        damping: Damping ratio (Rayleigh).
+        damping_type: ``"rayleigh"`` (default) or ``"mass_proportional"``.
         tolerance: Relative tolerance for the bisection refinement of the
             collapse intensity (``None`` disables bisection).
         max_scale: Optional upper bound on the ladder (geometric extension).
@@ -143,8 +385,7 @@ def _ida_run(
     """
     from openseespy.opensees import wipe
 
-    t1 = period_1(code)
-    t2 = t1 * 0.5  # unused for mass-proportional damping (a1 = 0)
+    t1, t2 = _rayleigh_periods(code)
 
     wipe()
     try:
@@ -161,7 +402,7 @@ def _ida_run(
                 dt,
                 direction="X",
                 damping_ratio=damping,
-                damping_type="mass_proportional",
+                damping_type=damping_type,
                 period_1=t1,
                 period_2=t2,
                 gravity_patterns={"GRAV": 1.0} if pdelta_gravity else None,
@@ -188,7 +429,7 @@ def _ida_run(
                 ladder.append(top)
                 drifts.append(d)
                 converged.append(c)
-                if (not c) or d > collapse_drift:
+                if _trips_collapse(c, d, collapse_drift):
                     im_collapse = top
                     break
 
@@ -204,7 +445,7 @@ def _ida_run(
                     mid = 0.5 * (lo + hi)
                     d, c = _eval(mid)
                     evaluations.append({"intensity": mid, "drift": d, "converged": c})
-                    if (not c) or d > collapse_drift:
+                    if _trips_collapse(c, d, collapse_drift):
                         hi = mid
                     else:
                         lo = mid
@@ -226,7 +467,7 @@ def _ida_run(
         "converged": converged,
         "collapse_intensity": im_collapse,
         "collapse_criterion": collapse_criterion(ladder, drifts, converged, collapse_drift),
-        "collapse_drift": float(collapse_drift),
+        "collapse_drift": collapse_drift,
         "bisection": bisection,
     }
 
@@ -237,13 +478,14 @@ def run_ida(
     intensities: Sequence[float],
     *,
     dt: float = 0.005,
-    collapse_drift: float = _COLLAPSE_DRIFT,
+    collapse_drift: Optional[float] = _COLLAPSE_DRIFT,
     damping: float = _DAMPING,
     tolerance: float = 0.01,
     max_scale: Optional[float] = None,
     pdelta: bool = True,
     pdelta_gravity: bool = True,
     channel: Optional[str] = None,
+    damping_type: str = "rayleigh",
 ) -> dict[str, Any]:
     """Incremental dynamic analysis of one record over an IM ladder.
 
@@ -257,8 +499,9 @@ def run_ida(
             an LMSR-N record).
         intensities: Ascending record scale factors (the IM ladder).
         dt: Integration/resampling step (s; default 0.005).
-        collapse_drift: Peak interstorey-drift ratio collapse threshold.
-        damping: Damping ratio (mass-proportional).
+        collapse_drift: Peak interstorey-drift ratio collapse threshold (``None`` disables the drift proxy).
+        damping: Damping ratio (Rayleigh).
+        damping_type: ``"rayleigh"`` (default) or ``"mass_proportional"``.
         tolerance: Bisection relative tolerance (default 0.01).
         max_scale: Optional upper bound on the ladder (geometric extension).
         pdelta: When True, emit the ``PDelta`` geometric transformation.
@@ -282,6 +525,7 @@ def run_ida(
         max_scale=max_scale,
         pdelta=pdelta,
         pdelta_gravity=pdelta_gravity,
+        damping_type=damping_type,
     )
 
 
@@ -291,7 +535,7 @@ def collapse_ida_curves(
     intensities: Sequence[float],
     *,
     dt: float = 0.005,
-    collapse_drift: float = _COLLAPSE_DRIFT,
+    collapse_drift: Optional[float] = _COLLAPSE_DRIFT,
     damping: float = _DAMPING,
     tolerance: float = 0.01,
     max_scale: Optional[float] = None,
@@ -299,6 +543,7 @@ def collapse_ida_curves(
     pdelta_gravity: bool = True,
     record_channels: Optional[dict[str, str]] = None,
     verbose: bool = False,
+    damping_type: str = "rayleigh",
 ) -> dict[str, Any]:
     """Run the full IDA over *record_ids* and keep the per-record curves.
 
@@ -314,8 +559,9 @@ def collapse_ida_curves(
         record_ids: Record identifiers (the LMSR-N set).
         intensities: Ascending record scale factors (the IM ladder).
         dt: Integration/resampling step (s).
-        collapse_drift: Peak interstorey-drift ratio collapse threshold.
-        damping: Damping ratio (mass-proportional).
+        collapse_drift: Peak interstorey-drift ratio collapse threshold (``None`` disables the drift proxy).
+        damping: Damping ratio (Rayleigh).
+        damping_type: ``"rayleigh"`` (default) or ``"mass_proportional"``.
         tolerance: Bisection relative tolerance.
         max_scale: Optional upper bound on the ladder.
         pdelta: When True, emit the ``PDelta`` geometric transformation.
@@ -354,6 +600,7 @@ def collapse_ida_curves(
             max_scale=max_scale,
             pdelta=pdelta,
             pdelta_gravity=pdelta_gravity,
+            damping_type=damping_type,
         )
         im = res["collapse_intensity"]
         capacities[rid] = (im * sa_t1) if im is not None else None
@@ -377,7 +624,7 @@ def collapse_ida_curves(
         "ladder": [float(im) for im in intensities],
         "max_scale": max_scale,
         "tolerance": tolerance,
-        "collapse_drift": float(collapse_drift),
+        "collapse_drift": collapse_drift,
         "records": [str(rid) for rid in record_ids],
         "records_detail": records_detail,
         "capacities": capacities,
@@ -394,7 +641,7 @@ def collapse_capacity_sa(
     intensities: Sequence[float],
     *,
     dt: float = 0.005,
-    collapse_drift: float = _COLLAPSE_DRIFT,
+    collapse_drift: Optional[float] = _COLLAPSE_DRIFT,
     damping: float = _DAMPING,
     tolerance: float = 0.01,
     max_scale: Optional[float] = None,
@@ -402,6 +649,7 @@ def collapse_capacity_sa(
     pdelta_gravity: bool = True,
     record_channels: Optional[dict[str, str]] = None,
     verbose: bool = False,
+    damping_type: str = "rayleigh",
 ) -> dict[str, Any]:
     """Per-record collapse capacity in ``Sa(T1)`` terms + the median, for *code*.
 
@@ -425,6 +673,7 @@ def collapse_capacity_sa(
         pdelta_gravity=pdelta_gravity,
         record_channels=record_channels,
         verbose=verbose,
+        damping_type=damping_type,
     )
     return {
         "code": full["code"],

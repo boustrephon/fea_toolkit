@@ -133,3 +133,131 @@ def test_hand_built_mesh_without_frame_segments_falls_back():
         assert len(b._hinge_tags) == 5, f"expected 5 hinge springs, got {len(b._hinge_tags)}"
     finally:
         ops.wipe()
+
+
+# ── IMK skip: a member end with no calibration is plain elastic ──
+
+_IMK_PARAMS = {
+    "My_pos": 1.0e5,
+    "My_neg": -1.0e5,
+    "theta_p_pos": 0.01,
+    "theta_p_neg": 0.01,
+    "theta_pc_pos": 0.03,
+    "theta_pc_neg": 0.03,
+    "theta_u_pos": 0.04,
+    "theta_u_neg": 0.04,
+    "mc_my": 1.09,
+    "res_pos": 0.0,
+    "res_neg": 0.0,
+    "lamda_S": 0.0,
+    "lamda_C": 0.0,
+    "lamda_K": 0.0,
+    "c_S": 1.0,
+    "c_C": 1.0,
+    "c_K": 1.0,
+    "D_pos": 1.0,
+    "D_neg": 1.0,
+}
+
+
+def _imk_mesh(sec_imk: bool):
+    """Two standalone members: M1 (BEAM section) and M2 (PLAIN section).
+
+    M1's *section* carries the IMK calibration (element-level ``imk_params``
+    left ``None``) when *sec_imk* is true; M2 never does.
+    """
+    nodes = {
+        "A": _node("A", 1, 0.0, 0.0, 0.0),
+        "B": _node("B", 2, 4.0, 0.0, 0.0),
+        "C": _node("C", 3, 0.0, 0.0, 3.0),
+        "D": _node("D", 4, 4.0, 0.0, 3.0),
+    }
+    elems = {
+        "M1": FrameElement(elem_id="M1", elem_tag=11, node_i="A", node_j="B"),
+        "M2": FrameElement(elem_id="M2", elem_tag=12, node_i="C", node_j="D"),
+    }
+
+    def _sec(name):
+        return ISection(
+            name=name,
+            shape="I/Wide Flange",
+            material="Steel",
+            depth=0.3,
+            bf=0.15,
+            tf=0.01,
+            tw=0.006,
+            A=8e-3,
+            I33=1.2e-4,
+            I22=4e-5,
+            J=2e-6,
+            Z33=1e-3,
+            Z22=1e-3,
+        )
+
+    beam = _sec("BEAM")
+    if sec_imk:
+        beam.imk_params = dict(_IMK_PARAMS)
+    plain = _sec("PLAIN")
+    mm = MeshModel(
+        nodes=nodes,
+        frame_elements=elems,
+        frame_assignments={"M1": "BEAM", "M2": "PLAIN"},
+        area_elements={},
+        area_assignments={},
+        frame_dist_loads=[],
+        materials={"Steel": Material("Steel", "Steel", E_mod=2e11, Fy=2.5e8)},
+        sections={"BEAM": beam, "PLAIN": plain},
+        restraints={
+            "A": Restraint([1, 1, 1, 1, 1, 1]),
+            "B": Restraint([1, 1, 1, 1, 1, 1]),
+            "C": Restraint([1, 1, 1, 1, 1, 1]),
+            "D": Restraint([1, 1, 1, 1, 1, 1]),
+        },
+        frame_element_types={"M1": "beam", "M2": "beam"},
+    )
+    mm.frame_segments = segment_members(elems, nodes, frame_element_types=mm.frame_element_types)
+    return mm
+
+
+def test_imk_section_only_calibration_gets_hinge():
+    """A section-level ``imk_params`` (element-level ``None``) still gets a hinge.
+
+    The skip guard must mirror the material path's resolution order
+    (end → element → section), so a member whose *section* carries the IMK
+    calibration is not skipped.
+    """
+    mm = _imk_mesh(sec_imk=True)
+    b = AnalysisBuilder(
+        mm,
+        {
+            "element_type": "elasticBeamColumn",
+            "hinge_model": "lumped",
+            "hinge_backbone": "imk",
+            "verbose": False,
+        },
+    )
+    try:
+        b.build_domain()
+        # M1 (sec-only imk_params) → 2 end hinges; M2 (plain) → none.
+        assert len(b._hinge_tags) == 2, f"expected 2 hinge springs, got {len(b._hinge_tags)}"
+    finally:
+        ops.wipe()
+
+
+def test_imk_no_calibration_gets_no_spring():
+    """A member with no IMK calibration (element, end, or section) is plain elastic."""
+    mm = _imk_mesh(sec_imk=False)
+    b = AnalysisBuilder(
+        mm,
+        {
+            "element_type": "elasticBeamColumn",
+            "hinge_model": "lumped",
+            "hinge_backbone": "imk",
+            "verbose": False,
+        },
+    )
+    try:
+        b.build_domain()
+        assert len(b._hinge_tags) == 0, f"expected 0 hinge springs, got {len(b._hinge_tags)}"
+    finally:
+        ops.wipe()

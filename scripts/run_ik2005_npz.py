@@ -39,7 +39,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     ladder = [float(x) for x in args.ladder.split(",")]
     record_ids = fetched_ids()
-    skipped = peer_only_ids()
+    skipped = [rid for rid in peer_only_ids() if rid not in record_ids]
     if args.limit:
         record_ids = record_ids[: args.limit]
 

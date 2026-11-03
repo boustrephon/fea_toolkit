@@ -536,7 +536,7 @@ and wired through `write_results_npz()` via the `ida_results` argument.
 | `ida/gamma` | `()` | `float` | Strength coefficient `Vy/W` (= 1.0) |
 | `ida/max_scale` | `()` | `float` | Ladder upper bound |
 | `ida/tolerance` | `()` | `float` | Bisection relative tolerance |
-| `ida/collapse_drift` | `()` | `float` | Peak-drift collapse threshold |
+| `ida/collapse_drift` | `()` | `float` | Peak-drift collapse threshold (absent when the drift proxy is disabled — non-convergence only) |
 | `ida/median_collapse_Sa_T1_gamma` | `()` | `float` | Median `(Sa,c/g)/γ` |
 | `ida/sigma_ln` | `()` | `float` | Collapse dispersion `σ_ln` |
 

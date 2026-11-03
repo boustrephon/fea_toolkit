@@ -203,6 +203,65 @@ cyclic-deterioration `Λ` Eq. 13, 2026-10-28).
 **Where.** `benchmarks/imk_calibration.py`; `opensees/_elements.py`
 (`hinge_backbone="imk"`); `tests/test_benchmark_sac_imk.py`.
 
+#### P42b — IK-2005 generic-frame collapse (Medina frames, Fig 5.16)
+
+Source: `docs/ik2005_generic_frame_benchmark.md`; `docs/benchmark_roadmap.md` §3.
+
+**Status (2026-11-02).** The like-for-like IK-2005 match — the 12 Medina (2002)
+generic single-bay frames (`generic_frame_data.py`), the `IMKPeakOriented`
+hinge, the `generic_frame` generator (spring placement: 18 beam + 2 column-base,
+no elastic column springs) and the IDA runner (P-Δ + held `1.4 × seismic mass`,
+Rayleigh on T1+T95).  Record-free checks green: modal T1 ≤ 0.5 %, pushover
+`γ = 1.0` ≤ 2 %, MK-2003 modal tables (A.1–A.6) ≤ 0.002, the IK-2003 drift
+anchor `θr,max/[Sd/H] ≈ PF1`.  **Open:** the 33-record `0909` IDA overshoots —
+`(Sa,c/g)/γ ≈ 7.9` vs the paper's ≈ 3.4.  Root-cause (see the benchmark doc
+"Collapse criterion"): the collapse detector is only a minor factor (drift
+threshold sensitivity 2 %→2.1, 10 %→7.5, ∞→7.9), and the integrator is ruled
+out (halving `dt` 0.005→0.0025 and a √2-ratio ladder leave the `IV79e13`
+collapse unchanged: 77.75 / 77.75 / 77.46).  Model-lever bracket (single
+records): P-Δ off → **no collapse** (the destabiliser), 2× gravity → only
+−15 %, but **αc −0.1→−0.3 → 2.4× lower collapse** (77.75→31.875 `IV79e13`,
+≈2.9–4.0 in `(Sa,c/g)/γ`) — the dominant lever.  **Hinge M–θ instrumentation
+(done)**: at im=32 the roof beam is at 7.2·θy with M fallen to 0.66·My and the
+column bases at 4.45·θy (Mc) — the hinges genuinely enter post-capping, so the
+material/backbone is correct and the frame destabilises only near `θu ≈ 15·θy`
+(complete exhaustion; `θu ∝ 1/|αc|` explains the αc lever).  **Damping is the
+dominant lever (done)**: `IV79e13` collapses at 77.75 (Rayleigh 5 %), 73.0
+(2.5 %), **16.0 (1 %)** and 15.5 (mass-proportional 5 %) — a ~5× **damping
+cliff** between ξ ≈ 1 % and 2.5 %, i.e. the capacity is ~5×-sensitive to the
+higher-mode damping.  Appendix B.4 (paper) fixes spring stiffness n = 10× and
+β×1.1; our n = 100 is damping-equivalent, so the damping *prescription* is not
+the gap — the cliff makes the result ill-conditioned, and the gap is the
+DRAIN-2DX event-to-event collapse stall (flatline) vs OpenSees Newton
+non-convergence.  P-Δ magnitude, the integrator and the hinge material are
+exonerated.  **Mass-proportional 33-record median (done 2026-11-02)**: the full
+33-record `0909` IDA re-run with `damping_type="mass_proportional"` (no drift
+proxy) gives median **4.67** (σ_ln 0.605) vs 7.94 (Rayleigh) and ≈ 3.4 (paper)
+— the mass-proportional hypothesis is **refuted**.  **Missing-record bound**:
+with 7 of 40 absent, the 40-record median lies in **[4.27, 5.61]**
+(a13/a14 → a20/a21), so 3.4 is below the lower bound — the missing records
+*cannot* explain the gap.  **Collapse-criterion probe (done 2026-11-02,
+refuted)**: traced `ops.eigen("-fullGenLapack", 1)` through the time loop under
+mass-proportional damping — for `IV79e13` the tangent *never* goes non-positive
+(ω² ≈ 45 up to non-convergence), and for `IV79wsm` it goes singular (ω² = −87)
+at im=64 **after** the bisected non-convergence (38.9), with a transient
+negative at im=36 that still fully converges (false positive); a
+stiffness-singularity detector would *raise* the median, not lower it.  The
+collapse criterion is **exonerated** — the 4.67-vs-3.4 gap is a genuine
+response difference, with the **higher-mode damping content** (the 5× cliff) as
+the leading remaining candidate.  **Record-identity verification (done
+2026-11-02, exonerated too)**: reduced all 33 records to Table 4.2's scalar
+columns — PGA matches within ~2 % (USGS) / ~5–15 % (CESMD, 2 known-wrong
+components excepted), PGV within ~10–20 %; record *length* is systematically
+longer than Table 4.2 (51–92 s vs 36–40 s) but a truncation test shows the coda
+*raises* the collapse (e.g. `IV79wsm` 38.9→49.8, `IV79qkp` 15.7→19.2), i.e. the
+length difference already pushes us *toward* 3.4, not away — the record set is
+essentially correct and is **not** the explanation.
+
+**Where.** `benchmarks/generic_frame*.py`; `benchmarks/ik2005_records.py`;
+`opensees/_elements.py` (`hinge_backbone="imk_peak"`);
+`tests/test_generic_frame*.py`.
+
 #### P43 — Transient (time-history) results block in the unified NPZ schema
 
 Source: `docs/results_schema.md`; `docs/dev_notes.md` → *Results repository
