@@ -96,6 +96,22 @@ def _context_rows(obj: Any, model: Any) -> list:
     return element_rows(model, obj)
 
 
+def _spring_rows(obj: Any, model: Any) -> list:
+    """A node / line / area's soil springs (SAFE foundation support), read from
+    the model.
+
+    Mirrors :func:`_support_rows`: a spring is an assignment (plus a
+    definition) stored on the model, so describing one entity needs both the
+    object and the context.  ``None`` (no model, or a results archive, which
+    carries none) adds no spring rows.
+    """
+    from ...model.springs import spring_rows
+
+    if model is None:
+        return []
+    return spring_rows(model, obj)
+
+
 class PropertyInspector(QWidget):
     """Read-only property table for the current selection.
 
@@ -154,9 +170,12 @@ class PropertyInspector(QWidget):
 
         A node also reports its support conditions — restrained DOFs and its
         joint constraint — taken from the model set by
-        :meth:`set_source_model`.  A frame or area additionally reports its
-        assigned section, that section's material, the groups it belongs to,
-        and the applied loads referencing it (see
+        :meth:`set_source_model`; and its soil springs (SAFE foundation
+        support: a direct point spring, a line spring on a frame that ends at
+        it, or an area spring on an area it is a corner of).  A frame or area
+        additionally reports its assigned section, that section's material, the
+        groups it belongs to, its line/area spring, and the applied loads
+        referencing it (see
         :func:`fea_toolkit.model.load_queries.load_rows`), resolved through the
         same model.
         """
@@ -165,6 +184,7 @@ class PropertyInspector(QWidget):
         rows = (
             describe(obj)
             + _support_rows(obj, self._source_model)
+            + _spring_rows(obj, self._source_model)
             + _context_rows(obj, self._source_model)
             + load_rows(self._source_model, obj, self._load_factors)
         )
