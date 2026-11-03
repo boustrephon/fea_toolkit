@@ -101,9 +101,10 @@ def build_model(code: str) -> SAPModelData:
     ``level = 0..N`` (0 = base) and ``line = 0..1`` (0 = left, 1 = right).
     Sections are one per storey (``sec{i}`` for storey ``i = 1..N``), shared by
     the two columns and the beam above.  Seismic masses are lumped at the floor
-    levels (equal per floor, split across the two column lines).  The base is
-    fixed in translation and out-of-plane rotation with the in-plane rotation
-    (ry) left free for the base spring (see :func:`base_spring_props`).
+    levels (equal per floor, split across the two column lines).  The base nodes
+    are **fully fixed** (all six DOFs); the column-base rotational spring is a
+    ``zeroLength`` between each fixed base node and the ground-storey column
+    (see :func:`base_spring_props`).
 
     Args:
         code: Four-digit frame code (e.g. ``"0909"``); must be in

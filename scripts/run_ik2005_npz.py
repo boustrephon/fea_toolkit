@@ -58,14 +58,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         record_channels=USGS_CHANNELS,
         verbose=True,
     )
-    print(
-        f"  median (Sa,c/g)/γ = {ida['median_collapse_sa_gamma']:.2f}  "
-        f"σ_ln = {ida['sigma_ln']:.2f}  ({time.time() - t0:.0f} s)"
-    )
-
-    # 3. Write the archive.
+    # 3. Write the archive first — a formatting failure in the summary must not
+    # lose the run.
     out = args.out or f"ik2005_{args.code}.npz"
     path = write_results_npz(out, md, ida_results=ida)
+
+    med = ida["median_collapse_sa_gamma"]
+    sig = ida["sigma_ln"]
+    med_s = "—" if med is None else f"{med:.2f}"
+    sig_s = "—" if sig is None else f"{sig:.2f}"
+    print(f"  median (Sa,c/g)/γ = {med_s}  σ_ln = {sig_s}  ({time.time() - t0:.0f} s)")
     print(f"wrote {path}")
     if skipped:
         print(f"PEER-only (not yet fetched): {', '.join(skipped)}")

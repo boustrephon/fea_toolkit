@@ -17,6 +17,14 @@ from fea_toolkit.benchmarks import generic_frame_run as gfr
 _G = 9.80665
 
 
+@pytest.fixture(autouse=True)
+def _isolate_ground_motion(tmp_path, monkeypatch):
+    """Redirect the mirror to ``tmp_path`` so tests never touch the repo."""
+    from fea_toolkit.benchmarks.ik2005_records import GROUND_MOTION_DIR_ENV
+
+    monkeypatch.setenv(GROUND_MOTION_DIR_ENV, str(tmp_path))
+
+
 def _sine_pulse(dt: float, period: float, cycles: int = 8, pga: float = 0.3) -> np.ndarray:
     """A sine pulse at *period*, scaled to *pga* (g)."""
     n = int(cycles * period / dt)
@@ -91,12 +99,9 @@ def test_first_mode_participation(code, pf1):
     assert gfr.first_mode_participation(code) == pytest.approx(pf1, abs=0.01)
 
 
-def test_drift_demands_returns_structure():
+def test_drift_demands_returns_structure(tmp_path):
     """``drift_demands`` reports PF1 and per-ratio normalised roof drifts."""
-    from pathlib import Path
-
-    root = Path(gfr.__file__).resolve().parent.parent.parent.parent
-    local = root / "data" / "ground_motion" / "local"
+    local = tmp_path / "local"
     local.mkdir(parents=True, exist_ok=True)
     rid = "_test_drift_demands"
     path = local / f"{rid}.csv"
@@ -114,12 +119,9 @@ def test_drift_demands_returns_structure():
     assert res["median"][1.0] > 0.0
 
 
-def test_load_record_reads_at2_and_csv():
+def test_load_record_reads_at2_and_csv(tmp_path):
     """``_load_record`` accepts PEER ``.AT2`` (g→m/s²) and ``.csv`` (as-is)."""
-    from pathlib import Path
-
-    root = Path(gfr.__file__).resolve().parent.parent.parent.parent
-    local = root / "data" / "ground_motion" / "local"
+    local = tmp_path / "local"
     local.mkdir(parents=True, exist_ok=True)
     at2_id = "_test_lmsr_n_at2"
     csv_id = "_test_lmsr_n_csv"
@@ -150,12 +152,9 @@ def test_load_record_missing_raises():
         gfr._load_record("_no_such_lmsr_n_record", 0.005)
 
 
-def test_load_record_reads_channel_suffix():
+def test_load_record_reads_channel_suffix(tmp_path):
     """``_load_record`` reads ``<record_id>_<channel>.csv`` when channel is given."""
-    from pathlib import Path
-
-    root = Path(gfr.__file__).resolve().parent.parent.parent.parent
-    local = root / "data" / "ground_motion" / "local"
+    local = tmp_path / "local"
     local.mkdir(parents=True, exist_ok=True)
     path = local / "_test_lmsr_n_chan_a.csv"
     path.write_text("time,accel\n0.0,0.0\n0.005,2.0\n")

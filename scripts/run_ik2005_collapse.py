@@ -44,7 +44,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--code", default="0909", help="generic-frame code")
     parser.add_argument("--tolerance", type=float, default=0.01)
-    parser.add_argument("--max-scale", type=float, default=32.0)
+    parser.add_argument("--max-scale", type=float, default=128.0)
     parser.add_argument(
         "--ladder",
         type=str,

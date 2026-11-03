@@ -5,7 +5,10 @@ and ``scripts/run_ik2005_npz.py``: 40 Table-4.2 IDs, 7 PEER NGA-West2-only, and
 the USGS multi-component channel selection.
 """
 
+import pytest
+
 from fea_toolkit.benchmarks.ik2005_records import (
+    GROUND_MOTION_DIR_ENV,
     LMSR_N_IDS,
     PEER_ONLY,
     USGS_CHANNELS,
@@ -13,6 +16,12 @@ from fea_toolkit.benchmarks.ik2005_records import (
     peer_only_ids,
     peer_only_present,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_ground_motion(tmp_path, monkeypatch):
+    """Redirect the mirror to ``tmp_path`` so these tests never read the repo."""
+    monkeypatch.setenv(GROUND_MOTION_DIR_ENV, str(tmp_path))
 
 
 def test_lmsr_n_has_forty_unique_records():

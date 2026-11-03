@@ -11,6 +11,9 @@ imports OpenSees via :mod:`fea_toolkit.benchmarks.sac`) — the collapse/IDA
 runners that consume this manifest are OpenSees-dependent regardless.
 """
 
+import os
+from pathlib import Path
+
 #: The 40 LMSR-N record IDs (IK-2005 Table 4.2, Medina 2002) in table order.
 LMSR_N_IDS: list[str] = [
     # Imperial Valley 1979 (Mw 6.5)
@@ -92,17 +95,35 @@ USGS_CHANNELS: dict[str, str] = {
 }
 
 
+#: Environment variable overriding the ground-motion mirror location.  Tests set
+#: this to a ``tmp_path`` so they never read or write the repository's real
+#: ``data/ground_motion`` mirror; users may point it at their own mirror.
+GROUND_MOTION_DIR_ENV = "FEA_TOOLKIT_GROUND_MOTION_DIR"
+
+
+def ground_motion_dir() -> Path:
+    """The ground-motion mirror root.
+
+    Honors :data:`GROUND_MOTION_DIR_ENV` when set; otherwise the repository's
+    ``data/ground_motion`` directory (derived from this file's location, never
+    the working directory).
+    """
+    override = os.environ.get(GROUND_MOTION_DIR_ENV)
+    if override:
+        return Path(override)
+    return Path(__file__).resolve().parent.parent.parent.parent / "data" / "ground_motion"
+
+
 def peer_only_present() -> list[str]:
     """Return the PEER-only IDs whose waveform is already in the mirror.
 
     PEER NGA-West2 records are downloaded as ``<record_id>.AT2`` (or ``.csv``)
-    into ``data/ground_motion/{local,public}/``.  This returns, in table order,
-    the :data:`PEER_ONLY` IDs for which such a file exists — the 40-record re-run
-    happens automatically once all seven are dropped in.
+    into ``data/ground_motion/{local,public}/`` (see :func:`ground_motion_dir`).
+    This returns, in table order, the :data:`PEER_ONLY` IDs for which such a file
+    exists — the 40-record re-run happens automatically once all seven are
+    dropped in.
     """
-    from pathlib import Path
-
-    root = Path(__file__).resolve().parent.parent.parent.parent / "data" / "ground_motion"
+    root = ground_motion_dir()
     present = {
         rid
         for rid in PEER_ONLY

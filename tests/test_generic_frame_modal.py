@@ -143,9 +143,15 @@ def test_modal_damping_matches_paper(code):
     for ratio in MODAL_DATA[n]["Ti_T1"]:
         w = 2.0 * math.pi / (t1 * ratio)
         xi.append(a0 / (2.0 * w) + a1 * w / 2.0)
-    # Loose tolerance at the highest mode: the paper's ``ξi`` are derived from a
-    # (discretised) 95 %-participation anchor and ``Ti/T1`` rounded to 3 sig.
-    # figs, and the Rayleigh formula is most sensitive to that at the top mode.
-    # The lowest 3--4 modes (which dominate the first-mode-shaped collapse) match
-    # to ~2 %; only the highest mode drifts by up to ~10 %.
-    assert xi == pytest.approx(MODAL_DATA[n]["xi"], abs=0.02)
+    xi_expected = MODAL_DATA[n]["xi"]
+    # First mode is anchored at exactly 5 % (Rayleigh on (T1, T95)).
+    assert xi[0] == pytest.approx(0.05, rel=1e-3)
+    # Lower intermediate modes match the paper's ``ξi`` tightly — a
+    # mass-proportional regression (``ξn = ξ·Tn/T1``) undershoots them by
+    # ~50 %, far outside a 6 % relative band.
+    assert xi[1:-1] == pytest.approx(xi_expected[1:-1], rel=0.06)
+    # Highest mode only: the paper's ``ξi`` derive from a discretised 95 %
+    # participation anchor and ``Ti/T1`` rounded to 3 sig. figs, and the Rayleigh
+    # formula is most sensitive to that at the top mode, which drifts up to
+    # ~20 % — keep the looser absolute band here.
+    assert xi[-1] == pytest.approx(xi_expected[-1], abs=0.02)

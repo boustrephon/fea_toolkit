@@ -315,10 +315,10 @@ def _load_record(
     Raises:
         FileNotFoundError: If the record is absent from both mirrors.
     """
-    from pathlib import Path
+    from .ik2005_records import ground_motion_dir
 
     suffix = f"_{channel}" if channel else ""
-    root = Path(__file__).resolve().parent.parent.parent.parent / "data" / "ground_motion"
+    root = ground_motion_dir()
     for sub in ("local", "public"):
         for ext in (".AT2", ".csv"):
             path = root / sub / f"{record_id}{suffix}{ext}"
@@ -575,7 +575,7 @@ def collapse_ida_curves(
         ``{"code", "T1", "gamma", "g", "ladder", "max_scale", "tolerance",
         "collapse_drift", "records", "records_detail", "capacities",
         "collapse_Sa_T1_g", "median_collapse_sa", "median_collapse_sa_gamma",
-        "sigma_ln"}``.
+        "sigma_ln", "n_records", "n_collapsed", "n_survived"}``.
     """
     t1 = period_1(code)
     g = g_from_units(gf.UNITS)
@@ -612,9 +612,16 @@ def collapse_ida_curves(
             "ida": res,
         }
     collapsed = [v for v in capacities.values() if v is not None]
-    median = float(np.median(collapsed)) if collapsed else None
+    n_collapsed = len(collapsed)
+    n_survived = len(capacities) - n_collapsed
+    # Survivors are right-censored: the median is only meaningful once at least
+    # half the records collapsed, and a σ_ln computed from the collapsed subset
+    # alone must not be reported as though it described every record.
+    median = float(np.median(collapsed)) if collapsed and n_survived <= n_collapsed else None
     sigma_ln = (
-        float(np.std(np.log(np.asarray(collapsed, dtype=float)))) if collapsed else float("nan")
+        float(np.std(np.log(np.asarray(collapsed, dtype=float))))
+        if collapsed and n_survived == 0
+        else None
     )
     return {
         "code": code,
@@ -632,6 +639,9 @@ def collapse_ida_curves(
         "median_collapse_sa": median,
         "median_collapse_sa_gamma": (median / g) if median is not None else None,
         "sigma_ln": sigma_ln,
+        "n_records": len(record_ids),
+        "n_collapsed": n_collapsed,
+        "n_survived": n_survived,
     }
 
 
@@ -658,7 +668,7 @@ def collapse_capacity_sa(
 
     Returns:
         ``{"code", "T1", "gamma", "capacities", "median_collapse_sa",
-        "median_collapse_sa_gamma", "records"}``.
+        "median_collapse_sa_gamma", "records", "n_collapsed", "n_survived"}``.
     """
     full = collapse_ida_curves(
         code,
@@ -683,4 +693,6 @@ def collapse_capacity_sa(
         "median_collapse_sa": full["median_collapse_sa"],
         "median_collapse_sa_gamma": full["median_collapse_sa_gamma"],
         "records": full["records"],
+        "n_collapsed": full["n_collapsed"],
+        "n_survived": full["n_survived"],
     }

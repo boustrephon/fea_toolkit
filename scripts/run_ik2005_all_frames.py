@@ -120,14 +120,19 @@ def _write_plot(summary: dict, out_dir: str) -> None:
     if not rows:
         return
     rows.sort(key=lambda r: (r.get("N") or 0, r.get("T1") or 0.0))
-    t1 = [r["T1"] for r in rows]
-    med = [r.get("median_collapse_sa_gamma") for r in rows]
+    # A frame that survived the whole ladder reports no median — keep it in the
+    # summary, but exclude it from the plot and its annotations.
+    plotted = [r for r in rows if r.get("median_collapse_sa_gamma") is not None]
+    if not plotted:
+        return
+    t1 = [r["T1"] for r in plotted]
+    med = [r["median_collapse_sa_gamma"] for r in plotted]
     fig, ax = plt.subplots(figsize=(7.5, 5))
     ax.plot(t1, med, "o-", color="#1f77b4", label="median (Sa,c/g)/γ")
     ax.axhline(
         3.3, color="#d62728", linestyle="--", linewidth=1.0, label="IK-2005 §5.5 ≈ 3.3 (T1 ≈ 1 s)"
     )
-    for r in rows:
+    for r in plotted:
         ax.annotate(
             r["code"],
             (r["T1"], r["median_collapse_sa_gamma"]),
@@ -214,9 +219,15 @@ def main(argv: Optional[list[str]] = None) -> int:
             }
             summary[code] = entry
             _save(summary_path, summary)
+            med_s = (
+                "—"
+                if ida["median_collapse_sa_gamma"] is None
+                else f"{ida['median_collapse_sa_gamma']:.3f}"
+            )
+            sig_s = "—" if ida["sigma_ln"] is None else f"{ida['sigma_ln']:.3f}"
             print(
-                f"{_ts()}    → median (Sa,c/g)/γ = {ida['median_collapse_sa_gamma']:.3f}  "
-                f"σ_ln = {ida['sigma_ln']:.3f}  ({entry['elapsed_s']:.0f} s)",
+                f"{_ts()}    → median (Sa,c/g)/γ = {med_s}  "
+                f"σ_ln = {sig_s}  ({entry['elapsed_s']:.0f} s)",
                 flush=True,
             )
         except Exception as exc:  # keep the long run alive past one bad frame
