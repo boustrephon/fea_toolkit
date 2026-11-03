@@ -3509,7 +3509,7 @@ class MainWindow(QMainWindow):
             self,
             "Open model",
             "",
-            "Structural model (*.s2k *.S2K *.$2k *.$2K *.e2k *.E2K *.$et *.$ET *.json *.JSON);;All files (*)",
+            "Structural model (*.s2k *.S2K *.$2k *.$2K *.e2k *.E2K *.$et *.$ET *.f2k *.F2K *.$sf *.$SF *.json *.JSON);;All files (*)",
         )
         if path and not self.open_path(path):
             QMessageBox.critical(

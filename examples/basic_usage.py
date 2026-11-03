@@ -47,7 +47,7 @@ print(f"OpenSees Version: {ops_version()}")
 
 #: Extensions the example can read: SAP2000 / ETABS text exports, plus the
 #: raw-table JSON caches written by ``SAP2000Parser.to_json()``.
-MODEL_FILE_TYPES = ("s2k", "S2K", "$2k", "e2k", "E2K", "$et", "json", "JSON")
+MODEL_FILE_TYPES = ("s2k", "S2K", "$2k", "e2k", "E2K", "$et", "f2k", "F2K", "$sf", "json", "JSON")
 
 
 def pick_file() -> Path:
