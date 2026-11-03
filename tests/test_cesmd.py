@@ -210,3 +210,39 @@ def test_not_in_cesmd_subset_of_manifest():
     assert ids >= fetch.NOT_IN_CESMD
     assert ids >= fetch.VIA_USGS
     assert not (fetch.NOT_IN_CESMD & fetch.VIA_USGS), "skip sets must be disjoint"
+
+
+# ── Event / channel selection ─────────────────────────────────────────
+
+
+def test_event_for_maps_every_record_to_its_mainshock():
+    """Each record id resolves to the mainshock its prefix encodes."""
+    fetch = _load_fetch_script()
+    expected = {
+        "IV79": "Imperial Valley",
+        "LP89": "Loma Prieta",
+        "NR94": "Northridge",
+        "SF71": "San Fernando",
+        "SH87": "Superstition Hills",
+    }
+    for rid, _year, _key, _station in fetch.LMSR_N_RECORDS:
+        assert fetch._event_for(rid) == expected[rid[:4]]
+
+
+def test_first_vol2_member_verifies_channel_and_skips_vertical():
+    """The member picker binds to the requested channel, never a vertical one."""
+    import io
+    import zipfile
+
+    fetch = _load_fetch_script()
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w") as zf:
+        zf.writestr("station.V2", "1 2 3")  # bare .V2 → CH1
+        zf.writestr("station2.V2", "4 5 6")  # CH2
+        zf.writestr("stationUP.V2", "7 8 9")  # vertical marker
+    data.seek(0)
+    with zipfile.ZipFile(data) as zf:
+        member1 = fetch._first_vol2_member(zf, channel="CH1")
+        assert member1 is not None and member1.filename == "station.V2"
+        member2 = fetch._first_vol2_member(zf, channel="CH2")
+        assert member2 is not None and member2.filename == "station2.V2"

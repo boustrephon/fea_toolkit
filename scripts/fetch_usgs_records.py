@@ -66,11 +66,25 @@ IV79_ZIP_URL = "https://escweb.wr.usgs.gov/nsmp-data/data2/cdrom_sm_1933-1986/19
 
 
 def _download(url: str, dest: Path) -> None:
-    """Download *url* to *dest* (with an explicit User-Agent)."""
+    """Download *url* to *dest* (with an explicit User-Agent).
+
+    The response is written to a temporary file first and promoted to *dest*
+    only once it is a readable ZIP archive, so a failed or truncated download
+    can never leave a bad cached archive at *dest*.
+    """
     print(f"fetch  {url}")
+    dest.parent.mkdir(parents=True, exist_ok=True)
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=300) as resp:
-        dest.write_bytes(resp.read())
+    tmp = dest.with_name(dest.name + ".tmp")
+    try:
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            tmp.write_bytes(resp.read())
+        # Only promote a body that is a readable ZIP archive.
+        with zipfile.ZipFile(tmp) as zf:
+            zf.infolist()
+        tmp.replace(dest)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def _write_csv(csv_path: Path, times, accel) -> None:
@@ -82,21 +96,24 @@ def _write_csv(csv_path: Path, times, accel) -> None:
             writer.writerow([f"{t:.6f}", f"{a:.6e}"])
 
 
-def _extract_and_write(zf: zipfile.ZipFile, member, rid: str, channel: str, csv_path: Path) -> None:
+def _extract_and_write(zf: zipfile.ZipFile, member, rid: str, channel: str, csv_path: Path) -> bool:
+    """Extract and write one SMC record; ``False`` when ``parse_smc`` fails."""
     text = zf.read(member).decode("utf-8", errors="replace")
     try:
         times, accel, meta = parse_smc(text)
     except ValueError as exc:
         print(f"{rid:8s} {channel}: {exc}", file=sys.stderr)
-        return
+        return False
     _write_csv(csv_path, times, accel)
     print(
         f"fetch  {rid}_{channel} -> {csv_path} (comp={meta['component']}, orient={meta['orientation']})"
     )
+    return True
 
 
 def cmd_download() -> int:
     """Download and convert every USGS record into ``local/<id>_<channel>.csv``."""
+    failed = 0
     # ── Loma Prieta 1989 (SMC, corr_sma-1.zip) ──
     lp_zip = LOCAL / "891018_1_corr_sma1.zip"
     if not lp_zip.exists():
@@ -118,7 +135,8 @@ def cmd_download() -> int:
                 )
                 if member is None:
                     continue  # a station may lack a channel
-                _extract_and_write(zf, member, rid, channel, csv_path)
+                if not _extract_and_write(zf, member, rid, channel, csv_path):
+                    failed += 1
 
     # ── Imperial Valley 1979 (DDS-7 CD-ROM, 1979.zip) ──
     iv_zip = LOCAL / "1979.zip"
@@ -135,8 +153,9 @@ def cmd_download() -> int:
                 member = next((i for i in zf.infolist() if i.filename == name), None)
                 if member is None:
                     continue  # Cucapah has only two channels
-                _extract_and_write(zf, member, rid, channel, csv_path)
-    return 0
+                if not _extract_and_write(zf, member, rid, channel, csv_path):
+                    failed += 1
+    return 1 if failed else 0
 
 
 def main(argv: Optional[list[str]] = None) -> int:

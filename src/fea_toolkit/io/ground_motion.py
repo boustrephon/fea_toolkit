@@ -344,6 +344,10 @@ def parse_smc(text: str) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
             chunk = stripped[i : i + 10].strip()
             if chunk:
                 values.append(float(chunk))
+                if len(values) >= npts:
+                    break
+        if len(values) >= npts:
+            break
     if len(values) < npts:
         raise ValueError(f"SMC data has {len(values)} values, expected {npts}")
     accel_cms2 = np.asarray(values[:npts], dtype=float)

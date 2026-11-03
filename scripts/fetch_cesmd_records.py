@@ -2,9 +2,11 @@
 """Download the IK-2005 LMSR-N (40-record) set from CESMD.
 
 CESMD (<https://strongmotioncenter.org>) is the USGS + California Geological
-Survey strong-motion archive — the same 40 California recordings as PEER
-NGA-West2, but free and with no academic-email requirement.  The record list is
-IK-2005 Table 4.2 (see ``docs/ik2005_generic_frame_benchmark.md``).
+Survey strong-motion archive — free, with no academic-email requirement — and
+holds **19 of the 40** IK-2005 LMSR-N recordings (the other 21 come from the
+USGS NSMP archive or PEER NGA-West2; see the acquisition table in
+``docs/ik2005_generic_frame_benchmark.md``).  The record list is IK-2005
+Table 4.2 (see ``docs/ik2005_generic_frame_benchmark.md``).
 
 Two modes:
 
@@ -28,6 +30,7 @@ from __future__ import annotations
 import argparse
 import csv
 import io
+import re
 import sys
 import time
 import zipfile
@@ -135,6 +138,55 @@ VIA_USGS: set[str] = {
 #: Where downloaded records are written (the runner's local mirror).
 LOCAL = Path("data/ground_motion/local")
 
+#: Expected CESMD Volume-2 horizontal component.  Table 4.2 lists no component
+#: azimuth, and the runner uses the single ``CH1`` (first horizontal) channel for
+#: every CESMD record (see the component caveat in the benchmark doc).  The
+#: selected dataset member is checked against this before its accelerogram is
+#: read, so a multi-channel dataset cannot silently bind to the wrong component.
+EXPECTED_CHANNEL = "CH1"
+
+#: Mainshock name per record-id prefix, used to constrain the CESMD query to the
+#: record's own event — a station-name substring match in the right year must not
+#: bind to a different mainshock (e.g. "Plaster City" 1979 vs 1987).
+_EVENT_BY_PREFIX: tuple[tuple[str, str], ...] = (
+    ("IV79", "Imperial Valley"),
+    ("LP89", "Loma Prieta"),
+    ("NR94", "Northridge"),
+    ("SF71", "San Fernando"),
+    ("SH87", "Superstition Hills"),
+)
+
+
+def _event_for(record_id: str) -> Optional[str]:
+    """The mainshock name for *record_id*, or ``None`` when unknown."""
+    for prefix, event in _EVENT_BY_PREFIX:
+        if record_id.startswith(prefix):
+            return event
+    return None
+
+
+def _vol2_channel(filename: str) -> str:
+    """Channel label of a Volume-2 member, read from its filename.
+
+    A bare ``<STATION>.V2`` is the CSMIP single-horizontal (channel 1) record;
+    an explicit ``CHn`` / ``-n.V2`` marker names that channel; a vertical marker
+    (``UP`` / ``VERT`` / channel ≥ 3) yields ``""`` so it is never selected as a
+    horizontal.  Anything else (a USGS ``.029``-style member) is a
+    single-horizontal record and is treated as channel 1.
+    """
+    upper = filename.upper()
+    if "UP" in upper or "VERT" in upper or "VRT" in upper:
+        return ""
+    match = re.search(r"CH[-_]?(\d)", upper)
+    if match:
+        n = int(match.group(1))
+        return "" if n >= 3 else f"CH{n}"
+    match = re.search(r"(\d)\.V2$", upper)
+    if match:
+        n = int(match.group(1))
+        return "" if n >= 3 else f"CH{n}"
+    return EXPECTED_CHANNEL
+
 
 def _iter_matches(res: dict) -> list[dict]:
     """Flatten a record-query response into per-record dicts."""
@@ -156,48 +208,62 @@ def _iter_matches(res: dict) -> list[dict]:
     return out
 
 
-def _search(key: str, year: int):
+def _search(key: str, year: int, event: Optional[str] = None):
     start, end = year_bounds(year)
-    return query_records(stname=key, startdate=start, enddate=end)
+    return query_records(evname=event, stname=key, startdate=start, enddate=end)
 
 
-def _first_vol2_member(zf: zipfile.ZipFile) -> Optional[zipfile.ZipInfo]:
-    """Pick the processed-acceleration member out of a ZIP.
+def _first_vol2_member(
+    zf: zipfile.ZipFile, *, channel: str = EXPECTED_CHANNEL
+) -> Optional[zipfile.ZipInfo]:
+    """Pick the *channel* processed-acceleration member out of a ZIP.
 
     CSMIP records are named ``<STATION>.V2``; USGS records use other names
-    (e.g. ``USACA74.029``).  Fall back to the first non-directory member.
+    (e.g. ``USACA74.029``).  A member's channel label (from its filename) must
+    match *channel*, so a multi-channel dataset cannot silently bind to the
+    wrong component; a member marked vertical is skipped.  Falls back to any
+    non-directory member only when no acceleration member is present.
     """
-    for info in zf.infolist():
-        if info.filename.upper().endswith(".V2"):
-            return info
-    for info in zf.infolist():
-        name = info.filename.upper()
-        if not info.is_dir() and ("V2" in name or "VOL2" in name or "ACC" in name):
-            return info
-    for info in zf.infolist():
-        if not info.is_dir():
+    candidates = [
+        info
+        for info in zf.infolist()
+        if not info.is_dir()
+        and (
+            info.filename.upper().endswith(".V2")
+            or "V2" in info.filename.upper()
+            or "VOL2" in info.filename.upper()
+            or "ACC" in info.filename.upper()
+        )
+    ]
+    if not candidates:
+        candidates = [info for info in zf.infolist() if not info.is_dir()]
+    for info in candidates:
+        if _vol2_channel(info.filename) == channel:
             return info
     return None
 
 
-def _zip_to_csv(zip_path: Path, csv_path: Path) -> None:
+def _zip_to_csv(zip_path: Path, csv_path: Path, *, channel: str = EXPECTED_CHANNEL) -> None:
     """Extract the acceleration from a CESMD dataset ZIP and write ``time,accel``.
 
     The dataset ZIP nests the waveform in a per-record inner ZIP (``…p.zip``
-    for processed data) whose ``.V2`` member is the accelerogram.
+    for processed data) whose ``.V2`` member is the accelerogram.  The selected
+    member is verified against the expected *channel* (``CH1`` — see
+    :data:`EXPECTED_CHANNEL`), so an arbitrary first ZIP or ACCEL DATA block is
+    never silently associated with the record.
     """
     with zipfile.ZipFile(zip_path) as outer:
         inner_names = [i.filename for i in outer.infolist() if i.filename.lower().endswith(".zip")]
         if inner_names:
             with zipfile.ZipFile(io.BytesIO(outer.read(inner_names[0]))) as inner:
-                member = _first_vol2_member(inner)
+                member = _first_vol2_member(inner, channel=channel)
                 if member is None:
-                    raise CESMDError(f"no .V2 member in {zip_path}")
+                    raise CESMDError(f"no {channel} .V2 member in {zip_path}")
                 text = inner.read(member).decode("utf-8", errors="replace")
         else:
-            member = _first_vol2_member(outer)
+            member = _first_vol2_member(outer, channel=channel)
             if member is None:
-                raise CESMDError(f"no acceleration member found in {zip_path}")
+                raise CESMDError(f"no {channel} acceleration member found in {zip_path}")
             text = outer.read(member).decode("utf-8", errors="replace")
     times, accel = parse_vol2(text)
     csv_path.parent.mkdir(parents=True, exist_ok=True)
@@ -222,7 +288,7 @@ def cmd_list(delay: float = 1.0, limit: Optional[int] = None) -> int:
             print(f"{rid:8s} {station!r} ({year}) -> already fetched from USGS NSMP")
             continue
         try:
-            matches = _iter_matches(_search(key, year))
+            matches = _iter_matches(_search(key, year, event=_event_for(rid)))
         except CESMDError as exc:
             print(f"{rid:8s} !! {exc}", file=sys.stderr)
             failed += 1
@@ -260,17 +326,29 @@ def cmd_download(
             print(f"skip   {rid} (already present)")
             continue
         start, end = year_bounds(year)
+        zip_path: Optional[Path] = None
         try:
             zip_path = download_dataset(
-                LOCAL, rid, stname=key, startdate=start, enddate=end, email=email
+                LOCAL,
+                rid,
+                stname=key,
+                startdate=start,
+                enddate=end,
+                email=email,
+                evname=_event_for(rid),
             )
             _zip_to_csv(zip_path, csv_path)
             if not keep_zip:
                 zip_path.unlink(missing_ok=True)
             print(f"fetch  {rid} -> {csv_path}")
-        except CESMDError as exc:
+        except (CESMDError, zipfile.BadZipFile, KeyError, ValueError) as exc:
             print(f"{rid:8s} !! {exc}", file=sys.stderr)
             failed += 1
+            # A ZIP that downloaded but failed conversion must not linger (and
+            # must not be mistaken for a fetched record on a later run); when the
+            # download itself failed there is no ZIP to remove.
+            if zip_path is not None and not keep_zip:
+                zip_path.unlink(missing_ok=True)
     return 1 if failed else 0
 
 

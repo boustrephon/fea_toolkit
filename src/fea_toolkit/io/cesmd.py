@@ -226,8 +226,9 @@ def parse_vol2(text: str) -> tuple[np.ndarray, np.ndarray]:
         from the file's cm/s²).
 
     Raises:
-        CESMDError: If the acceleration block or its time step is missing, or
-            the file holds fewer values than ``NPTS``.
+        CESMDError: If the acceleration block or its time step is missing, if
+            the file holds fewer values than ``NPTS``, or if a non-numeric
+            token appears in the acceleration block.
     """
     lines = text.replace("\r", "").split("\n")
     for i, line in enumerate(lines):
@@ -241,7 +242,13 @@ def parse_vol2(text: str) -> tuple[np.ndarray, np.ndarray]:
         dt = float(dt_match.group(1))
         values: list[float] = []
         for data_line in lines[i + 1 :]:
-            values.extend(float(tok) for tok in data_line.split())
+            for tok in data_line.split():
+                try:
+                    values.append(float(tok))
+                except ValueError as exc:
+                    raise CESMDError(f"non-numeric token {tok!r} in the ACCEL DATA block") from exc
+                if len(values) >= npts:
+                    break
             if len(values) >= npts:
                 break
         if len(values) < npts:
