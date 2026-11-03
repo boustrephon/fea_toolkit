@@ -194,8 +194,7 @@ cyclic-deterioration `Λ` Eq. 13, 2026-10-28).
    collapse capacity in `Sa(T1)` terms.  **Resolved 2026-10-30:** beam
    unbraced length (keep `Lb = L`, the bare-steel default) and Λ validation
    (Eq. 13 transcription + cap already unit-tested).  **Remaining:** the
-   four-record median `Sa(T1)` collapse comparison vs Ibarra–Krawinkler (2005)
-   and the `enrich_hinge` build-time route (see
+   `enrich_hinge` build-time route (see
    `docs/imk_deterioration_model.md` §5 / `docs/imk_member_classification.md`).
    The residual-stiffness floor was **dropped 2026-10-30** — non-convergence is
    the canonical collapse criterion.

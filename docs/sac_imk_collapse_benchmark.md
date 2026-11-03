@@ -25,8 +25,9 @@ with `nonlinear=True`, `backbone="imk"`, `hinge_model="lumped"`.  Beam hinges
 use the Lignos–Krawinkler (2011) backbone; column hinges use Lignos et al.
 (2019) with FEMA-355C axial ratios derived member-by-member
 (`derive_column_axial_ratio_by_member=True`); the leaning column stays elastic.
-The model is a **2-D** N–S perimeter moment frame (5 column lines × 3 storeys,
-`ndm=2`/`ndf=3`) carrying **half** the building's seismic mass — one of the two
+The model is a **planar 3-D** N–S perimeter moment frame (5 column lines ×
+3 storeys, six DOFs per node with the out-of-plane DOFs restrained) carrying
+**half** the building's seismic mass — one of the two
 symmetric frames — with a leaning column (line 5) that models the interior
 gravity framing for P-Δ.  The transcription carries **no gravity loads** (see
 the strength-ratio section below).  The model is SI
@@ -140,10 +141,15 @@ Re-running the pushover and IDA with `pdelta=True` + `pdelta_gravity=True`
 
 | Quantity | no P-Δ | P-Δ |
 |---|---|---|
-| `Vy` (EPP yield base shear) | ≈ 4.3 MN | ≈ 3.75 MN |
-| `γ = Vy / W` | ≈ 0.30 | **≈ 0.26** |
+| `Vy` (EPP yield base shear) | ≈ 4.3 MN | ≈ 4.08 MN |
+| `γ = Vy / W` | ≈ 0.30 | **≈ 0.282** |
 | `Sa,c(T1)/g` (4-record median) | 2.21 | **2.20** |
-| `(Sa,c/g) / γ` | ≈ 7.4 | **≈ 8.5** |
+| `(Sa,c/g) / γ` | ≈ 7.4 | **≈ 7.8** |
+
+The P-Δ `γ` is the **equal-energy** (EPP) idealisation
+(`bilinearize_equal_energy`) — the same definition as the "γ equal-energy"
+column of the 9/20-story table below (0.282); the first-yield alternative
+(5 % secant-stiffness drop) is 0.236, which raises `(Sa,c/g)/γ` to ≈ 9.3.
 
 The pushover shows the expected P-Δ softening (peak at ≈ 2.4 % roof drift then a
 negative post-yield slope, versus ≈ 7.5 % without), and the held gravity is

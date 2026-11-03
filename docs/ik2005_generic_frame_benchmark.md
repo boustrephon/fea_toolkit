@@ -16,12 +16,15 @@ related: [sac_imk_collapse_benchmark.md, imk_deterioration_model.md, benchmark_r
 > the modal-T1 check matches all 12 frames to ≤ 0.5 % and the pushover strength
 > `γ = Vy/W` matches the Appendix-B design value 1.0 to ≤ 2 % (both
 > record-free).  All 12 frames are now run over the 33 locally-fetched LMSR-N
-> records (19 CESMD + 14 USGS NSMP; 7 PEER NGA-West2-only remain).  After the
-> Rayleigh-damping + drift-proxy + spring-placement fixes, the `0909` median
-> **overshoots** — `(Sa,c/g)/γ ≈ 7.9` vs the paper's ≈ 3.4.  The root-cause
-> analysis (see "Collapse criterion") shows the collapse *detector* is only a
-> minor factor; the dominant gap is the frame's **dynamic stability** (P-Δ /
-> post-capping), still under investigation.
+> records (19 CESMD + 14 USGS NSMP; 7 PEER NGA-West2-only remain).  Under the
+> current configuration — 5 % Rayleigh damping on `T1` + the 95 %-participation
+> mode, non-convergence-only collapse (`_COLLAPSE_DRIFT = None`) — the `0909`
+> median **overshoots**: `(Sa,c/g)/γ ≈ 7.94` vs the paper's ≈ 3.4 (the earlier
+> 3.41 / 10 %-drift-proxy number was the pre-fix baseline).  The root-cause
+> analysis (see "Collapse criterion") exonerates the collapse *detector*, the
+> record set, P-Δ magnitude, `αc`, the hinge material and the integrator; the
+> leading remaining candidate is the **higher-mode damping content** (the ~5×
+> damping cliff), still under investigation.
 
 ## Purpose
 
@@ -136,9 +139,12 @@ Rules applied (`.clinerules` §4.6):
    analytically (first-yield `min(2·Myb1/h, 4·Myc/h)/W`, all 12 frames) and the
    pipeline pushover peak base-shear coefficient lands in `[0.9, 1.4]`
    (`tests/test_generic_frame.py`, `tests/test_generic_frame_pushover.py`).
-3. ✅ IDA collapse `(Sa,c/g)/γ ≈ 3.3` at `T1 ≈ 1 s` — median **3.41** over the
-   33 fetched LMSR-N records (vs ≈ 3.3, +3 %); dispersion σ_ln = 0.55 vs
-   IK-2005's ≈ 0.42 (Fig 5.18c).  See "Results" below.
+3. ⚠️ IDA collapse `(Sa,c/g)/γ ≈ 3.3` at `T1 ≈ 1 s` — **unresolved**.  The
+   median **3.41** (σ_ln 0.55) and its 10 %-drift-proxy split were the
+   **pre-fix baseline** (mass-proportional 5 % damping + the 10 % drift proxy);
+   under the current Rayleigh-on-(`T1`, `T95`) configuration with
+   non-convergence-only collapse (`_COLLAPSE_DRIFT = None`) the `0909` median is
+   **7.94** (σ_ln 0.45) vs IK-2005's ≈ 3.3.  See "Results" below.
 
 First target: **`0909`** (N = 9, T1 = 0.9 s) — closest to the SAC 3-story's
 period.
@@ -147,21 +153,25 @@ period.
 
 The 33 locally-available LMSR-N records (40 − 7 PEER-only) were run through
 `collapse_capacity_sa("0909", …)` — P-Δ + held `1.4 × seismic mass` gravity,
-5 % mass-proportional damping, peak-oriented IMK hinge, `max_scale = 128` (so
-every record collapses; the five slow records resolve at scales 33–64):
+peak-oriented IMK hinge, `max_scale = 128` (so every record collapses).  The
+table records the **pre-fix baseline** (5 % mass-proportional damping + the
+10 % drift proxy); the current configuration — 5 % Rayleigh damping on
+`T1` + `T95` with `_COLLAPSE_DRIFT = None` (non-convergence only) — supersedes
+it (see "Next steps"):
 
-| Statistic | Ours (33 records) | IK-2005 | Δ |
+| Statistic | Pre-fix baseline (33 records) | Current (Rayleigh, no drift proxy) | IK-2005 |
 |---|---|---|---|
-| Median `(Sa,c/g)/γ` | **3.41** | ≈ 3.3 (§5.5) | **+3 %** ✅ |
-| Dispersion σ_ln | **0.55** | ≈ 0.42 (Fig 5.18c) | +31 % ⚠️ |
+| Median `(Sa,c/g)/γ` | **3.41** | **7.94** | ≈ 3.3 (§5.5) |
+| Dispersion σ_ln | **0.55** | **0.45** | ≈ 0.42 (Fig 5.18c) |
 
 IK-2005 reports σ_ln only *graphically* (Fig 5.18c, "Dispersion of Collapse
 Capacity Spectra", y-axis "Standard Dev. ln[Sa,c(T1)/g]/γ") — ≈ 0.42 is read
 off the base-case (αc = −0.1) curve at T1 = 0.9 s; there is no tabulated
-value.  The median matches the target within the known caveats (7 PEER-only
-records absent, `LP89gmr`/`NR94stc` on the non-Medina horizontal, CESMD Vol2
-vs PEER NGA processing).  The dispersion is higher, most plausibly from the
-**collapse definition** below.
+value.  The pre-fix baseline matched the target within the known caveats
+(7 PEER-only records absent, `LP89gmr`/`NR94stc` on the non-Medina horizontal,
+CESMD Vol2 vs PEER NGA processing); the current Rayleigh/no-proxy run
+overshoots it by ~2.3×.  The pre-fix dispersion was higher, most plausibly from
+the **collapse definition** below.
 
 ### Collapse definition — drift proxy vs dynamic instability
 
@@ -170,28 +180,23 @@ of two tripwires per intensity:
 
 1. **non-convergence** to the end of the record — the Ibarra–Krawinkler
    dynamic-instability criterion (the IDA curve going flat), or
-2. **peak interstorey-drift ratio > 10 %** — the FEMA P-695 sidesway proxy
-   (`_COLLAPSE_DRIFT = 0.10`).
+2. **peak interstorey-drift ratio > `collapse_drift`** — the FEMA P-695
+   sidesway proxy.
 
-IK-2005's ≈ 3.3 median and ≈ 0.4 σ_ln were computed with the
-**dynamic-instability** definition only (the relative-intensity–EDP curve
-becoming flat), not a fixed 10 % drift threshold.  The drift proxy fires
-*earlier* than instability for any record whose peak drift reaches 10 % while
-the frame is still numerically stable, which lowers that record's collapse
-capacity.  *A priori* this could also inflate σ_ln — but in practice it does
-not (see the split below).
+The IK-2005 path drops the drift proxy: `_COLLAPSE_DRIFT = None`, so collapse
+is judged by **non-convergence (dynamic instability) alone** — the definition
+IK-2005's ≈ 3.3 median and ≈ 0.4 σ_ln were computed with (the
+relative-intensity–EDP curve becoming flat).  The 10 % proxy is how the
+**pre-fix baseline** was produced (and remains the SAC path's default in
+`benchmarks/sac_run.py`).  The detector reports which tripwire fired for each
+record (`collapse_criterion`, exposed as the `"collapse_criterion"` field of
+the `_ida_run` result).
 
-**Decision.**  Keep the 10 % drift proxy as a failure definition (a clean,
-deterministic lower bound), but make the IK-2005 comparison on the **same
-dynamic-instability measure**.  The detector was instrumented to report which
-tripwire fired for each record (`collapse_criterion`, exposed as the
-`"collapse_criterion"` field of the `_ida_run` result).
+### Per-record criterion split (33 records, pre-fix configuration)
 
-### Per-record criterion split (33 records)
-
-The instrumented detector was re-run over the 33 records (no bisection — the
-criterion is read off the first collapsed rung, which bisection does not
-change):
+The instrumented detector was re-run over the 33 records under the **pre-fix
+configuration** (10 % drift proxy enabled; no bisection — the criterion is read
+off the first collapsed rung, which bisection does not change):
 
 | Criterion | n | Records |
 |---|---|---|
@@ -322,7 +327,8 @@ drift proxy dropped) — see "Next steps".
 ### 40-record re-run (pending NGA-West2)
 
 The medians above are 33-record numbers (7 PEER-only records absent).  Once the
-7 NGA-West2 records are fetched (RSNs in "Acquisition status" above), re-run:
+7 NGA-West2 records are fetched (search by event + station — see "Downloading
+them" below), re-run:
 
 ```bash
 python scripts/run_ik2005_collapse.py --code 0909 --max-scale 128 \
@@ -700,12 +706,13 @@ fetched into the local-only mirror by whoever runs the benchmark — never
 committed (`ground_motion_data.md` §3, §5).  Two routes:
 
 **Route A — CESMD (free, no academic email — the recommended route).**  The
-same 40 California recordings are in the **CESMD** archive
-(<https://www.strongmotioncenter.org>), the merged USGS (NSMP) + California
-Geological Survey (CSMIP) strong-motion data centre.  Its registration form is
-*optional* ("not required as a condition of your access…"), so it needs no
-academic/corporate account, and the records are US Government data (public
-domain).  Search by event + station from the table above, download the
+**CESMD** archive (<https://www.strongmotioncenter.org>) — the merged USGS
+(NSMP) + California Geological Survey (CSMIP) strong-motion data centre — holds
+**19 of the 40** California recordings (33 once the 14 fetched from the USGS
+NSMP archive are added).  Its registration form is *optional* ("not required
+as a condition of your access…"), so it needs no academic/corporate account,
+and the records are US Government data (public domain).  Search by event +
+station (see the event-and-station search in Route B below), download the
 *processed* (Vol2) horizontal component, and write it as
 `data/ground_motion/local/<record_id>.csv` (two columns ``time,accel`` in m/s²)
 — the runner reads ``.csv`` directly.  (CESMD Vol2 files are header + ASCII
