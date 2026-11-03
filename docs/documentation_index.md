@@ -453,6 +453,11 @@ for automated cross-referencing.
   Tags: `etabs`, `e2k`, `io`, `parser`
   Related: [JSON Serialization: Raw Tables vs Model Codec](json_serialization.md) · [SAP2000 Parser — Table & Keyword Coverage](parser_coverage.md) · [LLM & AI Assistant Guide](llm_guide.md) · [Desktop GUI Roadmap](gui_roadmap.md)
 
+- [CSi SAFE (.f2k / .$sf) import](safe_import.md) — ✅ Complete
+  > SAFE tabular (.f2k) and native-database (.$sf) parsers, gmsh floor meshing, and soil/foundation spring supports for slab models.
+  Tags: `safe`, `f2k`, `sf`, `io`, `parser`, `gmsh`, `springs`
+  Related: [ETABS (.E2K / .$ET) import](e2k_import_plan.md) · [Shell openings — exact cut-out and shell element-family selection](shell_openings.md) · [LLM & AI Assistant Guide](llm_guide.md)
+
 
 ## 📦 Uncategorised
 
@@ -552,6 +557,7 @@ Tags across all documentation files:
 - **`etabs`** — [ETABS_checklist.md](ETABS_checklist.md), [e2k_import_plan.md](e2k_import_plan.md)
 - **`execution`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`export`** — [rhino_export.md](rhino_export.md), [tcl_export.md](tcl_export.md)
+- **`f2k`** — [safe_import.md](safe_import.md)
 - **`fea-toolkit`** — [openseespy_local_build.md](openseespy_local_build.md)
 - **`fiber`** — [cft_confinement_plan.md](cft_confinement_plan.md), [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`fiber-section`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
@@ -561,6 +567,7 @@ Tags across all documentation files:
 - **`gb50010`** — [capacity.md](capacity.md)
 - **`geomTransf`** — [member_offsets.md](member_offsets.md)
 - **`geometry`** — [rhino_export.md](rhino_export.md), [shell_openings.md](shell_openings.md)
+- **`gmsh`** — [safe_import.md](safe_import.md)
 - **`gpl`** — [licence.md](licence.md)
 - **`gravity`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`ground-motion`** — [benchmark_register.md](benchmark_register.md), [ground_motion_data.md](ground_motion_data.md), [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md)
@@ -584,7 +591,7 @@ Tags across all documentation files:
 - **`interaction`** — [gui.md](gui.md)
 - **`interactive`** — [viewer.md](viewer.md)
 - **`internal`** — [parser_coverage.md](parser_coverage.md)
-- **`io`** — [e2k_import_plan.md](e2k_import_plan.md), [json_serialization.md](json_serialization.md), [model_stage_file.md](model_stage_file.md), [pipeline_logging.md](pipeline_logging.md), [results_schema.md](results_schema.md), [tcl_import.md](tcl_import.md)
+- **`io`** — [e2k_import_plan.md](e2k_import_plan.md), [json_serialization.md](json_serialization.md), [model_stage_file.md](model_stage_file.md), [pipeline_logging.md](pipeline_logging.md), [results_schema.md](results_schema.md), [safe_import.md](safe_import.md), [tcl_import.md](tcl_import.md)
 - **`jntOffset`** — [member_offsets.md](member_offsets.md)
 - **`joint`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`json`** — [json_serialization.md](json_serialization.md)
@@ -633,7 +640,7 @@ Tags across all documentation files:
 - **`packaging`** — [versioning.md](versioning.md)
 - **`palette`** — [workflow_palette.md](workflow_palette.md)
 - **`panel-zone`** — [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md)
-- **`parser`** — [e2k_import_plan.md](e2k_import_plan.md), [json_serialization.md](json_serialization.md), [parser_coverage.md](parser_coverage.md)
+- **`parser`** — [e2k_import_plan.md](e2k_import_plan.md), [json_serialization.md](json_serialization.md), [parser_coverage.md](parser_coverage.md), [safe_import.md](safe_import.md)
 - **`partial-fixity`** — [member_releases.md](member_releases.md)
 - **`peak-oriented`** — [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md)
 - **`phase-b`** — [force_diagram_unification.md](force_diagram_unification.md)
@@ -674,6 +681,7 @@ Tags across all documentation files:
 - **`runtime`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`s2k`** — [model_review.md](model_review.md)
 - **`sac`** — [benchmark_roadmap.md](benchmark_roadmap.md), [imk_member_classification.md](imk_member_classification.md), [sac_benchmark.md](sac_benchmark.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [tcl_import.md](tcl_import.md)
+- **`safe`** — [safe_import.md](safe_import.md)
 - **`sap2000`** — [ETABS_checklist.md](ETABS_checklist.md), [member_offsets.md](member_offsets.md), [member_releases.md](member_releases.md), [model_review.md](model_review.md), [parser_coverage.md](parser_coverage.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`schema`** — [results_schema.md](results_schema.md)
 - **`scripting`** — [tcl_export.md](tcl_export.md)
@@ -686,6 +694,7 @@ Tags across all documentation files:
 - **`serialization`** — [json_serialization.md](json_serialization.md)
 - **`session`** — [project_bundle.md](project_bundle.md)
 - **`settings`** — [gui.md](gui.md)
+- **`sf`** — [safe_import.md](safe_import.md)
 - **`sfi-mvlem`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
 - **`shear`** — [duong_benchmark.md](duong_benchmark.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [shear_failure_modelling.md](shear_failure_modelling.md), [storey_response.md](storey_response.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`shear-building`** — [shear_building_benchmark.md](shear_building_benchmark.md)
@@ -696,6 +705,7 @@ Tags across all documentation files:
 - **`slabs`** — [element_classification.md](element_classification.md)
 - **`solver`** — [modal_analysis.md](modal_analysis.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`splitting`** — [element_splitting.md](element_splitting.md)
+- **`springs`** — [safe_import.md](safe_import.md)
 - **`static`** — [cantilever_benchmark.md](cantilever_benchmark.md)
 - **`steel`** — [imk_deterioration_model.md](imk_deterioration_model.md), [modeling_guidance.md](modeling_guidance.md)
 - **`steel02`** — [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)

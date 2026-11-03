@@ -781,14 +781,27 @@ that section.
      `- FOR EACH TOWER`, split `SLAB`/`DECK`/`WALL` properties) that leave
      geometry empty on real exports.  See `docs/e2k_import_plan.md`.
 
-3. **Load Combinations and Analysis Types**  
+3. **CSi SAFE `.f2k` / `.$sf` input** ✅
+   - `SAFEF2KParser` / `SAFEDBParser` (`io/f2k_parser.py`, `io/safe_db_parser.py`)
+     read SAFE tabular and native-database exports into the same `SAPModelData` —
+     points, slab/wall/beam/column objects, section assignments, point/line/area
+     springs, tendons, design strips, punching-shear overwrites, loads,
+     cases/combos, groups and mass source — and are wired through `load_model_data()`.
+   - Floor meshing (`mesh/floors.py`, gmsh) turns SAFE's `n`-gon slab objects
+     (with openings, drop panels and stiff zones) into buildable shell elements.
+   - Soil/foundation springs resolve to node-level `zeroLength` supports
+     (compression-only via `ENT` when `soil_spring_compression_only` is set).
+   - Parse-only (not yet analysis-modelled): tendons (prestress), design strips
+     and punching-shear overwrites.  See `docs/safe_import.md`.
+
+4. **Load Combinations and Analysis Types**  
    - ~~`MassSource`~~ ✅ Parsed by `_get_mass_sources()` and stored in `SAPModelData.mass_sources`.  
    - ~~`LoadCase`~~ ✅ Parsed by `get_load_cases()` — `LOAD CASE DEFINITIONS`, `CASE - RESPONSE SPECTRUM` (general + load assignments), `CASE - MODAL`, `CASE - STATIC` (see the "Key Components Implemented" table above).  \
    - ~~`LoadCombination`~~ ✅ Parsed by `_get_load_combinations()` from the `COMBINATION DEFINITIONS` table and stored in `SAPModelData.load_combinations` — combo type, design overrides, and a **lossless, order- and duplicate-preserving** `entries` list of `LoadCombinationEntry` (name, factor, `kind` = case/combo/unknown, optional modal `Mode`).  
    - ~~Load-combination trees & composite results~~ ✅ `model.load_combinations` materialises the reference graph (`build_combo_tree`), aggregates linear factors (`expand_linear_combination`) and generates **composite load cases** (`generate_combination_results`): a response-spectrum or SRSS term mixed with gravity forks into `+`/`−` composites, and `Envelope` yields a max/min pair or one composite per branch.  `generate_composite_results()` turns them into NPZ-ready result sets, so a combination can be visualised exactly like a load case.  See [`docs/load_combinations.md`](docs/load_combinations.md) (⚠️ `Absolute Add` and `Range Add` not yet implemented).  \
    - ~~Combination results export~~ ✅ `analysis.combinations.build_combination_results()` expands the model's combinations against the run load-case payloads, and `AnalysisBuilder.export_results(..., model=md, expand_combinations=True)` writes the composites into the NPZ as `static/{composite}/...` cases — ready for the force-diagram and viewer tools (tracked as **P12** in `docs/_pending_work.md`).
 
-4. **Advanced Analyses**  
+5. **Advanced Analyses**  
    - ~~Modal Analysis~~ ✅ `run_modal_analysis()` implemented — eigenvalue extraction with modal properties table.  
    - ~~Response Spectrum~~ ✅ `run_response_spectrum_analysis()` + `extract_element_rs_forces()`; the rigid / missing-mass correction (`spectrum.cqc_base_shear(...)`) is wired into `AnalysisBuilder.run_response_spectrum_analysis()` behind the opt-in `config["missing_mass"]` gate.  
    - ~~Nonlinear Static Pushover~~ ✅ `run_pushover_analysis()` implemented — see [`docs/pushover_analysis.md`](docs/pushover_analysis.md).  

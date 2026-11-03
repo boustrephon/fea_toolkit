@@ -937,6 +937,27 @@ the change in [`history/_done_log.md`](history/_done_log.md).
 does not consume, and the review report includes the same section.
 
 
+#### P44 — Profile the full B3 SAFE preprocess
+
+Source: `docs/safe_import.md` § Performance.
+
+**What.** Floor meshing itself is fast (~5 s on B3), but a *full*
+`Preprocessor.run()` on the B3 `.$sf` model (> 5000 nodes, 324 areas) took
+**> 2 min** — the cost is in the rest of the pipeline (frame splitting,
+wall-slab intersection detection, coincident-node merging, edge detection),
+not the new floor meshing.  Profile the run end-to-end, identify the hot
+stages, and apply targeted fixes (spatial-index reuse, removing O(n²) scans)
+before SAFE models become a first-class workflow.
+
+**Where.** `src/fea_toolkit/opensees/preprocessor.py` (`run()`),
+`src/fea_toolkit/model/geometry*.py`, `src/fea_toolkit/mesh/floors.py`.
+
+**Outline steps.** 1) time each `run()` stage on B3 with `cProfile`; 2) rank by
+cumulative cost; 3) fix the top offenders without changing the frozen-topology
+contract (§3.2); 4) re-measure and record the numbers in
+`docs/safe_import.md` § Performance.
+
+
 #### Closed items (README reconciliation, 2026-08-25)
 - **Deeper opstool result-post-processing integration** — closed as **no
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
