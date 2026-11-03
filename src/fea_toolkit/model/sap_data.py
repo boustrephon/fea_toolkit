@@ -1606,6 +1606,19 @@ class ShellSection(Section):
         raise NotImplementedError("Fiber conversion is not applicable to ShellSection")
 
 
+@dataclass
+class DeckSection(ShellSection):
+    """Composite metal-deck shell section (SAFE ``DECK PROPERTY DEFINITIONS``).
+
+    Extends :class:`ShellSection` with the composite deck's metal-deck
+    material and deck (rib) depth; the concrete topping thickness is held by
+    :attr:`ShellSection.thickness`.
+    """
+
+    deck_material: Optional[str] = None  # metal deck material name
+    deck_depth: float = 0.0  # deck rib depth
+
+
 # ── Element creation properties (resolved by Preprocessor) ─────────────
 
 
@@ -2418,6 +2431,68 @@ class ResponseSpectrumFunction:
     damping: float = 0.05
 
 
+# ═══════════════════════════════════════════════════════════════════
+# SAFE-specific model extensions (parsed by io.f2k_parser / io.safe_db_parser)
+# ═══════════════════════════════════════════════════════════════════
+
+
+@dataclass
+class PointSpring:
+    """SAFE point-spring definition (``SPRING PROPERTY DEFINITIONS - POINT SPRINGS``)."""
+
+    name: str
+    stiffness: dict[str, float] = field(default_factory=dict)  # UX/UY/UZ/RX/RY/RZ
+    nonlinear_option: str = "None (Linear)"
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class LineSpring:
+    """SAFE line-spring definition (``SPRING PROPERTY DEFINITIONS - LINE SPRINGS``)."""
+
+    name: str
+    vertical_stiffness: float = 0.0
+    rotational_stiffness: float = 0.0
+    nonlinear_option: str = "None (Linear)"
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class AreaSpring:
+    """SAFE area-spring definition (``SPRING PROPERTY DEFINITIONS - AREA SPRINGS``)."""
+
+    name: str
+    stiffness: dict[str, float] = field(default_factory=dict)  # U1/U2/U3
+    nonlinear_options: dict[str, str] = field(default_factory=dict)  # per-direction
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class TendonProperty:
+    """SAFE tendon section property (``TENDON SECTION PROPERTIES``)."""
+
+    name: str
+    material: str = ""
+    strand_area: float = 0.0
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class DesignStrip:
+    """SAFE design strip (``STRIP OBJECT CONNECTIVITY``).
+
+    ``segments`` holds one dict per strip segment with the start/end points
+    and the start/end half-widths (left/right) captured as-authored.
+    """
+
+    name: str
+    layer: str = "A"
+    auto_widen: bool = False
+    segments: list[dict[str, Any]] = field(default_factory=list)  # .f2k polyline segments
+    ends: list[dict[str, Any]] = field(default_factory=list)  # .$sf A/B end points + widths
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
 @dataclass
 class SAPModelData:
     """Complete SAP2000 model data for export to OpenSees or Rhino."""
@@ -2470,6 +2545,26 @@ class SAPModelData:
     nd_materials: dict[str, NDMaterial] = field(default_factory=dict)
     # Layered shell sections for nonlinear shear walls
     layered_shell_sections: dict[str, LayeredShellSection] = field(default_factory=dict)
+    # ── SAFE-specific objects (parsed by io.f2k_parser / io.safe_db_parser) ──
+    # Point/line/area spring definitions (soil / foundation support) and their
+    # per-object assignments; empty for SAP2000 / ETABS models.
+    point_springs: dict[str, PointSpring] = field(default_factory=dict)
+    point_spring_assignments: dict[str, str] = field(default_factory=dict)
+    line_springs: dict[str, LineSpring] = field(default_factory=dict)
+    line_spring_assignments: dict[str, str] = field(default_factory=dict)
+    area_springs: dict[str, AreaSpring] = field(default_factory=dict)
+    area_spring_assignments: dict[str, str] = field(default_factory=dict)
+    # Tendon section properties and design strips (SAFE).
+    tendons: dict[str, TendonProperty] = field(default_factory=dict)
+    design_strips: dict[str, DesignStrip] = field(default_factory=dict)
+    # Punching-shear design overwrites, keyed by the supported point id
+    # (SAFE PUNCHING SHEAR DESIGN OVERWRITES).  ``{}`` for other formats.
+    punching_shear: dict[str, Any] = field(default_factory=dict)
+    # SAFE-authored object roles: area_id -> "floor" | "wall".
+    area_roles: dict[str, str] = field(default_factory=dict)
+    # SAFE automatic-mesh intent (global max size + per-area overrides),
+    # consumed by the gmsh floor-meshing stage.  ``{}`` for SAP2000 / ETABS.
+    floor_mesh_options: dict[str, Any] = field(default_factory=dict)
     # Provenance — the file path the model was parsed from (empty for a model
     # built in code).  Used by the analysis verbs' Tcl-export QC checkbox to
     # place the dump next to its source.

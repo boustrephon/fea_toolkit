@@ -173,8 +173,13 @@ def _collect_dataclasses() -> dict[str, type]:
     _walk(SAPModelData)
     _walk(MeshModel)
     _walk(WallElement)
-    for sub in Section.__subclasses__():
-        _walk(sub)
+
+    def _walk_subclasses(cls: type) -> None:
+        for sub in cls.__subclasses__():
+            _walk(sub)
+            _walk_subclasses(sub)
+
+    _walk_subclasses(Section)
     return registry
 
 
