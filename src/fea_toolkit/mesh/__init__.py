@@ -7,6 +7,8 @@ only); remeshing requires Gmsh.
 * ``fea_toolkit.mesh.checks`` — mesh quality metrics (pure NumPy)
 * ``fea_toolkit.mesh.remesh`` — constrained quadrilateral remeshing via
   **Gmsh** (GPL v2+)
+* ``fea_toolkit.mesh.floors`` — gmsh floor meshing for SAFE slab models
+  (openings, drop panels, embedded beams/columns)
 
 Install with::
 

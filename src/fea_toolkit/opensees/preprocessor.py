@@ -1303,7 +1303,15 @@ class Preprocessor:
         )
 
     def _mesh_areas(self, md, selection=None):
-        """Subdivide area elements per AREA MESH ASSIGNMENTS.
+        """Subdivide area elements for shell creation.
+
+        Handles two mutually-exclusive meshing paths:
+
+        * **SAFE** — when ``md.floor_mesh_options`` is present, the floor
+          areas are meshed with gmsh
+          (:func:`~fea_toolkit.mesh.floors.mesh_floors`).
+        * **SAP2000** — otherwise, areas are subdivided per AREA MESH
+          ASSIGNMENTS (``md.area_mesh``).
 
         Also handles wall-slab intersection detection and optional
         splitting (mirrors the legacy builder's behaviour).
@@ -1343,6 +1351,16 @@ class Preprocessor:
                         "preprocessor", f"Split at {len(ws_findings)} wall intersection(s)"
                     )
 
+        # ── SAFE floor meshing (gmsh) ────────────────────────────
+        # SAFE carries a global automatic-mesh intent (floor_mesh_options)
+        # rather than SAP2000's per-area AREA MESH ASSIGNMENTS; its n-gon floor
+        # objects must be meshed before any shell can be built.
+        floor_opts = getattr(md, "floor_mesh_options", {}) or {}
+        if floor_opts:
+            self._mesh_floors(md, selection=selection)
+            md.floor_mesh_options = {}
+            return
+
         # ── Area meshing ─────────────────────────────────────────
         area_mesh = getattr(md, "area_mesh", {})
         if not area_mesh:
@@ -1376,6 +1394,42 @@ class Preprocessor:
         md.nodes = nodes
         # Clear so builder's _mesh_areas doesn't re-mesh
         md.area_mesh = {}
+
+    def _mesh_floors(self, md, selection=None):
+        """Mesh SAFE floor areas into shells via gmsh (``floor_mesh_options``)."""
+        from ..mesh.floors import mesh_floors
+
+        max_elem_tag = max((ae.area_tag for ae in md.area_elements.values()), default=0)
+        max_node_tag = max((nd.node_tag for nd in md.nodes.values()), default=0)
+        next_tag = max(max_elem_tag, max_node_tag) + 1
+
+        areas, assignments, nodes, _, skipped = mesh_floors(
+            md.area_elements,
+            md.area_assignments,
+            md.nodes,
+            floor_mesh_options=md.floor_mesh_options,
+            area_roles=getattr(md, "area_roles", None),
+            frame_elements=getattr(md, "frame_elements", None),
+            frame_assignments=getattr(md, "frame_assignments", None),
+            restraints=getattr(md, "restraints", None),
+            sections=getattr(md, "sections", None),
+            next_tag=next_tag,
+            verbose=self.config.get("verbose", False),
+        )
+        md.area_elements = areas
+        md.area_assignments = assignments
+        md.nodes = nodes
+        if skipped:
+            self._log.warning(
+                "preprocessor",
+                f"Floor meshing skipped {len(skipped)} non-horizontal area(s): {skipped}",
+            )
+
+        # SAFE beams were embedded as mesh constraint lines — mark them
+        # AtJoints so the frame-splitting pass connects them to every shell
+        # node along their length.
+        for fid in getattr(md, "frame_assignments", {}) or {}:
+            md.frame_auto_mesh.setdefault(fid, {})["AtJoints"] = True
 
     def _merge_coincident_nodes(self, md):
         """Merge mesh-created nodes at the same coordinates.
