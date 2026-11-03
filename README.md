@@ -12,8 +12,8 @@ visualisation and Grasshopper workflows.
 
 The goal is to create a Python package `fea_toolkit` that:
 
-- Parses SAP2000 `.s2k` and ETABS `.e2k` / `.$et` text files into a common
-  intermediate data model (`SAPModelData`).
+- Parses SAP2000 `.s2k`, ETABS `.e2k` / `.$et`, and CSi SAFE `.f2k` / `.$sf`
+  files into a common intermediate data model (`SAPModelData`).
 - Enriches section properties using a manufacturer database.
 - Splits frame elements at joints (and optionally at frame intersections)
   with parent‑child tracking.
@@ -300,6 +300,7 @@ parsing through analysis to visualisation and reporting.
 |---|---|---|
 | **Parse SAP2000 `.s2k`** | `SAP2000Parser.parse()` → `get_model_data()` | Read SAP2000 text export into structured model data |
 | **Parse ETABS `.e2k`** | `ETABSParser.parse()` → `get_model_data()` | Read ETABS text export into structured model data |
+| **Parse SAFE `.f2k` / `.$sf`** | `SAFEF2KParser.parse()` / `SAFEDBParser.parse()` → `get_model_data()` | Read SAFE tabular / native-database export into structured model data |
 | **Save/load JSON cache** | `.to_json()` / `.from_json()` | Serialise raw parsed tables for reuse without re-parsing |
 | **Enrich from catalogue** | `SectionLibrary.enrich_section()` | Populate section dimensions from a manufacturer database |
 
