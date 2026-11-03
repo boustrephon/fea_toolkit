@@ -42,6 +42,7 @@ from ..model.sap_data import (
     StressStrainCurve,
     is_opening_section,
 )
+from ._table_text import parse_table_file, read_file_with_encodings
 
 # from ..model.geometry import get_SAP_vecxz
 
@@ -142,163 +143,17 @@ class SAP2000Parser:
 
     @staticmethod
     def _read_file_with_encodings(path: Path) -> str:
-        """Try multiple encodings to read the file."""
-        encodings = ["utf-8", "cp1252", "latin-1"]
-        for enc in encodings:
-            try:
-                return path.read_text(encoding=enc)
-            except UnicodeDecodeError:
-                continue
-        # Fallback
-        return path.read_text(encoding="utf-8", errors="replace")
+        """Try multiple encodings to read the file (shared tokeniser helper)."""
+        return read_file_with_encodings(path)
 
     @staticmethod
     def _parse_sap2000_table_file(file_content: str) -> dict[str, list[dict[str, Any]]]:
-        """Parse SAP2000 table file with space-separated key-value pairs.
+        """Parse a CSI table file with space-separated key-value pairs.
 
-        Args:
-            file_content: String containing the file content
-
-        Returns:
-            Dictionary with table names as keys and lists of records as values
+        Thin delegate over :func:`fea_toolkit.io._table_text.parse_table_file`
+        (the single shared tokeniser for the ``.s2k`` / ``.f2k`` text exports).
         """
-        # Split content into lines
-        lines = file_content.strip().splitlines()
-
-        # Initialize result dictionary
-        result: dict[str, list[dict[str, object]]] = {}
-
-        # Parse the first line (file metadata)
-        if lines:
-            first_line = lines[0].strip()
-            # Parse pattern: "File {filepath} was saved on {date} at {time}"
-            metadata_pattern = re.compile(r"^File\s+(.+?)\s+was saved on\s+(.+?)\s+at\s+(.+?)$")
-            metadata_match = metadata_pattern.match(first_line)
-
-            if metadata_match:
-                file_path = metadata_match.group(1)
-                date_str = metadata_match.group(2)
-                time_str = metadata_match.group(3)
-
-                # Convert date and time to international format (YYYY/MM/DD HH:MM:SS)
-                formatted_datetime = ""
-
-                # Only format if both date and time are provided (not the placeholder format)
-                if date_str != "m/d/yy" and time_str != "h:mm:ss":
-                    try:
-                        # Parse date (assuming format like "12/23/26" -> month/day/year)
-                        date_parts = date_str.split("/")
-                        if len(date_parts) == 3:
-                            month = int(date_parts[0])
-                            day = int(date_parts[1])
-                            year = int(date_parts[2])
-
-                            # Convert 2-digit year to 4-digit (assuming 2000s)
-                            if year < 100:
-                                year = 2000 + year
-
-                            # Parse time (format like "11:55:03")
-                            time_parts = time_str.split(":")
-                            if len(time_parts) == 3:
-                                hour = int(time_parts[0])
-                                minute = int(time_parts[1])
-                                second = int(time_parts[2])
-
-                                # Format as YYYY/MM/DD HH:MM:SS with leading zeros
-                                formatted_datetime = f"{year:04d}/{month:02d}/{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
-                    except (ValueError, IndexError):
-                        # If parsing fails, leave empty
-                        formatted_datetime = ""
-
-                # Create metadata record
-                metadata_record = {"FileName": file_path, "DateSaved": formatted_datetime}
-
-                # Add METADATA table to result
-                result["METADATA"] = [metadata_record]
-
-            # Skip the first line for further parsing
-            lines = lines[1:]
-
-        current_table: Union[str, None] = None
-        current_record: dict[str, object] = {}
-
-        # Regular expressions for parsing
-        table_regex = re.compile(r'^TABLE:\s+"([^"]+)"')
-        kv_pair_regex = re.compile(r'(\w+)=("[^"]*"|[^\s]+)')
-
-        for raw_line in lines:
-            line = raw_line.strip()
-
-            # Skip empty lines
-            if not line:
-                continue
-
-            # Check if this is a new table header
-            table_match = table_regex.match(line)
-            if table_match:
-                # Save previous record if exists
-                if current_record and current_table:
-                    if current_table not in result:
-                        result[current_table] = []
-                    result[current_table].append(current_record)
-                    current_record = {}
-
-                # Start new table
-                current_table = table_match.group(1)
-                continue
-
-            # If no current table, skip this line
-            if current_table is None:
-                continue
-
-            # Check if line ends with continuation marker
-            ends_with_continuation = line.endswith("_")
-            if ends_with_continuation:
-                line = line[:-1].strip()  # Remove the continuation marker
-
-            # Parse key-value pairs
-            for match in kv_pair_regex.finditer(line):
-                key = match.group(1)
-                value = match.group(2)
-
-                # Remove quotes if present
-                if value.startswith('"') and value.endswith('"'):
-                    value = value[1:-1]
-
-                # Try to convert to appropriate type
-                try:
-                    # Try to convert to int
-                    value = int(value)
-                except ValueError:
-                    try:
-                        # Try to convert to float
-                        value = float(value)
-                    except ValueError:
-                        # Keep as string
-                        # Convert Yes/No to boolean
-                        if value.upper() == "YES":
-                            value = True
-                        elif value.upper() == "NO":
-                            value = False
-                        elif value.upper() == "NONE":
-                            value = None
-
-                current_record[key] = value
-
-            # If line doesn't end with continuation, save the record
-            if not ends_with_continuation and current_record:
-                if current_table not in result:
-                    result[current_table] = []
-                result[current_table].append(current_record)
-                current_record = {}
-
-        # Handle any remaining record
-        if current_record and current_table:
-            if current_table not in result:
-                result[current_table] = []
-            result[current_table].append(current_record)
-
-        return result
+        return parse_table_file(file_content)
 
     # -------------------------------------------------------------------------
     # JSON serialisation (optional)
