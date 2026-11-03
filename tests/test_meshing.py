@@ -6,7 +6,7 @@ selected entity's own fields, so the lookup lives in one module
 """
 
 from fea_toolkit.model.meshing import meshing_rows
-from fea_toolkit.model.sap_data import AreaElement, FrameElement, SAPModelData
+from fea_toolkit.model.sap_data import AreaElement, FrameElement, Node, SAPModelData
 
 
 def _model(
@@ -83,14 +83,38 @@ def test_opening_and_inactive_areas_flag_themselves():
     assert ("Meshed Away", "Yes") in rows
 
 
+def test_area_reports_auto_edge_constraint():
+    md = _model(
+        areas={"A1": AreaElement("A1", 1, ["1", "2", "3", "4"])},
+        area_roles={"A1": "floor"},
+        floor_mesh_options={"auto_edge_constraints": {"A1": True}},
+    )
+    assert ("Auto Edge Constraint", "Yes") in meshing_rows(md, md.area_elements["A1"])
+
+
+def test_node_reports_include_in_mesh():
+    md = _model(floor_mesh_options={"include_in_mesh": {"1": True}})
+    assert meshing_rows(md, Node("1", 1, 0.0, 0.0, 0.0)) == [("Include In Mesh", "Yes")]
+    assert meshing_rows(md, Node("9", 9, 0.0, 0.0, 0.0)) == []
+
+
 def test_frame_reports_its_auto_mesh_settings():
     md = _model(
         frames={"F1": FrameElement("F1", 1, "1", "2")},
-        frame_auto_mesh={"F1": {"AtJoints": True, "MaxLength": 1.5}},
+        frame_auto_mesh={
+            "F1": {
+                "Auto Mesh": "Yes",
+                "At Intermediate Joints": "Yes",
+                "At Intersections": "Yes",
+                "Min Number?": "No",
+                "Max Length?": "No",
+            }
+        },
     )
     assert meshing_rows(md, md.frame_elements["F1"]) == [
-        ("Auto Mesh AtJoints", "Yes"),
-        ("Auto Mesh MaxLength", "1.5"),
+        ("Auto Mesh", "Yes"),
+        ("Auto Mesh At Joints", "Yes"),
+        ("Auto Mesh At Intersections", "Yes"),
     ]
 
 

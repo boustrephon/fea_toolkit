@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .sap_data import AreaElement, FrameElement
+from .sap_data import AreaElement, FrameElement, Node
 
 __all__ = ["meshing_rows"]
 
@@ -47,6 +47,10 @@ def _area_meshing_rows(model: Any, area: AreaElement) -> list:
     if size:
         rows.append(("Mesh Size", f"{float(size):g}"))
 
+    edge = opts.get("auto_edge_constraints", {}).get(area.area_id)
+    if edge is not None:
+        rows.append(("Auto Edge Constraint", "Yes" if edge else "No"))
+
     if getattr(area, "opening", False):
         rows.append(("Opening", "Yes"))
     if getattr(area, "inactive", False):
@@ -60,31 +64,45 @@ def _frame_meshing_rows(model: Any, frame: FrameElement) -> list:
     if not auto:
         return []
     rows: list[tuple[str, str]] = []
-    for key, value in auto.items():
-        if value:
-            rows.append((f"Auto Mesh {key}", _format(value)))
+    for key, label in (
+        ("Auto Mesh", "Auto Mesh"),
+        ("At Intermediate Joints", "Auto Mesh At Joints"),
+        ("At Intersections", "Auto Mesh At Intersections"),
+    ):
+        value = auto.get(key)
+        if value is not None:
+            rows.append((label, _yes_no(value)))
     return rows
 
 
-def _format(value: Any) -> str:
+def _node_meshing_rows(model: Any, node: Node) -> list:
+    opts = getattr(model, "floor_mesh_options", None) or {}
+    include = opts.get("include_in_mesh", {}).get(node.node_id)
+    if include is None:
+        return []
+    return [("Include In Mesh", "Yes" if include else "No")]
+
+
+def _yes_no(value: Any) -> str:
     if isinstance(value, bool):
         return "Yes" if value else "No"
-    if isinstance(value, float):
-        return f"{value:g}"
-    return str(value)
+    return "Yes" if str(value).strip().lower() in ("yes", "true", "1") else "No"
 
 
 def meshing_rows(model: Any, obj: Any) -> list:
     """``[(label, value), …]`` describing *obj*'s meshing settings.
 
     An area reports its role (floor/wall), its per-area mesh option and
-    add-restraints flag, the governing maximum mesh size, and whether it is an
-    opening or has been meshed away (``inactive``).  A frame reports its
-    auto-mesh settings.  Rows with nothing to say are omitted.
+    add-restraints flag, the governing maximum mesh size, whether its edges are
+    auto-constrained, and whether it is an opening or has been meshed away
+    (``inactive``).  A frame reports its auto-mesh settings; a node reports
+    whether it is included in the floor mesh.  Rows with nothing to say are
+    omitted.
 
     Args:
         model: A ``SAPModelData`` or ``MeshModel``, or ``None``.
-        obj: The selected :class:`AreaElement` or :class:`FrameElement`.
+        obj: The selected :class:`AreaElement`, :class:`FrameElement` or
+            :class:`Node`.
 
     Returns:
         One ``(name, value)`` pair per non-empty fact.
@@ -95,4 +113,6 @@ def meshing_rows(model: Any, obj: Any) -> list:
         return _area_meshing_rows(model, obj)
     if isinstance(obj, FrameElement):
         return _frame_meshing_rows(model, obj)
+    if isinstance(obj, Node):
+        return _node_meshing_rows(model, obj)
     return []

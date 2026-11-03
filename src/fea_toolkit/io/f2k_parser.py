@@ -708,6 +708,22 @@ class SAFEF2KParser:
             }
         if wall_per_area:
             opts["wall_per_area"] = wall_per_area
+        edge_constraints: dict[str, bool] = {}
+        for rec in self._raw_tables.get("AREA ASSIGNMENTS - AUTO EDGE CONSTRAINTS", []):
+            aid = self._id(rec, ("UniqueName", "Unique Name"))
+            if aid is None:
+                continue
+            edge_constraints[str(aid)] = self._to_bool(rec.get("Constraint", False))
+        if edge_constraints:
+            opts["auto_edge_constraints"] = edge_constraints
+        include_in_mesh: dict[str, bool] = {}
+        for rec in self._raw_tables.get("JOINT ASSIGNMENTS - FLOOR MESHING OPTION", []):
+            jid = self._id(rec, ("UniqueName", "Unique Name"))
+            if jid is None:
+                continue
+            include_in_mesh[str(jid)] = self._to_bool(rec.get("IncludeInMesh", False))
+        if include_in_mesh:
+            opts["include_in_mesh"] = include_in_mesh
         for rec in self._raw_tables.get(
             "ANALYSIS OPTIONS - AUTOMATIC RECTANGULAR MESH OPTIONS FOR WALLS", []
         ):

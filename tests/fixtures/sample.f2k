@@ -106,3 +106,12 @@ TABLE:  "AREA ASSIGNMENTS - FLOOR AUTO MESH OPTIONS"
 TABLE:  "AREA ASSIGNMENTS - WALL AUTO MESH OPTIONS"
    UniqueName=200   "Mesh Option"="Auto Rectangular"   "Add Restraints"=Yes
 
+TABLE:  "AREA ASSIGNMENTS - AUTO EDGE CONSTRAINTS"
+   UniqueName=100   Constraint=Yes
+   UniqueName=200   Constraint=Yes
+
+TABLE:  "JOINT ASSIGNMENTS - FLOOR MESHING OPTION"
+   UniqueName=1   IncludeInMesh=Yes
+   UniqueName=2   IncludeInMesh=No
+
+

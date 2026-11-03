@@ -141,6 +141,8 @@ def test_floor_mesh_options(model):
         "mesh_option": "Auto Rectangular",
         "add_restraints": True,
     }
+    assert model.floor_mesh_options["auto_edge_constraints"] == {"100": True, "200": True}
+    assert model.floor_mesh_options["include_in_mesh"] == {"1": True, "2": False}
 
 
 def test_model_loader_routes_f2k(tmp_path):
