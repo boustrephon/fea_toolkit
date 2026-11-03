@@ -1,0 +1,138 @@
+File C:\fake\B3.$sf was saved on 8/26/21 at 20:28:38
+
+TABLE:  "PROGRAM CONTROL"
+   ProgramName=SAFE   Version=12.3.2   CurrUnits="N, mm, C"   MergeTol=1
+
+TABLE:  "AUTOMATIC SLAB MESH OPTIONS"
+   MeshOpt=Rectangular   Localize=Yes   Merge=Yes   MaxSize=1200
+
+TABLE:  "MATERIAL PROPERTIES 01 - GENERAL"
+   Material=C45   Type=Concrete
+   Material=CSA-G30.18Gr400   Type=Rebar
+
+TABLE:  "MATERIAL PROPERTIES 03 - CONCRETE"
+   Material=C45   E=26400   U=0.2   A=1E-05   UnitWt=2.45E-05   Fc=45   LtWtConc=No
+
+TABLE:  "MATERIAL PROPERTIES 04 - REBAR"
+   Material=CSA-G30.18Gr400   E=200000   UnitWt=7.69728639422648E-05   Fy=400   Fu=500
+
+TABLE:  "SLAB PROPERTIES 01 - GENERAL"
+   Slab=SLAB2   Type=Slab
+   Slab=D675   Type=Drop
+
+TABLE:  "SLAB PROPERTIES 02 - SOLID SLABS"
+   Slab=SLAB2   Type=Slab   MatProp=C45   Thickness=250   Ortho=No
+   Slab=D675   Type=Drop   MatProp=C45   Thickness=675   Ortho=No
+
+TABLE:  "SLAB PROPERTY ASSIGNMENTS"
+   Area=1   SlabProp=SLAB2   OpeningType=None
+   Area=2   SlabProp=D675   OpeningType=None
+   Area=3   SlabProp=None   OpeningType=Unloaded
+
+TABLE:  "WALL PROPERTIES"
+   Wall=BW800   MatProp=C45   Thickness=800   AutoRigid=No   OutOfPlane=No
+
+TABLE:  "BEAM PROPERTIES 01 - GENERAL"
+   Beam=1500x675   Type=Rectangular
+
+TABLE:  "BEAM PROPERTIES 02 - RECTANGULAR BEAM"
+   Beam=1500x675   MatProp=C45   Depth=675   WidthTop=1500   WidthBot=1500
+
+TABLE:  "BEAM PROPERTIES 06 - DESIGN DATA"
+   Beam=1500x675   MatRebarL=CSA-G30.18Gr400   MatRebarS=CSA-G30.18Gr400   CoverTop=40   CoverBot=40   NoDesign=No
+
+TABLE:  "BEAM PROPERTY ASSIGNMENTS"
+   Line=10   BeamProp=1500x675
+
+TABLE:  "COLUMN PROPERTIES 01 - GENERAL"
+   Column=C1200x1200   Type=Rectangular
+
+TABLE:  "COLUMN PROPERTIES 02 - RECTANGULAR"
+   Column=C1200x1200   MatProp=C45   SecDim2=1200   SecDim3=1200   AutoRigid=No   AutoDrop=No   IncludeCap=No
+
+TABLE:  "SPRING PROPERTIES - POINT"
+   Spring=PSPR1   Ux=0   Uy=0   Uz=1   Rx=0   Ry=0   Rz=0   NonlinOpt="None (Linear)"
+
+TABLE:  "SPRING PROPERTIES - LINE"
+   Spring=SUPPORT   VertStiff=10000000   RotStiff=0   NonlinOpt="None (Linear)"
+
+TABLE:  "LINE SPRING ASSIGNMENTS"
+   Line=20   Spring=SUPPORT
+
+TABLE:  "TENDON PROPERTIES"
+   TendonProp=TENDON1   MatProp=A416MGr186   StrandArea=98.70948
+
+TABLE:  "LOAD PATTERNS"
+   LoadPat=DL   Type=DEAD   SelfWtMult=1
+   LoadPat=LL   Type=LIVE   SelfWtMult=0
+
+TABLE:  "LOAD CASES 01 - GENERAL"
+   LoadCase=DL   Type=LinStatic   DesignOpt=Auto   DesignType=DEAD
+   LoadCase=LL   Type=LinStatic   DesignOpt=Auto   DesignType=LIVE
+
+TABLE:  "LOAD CASES 02 - STATIC"
+   LoadCase=DL   InitialCond=Zero   AType=Linear
+   LoadCase=LL   InitialCond=Zero   AType=Linear
+
+TABLE:  "LOAD CASES 06 - LOADS APPLIED"
+   LoadCase=DL   LoadPat=DL   SF=1
+   LoadCase=LL   LoadPat=LL   SF=1
+
+TABLE:  "LOAD COMBINATIONS"
+   Combo="GRAVITY ULS"   Load=DL   SF=1.4   Type="Linear Add"
+   Combo="GRAVITY ULS"   Load=LL   SF=1.6
+
+TABLE:  "MASS SOURCE"
+   LoadPat=DL   Multiplier=1
+
+TABLE:  "POINT RESTRAINT ASSIGNMENTS"
+   Point=4   Ux=Yes   Uy=Yes   Uz=Yes   Rx=No   Ry=No   Rz=No
+   Point=5   Ux=Yes   Uy=Yes   Uz=Yes   Rx=No   Ry=No   Rz=No
+
+TABLE:  "GROUP DEFINITIONS"
+   Group=All   Color=Red
+   Group="BP OUTLINE"   Color=Yellow
+
+TABLE:  "GROUP ASSIGNMENTS"
+   Group="BP OUTLINE"   ObjType=Line   ObjLabel=10
+
+TABLE:  "OBJECT GEOMETRY - POINT COORDINATES"
+   Point=1   GlobalX=0   GlobalY=0   GlobalZ=0   SpecialPt=No
+   Point=2   GlobalX=4000   GlobalY=0   GlobalZ=0   SpecialPt=No
+   Point=3   GlobalX=4000   GlobalY=4000   GlobalZ=0   SpecialPt=No
+   Point=4   GlobalX=0   GlobalY=4000   GlobalZ=0   SpecialPt=No
+   Point=5   GlobalX=0   GlobalY=0   GlobalZ=3000   SpecialPt=No
+   Point=6   GlobalX=4000   GlobalY=0   GlobalZ=3000   SpecialPt=No
+   Point=7   GlobalX=4000   GlobalY=4000   GlobalZ=3000   SpecialPt=No
+   Point=8   GlobalX=0   GlobalY=4000   GlobalZ=3000   SpecialPt=No
+
+TABLE:  "OBJECT GEOMETRY - LINES 01 - GENERAL"
+   Line=10   PointI=1   PointJ=2
+   Line=20   PointI=4   PointJ=3
+
+TABLE:  "OBJECT GEOMETRY - AREAS 01 - GENERAL"
+   Area=1   Point1=1   Point2=2   Point3=3   Point4=4   Auto=No
+   Area=2   Point1=5   Point2=6   Point3=7   Point4=8   Auto=No
+   Area=3   Point1=1   Point2=2   Point3=3   Point4=4   Auto=No
+   Area=3   Point1=8   Point2=7   Point3=6   Point4=5
+
+TABLE:  "OBJECT GEOMETRY - DESIGN STRIPS"
+   Strip=CSA1   Point=1   WALeft=500   WARight=500
+   Strip=CSA1   Point=2   WBLeft=500   WBRight=500
+
+TABLE:  "LOAD ASSIGNMENTS - SURFACE LOADS"
+   Area=1   LoadPat=LL   Dir=Gravity   UnifLoad=0.005   A=0   B=0   C=0
+
+TABLE:  "LOAD ASSIGNMENTS - LINE OBJECTS - DISTRIBUTED LOADS"
+   Line=10   LoadPat=DL   Type=Force   Dir=Gravity   DistType=RelDist   RelDistA=0   RelDistB=1   AbsDistA=0   AbsDistB=4000   FOverLA=39   FOverLB=39
+
+TABLE:  "LOAD ASSIGNMENTS - POINT LOADS"
+   Point=1   LoadPat=SDL   Fx=0   Fy=0   Fgrav=-50780   Mx=0   My=0   Mz=0
+
+TABLE:  "PUNCHING SHEAR DESIGN OVERWRITES 01 - GENERAL"
+   Point=4   Check="Program Determined"   LocType=Auto   Perimeter=Auto   EffDepth=Auto   Openings=Auto   ReinfType=None
+
+TABLE:  "REINFORCING BAR SIZES"
+   Bar=10   Diameter=10   Area=78.5398
+
+END TABLE DATA
