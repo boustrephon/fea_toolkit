@@ -52,10 +52,10 @@ cd "$ROOT"
 
 PYTHON="${PYTHON:-python}"
 PACKAGE="${PACKAGE:-src/fea_toolkit}"
+GUI_ENTRY="${GUI_ENTRY:-scripts/fea_gui_entry.py}"
 OUTPUT_NAME="${OUTPUT_NAME:-fea_toolkit}"
 
 ARGS=(
-    --python-flag=-m
     --assume-yes-for-downloads
     --output-dir="$ROOT/build/nuitka"
     --output-filename="$OUTPUT_NAME"
@@ -74,12 +74,14 @@ ARGS=(
 
 if [[ "$GUI" -eq 1 ]]; then
     # A .app bundle on macOS; satisfies the pyobjc AppKit/Foundation requirement.
-    # Launch the Qt GUI (fea_toolkit.gui.__main__), not the API-lister __main__.
+    # Compile the top-level GUI entry script, not `-m` on the subpackage: the
+    # latter broke relative imports (io.report's ``from ..utils import ...``).
     ARGS+=(--mode=app-dist --enable-plugin=pyside6 --macos-app-icon=none)
-    PACKAGE="${GUI_PACKAGE:-src/fea_toolkit/gui}"
+    ENTRY="$GUI_ENTRY"
 else
     ARGS+=(
         --standalone
+        --python-flag=-m
         # CLI build has no Qt and no macOS pyobjc bridge.
         --nofollow-import-to=PySide6
         --nofollow-import-to=pyvistaqt
@@ -88,6 +90,7 @@ else
         --nofollow-import-to=Foundation
         --nofollow-import-to=objc
     )
+    ENTRY="$PACKAGE"
 fi
 
 if [[ "$WITH_OPENSEES" -eq 1 ]]; then
@@ -113,7 +116,7 @@ else
     )
 fi
 
-ARGS+=("$PACKAGE")
+ARGS+=("$ENTRY")
 
 INTERFACE="cli"
 [[ "$GUI" -eq 1 ]] && INTERFACE="gui"
