@@ -84,6 +84,7 @@ from ..model.sap_data import (
     ShellSection,
     ShellUniformLoadSet,
     TeeSection,
+    is_null_section,
     is_opening_section,
 )
 from ..model.section_profiles import _rotate_loops_about, _signed_loop_properties
@@ -841,11 +842,13 @@ def _resolve_geometry(
         is_opening = is_opening_section(attrs.get("SECTION")) or (
             str(attrs.get("OPENING", "")).strip().upper() == "YES"
         )
+        is_null = is_null_section(attrs.get("SECTION"))
         area_elements[area_id] = AreaElement(
             area_id=area_id,
             area_tag=next_area_tag,
             node_ids=node_ids,
             opening=is_opening,
+            null=is_null,
         )
         next_area_tag += 1
         section = attrs.get("SECTION")

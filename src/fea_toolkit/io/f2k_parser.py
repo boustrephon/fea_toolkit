@@ -51,7 +51,7 @@ from ..model.sap_data import (
     Section,
     ShellSection,
     TendonProperty,
-    is_opening_section,
+    is_null_section,
 )
 from ._table_text import parse_table_file, read_file_with_encodings
 
@@ -454,17 +454,21 @@ class SAFEF2KParser:
             assign[str(aid)] = str(sec)
         return assign
 
-    def _get_opening_area_ids(self) -> set[str]:
-        """Area ids whose section is ``None`` / ``NONE`` (voids/opening)."""
-        opening: set[str] = set()
+    def _get_null_area_ids(self) -> set[str]:
+        """Area ids whose section is ``None`` / ``NONE`` (geometric objects).
+
+        These carry no shell stiffness but are not openings: they are load
+        patches / meshing guides (see :func:`is_null_section`).
+        """
+        null_ids: set[str] = set()
         for rec in self._raw_tables.get("AREA ASSIGNMENTS - SECTION PROPERTIES", []):
             aid = self._id(rec, ("UniqueName", "Unique Name"))
             if aid is None:
                 continue
             sec = rec.get("Section Property")
-            if sec is None or is_opening_section(sec):
-                opening.add(str(aid))
-        return opening
+            if sec is None or is_null_section(sec):
+                null_ids.add(str(aid))
+        return null_ids
 
     def _get_groups(self) -> dict[str, Group]:
         groups: dict[str, Group] = {}
@@ -750,7 +754,7 @@ class SAFEF2KParser:
 
         area_assignments = self._get_area_assignments()
         sections = self._get_sections()
-        opening_ids = self._get_opening_area_ids()
+        null_ids = self._get_null_area_ids()
         area_elements = self._get_area_elements()
         for aid, elem in area_elements.items():
             sec_name = area_assignments.get(aid)
@@ -758,8 +762,8 @@ class SAFEF2KParser:
                 sec = sections.get(sec_name)
                 if isinstance(sec, ShellSection):
                     elem.thickness = sec.thickness
-            if aid in opening_ids:
-                elem.opening = True
+            if aid in null_ids:
+                elem.null = True
 
         load_cases = self.get_load_cases()
         point_springs, point_spring_assignments = self._get_point_springs()

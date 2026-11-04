@@ -83,6 +83,15 @@ def test_opening_and_inactive_areas_flag_themselves():
     assert ("Meshed Away", "Yes") in rows
 
 
+def test_null_area_flags_itself_as_geometric():
+    md = _model(
+        areas={"A1": AreaElement("A1", 1, ["1", "2", "3"])},
+        area_roles={"A1": "floor"},
+    )
+    md.area_elements["A1"].null = True
+    assert ("Null (Geometric)", "Yes") in meshing_rows(md, md.area_elements["A1"])
+
+
 def test_area_reports_auto_edge_constraint():
     md = _model(
         areas={"A1": AreaElement("A1", 1, ["1", "2", "3", "4"])},

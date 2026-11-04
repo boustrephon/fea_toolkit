@@ -42,8 +42,10 @@ def test_multi_line_area_polygon_merged(model):
     assert model.area_elements["3"].node_ids == ["1", "2", "3", "4", "8", "7", "6", "5"]
 
 
-def test_openings(model):
-    assert model.area_elements["3"].opening is True
+def test_null_areas(model):
+    assert model.area_elements["3"].null is True
+    assert model.area_elements["3"].opening is False
+    assert model.area_elements["1"].null is False
     assert model.area_elements["1"].opening is False
 
 

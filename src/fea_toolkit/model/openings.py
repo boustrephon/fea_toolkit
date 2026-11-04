@@ -1,11 +1,13 @@
 """Opening (void) geometry: net shell area after subtracting openings.
 
 An *opening* is an :class:`~fea_toolkit.model.sap_data.AreaElement` flagged
-``opening=True`` — assigned the built-in ``"NONE"`` section (modern
-ETABS/SAP2000), or ``OPENING "YES"`` (legacy ETABS 9.7).  Openings are voids,
+``opening=True`` — an *explicitly designated* void (``OPENING "YES"`` in
+legacy ETABS 9.7, or an explicit opening section name).  Openings are voids,
 not shells: they carry no weight, and their region is cut out of any coplanar
 parent slab/wall they overlap (CSiXRevit documents wall openings as area
-objects that *overlap* the wall area).
+objects that *overlap* the wall area).  The built-in ``"NONE"`` section is
+*not* an opening — it is a null (geometric) object (see
+:func:`~fea_toolkit.model.sap_data.is_null_section`), and is not handled here.
 
 The self-weight paths call :func:`net_area` in place of the raw
 :func:`~fea_toolkit.model.geometry_core.polygon_area_3d` so the applied and

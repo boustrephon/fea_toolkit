@@ -2013,32 +2013,48 @@ class FrameElement:
     imk_params_j: Optional[dict[str, float]] = None
 
 
-# ── Opening / void section markers ───────────────────────────────────
-# CSI marks an area *opening* (a hole in a slab/wall/floor) by assigning
-# it the built-in ``"NONE"`` section rather than a real shell section —
-# see the CSiXRevit import mapping and ``docs/e2k_import_plan.md``.
-# Legacy ETABS 9.7 instead wrote ``OPENING "YES"`` on the assignment line;
-# the e2k parser folds both spellings into ``AreaElement.opening``.
-_VOID_SECTION_NAMES = {"NONE"}
+# ── Null vs opening area markers ────────────────────────────────────
+# CSI's built-in ``"NONE"`` section marks a *null* (geometric) area — an object
+# drawn for a purpose other than contributing shell stiffness: a load patch
+# (whose uniform load transfers to the enclosing slab) or a meshing guide.
+# It is **not** an opening.  A true *opening* (a hole cut in a slab/wall) is
+# recognised only when it is explicitly designated as one — e.g. the legacy
+# ETABS 9.7 ``OPENING "YES"`` assignment flag (parsed inline by the e2k parser)
+# or an explicit opening section name listed below.
+_NULL_SECTION_NAMES = {"NONE"}
+_OPENING_SECTION_NAMES: frozenset[str] = frozenset()
+
+
+def is_null_section(name: Any) -> bool:
+    """True when *name* is the built-in ``"NONE"`` (geometric/null) section.
+
+    A null area carries no shell stiffness and is excluded from analysis, but
+    it is *not* a hole: its loads (if any) transfer to the enclosing slab, and
+    its boundary is a meshing constraint.  Case is not significant.
+    """
+    return str(name or "").strip().upper() in _NULL_SECTION_NAMES
 
 
 def is_opening_section(name: Any) -> bool:
-    """True when *name* is a void/opening section marker, not a shell section.
+    """True when *name* is an explicit *opening* (void) section marker.
 
-    The built-in ``"NONE"`` section marks opening areas (and null line
-    objects) in ETABS/SAP2000 exports; case is not significant.
+    Unlike :func:`is_null_section`, this is a positive designation of a hole.
+    Most CSI exports mark openings with the ``OPENING "YES"`` assignment flag
+    (handled inline by the e2k parser) rather than by a section name; this
+    predicate covers the rare case of an explicit opening section name.  Case
+    is not significant.
     """
-    return str(name or "").strip().upper() in _VOID_SECTION_NAMES
+    return str(name or "").strip().upper() in _OPENING_SECTION_NAMES
 
 
 @dataclass
 class AreaElement:
     """2D shell/area element connectivity.
 
-    ``opening`` marks a void/opening area (assigned the built-in
-    ``"NONE"`` section, or ``OPENING "YES"`` in legacy ETABS 9.7): such
-    areas carry no shell stiffness and are cut out of the parent
-    slab/wall when its weight and mesh are computed.
+    ``opening`` marks an *explicit* opening (a void hole cut in the slab/wall).
+    ``null`` marks the built-in ``"NONE"`` (geometric) object — excluded from
+    analysis, but kept as a load patch / meshing guide rather than a hole.  See
+    :func:`is_opening_section` and :func:`is_null_section`.
 
     ``inactive`` is set to ``True`` when the super-element has been
     subdivided into mesh sub-elements.
@@ -2053,7 +2069,8 @@ class AreaElement:
     area_tag: int
     node_ids: list[str]  # ordered corner nodes
     thickness: float = 0.0
-    opening: bool = False  # True when this area is a void/opening (assigned "NONE")
+    opening: bool = False  # True when this area is an explicit opening (void)
+    null: bool = False  # True when this area is the built-in "NONE" (geometric) object
     inactive: bool = False  # True when superseded by mesh sub‑elements
     parent_id: Optional[str] = None
     child_ids: list[str] = field(default_factory=list)
@@ -2576,6 +2593,11 @@ class SAPModelData:
     def opening_area_ids(self) -> set[str]:
         """IDs of area elements flagged as openings (voids)."""
         return {aid for aid, a in self.area_elements.items() if getattr(a, "opening", False)}
+
+    @property
+    def null_area_ids(self) -> set[str]:
+        """IDs of area elements flagged as null (geometric) objects."""
+        return {aid for aid, a in self.area_elements.items() if getattr(a, "null", False)}
 
     # ── Unit conversion factors ──────────────────────────────────────────
     # These are computed from self.units and provide a consistent way to

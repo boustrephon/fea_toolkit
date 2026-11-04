@@ -40,6 +40,7 @@ from ..model.sap_data import (
     Section,
     ShellSection,
     StressStrainCurve,
+    is_null_section,
     is_opening_section,
 )
 from ._table_text import parse_table_file, read_file_with_encodings
@@ -227,6 +228,8 @@ class SAP2000Parser:
                     a_elem.thickness = sec.thickness
                 if is_opening_section(sec_name):
                     a_elem.opening = True
+                if is_null_section(sec_name):
+                    a_elem.null = True
 
         # ── Apply cardinal points to frame elements ──
         frame_cardinal = self._get_frame_cardinal_points()
@@ -1222,8 +1225,8 @@ class SAP2000Parser:
             aid = str(a.get("Area", "0"))
             sec = a.get("Section", "")
             # The raw-table parser converts the reserved ``Section="NONE"``
-            # marker (an opening/void area) to ``None``; recover it so
-            # :func:`is_opening_section` can still flag the area as a void.
+            # marker (a null/geometric area) to ``None``; recover it so
+            # :func:`is_null_section` can still flag the area.
             if sec is None:
                 sec = "NONE"
             if aid != "0" and sec:

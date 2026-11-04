@@ -52,7 +52,7 @@ from ..model.sap_data import (
     Section,
     ShellSection,
     TendonProperty,
-    is_opening_section,
+    is_null_section,
 )
 from .f2k_parser import SAFEF2KParser, _normalize_case_type
 from .safe_table_registry import safe_db_table_coverage, safe_db_unhandled_tables
@@ -298,16 +298,17 @@ class SAFEDBParser(SAFEF2KParser):
             assign[str(aid)] = str(slab)
         return assign
 
-    def _get_opening_area_ids(self) -> set[str]:
-        opening: set[str] = set()
+    def _get_null_area_ids(self) -> set[str]:
+        """Area ids whose slab property is ``None`` / ``NONE`` (geometric)."""
+        null_ids: set[str] = set()
         for rec in self._raw_tables.get("SLAB PROPERTY ASSIGNMENTS", []):
             aid = rec.get("Area")
             if aid is None:
                 continue
             slab = rec.get("SlabProp")
-            if slab is None or is_opening_section(slab):
-                opening.add(str(aid))
-        return opening
+            if slab is None or is_null_section(slab):
+                null_ids.add(str(aid))
+        return null_ids
 
     def _get_groups(self) -> dict[str, Group]:
         groups: dict[str, Group] = {}
@@ -584,7 +585,7 @@ class SAFEDBParser(SAFEF2KParser):
 
         area_assignments = self._get_area_assignments()
         sections = self._get_sections()
-        opening_ids = self._get_opening_area_ids()
+        null_ids = self._get_null_area_ids()
         area_elements = self._get_area_elements()
         for aid, elem in area_elements.items():
             sec_name = area_assignments.get(aid)
@@ -592,8 +593,8 @@ class SAFEDBParser(SAFEF2KParser):
                 sec = sections.get(sec_name)
                 if isinstance(sec, ShellSection):
                     elem.thickness = sec.thickness
-            if aid in opening_ids:
-                elem.opening = True
+            if aid in null_ids:
+                elem.null = True
 
         load_cases = self.get_load_cases()
         point_springs, point_spring_assignments = self._get_point_springs()

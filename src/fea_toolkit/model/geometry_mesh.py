@@ -534,8 +534,8 @@ def mesh_area_elements(
             continue  # only quad areas are meshed
         if getattr(elem, "inactive", False):
             continue  # already subdivided in a previous build
-        if getattr(elem, "opening", False):
-            continue  # openings are voids, never meshed
+        if getattr(elem, "opening", False) or getattr(elem, "null", False):
+            continue  # openings/nulls are never meshed
 
         # Seed registry from this area's corner nodes
         for nid in elem.node_ids:
@@ -956,8 +956,8 @@ def subdivide_area_mesh(
             continue
         if getattr(elem, "inactive", False):
             continue
-        if getattr(elem, "opening", False):
-            continue  # openings are voids, never meshed
+        if getattr(elem, "opening", False) or getattr(elem, "null", False):
+            continue  # openings/nulls are never meshed
         if len(elem.node_ids) != 4:
             continue
 

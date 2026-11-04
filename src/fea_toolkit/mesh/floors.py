@@ -163,6 +163,7 @@ def mesh_floors(
 
     roles = area_roles or {}
     opening_ids = {aid for aid, a in area_elements.items() if getattr(a, "opening", False)}
+    null_ids = {aid for aid, a in area_elements.items() if getattr(a, "null", False)}
 
     # ── Partition floor vs opening areas by rounded Z level ──────────
     def _level_of(aid: str) -> Optional[float]:
@@ -179,6 +180,8 @@ def mesh_floors(
     for aid, area in area_elements.items():
         if getattr(area, "inactive", False):
             continue
+        if aid in null_ids:
+            continue  # geometric object: not a shell, not a hole (loads deferred)
         if aid in opening_ids:
             z = _level_of(aid)
             if z is not None:

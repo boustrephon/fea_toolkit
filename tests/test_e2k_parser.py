@@ -1061,7 +1061,7 @@ def test_null_line_and_none_section_materialised(tmp_path):
     assert md.sections["NONE"].A == 0.0
 
 
-def test_opening_areas_flagged_from_none_section_and_legacy_flag(tmp_path):
+def test_null_and_opening_areas_flagged_distinctly(tmp_path):
     content = (
         "$ CONTROLS\n"
         '  UNITS  "KN"  "M"\n'
@@ -1086,10 +1086,16 @@ def test_opening_areas_flagged_from_none_section_and_legacy_flag(tmp_path):
     p.write_text(content, encoding="utf-8")
     md = ETABSParser(p).parse().get_model_data()
 
-    assert md.area_elements["A1@ROOF"].opening is True
+    # SECTION "NONE" is a null (geometric) object, not an opening.
+    assert md.area_elements["A1@ROOF"].null is True
+    assert md.area_elements["A1@ROOF"].opening is False
+    # OPENING "YES" is the explicit opening (void) designation.
     assert md.area_elements["A2@ROOF"].opening is True
+    assert md.area_elements["A2@ROOF"].null is False
     assert md.area_elements["A3@ROOF"].opening is False
-    assert md.opening_area_ids == {"A1@ROOF", "A2@ROOF"}
+    assert md.area_elements["A3@ROOF"].null is False
+    assert md.opening_area_ids == {"A2@ROOF"}
+    assert md.null_area_ids == {"A1@ROOF"}
 
 
 def test_missing_sd_section_gets_placeholder(tmp_path):

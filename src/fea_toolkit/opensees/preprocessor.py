@@ -1405,13 +1405,17 @@ class Preprocessor:
         if not area_mesh:
             return
 
-        # Exclude loads-only areas and opening (void) areas.
-        opening_ids = {aid for aid, a in md.area_elements.items() if getattr(a, "opening", False)}
+        # Exclude loads-only areas, opening (void) areas and null (geometric) areas.
+        excluded_ids = {
+            aid
+            for aid, a in md.area_elements.items()
+            if getattr(a, "opening", False) or getattr(a, "null", False)
+        }
         if selection is not None:
-            loads_only = set(selection.get_area_ids(md)) | opening_ids
+            loads_only = set(selection.get_area_ids(md)) | excluded_ids
             mesh_filtered = {aid: m for aid, m in area_mesh.items() if aid not in loads_only}
         else:
-            mesh_filtered = {aid: m for aid, m in area_mesh.items() if aid not in opening_ids}
+            mesh_filtered = {aid: m for aid, m in area_mesh.items() if aid not in excluded_ids}
 
         if not mesh_filtered:
             return

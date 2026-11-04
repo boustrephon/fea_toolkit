@@ -1640,8 +1640,8 @@ def test_rigid_diaphragms_false_wins_over_explicit_constraints(tmp_path):
         ops.wipe()
 
 
-def test_opening_area_flagged_from_none_section(tmp_path):
-    """An area assigned SAP2000's built-in "NONE" section is an opening."""
+def test_null_area_flagged_from_none_section(tmp_path):
+    """An area assigned SAP2000's built-in "NONE" section is a null object."""
     data = {
         "PROGRAM CONTROL": [{"CurrUnits": "kN, m, C"}],
         "JOINT COORDINATES": [
@@ -1659,13 +1659,16 @@ def test_opening_area_flagged_from_none_section(tmp_path):
             {"Area": "A2", "Joint1": 1, "Joint2": 2, "Joint3": 3, "Joint4": 4},
         ],
     }
-    json_path = tmp_path / "openings.json"
+    json_path = tmp_path / "null.json"
     json_path.write_text(json.dumps(data))
     md = SAP2000Parser.from_json(json_path).get_model_data()
 
+    assert md.area_elements["A1"].null is False
     assert md.area_elements["A1"].opening is False
-    assert md.area_elements["A2"].opening is True
-    assert md.opening_area_ids == {"A2"}
+    assert md.area_elements["A2"].null is True
+    assert md.area_elements["A2"].opening is False
+    assert md.opening_area_ids == set()
+    assert md.null_area_ids == {"A2"}
 
 
 def test_rigid_diaphragms_explicit_selection_groups(tmp_path):

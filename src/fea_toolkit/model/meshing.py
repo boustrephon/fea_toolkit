@@ -53,6 +53,8 @@ def _area_meshing_rows(model: Any, area: AreaElement) -> list:
 
     if getattr(area, "opening", False):
         rows.append(("Opening", "Yes"))
+    if getattr(area, "null", False):
+        rows.append(("Null (Geometric)", "Yes"))
     if getattr(area, "inactive", False):
         rows.append(("Meshed Away", "Yes"))
 
