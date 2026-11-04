@@ -20,23 +20,29 @@
 #   scripts/build_nuitka.sh --gui               # GUI app, no OpenSees
 #   scripts/build_nuitka.sh --with-opensees     # CLI + OpenSees (licensed)
 #   scripts/build_nuitka.sh --gui --with-opensees
+#   scripts/build_nuitka.sh --gui --icon build/fea_toolkit.icns
 #
 # Overridable via the environment: PYTHON (default "python"), PACKAGE (default
-# "src/fea_toolkit"), OUTPUT_NAME (default "fea_toolkit").
+# "src/fea_toolkit"), OUTPUT_NAME (default "fea_toolkit"), ICON (default none;
+# a macOS .icns path, or pass --icon).  See docs/build_nuitka.md.
 
 set -euo pipefail
 
 GUI=0
 WITH_OPENSEES=0
-for arg in "$@"; do
-    case "$arg" in
+ICON="${ICON:-}"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
         --gui) GUI=1 ;;
         --with-opensees) WITH_OPENSEES=1 ;;
+        --icon) ICON="$2"; shift ;;
+        --icon=*) ICON="${1#--icon=}" ;;
         *)
-            echo "build_nuitka.sh: unknown argument: $arg" >&2
+            echo "build_nuitka.sh: unknown argument: $1" >&2
             exit 2
             ;;
     esac
+    shift
 done
 
 if [[ "$WITH_OPENSEES" -eq 1 && "${OPENSEES_COMMERCIAL_LICENCE:-}" != "1" ]]; then
@@ -76,7 +82,9 @@ if [[ "$GUI" -eq 1 ]]; then
     # A .app bundle on macOS; satisfies the pyobjc AppKit/Foundation requirement.
     # Compile the top-level GUI entry script, not `-m` on the subpackage: the
     # latter broke relative imports (io.report's ``from ..utils import ...``).
-    ARGS+=(--mode=app-dist --enable-plugin=pyside6 --macos-app-icon=none --macos-app-name="$OUTPUT_NAME")
+    ICON_ARG="--macos-app-icon=none"
+    [[ -n "$ICON" ]] && ICON_ARG="--macos-app-icon=$ICON"
+    ARGS+=(--mode=app-dist --enable-plugin=pyside6 "$ICON_ARG" --macos-app-name="$OUTPUT_NAME")
     ENTRY="$GUI_ENTRY"
 else
     ARGS+=(

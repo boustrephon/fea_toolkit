@@ -304,6 +304,11 @@ for automated cross-referencing.
 
 ## 🛠️ Tool-Specific Workflows
 
+- [Building the app with Nuitka](build_nuitka.md) — ✅ Complete
+  > How to build the standalone CLI binary and the macOS desktop app with Nuitka, set the app name and icon, and point the separate build at an OpenSeesPy installation.
+  Tags: `build`, `nuitka`, `packaging`, `distribution`, `icon`, `app-name`, `opensees`, `macos`
+  Related: [Desktop GUI](gui.md) · [Licence and Disclaimer](licence.md) · [Versioning & Release Plan](versioning.md) · [Custom OpenSeesPy local build — swap recipe](openseespy_local_build.md) · [_pending_work.md](_pending_work.md)
+
 - [Xara/OpenSeesRT Gravity & Solver Lessons Learned](xara_gravity_and_solver.md) — ✅ Complete
   > Lessons learned from Xara/OpenSeesRT gravity analysis and solver configuration.
   Tags: `xara`, `tcl`, `gravity`, `solver`, `lessons-learned`
@@ -478,6 +483,7 @@ Tags across all documentation files:
 - **`analysis-builder`** — [builder_reference.md](builder_reference.md), [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`analysis-type`** — [modal_analysis.md](modal_analysis.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [pushover_analysis.md](pushover_analysis.md), [storey_response.md](storey_response.md)
 - **`api-reference`** — [llm_guide.md](llm_guide.md)
+- **`app-name`** — [build_nuitka.md](build_nuitka.md)
 - **`architecture`** — [analysis.md](analysis.md), [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [builder_reference.md](builder_reference.md), [dev_notes.md](dev_notes.md), [gui_roadmap.md](gui_roadmap.md), [layered_analysis_workflow.md](layered_analysis_workflow.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [workflow.md](workflow.md), [workflow_authoring.md](workflow_authoring.md)
 - **`area-elements`** — [shell_openings.md](shell_openings.md), [shell_support.md](shell_support.md)
 - **`asce41`** — [capacity.md](capacity.md)
@@ -494,7 +500,7 @@ Tags across all documentation files:
 - **`braced-frame`** — [benchmark_register.md](benchmark_register.md)
 - **`braces`** — [element_classification.md](element_classification.md)
 - **`buckling`** — [model_review.md](model_review.md)
-- **`build`** — [openseespy_local_build.md](openseespy_local_build.md)
+- **`build`** — [build_nuitka.md](build_nuitka.md), [openseespy_local_build.md](openseespy_local_build.md)
 - **`cantilever`** — [cantilever_benchmark.md](cantilever_benchmark.md)
 - **`capacity`** — [capacity.md](capacity.md), [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`capacity-spectrum`** — [csm_bilinearization.md](csm_bilinearization.md), [csm_test_model_plan.md](csm_test_model_plan.md)
@@ -538,7 +544,7 @@ Tags across all documentation files:
 - **`diaphragm`** — [diaphragm_constraints.md](diaphragm_constraints.md)
 - **`disclaimer`** — [licence.md](licence.md)
 - **`displacement`** — [storey_response.md](storey_response.md)
-- **`distribution`** — [licence.md](licence.md)
+- **`distribution`** — [build_nuitka.md](build_nuitka.md), [licence.md](licence.md)
 - **`drift`** — [storey_response.md](storey_response.md)
 - **`duong`** — [duong_benchmark.md](duong_benchmark.md), [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`dynamic`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
@@ -580,6 +586,7 @@ Tags across all documentation files:
 - **`html-export`** — [viewer.md](viewer.md)
 - **`hysteretic`** — [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`ibarra-krawinkler`** — [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [imk_deterioration_model.md](imk_deterioration_model.md), [imk_member_classification.md](imk_member_classification.md)
+- **`icon`** — [build_nuitka.md](build_nuitka.md)
 - **`ida`** — [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md)
 - **`identifiers`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`imk`** — [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [imk_deterioration_model.md](imk_deterioration_model.md), [imk_member_classification.md](imk_member_classification.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md)
@@ -608,7 +615,7 @@ Tags across all documentation files:
 - **`load-redistribution`** — [element_splitting.md](element_splitting.md)
 - **`loads`** — [load_cases_and_combinations.md](load_cases_and_combinations.md), [load_combinations.md](load_combinations.md)
 - **`logging`** — [pipeline_logging.md](pipeline_logging.md)
-- **`macos`** — [openseespy_local_build.md](openseespy_local_build.md)
+- **`macos`** — [build_nuitka.md](build_nuitka.md), [openseespy_local_build.md](openseespy_local_build.md)
 - **`mander`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`masonry`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md)
 - **`mcft`** — [duong_benchmark.md](duong_benchmark.md), [shear_failure_modelling.md](shear_failure_modelling.md)
@@ -631,13 +638,14 @@ Tags across all documentation files:
 - **`nonlinear-dynamic`** — [benchmark_register.md](benchmark_register.md), [ground_motion_data.md](ground_motion_data.md), [imk_deterioration_model.md](imk_deterioration_model.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md)
 - **`notes`** — [dev_notes.md](dev_notes.md)
 - **`npz`** — [model_stage_file.md](model_stage_file.md), [project_bundle.md](project_bundle.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
+- **`nuitka`** — [build_nuitka.md](build_nuitka.md)
 - **`offsets`** — [member_offsets.md](member_offsets.md)
 - **`openings`** — [shell_openings.md](shell_openings.md)
-- **`opensees`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [tcl_export.md](tcl_export.md)
+- **`opensees`** — [build_nuitka.md](build_nuitka.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [tcl_export.md](tcl_export.md)
 - **`openseespy`** — [licence.md](licence.md), [openseespy_local_build.md](openseespy_local_build.md)
 - **`openseesrt`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`orchestration`** — [analysis.md](analysis.md)
-- **`packaging`** — [versioning.md](versioning.md)
+- **`packaging`** — [build_nuitka.md](build_nuitka.md), [versioning.md](versioning.md)
 - **`palette`** — [workflow_palette.md](workflow_palette.md)
 - **`panel-zone`** — [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md)
 - **`parser`** — [e2k_import_plan.md](e2k_import_plan.md), [json_serialization.md](json_serialization.md), [parser_coverage.md](parser_coverage.md), [safe_import.md](safe_import.md)

@@ -354,6 +354,9 @@ When `opensees.python` is absent, the solver falls back to the
 ("delegating static analysis to …"), and a failed run reports the subprocess's
 own traceback in the Message Log.
 
+See `build_nuitka.md` for the full build-and-distribute guide (naming the app,
+adding an icon, and setting up the OpenSeesPy environment).
+
 Selecting supports **multiple** entities: a clean click replaces, Shift-click
 adds, Ctrl/Cmd-click toggles, and a drag with the marquee modifier (Alt/Opt, or
 any drag in Select mode) rubber-band-selects.  A left-to-right marquee is a
