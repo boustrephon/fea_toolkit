@@ -453,7 +453,7 @@ for automated cross-referencing.
   Tags: `etabs`, `e2k`, `io`, `parser`
   Related: [JSON Serialization: Raw Tables vs Model Codec](json_serialization.md) · [SAP2000 Parser — Table & Keyword Coverage](parser_coverage.md) · [LLM & AI Assistant Guide](llm_guide.md) · [Desktop GUI Roadmap](gui_roadmap.md)
 
-- [CSi SAFE (.f2k / .$sf) import](safe_import.md) — ✅ Complete
+- [CSi SAFE (.f2k / .$sf) import](safe_import.md) — ⚠️ Partial
   > SAFE tabular (.f2k) and native-database (.$sf) parsers, gmsh floor meshing, and soil/foundation spring supports for slab models.
   Tags: `safe`, `f2k`, `sf`, `io`, `parser`, `gmsh`, `springs`
   Related: [ETABS (.E2K / .$ET) import](e2k_import_plan.md) · [Shell openings — exact cut-out and shell element-family selection](shell_openings.md) · [LLM & AI Assistant Guide](llm_guide.md)

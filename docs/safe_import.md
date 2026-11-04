@@ -1,7 +1,7 @@
 ---
 title: "CSi SAFE (.f2k / .$sf) import"
 description: "SAFE tabular (.f2k) and native-database (.$sf) parsers, gmsh floor meshing, and soil/foundation spring supports for slab models."
-status: "complete"
+status: "partial"
 tags: [safe, f2k, sf, io, parser, gmsh, springs]
 category: [import]
 related: [e2k_import_plan.md, shell_openings.md, llm_guide.md]
@@ -9,7 +9,7 @@ related: [e2k_import_plan.md, shell_openings.md, llm_guide.md]
 
 # CSi SAFE (`.f2k` / `.$sf`) import
 
-> **Status: ✅ Complete.** SAFE slab models import through the same
+> **Status: ⚠️ Partial.** SAFE slab models import through the same
 > `load_model_data()` path as SAP2000/ETABS, mesh with gmsh, and carry their
 > soil/foundation springs into OpenSees as `zeroLength` supports.
 
@@ -58,11 +58,13 @@ per-level planar union into buildable quad/tri `AreaElement`s:
 
 * the **union outer boundary** is reconstructed from undirected edge counts
   (an edge on the outline is one whose midpoint lies inside no other region);
-* **openings** are cut as `PlaneSurface` holes;
-* **null** (`"NONE"`) areas are neither shells nor holes: they are excluded
-  from the gmsh pass, and their uniform pressure re-parents onto the slab
-  sub-elements under them (`transfer_null_area_loads`) rather than being
-  dropped;
+* **openings** are cut as `PlaneSurface` holes — an *unloaded* opening
+  (`OpeningType=Unloaded`) is imported as a void (`opening=True`), while a
+  *loaded* opening stays a null load patch;
+* **null** (`"NONE"`) areas are neither shells nor holes: their boundary edges
+  are embedded as mesh constraints so the patch boundary is tiled exactly, and
+  their uniform pressure re-parents onto the slab sub-elements under them
+  (`transfer_null_area_loads`) rather than being dropped;
 * **overlapping drop panels / stiff zones** are resolved by per-element
   *overlay precedence* (`Stiff` > `Drop` > `Slab`, read from the section
   `shape`) — OCC booleans cannot subtract coplanar faces, so the mesher works
