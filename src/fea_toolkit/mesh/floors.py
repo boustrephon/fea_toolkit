@@ -13,8 +13,8 @@ What it does per level (a set of coplanar, horizontal floor areas):
 
 * each floor area polygon becomes a gmsh ``PlaneSurface``,
 * each opening (void) polygon is cut out as a hole in the surface that contains
-  it — and a boundary loop contained by another loop (a floor union with an
-  island) is likewise treated as a hole rather than a separate surface,
+  it — and a floor union's nested boundary loops (an island) are resolved by
+  nesting depth: an odd-depth loop is a hole, an even-depth loop is a surface,
 * null (``"NONE"`` / load-patch) area boundary edges are *embedded* as mesh
   constraints so the patch boundary is tiled exactly for
   :func:`fea_toolkit.model.geometry_frames.transfer_null_area_loads`,
@@ -109,35 +109,6 @@ def _chain_loops(edges: list[tuple[tuple, tuple]]) -> list[list[tuple]]:
     return loops
 
 
-def _interior_point_2d(poly: list[tuple[float, float]]) -> tuple[float, float]:
-    """A point strictly inside a simple 2-D polygon.
-
-    The vertex centroid is usually interior; when it is not (a concave loop),
-    fall back to an edge midpoint nudged slightly toward the centroid, which the
-    even-odd :func:`point_in_polygon_2d` test then confirms.
-    """
-    n = len(poly)
-    cx = sum(p[0] for p in poly) / n
-    cy = sum(p[1] for p in poly) / n
-    if point_in_polygon_2d((cx, cy), poly):
-        return (cx, cy)
-    for i in range(n):
-        x0, y0 = poly[i]
-        x1, y1 = poly[(i + 1) % n]
-        mx = (x0 + x1) / 2.0
-        my = (y0 + y1) / 2.0
-        dx, dy = cx - mx, cy - my
-        denom = (dx * dx + dy * dy) ** 0.5
-        if denom < 1e-12:
-            continue
-        for frac in (1e-2, 1e-3, 1e-4, 1e-5):
-            px = mx + (dx / denom) * frac
-            py = my + (dy / denom) * frac
-            if point_in_polygon_2d((px, py), poly):
-                return (px, py)
-    return (cx, cy)  # best effort — the centroid is the last resort
-
-
 def mesh_floors(
     area_elements: dict[str, AreaElement],
     area_assignments: dict[str, str],
@@ -148,11 +119,11 @@ def mesh_floors(
     frame_assignments: Optional[dict[str, str]] = None,
     restraints: Optional[dict[str, Any]] = None,
     sections: Optional[dict[str, Any]] = None,
-    excluded_area_ids: Optional[set[str]] = None,
     next_tag: int = 1,
     target_length: Optional[float] = None,
     recombine: bool = True,
     verbose: bool = False,
+    excluded_area_ids: Optional[set[str]] = None,
 ) -> tuple[dict[str, AreaElement], dict[str, str], dict[str, Node], int, list[str]]:
     """Mesh SAFE floor areas into quads, preserving openings and constraints.
 
@@ -174,14 +145,14 @@ def mesh_floors(
             walls) are embedded as mesh nodes.
         sections: ``{name: Section}`` — used to resolve overlay precedence from
             each section's ``shape`` (``"Stiff"`` > ``"Drop"`` > anything else).
-        excluded_area_ids: Optional ``set[str]`` of area ids to exclude from
-            floor meshing (loads-only areas) — they are never converted into
-            floor shells.
         next_tag: First free numeric tag for new nodes and elements.
         target_length: Fallback element size when ``floor_mesh_options`` has no
             ``max_size``.
         recombine: Recombine triangles into quads.
         verbose: Show gmsh terminal output.
+        excluded_area_ids: Optional ``set[str]`` of area ids to exclude from
+            floor meshing (loads-only areas) — they are never converted into
+            floor shells.
 
     Returns:
         ``(area_elements, area_assignments, nodes, next_tag, skipped)`` where
@@ -348,12 +319,14 @@ def mesh_floors(
 
         # ── Outer surfaces (CCW) with nested holes and opening voids (CW) ──
         # A floor union can be a ring: its outer boundary encloses an inner
-        # boundary loop (an island such as a courtyard).  A loop contained by
-        # another is a *hole* in the containing surface — its curve loop is
-        # added clockwise and no ``PlaneSurface`` is made for it — not a
-        # separate surface.  Containment uses an *interior* point of the
-        # candidate loop (not its vertex centroid, which can fall outside a
-        # concave loop).
+        # boundary loop (an island such as a courtyard).  A loop's nesting depth
+        # decides its role — an even-depth loop is a *surface*, an odd-depth
+        # loop is a *hole* in its parent surface (added clockwise, with no
+        # ``PlaneSurface`` of its own).  The direct parent is the *smallest*
+        # loop that strictly encloses the candidate, tested with the candidate's
+        # own vertices: they lie on its boundary, so they can never fall inside
+        # one of its own holes and make an inner loop claim an outer one that
+        # encloses it.
         norm_loops: list[tuple[list[tuple], list[tuple[float, float]]]] = []
         for loop in outer_loops:
             verts = list(loop)
@@ -363,29 +336,40 @@ def mesh_floors(
                 poly.reverse()
             norm_loops.append((verts, poly))
 
+        areas = [abs(_signed_area(poly)) for _verts, poly in norm_loops]
         parent_of: dict[int, int] = {}
         for i, (_vi, poly_i) in enumerate(norm_loops):
-            ip = _interior_point_2d(poly_i)
+            best_area: Optional[float] = None
             for j, (_vj, poly_j) in enumerate(norm_loops):
-                if j == i:
+                if j == i or areas[j] <= areas[i]:
+                    continue  # an enclosing loop must be strictly larger
+                if not any(point_in_polygon_2d(v, poly_j) for v in poly_i):
                     continue
-                if point_in_polygon_2d(ip, poly_j):
+                if best_area is None or areas[j] < best_area:
                     parent_of[i] = j
-                    break
+                    best_area = areas[j]
+
+        depth_of: dict[int, int] = {}
+        for i in range(len(norm_loops)):
+            depth = 0
+            cur = i
+            while cur in parent_of:
+                cur = parent_of[cur]
+                depth += 1
+            depth_of[i] = depth
 
         nested_holes: dict[int, list[int]] = {}
         for i, (verts, _poly) in enumerate(norm_loops):
-            parent = parent_of.get(i)
-            if parent is None:
-                continue
+            if depth_of[i] % 2 == 0:
+                continue  # a surface (outer or island), not a hole
             # Clockwise curve loop (relative to the CCW parent surface).
             ov = [(v[0], v[1], level_z) for v in verts]
             ov.reverse()
-            nested_holes.setdefault(parent, []).append(_curve_loop(ov))
+            nested_holes.setdefault(parent_of[i], []).append(_curve_loop(ov))
 
         outer_surfaces: list[tuple[int, list[tuple[float, float]]]] = []
         for i, (verts, poly) in enumerate(norm_loops):
-            if i in parent_of:
+            if depth_of[i] % 2 == 1:
                 continue  # a hole, not a surface of its own
             hole_loops: list[int] = list(nested_holes.get(i, []))
             for opoly in open_polys.values():
