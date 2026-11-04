@@ -141,15 +141,17 @@ Resolution order, highest precedence first:
    import `openseespy` (the source install and the licensed build), otherwise
    the first `python3` on `PATH`.
 
-The chosen interpreter is logged when a solve is delegated ("delegating static
-analysis to …"), and a failed run reports the subprocess's own traceback in the
+The chosen interpreter is logged when a solve is delegated ("delegating … analysis
+to …"), and a failed run reports the subprocess's own traceback in the
 GUI's Message Log.
 
-> **Which verbs delegate.**  Today `run_static` delegates out-of-process when
-> `openseespy` is unavailable.  `run_modal`, `run_rs` and `run_pushover` still
-> import `openseespy` in-process and require the licensed (`--with-opensees`)
-> build or the source install until their delegation is wired.  See
-> `docs/gui.md` → *OpenSees runtime*.
+> **Which verbs delegate.**  Every OpenSees solve verb — `run_static`, `modal`,
+> `response_spectrum` and `pushover` — runs in-process when the current
+> interpreter can import `openseespy` (the source install and the licensed
+> `--with-opensees` build), and otherwise delegates to the configured
+> interpreter.  A `response_spectrum` / `pushover` step serialises the modal
+> result its preceding `modal` step produced and ships it to the subprocess, so
+> the modal analysis is not re-run.  See `docs/gui.md` → *OpenSees runtime*.
 
 ## Licence
 

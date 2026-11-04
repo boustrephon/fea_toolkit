@@ -121,6 +121,10 @@ PUSHOVER_PARAMS: dict[str, ParamSpec] = {
 def run_pushover(context: StepContext, step: Step) -> list[StepResult]:
     """Run a pushover analysis against the prepared topology.
 
+    In the "separate" build (no bundled ``openseespy``) the solve is delegated
+    to the configured OpenSees interpreter via
+    :func:`~fea_toolkit.opensees.delegate.run_pushover_out_of_process`.
+
     Args:
         context: The run's working state.  ``model`` and ``results["modal"]``
             must already be present (``mesh`` then ``modal`` steps precede this).
@@ -133,8 +137,9 @@ def run_pushover(context: StepContext, step: Step) -> list[StepResult]:
 
     Raises:
         ValueError: If a parameter is not declared by this verb.
+        RuntimeError: If the out-of-process solve fails.
     """
-    from ...analysis.pushover import run_pushover_analysis
+    from ...opensees.runtime import opensees_available
 
     params: dict[str, Any] = validate_params("pushover", PUSHOVER_PARAMS, step.params)
     maybe_export_tcl(context, "pushover", params)
@@ -160,22 +165,46 @@ def run_pushover(context: StepContext, step: Step) -> list[StepResult]:
     config.setdefault("pushover_record_shell_forces", params["store_shell_forces"])
     config.setdefault("pushover_record_section_deformations", params["store_section_deformations"])
 
-    result = run_pushover_analysis(
-        context.model,
-        resolve_modal_result(context, params["modal_case"]),
-        material_type=params["material_type"],
-        gravity_patterns=params["gravity_patterns"] or None,
-        lateral_load_type=params["lateral_load_type"],
-        max_disp_val=params["max_disp_val"],
-        num_steps=params["num_steps"],
-        brace_type=params["brace_type"],
-        brace_sections=params["brace_sections"] or None,
-        directions=params["directions"],
-        name=params["name"],
-        config=config or None,
-        return_builders=params["return_builders"],
-        log=context.pipeline_log,
-    )
+    modal_result = resolve_modal_result(context, params["modal_case"])
+
+    if opensees_available():
+        from ...analysis.pushover import run_pushover_analysis
+
+        result = run_pushover_analysis(
+            context.model,
+            modal_result,
+            material_type=params["material_type"],
+            gravity_patterns=params["gravity_patterns"] or None,
+            lateral_load_type=params["lateral_load_type"],
+            max_disp_val=params["max_disp_val"],
+            num_steps=params["num_steps"],
+            brace_type=params["brace_type"],
+            brace_sections=params["brace_sections"] or None,
+            directions=params["directions"],
+            name=params["name"],
+            config=config or None,
+            return_builders=params["return_builders"],
+            log=context.pipeline_log,
+        )
+    else:
+        from ...opensees.delegate import run_pushover_out_of_process
+
+        result = run_pushover_out_of_process(
+            context,
+            modal_result,
+            {
+                "material_type": params["material_type"],
+                "gravity_patterns": params["gravity_patterns"] or None,
+                "lateral_load_type": params["lateral_load_type"],
+                "max_disp_val": params["max_disp_val"],
+                "num_steps": params["num_steps"],
+                "brace_type": params["brace_type"],
+                "brace_sections": params["brace_sections"] or None,
+                "directions": params["directions"],
+                "name": params["name"],
+                "config": config or {},
+            },
+        )
     context.results["pushover"] = result
     context.log(f"Pushover ({params['directions']}): complete")
     return [StepResult(kind=PUSHOVER, label="Pushover", payload=result)]

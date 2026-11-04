@@ -138,6 +138,11 @@ def resolve_default_modal_case(model_data: Any) -> str:
 def run_modal(context: StepContext, step: Step) -> list[StepResult]:
     """Solve the eigenvalue problem against the prepared topology.
 
+    In the "separate" build (no bundled ``openseespy``) the solve is delegated
+    to the interpreter resolved by
+    :func:`~fea_toolkit.opensees.runtime.resolve_opensees_python` via
+    :func:`~fea_toolkit.opensees.delegate.run_modal_out_of_process`.
+
     Args:
         context: The run's working state.  ``model`` must already be prepared
             (a ``mesh`` step normally precedes this one); the result is stored
@@ -153,18 +158,34 @@ def run_modal(context: StepContext, step: Step) -> list[StepResult]:
         ValueError: If a parameter is not declared by this verb, or a result
             named ``params["name"]`` is already stored — a recipe must give
             each modal step a distinct ``name``.
+        RuntimeError: If the out-of-process solve fails.
     """
-    from ...analysis.modal import run_modal_analysis
+    from ...opensees.runtime import opensees_available
 
     params: dict[str, Any] = validate_params("modal", MODAL_PARAMS, step.params)
     maybe_export_tcl(context, "modal", params)
-    result = run_modal_analysis(
-        context.model,
-        n_modes=params["n_modes"],
-        name=params["name"],
-        config=params["config"] or None,
-        log=context.pipeline_log,
-    )
+
+    if opensees_available():
+        from ...analysis.modal import run_modal_analysis
+
+        result = run_modal_analysis(
+            context.model,
+            n_modes=params["n_modes"],
+            name=params["name"],
+            config=params["config"] or None,
+            log=context.pipeline_log,
+        )
+    else:
+        from ...opensees.delegate import run_modal_out_of_process
+
+        result = run_modal_out_of_process(
+            context,
+            {
+                "n_modes": params["n_modes"],
+                "name": params["name"],
+                "config": params["config"] or {},
+            },
+        )
     modal_results = context.results.setdefault("modal", {})
     if params["name"] in modal_results:
         raise ValueError(

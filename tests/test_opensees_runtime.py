@@ -124,3 +124,45 @@ class TestExchangeCodec:
 
         with pytest.raises(TypeError):
             nested_to_jsonable({"x": _Weird()})
+
+    def test_round_trips_integer_keys_and_tuples(self):
+        payload = {0: {5: (1.0, 2.0, 3.0), 6: (0.0, -1.0, 0.5)}, "meta": (1, 2)}
+        encoded = json.loads(json.dumps(nested_to_jsonable(payload)))
+        decoded = nested_from_jsonable(encoded)
+
+        assert set(decoded.keys()) == {0, "meta"}
+        assert isinstance(decoded[0][5], tuple)
+        assert decoded[0][5] == (1.0, 2.0, 3.0)
+        assert decoded[0][6] == (0.0, -1.0, 0.5)
+        assert isinstance(decoded["meta"], tuple)
+        assert decoded["meta"] == (1, 2)
+
+    def test_round_trips_an_analysis_result(self):
+        from fea_toolkit.analysis.base import AnalysisResult
+        from fea_toolkit.opensees._exchange import (
+            analysis_result_from_jsonable,
+            analysis_result_to_jsonable,
+        )
+
+        result = AnalysisResult(
+            name="M",
+            analysis_type="ModalAnalysis",
+            data={
+                "modal": {
+                    "periods": np.array([1.0, 0.4]),
+                    "eigenvalues": np.array([22.0, 246.0]),
+                },
+                "shapes": {0: {1: (0.1, 0.2, 0.3)}},
+            },
+            metadata={"n_modes": 2, "config": {"element_type": "elasticBeamColumn"}},
+        )
+        encoded = json.loads(json.dumps(analysis_result_to_jsonable(result)))
+        decoded = analysis_result_from_jsonable(encoded)
+
+        assert isinstance(decoded, AnalysisResult)
+        assert decoded.name == "M"
+        assert decoded.analysis_type == "ModalAnalysis"
+        np.testing.assert_allclose(decoded.data["modal"]["periods"], [1.0, 0.4])
+        np.testing.assert_allclose(decoded.data["modal"]["eigenvalues"], [22.0, 246.0])
+        assert decoded.data["shapes"][0][1] == (0.1, 0.2, 0.3)
+        assert decoded.metadata["config"]["element_type"] == "elasticBeamColumn"

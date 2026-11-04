@@ -351,8 +351,13 @@ Name that interpreter in an `opensees` section of the same settings file:
 When `opensees.python` is absent, the solver falls back to the
 `FEA_TOOLKIT_OPENSEES_PYTHON` environment variable, then to a `python3` on
 `PATH`.  The chosen interpreter is logged when a solve is delegated
-("delegating static analysis to …"), and a failed run reports the subprocess's
-own traceback in the Message Log.
+("delegating … analysis to …"), and a failed run reports the subprocess's own
+traceback in the Message Log.
+
+Every OpenSees solve verb — `run_static`, `modal`, `response_spectrum` and
+`pushover` — uses this path when `openseespy` cannot be imported in-process; a
+`response_spectrum` / `pushover` step ships the modal result its `modal` step
+produced to the subprocess rather than re-running it.
 
 See `build_nuitka.md` for the full build-and-distribute guide (naming the app,
 adding an icon, and setting up the OpenSeesPy environment).

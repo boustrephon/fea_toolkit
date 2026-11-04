@@ -193,6 +193,10 @@ def resolve_spectrum(
 def run_response_spectrum(context: StepContext, step: Step) -> list[StepResult]:
     """Combine one spectrum direction's modal response.
 
+    In the "separate" build (no bundled ``openseespy``) the solve is delegated
+    to the configured OpenSees interpreter via
+    :func:`~fea_toolkit.opensees.delegate.run_rs_out_of_process`.
+
     Args:
         context: The run's working state.  ``model`` and ``results["modal"]``
             must already be present (``mesh`` then ``modal`` steps precede this).
@@ -206,8 +210,9 @@ def run_response_spectrum(context: StepContext, step: Step) -> list[StepResult]:
 
     Raises:
         ValueError: If a parameter is not declared, or no spectrum is supplied.
+        RuntimeError: If the out-of-process solve fails.
     """
-    from ...analysis.rs import run_response_spectrum_analysis
+    from ...opensees.runtime import opensees_available
 
     params: dict[str, Any] = validate_params("response_spectrum", RS_PARAMS, step.params)
     maybe_export_tcl(context, "response_spectrum", params)
@@ -219,20 +224,41 @@ def run_response_spectrum(context: StepContext, step: Step) -> list[StepResult]:
         T_spec=params["T_spec"],
         Sa_spec=params["Sa_spec"],
     )
+    modal_result = resolve_modal_result(context, params["modal_case"])
 
-    result = run_response_spectrum_analysis(
-        context.model,
-        resolve_modal_result(context, params["modal_case"]),
-        direction=params["direction"],
-        T_spec=T_spec,
-        Sa_spec=Sa_spec,
-        damping=params["damping"],
-        n_modes=params["n_modes"],
-        name=params["name"],
-        log=context.pipeline_log,
-        record_frame_forces=params["record_frame_forces"],
-        record_shell_forces=params["record_shell_forces"],
-    )
+    if opensees_available():
+        from ...analysis.rs import run_response_spectrum_analysis
+
+        result = run_response_spectrum_analysis(
+            context.model,
+            modal_result,
+            direction=params["direction"],
+            T_spec=T_spec,
+            Sa_spec=Sa_spec,
+            damping=params["damping"],
+            n_modes=params["n_modes"],
+            name=params["name"],
+            log=context.pipeline_log,
+            record_frame_forces=params["record_frame_forces"],
+            record_shell_forces=params["record_shell_forces"],
+        )
+    else:
+        from ...opensees.delegate import run_rs_out_of_process
+
+        result = run_rs_out_of_process(
+            context,
+            modal_result,
+            {
+                "direction": params["direction"],
+                "T_spec": T_spec,
+                "Sa_spec": Sa_spec,
+                "damping": params["damping"],
+                "n_modes": params["n_modes"],
+                "name": params["name"],
+                "record_frame_forces": params["record_frame_forces"],
+                "record_shell_forces": params["record_shell_forces"],
+            },
+        )
     # Keyed by direction so a later summary step (e.g. load_verification) can
     # read every direction the run produced, not just the last one.
     context.results.setdefault("rs", {})[str(params["direction"]).upper()] = result
