@@ -73,6 +73,14 @@ def _nodal_spring_label(spring: Any) -> str:
     ``soil_spring_compression_only`` config (off by default, which emits a
     linear ``Elastic`` material), so the flag records SAFE's intent rather
     than an active nonlinear support.
+
+    Args:
+        spring: The resolved :class:`~fea_toolkit.model.mesh_model.NodalSpring`
+            to describe.
+
+    Returns:
+        A compact, human-readable description (e.g. ``"UX=1e6, UZ=2e6"``), or
+        ``"spring"`` when no stiffness or compression flag is set.
     """
     stiffness = getattr(spring, "stiffness", None) or []
     parts = [
@@ -92,6 +100,17 @@ def _node_spring_rows(model: Any, node_id: str, processed: Any = None) -> list:
     from *model* — the raw ``SAPModelData`` — while the resolved
     ``NodalSpring`` list reads from *processed* (the ``MeshModel``) when one is
     given, else from *model*.
+
+    Args:
+        model: The raw ``SAPModelData`` (or ``None`` when only the resolved
+            *processed* springs are needed).
+        node_id: The node whose spring rows are collected.
+        processed: Optional ``MeshModel`` supplying the resolved
+            ``point_springs`` list; when ``None`` it reads from *model*.
+
+    Returns:
+        ``[(label, value), …]`` — one pair per spring type that touches
+        *node_id* (point, line, area, and resolved nodal springs).
     """
     rows: list[tuple[str, str]] = []
 
@@ -153,7 +172,9 @@ def spring_rows(model: Any, obj: Any, processed: Any = None) -> list:
     Returns:
         One ``(name, value)`` pair per non-empty fact.
     """
-    if model is None or obj is None:
+    if obj is None:
+        return []
+    if model is None and processed is None:
         return []
     if isinstance(obj, Node):
         return _node_spring_rows(model, obj.node_id, processed=processed)
