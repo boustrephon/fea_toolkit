@@ -50,6 +50,8 @@ __pycache__/
 
 .Python
 build/
+# Nuitka crash report, written to the repo root when a compile fails.
+nuitka-crash-report.xml
 develop-eggs/
 dist/
 downloads/
