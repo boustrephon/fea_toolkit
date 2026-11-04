@@ -276,12 +276,15 @@ def test_ent_zerolength_resists_downward_not_uplift():
         ops.analysis("Static")
         return int(ops.analyze(1)), model_tag
 
-    # Downward: ENT resists compression → the model node settles by load/k.
-    result, model_tag = _build(-1.0)
-    assert result == 0
-    assert ops.nodeDisp(model_tag, 3) == pytest.approx(-load / k)
+    try:
+        # Downward: ENT resists compression → the model node settles by load/k.
+        result, model_tag = _build(-1.0)
+        assert result == 0
+        assert ops.nodeDisp(model_tag, 3) == pytest.approx(-load / k)
 
-    # Uplift: ENT releases tension → the Z DOF has no stiffness and the solve
-    # cannot converge (the node would lift freely).
-    result, _model_tag = _build(1.0)
-    assert result < 0
+        # Uplift: ENT releases tension → the Z DOF has no stiffness and the solve
+        # cannot converge (the node would lift freely).
+        result, _model_tag = _build(1.0)
+        assert result < 0
+    finally:
+        ops.wipe()
