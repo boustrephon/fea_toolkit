@@ -60,10 +60,15 @@ def bundled_with_opensees() -> bool:
     """Return True when the OpenSeesPy runtime is bundled in this build.
 
     In the "separate" Nuitka build ``openseespy`` is excluded with
-    ``--nofollow-import-to``, so :func:`importlib.util.find_spec` returns
-    ``None``; in the licensed build it resolves to a real spec.
+    ``--nofollow-import-to``; Nuitka then substitutes a stub that raises
+    :class:`ImportError` (rather than letting :func:`importlib.util.find_spec`
+    return ``None``).  Either way the answer is "not bundled".  In the licensed
+    build ``openseespy`` is included and the spec resolves.
     """
-    return importlib.util.find_spec("openseespy") is not None
+    try:
+        return importlib.util.find_spec("openseespy") is not None
+    except ImportError:
+        return False
 
 
 def license_summary(version: Optional[str] = None, with_opensees: Optional[bool] = None) -> str:
