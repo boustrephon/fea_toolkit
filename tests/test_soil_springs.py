@@ -12,6 +12,7 @@ from fea_toolkit.model.sap_data import (
     LineSpring,
     Node,
     PointSpring,
+    Restraint,
     SAPModelData,
 )
 from fea_toolkit.opensees.preprocessor import Preprocessor
@@ -26,6 +27,7 @@ def _model(
     nodes,
     frames=None,
     areas=None,
+    restraints=None,
     point_springs=None,
     point_assigns=None,
     line_springs=None,
@@ -37,7 +39,7 @@ def _model(
     areas = areas or {}
     return SAPModelData(
         nodes=nodes,
-        restraints={},
+        restraints=restraints or {},
         materials={},
         sections={},
         frame_elements=frames,
@@ -227,40 +229,59 @@ def test_builder_ent_for_compression_only():
 def test_ent_zerolength_resists_downward_not_uplift():
     """Ground-as-node-i: downward is compression (ENT resists), uplift is tension.
 
-    Verifies the ``zeroLength`` node order used by ``_create_point_springs``
-    against the ``ENT`` (elastic-no-tension) convention: with the fixed ground
-    node as node i and the model node as node j, a downward (-Z) displacement is
-    compression — which ENT resists — while uplift is tension, which it releases.
+    Builds the spring domain through :class:`AnalysisBuilder` (exercising the
+    production :meth:`_create_point_springs` path) and checks its ``zeroLength``
+    node order against the ``ENT`` (elastic-no-tension) convention: the fixed
+    ground node is node i and the model node is node j, so a downward (-Z)
+    displacement of the model node is compression — which ENT resists — while
+    uplift is tension, which it releases.
     """
     import openseespy.opensees as ops
+
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
     k = 1000.0
     load = 100.0
 
-    def _build(sign: float) -> int:
+    def _build(sign: float) -> tuple[int, int]:
         ops.wipe()
-        ops.model("basic", "-ndm", 3, "-ndf", 6)
-        ops.node(1, 0.0, 0.0, 0.0)  # ground (node i)
-        ops.node(2, 0.0, 0.0, 0.0)  # model node (node j)
-        ops.fix(1, 1, 1, 1, 1, 1, 1)
-        ops.fix(2, 1, 1, 0, 1, 1, 1)  # only Z free
-        ops.uniaxialMaterial("ENT", 1, k)
-        ops.element("zeroLength", 1, 1, 2, "-mat", 1, "-dir", 3)
+        md = _model(
+            nodes={"1": _node("1", 1, 0, 0, 0)},
+            restraints={"1": Restraint(dofs=[1, 1, 0, 1, 1, 1])},  # only UZ free
+            point_springs={
+                "PS": PointSpring(
+                    name="PS", stiffness={"UZ": k}, nonlinear_option="Compression Only"
+                )
+            },
+            point_assigns={"1": "PS"},
+        )
+        mm = _run(md)
+        AnalysisBuilder(mm, {"verbose": False, "soil_spring_compression_only": True}).build_domain()
+
+        # Exactly one zeroLength support, ground node i → model node j.
+        assert len(ops.getEleTags()) == 1
+        ground_tag, model_tag = ops.eleNodes(ops.getEleTags()[0])
+        assert ground_tag != model_tag
+        assert ops.nodeCoord(ground_tag) == ops.nodeCoord(model_tag)
+
+        # Apply the Z load to the model node (node j) and solve one step.
         ops.timeSeries("Linear", 1)
         ops.pattern("Plain", 1, 1)
-        ops.load(2, 0.0, 0.0, sign * load, 0.0, 0.0, 0.0)
+        ops.load(model_tag, 0.0, 0.0, sign * load, 0.0, 0.0, 0.0)
         ops.system("BandGeneral")
         ops.numberer("RCM")
         ops.constraints("Plain")
         ops.integrator("LoadControl", 1.0)
         ops.algorithm("Newton")
         ops.analysis("Static")
-        return int(ops.analyze(1))
+        return int(ops.analyze(1)), model_tag
 
-    # Downward: ENT resists compression → node 2 settles by load/k.
-    assert _build(-1.0) == 0
-    assert ops.nodeDisp(2, 3) == pytest.approx(-load / k)
+    # Downward: ENT resists compression → the model node settles by load/k.
+    result, model_tag = _build(-1.0)
+    assert result == 0
+    assert ops.nodeDisp(model_tag, 3) == pytest.approx(-load / k)
 
     # Uplift: ENT releases tension → the Z DOF has no stiffness and the solve
     # cannot converge (the node would lift freely).
-    assert _build(1.0) < 0
+    result, _model_tag = _build(1.0)
+    assert result < 0
