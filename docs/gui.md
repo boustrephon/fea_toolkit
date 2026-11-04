@@ -332,6 +332,28 @@ The file is read at start-up; the Message Log states which policy is in force
 did not understand** — an unknown key, an out-of-range value or unreadable JSON
 leaves the defaults in place and says so, rather than failing silently.
 
+### OpenSees runtime (the "separate" build)
+
+The packaged "separate" app does **not** embed OpenSeesPy.  To run an analysis
+it shells out to a Python environment that *does* have OpenSeesPy installed.
+Name that interpreter in an `opensees` section of the same settings file:
+
+```json
+{
+  "opensees": { "python": "/path/to/venv/bin/python" }
+}
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `opensees.python` | *(auto-detected)* | The Python interpreter that runs analysis out-of-process — an environment with `openseespy` **and** `fea_toolkit` installed. |
+
+When `opensees.python` is absent, the solver falls back to the
+`FEA_TOOLKIT_OPENSEES_PYTHON` environment variable, then to a `python3` on
+`PATH`.  The chosen interpreter is logged when a solve is delegated
+("delegating static analysis to …"), and a failed run reports the subprocess's
+own traceback in the Message Log.
+
 Selecting supports **multiple** entities: a clean click replaces, Shift-click
 adds, Ctrl/Cmd-click toggles, and a drag with the marquee modifier (Alt/Opt, or
 any drag in Select mode) rubber-band-selects.  A left-to-right marquee is a

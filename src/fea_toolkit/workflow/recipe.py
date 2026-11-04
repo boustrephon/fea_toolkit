@@ -342,6 +342,7 @@ def run_recipe(
     log: Any = None,
     pipeline_log: Any = None,
     on_step: Any = None,
+    opensees_python: Any = None,
 ) -> RecipeRun:
     """Run a recipe's steps in order against *model_data*.
 
@@ -372,6 +373,11 @@ def run_recipe(
             ``"cancelled"``), so a GUI can show live per-step progress.  A
             callback exception is swallowed — a progress listener must never
             change a step's outcome.  It is called on the caller's thread.
+        opensees_python: Optional path to the interpreter that should run
+            analysis out-of-process when this process cannot import
+            ``openseespy`` (the "separate" build).  Stored on the
+            :class:`~fea_toolkit.workflow.steps.StepContext` and read by the
+            solve verbs.
 
     Returns:
         The :class:`RecipeRun` — its results, tolerated failures and whether it
@@ -390,6 +396,8 @@ def run_recipe(
         context.cancel = cancel
     if pipeline_log is not None:
         context.pipeline_log = pipeline_log
+    if opensees_python is not None:
+        context.opensees_python = opensees_python
     if log is not None:
         context.log = log
     elif pipeline_log is not None:

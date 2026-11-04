@@ -46,6 +46,13 @@ RUN_STATIC_PARAMS: dict[str, ParamSpec] = {
 def run_static(context: StepContext, step: Step) -> list[StepResult]:
     """Solve the requested static cases against the prepared topology.
 
+    In the "separate" build (no bundled ``openseespy``) the solve is delegated
+    to the interpreter resolved by
+    :func:`~fea_toolkit.opensees.runtime.resolve_opensees_python` — the
+    configured ``opensees.python`` setting, the
+    ``FEA_TOOLKIT_OPENSEES_PYTHON`` environment variable, or an auto-detected
+    ``python3`` — via :func:`~fea_toolkit.opensees.delegate.run_static_out_of_process`.
+
     Args:
         context: The run's working state.  Its ``model`` must already be
             prepared (a :mod:`fea_toolkit.workflow.verbs.mesh` step normally
@@ -59,9 +66,10 @@ def run_static(context: StepContext, step: Step) -> list[StepResult]:
 
     Raises:
         ValueError: If a parameter is not declared by this verb.
+        RuntimeError: If the out-of-process solve fails (its trailing subprocess
+            output is included in the message).
     """
     from ...analysis.case_listing import list_static_cases
-    from ...analysis.linear import run_case_set
 
     params: dict[str, Any] = validate_params("run_static", RUN_STATIC_PARAMS, step.params)
     maybe_export_tcl(context, "run_static", params)
@@ -70,14 +78,23 @@ def run_static(context: StepContext, step: Step) -> list[StepResult]:
     case_names = ", ".join(cases)
 
     raw: dict = {}
-    result = run_case_set(
-        context.model_data,
-        context.model,
-        cases,
-        config=params["config"] or None,
-        raw_out=raw,
-        should_cancel=context.cancel,
-    )
+    from ...opensees.runtime import opensees_available
+
+    if opensees_available():
+        from ...analysis.linear import run_case_set
+
+        result = run_case_set(
+            context.model_data,
+            context.model,
+            cases,
+            config=params["config"] or None,
+            raw_out=raw,
+            should_cancel=context.cancel,
+        )
+    else:
+        from ...opensees.delegate import run_static_out_of_process
+
+        raw, result = run_static_out_of_process(context, cases, params["config"] or {})
     context.case_results.update(raw)
     # Per-case applied + summed summaries — what a later load_verification step
     # formats into the load/reaction table without a second solve.

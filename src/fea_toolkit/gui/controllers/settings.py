@@ -39,6 +39,7 @@ __all__ = [
     "RESTRAINT_STYLES",
     "DisplaySettings",
     "load_gui_settings",
+    "load_opensees_setting",
     "resolve_display",
     "save_display_settings",
 ]
@@ -316,14 +317,51 @@ def load_gui_settings(
 
     # The ``display`` section is stripped before the interaction resolver sees
     # the file, so a display key never surfaces as "ignoring unknown interaction
-    # setting 'display'" — the two readers each own their own keys.
-    interaction_data = {key: value for key, value in data.items() if key != "display"}
+    # setting 'display'" — the two readers each own their own keys.  ``opensees``
+    # is likewise owned by :func:`load_opensees_setting`, not the interaction
+    # policy.
+    interaction_data = {
+        key: value for key, value in data.items() if key not in ("display", "opensees")
+    }
     policy, policy_notes = resolve_policy(interaction_data)
     policy_notes = [f"{target}: {note}" for note in policy_notes]
     display, display_notes = resolve_display(data.get("display"))
     display_notes = [f"{target}: {note}" for note in display_notes]
 
     return policy, display, [*policy_notes, *display_notes]
+
+
+def load_opensees_setting(path: Optional[Union[str, Path]] = None) -> Optional[str]:
+    """Read the configured OpenSees interpreter from the settings file.
+
+    The ``opensees`` section names the Python interpreter that runs analysis
+    out-of-process in the "separate" build — e.g.
+    ``{"opensees": {"python": "/path/to/venv/bin/python"}}``.  ``None`` means
+    "not configured": the solver then falls back to the
+    ``FEA_TOOLKIT_OPENSEES_PYTHON`` environment variable and auto-detection
+    (see :mod:`fea_toolkit.opensees.runtime`).
+
+    Args:
+        path: Settings file to read; defaults to :func:`default_config_path`.
+
+    Returns:
+        The configured interpreter path, or ``None`` when the file is missing,
+        malformed, or carries no ``opensees.python`` string.
+    """
+    target = Path(path).expanduser() if path is not None else default_config_path()
+    if not target.is_file():
+        return None
+    try:
+        data = json.loads(target.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    section = data.get("opensees")
+    if not isinstance(section, dict):
+        return None
+    value = section.get("python")
+    return value if isinstance(value, str) and value else None
 
 
 def save_display_settings(

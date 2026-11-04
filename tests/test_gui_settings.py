@@ -7,6 +7,7 @@ import pytest
 from fea_toolkit.gui.controllers.settings import (
     DISPLAY_DEFAULTS,
     load_gui_settings,
+    load_opensees_setting,
     resolve_display,
     save_display_settings,
 )
@@ -33,6 +34,28 @@ def test_display_section_is_applied_and_interaction_keys_still_parse(tmp_path):
     assert policy.pick_button == "right"
     # The ``display`` key must not leak into the interaction resolver's notes.
     assert notes == []
+
+
+def test_opensees_section_is_read_and_does_not_leak_into_interaction_notes(tmp_path):
+    path = tmp_path / "gui.json"
+    path.write_text(
+        json.dumps({"preset": "click_drag", "opensees": {"python": "/venv/bin/python"}})
+    )
+    assert load_opensees_setting(path) == "/venv/bin/python"
+    # The ``opensees`` key must not surface as "unknown interaction setting".
+    _policy, _display, notes = load_gui_settings(path)
+    assert notes == []
+
+
+def test_opensees_setting_is_none_when_absent_or_malformed(tmp_path):
+    assert load_opensees_setting(tmp_path / "missing.json") is None
+
+    path = tmp_path / "gui.json"
+    path.write_text(json.dumps({"opensees": {"python": 42}}))
+    assert load_opensees_setting(path) is None
+
+    path.write_text(json.dumps({"opensees": "not-an-object"}))
+    assert load_opensees_setting(path) is None
 
 
 def test_unknown_display_key_is_reported():

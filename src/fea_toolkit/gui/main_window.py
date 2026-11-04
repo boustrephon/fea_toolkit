@@ -2835,6 +2835,9 @@ class MainWindow(QMainWindow):
 
         recipe = Recipe.from_dict(self._recipe_panel.recipe.to_dict())
         model_data = store.raw()
+        from .controllers.settings import load_opensees_setting
+
+        opensees_python = load_opensees_setting()
         starting_mesh = store.preprocessed()
         messages: list = []
         self._recipe_messages = messages
@@ -2878,6 +2881,7 @@ class MainWindow(QMainWindow):
                 cancel=should_cancel,
                 pipeline_log=pipeline_log,
                 on_step=on_step,
+                opensees_python=opensees_python,
             )
             return run, messages
 

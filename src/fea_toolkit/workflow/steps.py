@@ -281,6 +281,11 @@ class StepContext:
         pipeline_log: Optional structured
             :class:`~fea_toolkit.io.log.PipelineLog` for analysis events —
             distinct from *log* (the one-line progress sink).
+        opensees_python: Optional path to the interpreter that should run
+            analysis out-of-process when this process cannot import
+            ``openseespy`` (the "separate" build).  ``None`` lets a solve verb
+            fall back to :func:`fea_toolkit.opensees.runtime.resolve_opensees_python`
+            (environment variable, then auto-detection).
         cancelled: Set by a step that observed its **own** cooperative
             cancellation (e.g. a solve stopped between cases).  ``run_recipe``
             reads it after each step, so a cancellation inside the *last* step
@@ -294,6 +299,7 @@ class StepContext:
     cancel: Callable[[], bool] = _never_cancel
     log: Callable[[str], None] = _discard
     pipeline_log: Optional["PipelineLog"] = None
+    opensees_python: Optional[str] = None
     cancelled: bool = False
 
 
