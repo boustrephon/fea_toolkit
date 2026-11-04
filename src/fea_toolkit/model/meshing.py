@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from .sap_data import AreaElement, FrameElement, Node
+from .sap_data import AreaElement, FrameElement, Node, is_null_section
 
 __all__ = ["frame_role", "meshing_rows"]
 
@@ -24,9 +24,11 @@ def frame_role(model: Any, frame: FrameElement) -> Optional[str]:
     CSI draws *null* (``"NONE"``) frames for purposes other than contributing
     member stiffness.  They are the non-structural companions to the null areas
     of :func:`~fea_toolkit.model.sap_data.is_null_section`: a frame *with* a
-    section assignment is structural (its geometric type — beam/column/brace —
-    is :class:`~fea_toolkit.model.mesh_model.MeshModel.frame_element_types`),
-    but a frame *without* one is classified here:
+    real section assignment is structural (its geometric type —
+    beam/column/brace — is
+    :class:`~fea_toolkit.model.mesh_model.MeshModel.frame_element_types`), but a
+    frame *without* one — or assigned the built-in ``"NONE"`` section — is
+    classified here:
 
     * ``"line spring"`` — the frame carries a SAFE line-spring assignment
       (its stiffness distributes to the frame's endpoints; the frame itself is
@@ -48,8 +50,9 @@ def frame_role(model: Any, frame: FrameElement) -> Optional[str]:
         return None
 
     assignments = getattr(model, "frame_assignments", None) or {}
-    if assignments.get(frame.elem_id):
-        return None
+    section = assignments.get(frame.elem_id)
+    if section and not is_null_section(section):
+        return None  # structural frame (beam/column/brace)
 
     line_springs = getattr(model, "line_spring_assignments", None) or {}
     if frame.elem_id in line_springs:

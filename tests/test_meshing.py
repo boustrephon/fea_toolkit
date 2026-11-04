@@ -154,6 +154,14 @@ def test_frame_with_a_section_has_no_non_structural_role():
     assert meshing_rows(md, md.frame_elements["F1"]) == []
 
 
+def test_frame_assigned_the_none_section_is_non_structural():
+    md = _model(
+        frames={"F1": FrameElement("F1", 1, "1", "2")},
+        frame_assignments={"F1": "NONE"},
+    )
+    assert ("Role", "mesh guide") in meshing_rows(md, md.frame_elements["F1"])
+
+
 def test_line_spring_frame_reports_the_line_spring_role():
     md = _model(
         frames={"F1": FrameElement("F1", 1, "1", "2")},
