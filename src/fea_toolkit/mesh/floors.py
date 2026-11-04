@@ -12,7 +12,7 @@ quad-dominant mesh of sub-``AreaElement``\\ s, in the same
 What it does per level (a set of coplanar, horizontal floor areas):
 
 * each floor area polygon becomes a gmsh ``PlaneSurface``,
-* each opening (void) polygon is cut out as a hole in the surface that contains
+* each opening (void) polygon is cut out as a hole in the innermost surface that contains
   it — and a floor union's nested boundary loops (an island) are resolved by
   nesting depth: an odd-depth loop is a hole, an even-depth loop is a surface,
 * null (``"NONE"`` / load-patch) area boundary edges are *embedded* as mesh
@@ -119,11 +119,11 @@ def mesh_floors(
     frame_assignments: Optional[dict[str, str]] = None,
     restraints: Optional[dict[str, Any]] = None,
     sections: Optional[dict[str, Any]] = None,
+    excluded_area_ids: Optional[set[str]] = None,
     next_tag: int = 1,
     target_length: Optional[float] = None,
     recombine: bool = True,
     verbose: bool = False,
-    excluded_area_ids: Optional[set[str]] = None,
 ) -> tuple[dict[str, AreaElement], dict[str, str], dict[str, Node], int, list[str]]:
     """Mesh SAFE floor areas into quads, preserving openings and constraints.
 
@@ -145,14 +145,14 @@ def mesh_floors(
             walls) are embedded as mesh nodes.
         sections: ``{name: Section}`` — used to resolve overlay precedence from
             each section's ``shape`` (``"Stiff"`` > ``"Drop"`` > anything else).
+        excluded_area_ids: Optional ``set[str]`` of area ids to exclude from
+            floor meshing (loads-only areas) — they are never converted into
+            floor shells.
         next_tag: First free numeric tag for new nodes and elements.
         target_length: Fallback element size when ``floor_mesh_options`` has no
             ``max_size``.
         recombine: Recombine triangles into quads.
         verbose: Show gmsh terminal output.
-        excluded_area_ids: Optional ``set[str]`` of area ids to exclude from
-            floor meshing (loads-only areas) — they are never converted into
-            floor shells.
 
     Returns:
         ``(area_elements, area_assignments, nodes, next_tag, skipped)`` where
@@ -317,7 +317,7 @@ def mesh_floors(
                 signed.append(line if a < b else -line)
             return gmsh.model.geo.add_curve_loop(signed)
 
-        # ── Outer surfaces (CCW) with nested holes and opening voids (CW) ──
+        # ── Loop nesting: normalise loops and resolve surface/hole roles ──
         # A floor union can be a ring: its outer boundary encloses an inner
         # boundary loop (an island such as a courtyard).  A loop's nesting depth
         # decides its role — an even-depth loop is a *surface*, an odd-depth
@@ -367,27 +367,48 @@ def mesh_floors(
             ov.reverse()
             nested_holes.setdefault(parent_of[i], []).append(_curve_loop(ov))
 
-        outer_surfaces: list[tuple[int, list[tuple[float, float]]]] = []
-        for i, (verts, poly) in enumerate(norm_loops):
+        # ── Innermost-loop containment ──
+        # An ancestor loop's polygon encloses the hole regions of the loops
+        # nested inside it, but those regions are not part of the ancestor's
+        # surface material — an island inside a courtyard is a surface of its
+        # own, and the courtyard itself is void.  Openings and embedded
+        # constraints must therefore bind to the *innermost* containing loop,
+        # and only when that loop is a surface (even depth); anything landing
+        # inside an odd-depth loop (a hole) binds to no surface at all.
+        def _innermost_loop(pt: tuple[float, float]) -> Optional[int]:
+            best: Optional[int] = None
+            best_area: Optional[float] = None
+            for i, (_verts, poly) in enumerate(norm_loops):
+                if point_in_polygon_2d(pt, poly) and (best_area is None or areas[i] < best_area):
+                    best = i
+                    best_area = areas[i]
+            return best
+
+        open_holes: dict[int, list[int]] = {}
+        for opoly in open_polys.values():
+            cx = sum(p[0] for p in opoly) / len(opoly)
+            cy = sum(p[1] for p in opoly) / len(opoly)
+            owner = _innermost_loop((cx, cy))
+            if owner is None or depth_of[owner] % 2 == 1:
+                continue  # a void inside a void — no surface to cut it from
+            ov = [(p[0], p[1], level_z) for p in opoly]
+            if _signed_area(opoly) > 0.0:
+                ov.reverse()
+            open_holes.setdefault(owner, []).append(_curve_loop(ov))
+
+        loop_surf: dict[int, int] = {}
+        for i, (verts, _poly) in enumerate(norm_loops):
             if depth_of[i] % 2 == 1:
                 continue  # a hole, not a surface of its own
             hole_loops: list[int] = list(nested_holes.get(i, []))
-            for opoly in open_polys.values():
-                cx = sum(p[0] for p in opoly) / len(opoly)
-                cy = sum(p[1] for p in opoly) / len(opoly)
-                if point_in_polygon_2d((cx, cy), poly):
-                    ov = [(p[0], p[1], level_z) for p in opoly]
-                    if _signed_area(opoly) > 0.0:
-                        ov.reverse()
-                    hole_loops.append(_curve_loop(ov))
-            surf = gmsh.model.geo.add_plane_surface([_curve_loop(verts), *hole_loops])
-            outer_surfaces.append((surf, poly))
+            hole_loops.extend(open_holes.get(i, []))
+            loop_surf[i] = gmsh.model.geo.add_plane_surface([_curve_loop(verts), *hole_loops])
 
         def _surface_for(pt: tuple[float, float]) -> Optional[int]:
-            for surf, poly in outer_surfaces:
-                if point_in_polygon_2d(pt, poly):
-                    return surf
-            return None
+            owner = _innermost_loop(pt)
+            if owner is None or depth_of[owner] % 2 == 1:
+                return None  # inside a hole (void), not any surface
+            return loop_surf[owner]
 
         # ── Constraint edges: internal tiling + overlay boundaries ──
         line_to_surf: dict[int, int] = {}
