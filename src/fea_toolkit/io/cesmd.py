@@ -220,11 +220,22 @@ def _vol2_spans(lines: list[str]) -> list[tuple[Optional[int], int, int]]:
     """The ``(channel_or_None, start, end)`` spans of a Volume-2 file's blocks.
 
     A block opens at each ``Corrected accelerogram`` line (a single-channel file
-    may omit it, yielding one block spanning the whole file).  Each span's
-    channel number is read from its ``Chan  N:`` header line, ``None`` when that
-    header is absent (the caller then numbers it by position).
+    may omit it, yielding one block spanning the whole file).  A block start is
+    recognised only at the beginning of a line, so marker text embedded inside a
+    title does not open a false boundary.  Each span's channel number is read
+    from its ``Chan  N:`` header line, ``None`` when that header is absent (the
+    caller then numbers it by position).
+
+    Args:
+        lines: The Volume-2 text split into lines (``\r`` already stripped).
+
+    Returns:
+        ``[(channel_or_None, start, end), …]`` — one span per block, in file
+        order, with half-open line indices ``start``/``end`` into *lines* and
+        ``channel_or_None`` the block's channel number (``None`` when its
+        ``Chan  N:`` header is absent).
     """
-    starts = [i for i, line in enumerate(lines) if _BLOCK_START_RE.search(line)]
+    starts = [i for i, line in enumerate(lines) if _BLOCK_START_RE.match(line.lstrip())]
     if not starts:
         starts = [0]
     spans: list[tuple[Optional[int], int, int]] = []
