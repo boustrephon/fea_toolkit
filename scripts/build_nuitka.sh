@@ -76,7 +76,7 @@ if [[ "$GUI" -eq 1 ]]; then
     # A .app bundle on macOS; satisfies the pyobjc AppKit/Foundation requirement.
     # Compile the top-level GUI entry script, not `-m` on the subpackage: the
     # latter broke relative imports (io.report's ``from ..utils import ...``).
-    ARGS+=(--mode=app-dist --enable-plugin=pyside6 --macos-app-icon=none)
+    ARGS+=(--mode=app-dist --enable-plugin=pyside6 --macos-app-icon=none --macos-app-name="$OUTPUT_NAME")
     ENTRY="$GUI_ENTRY"
 else
     ARGS+=(
