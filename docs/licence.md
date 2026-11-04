@@ -150,7 +150,11 @@ directory. That bundle is a redistribution of OpenSees/OpenSeesPy, so:
 The bundled components and their licences are recorded in
 [`THIRD-PARTY-NOTICES.md`](https://github.com/boustrephon/fea_toolkit/blob/main/THIRD-PARTY-NOTICES.md);
 the `--license` flag on the command-line entry points prints the same short-form
-notice.
+notice. Build tooling lives in
+[`scripts/build_nuitka.sh`](https://github.com/boustrephon/fea_toolkit/blob/main/scripts/build_nuitka.sh)
+(the `--with-opensees` mode is gated behind `OPENSEES_COMMERCIAL_LICENCE=1`) and
+[`.github/workflows/release.yml`](https://github.com/boustrephon/fea_toolkit/blob/main/.github/workflows/release.yml),
+which builds the "separate" (no OpenSeesPy) executable on tag push.
 
 ## Third-party software, data and trademarks
 
