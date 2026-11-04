@@ -216,6 +216,30 @@ _BLOCK_START_RE = re.compile(r"corrected\s+accelerogram", re.IGNORECASE)
 _CHANNEL_RE = re.compile(r"\bchan(?:nel)?\s+(\d+)\s*:", re.IGNORECASE)
 
 
+def _vol2_spans(lines: list[str]) -> list[tuple[Optional[int], int, int]]:
+    """The ``(channel_or_None, start, end)`` spans of a Volume-2 file's blocks.
+
+    A block opens at each ``Corrected accelerogram`` line (a single-channel file
+    may omit it, yielding one block spanning the whole file).  Each span's
+    channel number is read from its ``Chan  N:`` header line, ``None`` when that
+    header is absent (the caller then numbers it by position).
+    """
+    starts = [i for i, line in enumerate(lines) if _BLOCK_START_RE.search(line)]
+    if not starts:
+        starts = [0]
+    spans: list[tuple[Optional[int], int, int]] = []
+    for idx, start in enumerate(starts):
+        end = starts[idx + 1] if idx + 1 < len(starts) else len(lines)
+        chan: Optional[int] = None
+        for line in lines[start:end]:
+            match = _CHANNEL_RE.search(line)
+            if match:
+                chan = int(match.group(1))
+                break
+        spans.append((chan, start, end))
+    return spans
+
+
 def parse_vol2_channels(text: str) -> dict[int, tuple[np.ndarray, np.ndarray]]:
     """Parse every channel block of a (possibly multichannel) Volume-2 file.
 
@@ -237,24 +261,23 @@ def parse_vol2_channels(text: str) -> dict[int, tuple[np.ndarray, np.ndarray]]:
 
     Raises:
         CESMDError: If no acceleration block is present, if a block's time step
-            is missing, if a block holds fewer values than ``NPTS``, or if a
-            non-numeric token appears in a block's values.
+            is missing, if a block holds fewer values than ``NPTS``, if a
+            non-numeric token appears in a block's values, or if two blocks
+            resolve to the same channel number (a later block must not silently
+            replace an earlier one).
     """
     lines = text.replace("\r", "").split("\n")
-    starts = [i for i, line in enumerate(lines) if _BLOCK_START_RE.search(line)]
-    if not starts:
-        starts = [0]
-    blocks = list(zip(starts, [*starts[1:], len(lines)]))
+    spans = _vol2_spans(lines)
 
     channels: dict[int, tuple[np.ndarray, np.ndarray]] = {}
-    for fallback, (start, end) in enumerate(blocks, start=1):
-        chan: Optional[int] = None
-        for line in lines[start:end]:
-            match = _CHANNEL_RE.search(line)
-            if match:
-                chan = int(match.group(1))
-                break
-        channels[chan if chan is not None else fallback] = _parse_vol2_block(lines, start, end)
+    for fallback, (chan, start, end) in enumerate(spans, start=1):
+        key = chan if chan is not None else fallback
+        if key in channels:
+            raise CESMDError(
+                f"Volume-2 file has more than one channel {key} block; "
+                "refusing to merge or drop one"
+            )
+        channels[key] = _parse_vol2_block(lines, start, end)
     return channels
 
 
@@ -306,11 +329,14 @@ def parse_vol2(text: str) -> tuple[np.ndarray, np.ndarray]:
         from the file's cm/s²).
 
     Raises:
-        CESMDError: If the acceleration block or its time step is missing, if
-            the file holds fewer values than ``NPTS``, or if a non-numeric
-            token appears in the acceleration block.
+        CESMDError: If the first channel block's acceleration marker or time
+            step is missing, if that block holds fewer values than ``NPTS``, or
+            if a non-numeric token appears in that block.  Later blocks are not
+            parsed, so a malformed later block does not raise here.
     """
-    return next(iter(parse_vol2_channels(text).values()))
+    lines = text.replace("\r", "").split("\n")
+    _chan, start, end = _vol2_spans(lines)[0]
+    return _parse_vol2_block(lines, start, end)
 
 
 def parse_vol2_channel(text: str, channel: int) -> tuple[np.ndarray, np.ndarray]:
@@ -329,13 +355,26 @@ def parse_vol2_channel(text: str, channel: int) -> tuple[np.ndarray, np.ndarray]
         requested channel.
 
     Raises:
-        CESMDError: If the file has no acceleration block, or no block matching
-            *channel*.
+        CESMDError: If the file has no acceleration block, no block matching
+            *channel*, or more than one block matching *channel*.
     """
-    channels = parse_vol2_channels(text)
-    try:
-        return channels[channel]
-    except KeyError:
+    lines = text.replace("\r", "").split("\n")
+    spans = _vol2_spans(lines)
+    matches: list[tuple[int, int]] = []
+    available: set[int] = set()
+    for fallback, (chan, start, end) in enumerate(spans, start=1):
+        key = chan if chan is not None else fallback
+        available.add(key)
+        if key == channel:
+            matches.append((start, end))
+    if not matches:
         raise CESMDError(
-            f"Volume-2 file has no channel {channel} block (channels: {sorted(channels)})"
-        ) from None
+            f"Volume-2 file has no channel {channel} block (channels: {sorted(available)})"
+        )
+    if len(matches) > 1:
+        raise CESMDError(
+            f"Volume-2 file has more than one channel {channel} block; "
+            "refusing to merge or drop one"
+        )
+    start, end = matches[0]
+    return _parse_vol2_block(lines, start, end)
