@@ -32,6 +32,8 @@ from typing import NamedTuple, Optional
 
 import fea_toolkit
 
+from .license import add_license_argument, print_license
+
 # --- Lazy introspection helpers -------------------------------------
 
 # Facades such as ``fea_toolkit.plotting.viz`` re-export names defined in
@@ -449,7 +451,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         version=f"fea_toolkit {fea_toolkit.__version__}",
         help="Show the fea_toolkit version and exit.",
     )
+    add_license_argument(parser)
     args = parser.parse_args(argv)
+
+    if args.license:
+        print_license(fea_toolkit.__version__)
+        return 0
 
     if args.source and args.name is None:
         parser.error("--source requires a NAME")
