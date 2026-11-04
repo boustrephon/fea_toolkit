@@ -781,7 +781,7 @@ that section.
      `- FOR EACH TOWER`, split `SLAB`/`DECK`/`WALL` properties) that leave
      geometry empty on real exports.  See `docs/e2k_import_plan.md`.
 
-3. **CSi SAFE `.f2k` / `.$sf` input** ⚠️
+3. **CSi SAFE `.f2k` / `.$sf` input** ⚠️ Partial
    - `SAFEF2KParser` / `SAFEDBParser` (`io/f2k_parser.py`, `io/safe_db_parser.py`)
      read SAFE tabular and native-database exports into the same `SAPModelData` —
      points, slab/wall/beam/column objects, section assignments, point/line/area
