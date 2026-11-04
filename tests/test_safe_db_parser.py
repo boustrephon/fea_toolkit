@@ -5,6 +5,7 @@ Covers :mod:`fea_toolkit.io.safe_db_parser`.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -15,10 +16,9 @@ from fea_toolkit.model.sap_data import ConcreteRectangularSection, ShellSection
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample.$sf"
 
-_REAL_SF = (
-    "/Users/andrew/Library/Mobile Documents/com~apple~CloudDocs/Work/"
-    "Reference/Analysis/CSi SAFE/SAFE Model/B3.$sf"
-)
+# Real SAFE models (client data — never committed).  Optional spot-checks that
+# skip unless FEA_TOOLKIT_REAL_SF points at an available model file.
+_REAL_SF = os.environ.get("FEA_TOOLKIT_REAL_SF")
 
 
 @pytest.fixture(scope="module")
@@ -43,8 +43,8 @@ def test_multi_line_area_polygon_merged(model):
 
 
 def test_null_areas(model):
-    assert model.area_elements["3"].null is True
-    assert model.area_elements["3"].opening is False
+    assert model.area_elements["3"].opening is True
+    assert model.area_elements["3"].null is False
     assert model.area_elements["1"].null is False
     assert model.area_elements["1"].opening is False
 
@@ -149,7 +149,10 @@ def test_codec_round_trip(model):
     assert restored.floor_mesh_options == model.floor_mesh_options
 
 
-@pytest.mark.skipif(not Path(_REAL_SF).exists(), reason="real SAFE model not present")
+@pytest.mark.skipif(
+    not _REAL_SF or not Path(_REAL_SF).exists(),
+    reason="set FEA_TOOLKIT_REAL_SF to a real SAFE .$sf model to run this spot-check",
+)
 def test_real_sf_loads():
     md = SAFEDBParser(_REAL_SF).parse().get_model_data()
     assert len(md.nodes) > 0

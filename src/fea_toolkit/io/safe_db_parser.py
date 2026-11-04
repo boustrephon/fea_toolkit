@@ -299,16 +299,38 @@ class SAFEDBParser(SAFEF2KParser):
         return assign
 
     def _get_null_area_ids(self) -> set[str]:
-        """Area ids whose slab property is ``None`` / ``NONE`` (geometric)."""
+        """Area ids whose slab property is ``None`` / ``NONE`` (geometric).
+
+        An *unloaded* opening (``OpeningType=Unloaded``) is a geometric void,
+        not a null area — it is handled by :meth:`_get_opening_ids`.
+        """
         null_ids: set[str] = set()
         for rec in self._raw_tables.get("SLAB PROPERTY ASSIGNMENTS", []):
             aid = rec.get("Area")
             if aid is None:
                 continue
             slab = rec.get("SlabProp")
-            if slab is None or is_null_section(slab):
+            if slab is not None and not is_null_section(slab):
+                continue
+            if str(rec.get("OpeningType", "") or "").strip().lower() != "unloaded":
                 null_ids.add(str(aid))
         return null_ids
+
+    def _get_opening_ids(self) -> set[str]:
+        """Area ids flagged ``OpeningType=Unloaded`` — geometric voids.
+
+        SAFE marks an *unloaded* opening as a void to be cut out of the slab; a
+        *loaded* opening (``OpeningType=Loaded``) stays a null load patch (its
+        pressure transfers to the enclosing slab) and is *not* an opening.
+        """
+        opening_ids: set[str] = set()
+        for rec in self._raw_tables.get("SLAB PROPERTY ASSIGNMENTS", []):
+            aid = rec.get("Area")
+            if aid is None:
+                continue
+            if str(rec.get("OpeningType", "") or "").strip().lower() == "unloaded":
+                opening_ids.add(str(aid))
+        return opening_ids
 
     def _get_groups(self) -> dict[str, Group]:
         groups: dict[str, Group] = {}
@@ -407,7 +429,9 @@ class SAFEDBParser(SAFEF2KParser):
                     node_id=str(pid),
                     fx=self._to_float(rec.get("Fx", 0.0)) or 0.0,
                     fy=self._to_float(rec.get("Fy", 0.0)) or 0.0,
-                    # SAFE's ``Fgrav`` is the force along the gravity (-Z) axis.
+                    # SAFE's ``Fgrav`` is the global-Z point load (positive +Z
+                    # up), so a gravity (downward) load is negative — mapped
+                    # directly onto the toolkit's global-Z ``fz``.
                     fz=self._to_float(rec.get("Fgrav", 0.0)) or 0.0,
                     mx=self._to_float(rec.get("Mx", 0.0)) or 0.0,
                     my=self._to_float(rec.get("My", 0.0)) or 0.0,
@@ -440,10 +464,11 @@ class SAFEDBParser(SAFEF2KParser):
             name = str(rec.get("LoadCase", ""))
             if not name:
                 continue
+            load_sf = self._to_float(rec.get("SF"))
             assigns.setdefault(name, []).append(
                 {
                     "LoadName": rec.get("LoadPat", ""),
-                    "LoadSF": self._to_float(rec.get("SF", 1.0)) or 1.0,
+                    "LoadSF": load_sf if load_sf is not None else 1.0,
                 }
             )
         for name, case in cases.items():
@@ -586,6 +611,7 @@ class SAFEDBParser(SAFEF2KParser):
         area_assignments = self._get_area_assignments()
         sections = self._get_sections()
         null_ids = self._get_null_area_ids()
+        opening_ids = self._get_opening_ids()
         area_elements = self._get_area_elements()
         for aid, elem in area_elements.items():
             sec_name = area_assignments.get(aid)
@@ -595,6 +621,8 @@ class SAFEDBParser(SAFEF2KParser):
                     elem.thickness = sec.thickness
             if aid in null_ids:
                 elem.null = True
+            if aid in opening_ids:
+                elem.opening = True
 
         load_cases = self.get_load_cases()
         point_springs, point_spring_assignments = self._get_point_springs()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -17,11 +18,8 @@ from fea_toolkit.model.sap_data import (
 FIXTURE = Path(__file__).parent / "fixtures" / "sample.f2k"
 
 # Real SAFE models (client data — never committed).  Optional spot-checks that
-# skip when the files are absent.
-_REAL_F2K = (
-    "/Users/andrew/Library/Mobile Documents/com~apple~CloudDocs/Work/"
-    "Reference/Analysis/CSi SAFE/SAFE Model/Trial v1.0.f2k"
-)
+# skip unless FEA_TOOLKIT_REAL_F2K points at an available model file.
+_REAL_F2K = os.environ.get("FEA_TOOLKIT_REAL_F2K")
 
 
 @pytest.fixture(scope="module")
@@ -171,7 +169,10 @@ def test_codec_round_trip(model):
     assert restored.floor_mesh_options == model.floor_mesh_options
 
 
-@pytest.mark.skipif(not Path(_REAL_F2K).exists(), reason="real SAFE model not present")
+@pytest.mark.skipif(
+    not _REAL_F2K or not Path(_REAL_F2K).exists(),
+    reason="set FEA_TOOLKIT_REAL_F2K to a real SAFE .f2k model to run this spot-check",
+)
 def test_real_f2k_loads():
     md = SAFEF2KParser(_REAL_F2K).parse().get_model_data()
     assert len(md.nodes) > 0

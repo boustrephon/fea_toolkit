@@ -458,7 +458,9 @@ class SAFEF2KParser:
         """Area ids whose section is ``None`` / ``NONE`` (geometric objects).
 
         These carry no shell stiffness but are not openings: they are load
-        patches / meshing guides (see :func:`is_null_section`).
+        patches / meshing guides (see :func:`is_null_section`).  An *unloaded*
+        opening (``OpeningType=Unloaded``) is a geometric void, not a null area
+        — it is handled by :meth:`_get_opening_ids`.
         """
         null_ids: set[str] = set()
         for rec in self._raw_tables.get("AREA ASSIGNMENTS - SECTION PROPERTIES", []):
@@ -466,9 +468,27 @@ class SAFEF2KParser:
             if aid is None:
                 continue
             sec = rec.get("Section Property")
-            if sec is None or is_null_section(sec):
+            if sec is not None and not is_null_section(sec):
+                continue
+            if str(rec.get("OpeningType", "") or "").strip().lower() != "unloaded":
                 null_ids.add(str(aid))
         return null_ids
+
+    def _get_opening_ids(self) -> set[str]:
+        """Area ids flagged ``OpeningType=Unloaded`` — geometric voids.
+
+        SAFE marks an *unloaded* opening as a void to be cut out of the slab; a
+        *loaded* opening (``OpeningType=Loaded``) stays a null load patch (its
+        pressure transfers to the enclosing slab) and is *not* an opening.
+        """
+        opening_ids: set[str] = set()
+        for rec in self._raw_tables.get("AREA ASSIGNMENTS - SECTION PROPERTIES", []):
+            aid = self._id(rec, ("UniqueName", "Unique Name"))
+            if aid is None:
+                continue
+            if str(rec.get("OpeningType", "") or "").strip().lower() == "unloaded":
+                opening_ids.add(str(aid))
+        return opening_ids
 
     def _get_groups(self) -> dict[str, Group]:
         groups: dict[str, Group] = {}
@@ -535,10 +555,11 @@ class SAFEF2KParser:
             name = str(rec.get("Name", ""))
             if not name:
                 continue
+            load_sf = self._to_float(rec.get("Load SF"))
             assigns.setdefault(name, []).append(
                 {
                     "LoadName": rec.get("Load Name", ""),
-                    "LoadSF": self._to_float(rec.get("Load SF", 1.0)) or 1.0,
+                    "LoadSF": load_sf if load_sf is not None else 1.0,
                 }
             )
             if name not in cases:
@@ -755,6 +776,7 @@ class SAFEF2KParser:
         area_assignments = self._get_area_assignments()
         sections = self._get_sections()
         null_ids = self._get_null_area_ids()
+        opening_ids = self._get_opening_ids()
         area_elements = self._get_area_elements()
         for aid, elem in area_elements.items():
             sec_name = area_assignments.get(aid)
@@ -764,6 +786,8 @@ class SAFEF2KParser:
                     elem.thickness = sec.thickness
             if aid in null_ids:
                 elem.null = True
+            if aid in opening_ids:
+                elem.opening = True
 
         load_cases = self.get_load_cases()
         point_springs, point_spring_assignments = self._get_point_springs()
