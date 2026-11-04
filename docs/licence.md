@@ -130,6 +130,28 @@ If you intend to distribute a product or run a service built on this toolkit,
 confirm your OpenSeesPy licensing position with Oregon State University before
 release.
 
+### Packaging into an executable (Nuitka) changes this
+
+The "shell out" case above holds only while the bundle ships **no OpenSees
+code**. A Nuitka "standalone" build does the opposite: it compiles `fea_toolkit`
+and **embeds** `openseespy` — the OpenSees core library plus its bundled
+BLAS/LAPACK and GCC runtime libraries — into the executable and its `.dist`
+directory. That bundle is a redistribution of OpenSees/OpenSeesPy, so:
+
+- the OpenSees copyright notice must be reproduced verbatim
+  ([`OpenSees-COPYRIGHT.txt`](https://github.com/boustrephon/fea_toolkit/blob/main/OpenSees-COPYRIGHT.txt))
+  and the OpenSeesPy notice included;
+- publishing the bundle — including as a GitHub Release asset — is **commercial
+  redistribution** and requires a licence from Oregon State University (and, for
+  the OpenSees core, the UC Office of Technology Licensing) *before* release;
+- building and running it inside GitHub Actions alone is internal use, but any
+  stored or published artifact must be treated as a distribution.
+
+The bundled components and their licences are recorded in
+[`THIRD-PARTY-NOTICES.md`](https://github.com/boustrephon/fea_toolkit/blob/main/THIRD-PARTY-NOTICES.md);
+the `--license` flag on the command-line entry points prints the same short-form
+notice.
+
 ## Third-party software, data and trademarks
 
 ### SAP2000 and CSi
