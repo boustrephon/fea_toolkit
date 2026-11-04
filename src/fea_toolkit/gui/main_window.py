@@ -1581,6 +1581,14 @@ class MainWindow(QMainWindow):
         # than the model currently drawn.  With no store (an archive) it falls
         # back to the displayed model, which simply has neither.
         self._inspector.set_source_model(self._store.raw() if self._store is not None else model)
+        # Resolved soil springs live on the preprocessed MeshModel (its
+        # ``point_springs`` is a resolved list), not the raw SAPModelData — so
+        # the Inspector is given the processed model for those, alongside the
+        # raw model (above) for the spring definitions and assignments.
+        processed = self._store.preprocessed() if self._store is not None else None
+        if processed is None and isinstance(model, MeshModel):
+            processed = model
+        self._inspector.set_processed_model(processed)
         if rebuild_tree:
             self._tree_model.set_model(self._tree_model_source(model), self._views.views())
         if camera is None:

@@ -96,20 +96,22 @@ def _context_rows(obj: Any, model: Any) -> list:
     return element_rows(model, obj)
 
 
-def _spring_rows(obj: Any, model: Any) -> list:
+def _spring_rows(obj: Any, model: Any, processed: Any = None) -> list:
     """A node / line / area's soil springs (SAFE foundation support), read from
     the model.
 
     Mirrors :func:`_support_rows`: a spring is an assignment (plus a
     definition) stored on the model, so describing one entity needs both the
-    object and the context.  ``None`` (no model, or a results archive, which
+    object and the context.  The assignment details come from *model* (the raw
+    ``SAPModelData``), while the resolved nodal springs come from *processed*
+    (the ``MeshModel``).  ``None`` (no model, or a results archive, which
     carries none) adds no spring rows.
     """
     from ...model.springs import spring_rows
 
-    if model is None:
+    if model is None and processed is None:
         return []
-    return spring_rows(model, obj)
+    return spring_rows(model, obj, processed=processed)
 
 
 def _meshing_rows(obj: Any, model: Any) -> list:
@@ -131,6 +133,7 @@ class PropertyInspector(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._source_model: Any = None
+        self._processed_model: Any = None
         self._load_factors: Any = None
         self._title = QLabel(object_title(None), self)
         self._title.setEnabled(False)
@@ -164,6 +167,21 @@ class PropertyInspector(QWidget):
         """
         self._source_model = model
 
+    def set_processed_model(self, model: Any) -> None:
+        """Set the processed model that supplies resolved nodal springs.
+
+        The Inspector's soil-spring rows resolve a node's ``NodalSpring`` from
+        the preprocessed :class:`~fea_toolkit.model.mesh_model.MeshModel` (whose
+        ``point_springs`` is a resolved list), while the spring *definitions and
+        assignments* (``point_spring_assignments``, ``line_spring_assignments``,
+        ``area_spring_assignments``) live on the raw ``SAPModelData`` set by
+        :meth:`set_source_model`.  ``None`` adds no resolved-spring rows.
+
+        Args:
+            model: A ``MeshModel``, or ``None``.
+        """
+        self._processed_model = model
+
     def set_load_factors(self, factors: Any) -> None:
         """Set the active load source's ``{pattern: factor}`` map (or ``None``).
 
@@ -181,9 +199,10 @@ class PropertyInspector(QWidget):
         joint constraint — taken from the model set by
         :meth:`set_source_model`; and its soil springs (SAFE foundation
         support: a direct point spring, a line spring on a frame that ends at
-        it, or an area spring on an area it is a corner of).  A frame or area
-        additionally reports its assigned section, that section's material, the
-        groups it belongs to, its line/area spring, and the applied loads
+        it, an area spring on an area it is a corner of, or — from the model set
+        by :meth:`set_processed_model` — the resolved nodal spring).  A frame or
+        area additionally reports its assigned section, that section's material,
+        the groups it belongs to, its line/area spring, and the applied loads
         referencing it (see
         :func:`fea_toolkit.model.load_queries.load_rows`), resolved through the
         same model.
@@ -193,7 +212,7 @@ class PropertyInspector(QWidget):
         rows = (
             describe(obj)
             + _support_rows(obj, self._source_model)
-            + _spring_rows(obj, self._source_model)
+            + _spring_rows(obj, self._source_model, self._processed_model)
             + _meshing_rows(obj, self._source_model)
             + _context_rows(obj, self._source_model)
             + load_rows(self._source_model, obj, self._load_factors)

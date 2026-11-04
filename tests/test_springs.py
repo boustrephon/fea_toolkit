@@ -69,7 +69,7 @@ def test_node_on_a_spring_supported_line_reports_the_line_spring():
         line_springs={"LS": LineSpring(name="LS", vertical_stiffness=10.0)},
         line_assigns={"L1": "LS"},
     )
-    assert spring_rows(md, _node("2")) == [("Line Spring", "LS (vert 10)")]
+    assert spring_rows(md, _node("2")) == [("Line Spring", "L1: LS (vert 10)")]
 
 
 def test_node_on_a_spring_supported_area_reports_the_area_spring():
@@ -78,7 +78,7 @@ def test_node_on_a_spring_supported_area_reports_the_area_spring():
         area_springs={"AS": AreaSpring(name="AS", stiffness={"U3": 1500.0})},
         area_assigns={"A1": "AS"},
     )
-    assert spring_rows(md, _node("3")) == [("Area Spring", "AS (U3=1500)")]
+    assert spring_rows(md, _node("3")) == [("Area Spring", "A1: AS (U3=1500)")]
 
 
 def test_node_reports_every_spring_it_touches_in_order():
@@ -94,8 +94,8 @@ def test_node_reports_every_spring_it_touches_in_order():
     )
     assert spring_rows(md, _node("1")) == [
         ("Point Spring", "PS (UZ=500)"),
-        ("Line Spring", "LS (vert 10)"),
-        ("Area Spring", "AS (U3=1500)"),
+        ("Line Spring", "L1: LS (vert 10)"),
+        ("Area Spring", "A1: AS (U3=1500)"),
     ]
 
 
@@ -136,7 +136,7 @@ def test_a_mesh_model_reports_its_resolved_nodal_spring():
             )
         ],
     )
-    assert spring_rows(mm, _node("5")) == [("Soil Spring", "UZ=1500, compression-only")]
+    assert spring_rows(mm, _node("5")) == [("Soil Spring", "UZ=1500, compression-only candidate")]
 
 
 def test_a_none_model_reports_nothing():

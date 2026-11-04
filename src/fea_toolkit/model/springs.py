@@ -66,7 +66,14 @@ def _area_spring_label(model: Any, name: str) -> str:
 
 
 def _nodal_spring_label(spring: Any) -> str:
-    """A resolved :class:`~fea_toolkit.model.mesh_model.NodalSpring` compactly."""
+    """A resolved :class:`~fea_toolkit.model.mesh_model.NodalSpring` compactly.
+
+    DOFs flagged ``compression_only`` are labelled *candidates*: whether they
+    actually resist compression-only depends on the builder's
+    ``soil_spring_compression_only`` config (off by default, which emits a
+    linear ``Elastic`` material), so the flag records SAFE's intent rather
+    than an active nonlinear support.
+    """
     stiffness = getattr(spring, "stiffness", None) or []
     parts = [
         f"{dof}={stiffness[i]:g}"
@@ -74,12 +81,18 @@ def _nodal_spring_label(spring: Any) -> str:
         if i < len(stiffness) and stiffness[i]
     ]
     if getattr(spring, "compression_only", None):
-        parts.append("compression-only")
+        parts.append("compression-only candidate")
     return ", ".join(parts) if parts else "spring"
 
 
-def _node_spring_rows(model: Any, node_id: str) -> list:
-    """Every spring that touches *node_id* — point, line, area, then resolved."""
+def _node_spring_rows(model: Any, node_id: str, processed: Any = None) -> list:
+    """Every spring that touches *node_id* — point, line, area, then resolved.
+
+    Assignment details (point/line/area definitions and their assignments) read
+    from *model* — the raw ``SAPModelData`` — while the resolved
+    ``NodalSpring`` list reads from *processed* (the ``MeshModel``) when one is
+    given, else from *model*.
+    """
     rows: list[tuple[str, str]] = []
 
     point = (getattr(model, "point_spring_assignments", None) or {}).get(node_id)
@@ -90,26 +103,26 @@ def _node_spring_rows(model: Any, node_id: str) -> list:
     if line_assignments:
         frames = getattr(model, "frame_elements", None) or {}
         labels = [
-            _line_spring_label(model, name)
+            f"{line_id}: {_line_spring_label(model, name)}"
             for line_id, name in line_assignments.items()
             if (frame := frames.get(line_id)) is not None
             and node_id in (frame.node_i, frame.node_j)
         ]
         if labels:
-            rows.append(("Line Spring", ", ".join(dict.fromkeys(labels))))
+            rows.append(("Line Spring", ", ".join(labels)))
 
     area_assignments = getattr(model, "area_spring_assignments", None) or {}
     if area_assignments:
         areas = getattr(model, "area_elements", None) or {}
         labels = [
-            _area_spring_label(model, name)
+            f"{area_id}: {_area_spring_label(model, name)}"
             for area_id, name in area_assignments.items()
             if (area := areas.get(area_id)) is not None and node_id in area.node_ids
         ]
         if labels:
-            rows.append(("Area Spring", ", ".join(dict.fromkeys(labels))))
+            rows.append(("Area Spring", ", ".join(labels)))
 
-    resolved = getattr(model, "point_springs", None)
+    resolved = getattr(processed if processed is not None else model, "point_springs", None)
     if isinstance(resolved, list):
         for spring in resolved:
             if getattr(spring, "node_id", None) == node_id:
@@ -118,7 +131,7 @@ def _node_spring_rows(model: Any, node_id: str) -> list:
     return rows
 
 
-def spring_rows(model: Any, obj: Any) -> list:
+def spring_rows(model: Any, obj: Any, processed: Any = None) -> list:
     """``[(label, value), …]`` describing *obj*'s soil/foundation springs.
 
     A node reports every spring it connects to — its direct point spring, any
@@ -129,9 +142,13 @@ def spring_rows(model: Any, obj: Any) -> list:
     no clutter.
 
     Args:
-        model: A ``SAPModelData`` or ``MeshModel``, or ``None``.
+        model: A ``SAPModelData`` (the raw assignment source) or a
+            ``MeshModel``, or ``None``.
         obj: The selected :class:`Node`, :class:`FrameElement` or
             :class:`AreaElement`.
+        processed: Optional ``MeshModel`` supplying the resolved
+            ``point_springs`` list.  When ``None``, resolved springs read from
+            *model* (so a bare ``MeshModel`` still reports its nodal springs).
 
     Returns:
         One ``(name, value)`` pair per non-empty fact.
@@ -139,7 +156,7 @@ def spring_rows(model: Any, obj: Any) -> list:
     if model is None or obj is None:
         return []
     if isinstance(obj, Node):
-        return _node_spring_rows(model, obj.node_id)
+        return _node_spring_rows(model, obj.node_id, processed=processed)
     if isinstance(obj, FrameElement):
         name = (getattr(model, "line_spring_assignments", None) or {}).get(obj.elem_id)
         return [("Line Spring", _line_spring_label(model, name))] if name else []
