@@ -46,8 +46,12 @@ related: [shell_support.md, constraint_detection.md, element_splitting.md, eleme
 
 ## 1. Background and current state
 
-An *opening* is an `AreaElement` with `opening=True` (the `"NONE"` section or
-`OPENING "YES"` in the source model).  Current behaviour:
+An *opening* is an `AreaElement` with `opening=True` — an *explicitly
+designated* void (`OPENING "YES"` in legacy ETABS 9.7, or an explicit opening
+section name).  The built-in `"NONE"` section is **not** an opening: it marks a
+*null* (geometric) object — a load patch whose pressure transfers to the
+enclosing slab, or a meshing guide — and is excluded from shells without being
+cut as a hole (see `model/sap_data.py` `is_null_section`).  Current behaviour:
 
 - **Self-weight** — `net_area()` subtracts the exact opening overlap
   (`model/openings.py`), so weights are correct.

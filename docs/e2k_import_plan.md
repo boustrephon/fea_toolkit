@@ -147,8 +147,10 @@ a sequential integer tag.
   (`X` → local 2, `Y` → local 3) is confirmed against a real ETABS export,
   while the wall-pier (vs frame) default and non-90 `ANGLE` cases remain to be
   pinned down.  Null `LINE`/`AREA` objects assigned the built-in `"NONE"` section are
-  materialised with a synthesised zero-stiffness `GeneralSection` (`"NONE"`), so
-  their loads (none in this model, but generally present) can resolve.
+  flagged `null` (not `opening`): an area is a *load patch* whose uniform
+  pressure re-parents onto the slab mesh under it (see
+  `transfer_null_area_loads`), and an assignment-free frame is classified as a
+  `line spring` / `patch boundary` / `mesh guide` role rather than a member.
 * **Restraints** (`$ POINT ASSIGNS` `RESTRAINT "UX UY UZ"`): mapped to the six
   DOFs and keyed by the `point@storey` node id.
 

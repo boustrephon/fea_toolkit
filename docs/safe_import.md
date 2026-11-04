@@ -59,6 +59,10 @@ per-level planar union into buildable quad/tri `AreaElement`s:
 * the **union outer boundary** is reconstructed from undirected edge counts
   (an edge on the outline is one whose midpoint lies inside no other region);
 * **openings** are cut as `PlaneSurface` holes;
+* **null** (`"NONE"`) areas are neither shells nor holes: they are excluded
+  from the gmsh pass, and their uniform pressure re-parents onto the slab
+  sub-elements under them (`transfer_null_area_loads`) rather than being
+  dropped;
 * **overlapping drop panels / stiff zones** are resolved by per-element
   *overlay precedence* (`Stiff` > `Drop` > `Slab`, read from the section
   `shape`) — OCC booleans cannot subtract coplanar faces, so the mesher works
