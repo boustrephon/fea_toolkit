@@ -529,6 +529,56 @@ def run_ida(
     )
 
 
+def _order_statistic_at(
+    collapsed: list[float], survivor_limits: list[float], n: int, k: int
+) -> Optional[float]:
+    """The ``k``-th (0-indexed) order statistic, when pinned to a collapse value.
+
+    ``collapsed`` holds the exact collapse capacities (Sa); ``survivor_limits``
+    holds each survivor's tested Sa limit — a *lower bound* on that record's
+    (unknown, larger) capacity.  A collapse value ``c`` is certain to be the
+    ``k``-th smallest only when the data force it there: at least ``k + 1``
+    records are known to be ``<= c`` (collapsed values at or below ``c``) and at
+    least ``n - k`` records are known to be ``>= c`` (collapsed values at or
+    above ``c``, plus every survivor tested at or above ``c``).  Survivors are
+    *not* assumed to exceed every collapse — only their own tested limit.
+
+    Returns:
+        ``c`` when it is pinned at rank ``k``, else ``None``.
+    """
+    for c in collapsed:
+        below = sum(1 for x in collapsed if x < c)
+        at = sum(1 for x in collapsed if x == c)
+        above_collapsed = sum(1 for x in collapsed if x > c)
+        above_survivors = sum(1 for s in survivor_limits if s >= c)
+        if below + at >= k + 1 and at + above_collapsed + above_survivors >= n - k:
+            return c
+    return None
+
+
+def _censored_median(
+    collapsed: list[float], survivor_limits: list[float], n: int
+) -> Optional[float]:
+    """Median of *n* collapse capacities with right-censored survivors.
+
+    The full-set median needs the middle rank (odd *n*) or both middle ranks
+    (even *n*).  Each required rank is read via :func:`_order_statistic_at`; if
+    either is unpinned by the observed collapses and survivor limits, the median
+    is unknowable and ``None`` is returned.  The all-collapsed case reduces to
+    the ordinary median (every rank is a collapse value).
+    """
+    if n == 0:
+        return None
+    ranks = [n // 2] if n % 2 == 1 else [n // 2 - 1, n // 2]
+    values = []
+    for k in ranks:
+        value = _order_statistic_at(collapsed, survivor_limits, n, k)
+        if value is None:
+            return None
+        values.append(value)
+    return float(values[0]) if len(values) == 1 else float(0.5 * (values[0] + values[1]))
+
+
 def collapse_ida_curves(
     code: str,
     record_ids: Sequence[str],
@@ -574,12 +624,14 @@ def collapse_ida_curves(
     Returns:
         ``{"code", "T1", "gamma", "g", "ladder", "max_scale", "tolerance",
         "collapse_drift", "records", "records_detail", "capacities",
-        "collapse_Sa_T1_g", "median_collapse_sa", "median_collapse_sa_gamma",
-        "sigma_ln", "n_records", "n_collapsed", "n_survived"}``.
+        "collapse_Sa_T1_g", "survivor_limits", "median_collapse_sa",
+        "median_collapse_sa_gamma", "sigma_ln", "n_records", "n_collapsed",
+        "n_survived"}``.
     """
     t1 = period_1(code)
     g = g_from_units(gf.UNITS)
     capacities: dict[str, Optional[float]] = {}
+    survivor_limits: list[float] = []
     records_detail: dict[str, dict[str, Any]] = {}
     collapse_sa_g: dict[str, Optional[float]] = {}
     for i, rid in enumerate(record_ids):
@@ -603,8 +655,16 @@ def collapse_ida_curves(
             damping_type=damping_type,
         )
         im = res["collapse_intensity"]
-        capacities[rid] = (im * sa_t1) if im is not None else None
-        collapse_sa_g[rid] = (im * sa_t1 / g) if im is not None else None
+        if im is not None:
+            capacities[rid] = im * sa_t1
+            collapse_sa_g[rid] = im * sa_t1 / g
+        else:
+            capacities[rid] = None
+            collapse_sa_g[rid] = None
+            # A survivor's collapse capacity lies above the top of its tested
+            # ladder, so record that tested limit (in Sa terms) as a lower
+            # bound on its position in the full-set order statistics.
+            survivor_limits.append(float(max(res["intensities"], default=0.0)) * sa_t1)
         records_detail[rid] = {
             "Sa_T1": float(sa_t1),
             "Sa_T1_g": float(sa_t1 / g),
@@ -615,23 +675,15 @@ def collapse_ida_curves(
     n_records = len(capacities)
     n_collapsed = len(collapsed)
     n_survived = n_records - n_collapsed
-    # Survivors are right-censored: their collapse capacity lies above the
-    # tested ladder, so they occupy the upper tail of the full-set order
-    # statistics.  The median of the full record set is therefore determined
-    # only when the required middle rank(s) are known — the single middle rank
-    # for an odd count, both middle ranks for an even count.  Censoring that
-    # leaves either required rank undetermined makes the median unknowable, so
-    # report ``None`` then (the all-collapsed case reduces to the ordinary
-    # ``np.median``).  A σ_ln computed from the collapsed subset alone must not
-    # be reported as though it described every record, so it is kept only when
-    # nothing is censored.
-    if n_collapsed > n_records // 2:
-        if n_records % 2 == 1:
-            median = float(collapsed[n_records // 2])
-        else:
-            median = float(0.5 * (collapsed[n_records // 2 - 1] + collapsed[n_records // 2]))
-    else:
-        median = None
+    # Survivors are right-censored: each survivor's collapse capacity lies
+    # above its own tested ladder, so its tested limit (not "infinity") is the
+    # best lower bound on where it sits in the full-set order statistics.  A
+    # median is reported only when the required middle rank(s) are pinned to
+    # exact collapse values by the observed collapses and survivor limits (see
+    # ``_censored_median``).  A σ_ln computed from the collapsed subset alone
+    # must not be reported as though it described every record, so it is kept
+    # only when nothing is censored.
+    median = _censored_median(collapsed, survivor_limits, n_records)
     sigma_ln = (
         float(np.std(np.log(np.asarray(collapsed, dtype=float))))
         if collapsed and n_survived == 0
@@ -650,6 +702,7 @@ def collapse_ida_curves(
         "records_detail": records_detail,
         "capacities": capacities,
         "collapse_Sa_T1_g": collapse_sa_g,
+        "survivor_limits": survivor_limits,
         "median_collapse_sa": median,
         "median_collapse_sa_gamma": (median / g) if median is not None else None,
         "sigma_ln": sigma_ln,
