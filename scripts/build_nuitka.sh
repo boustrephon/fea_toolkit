@@ -75,7 +75,7 @@ ARGS=(
 if [[ "$GUI" -eq 1 ]]; then
     # A .app bundle on macOS; satisfies the pyobjc AppKit/Foundation requirement.
     # Launch the Qt GUI (fea_toolkit.gui.__main__), not the API-lister __main__.
-    ARGS+=(--mode=app-dist --enable-plugin=pyside6)
+    ARGS+=(--mode=app-dist --enable-plugin=pyside6 --macos-app-icon=none)
     PACKAGE="${GUI_PACKAGE:-src/fea_toolkit/gui}"
 else
     ARGS+=(
