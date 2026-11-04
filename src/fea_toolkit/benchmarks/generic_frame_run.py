@@ -543,6 +543,14 @@ def _order_statistic_at(
     above ``c``, plus every survivor tested at or above ``c``).  Survivors are
     *not* assumed to exceed every collapse — only their own tested limit.
 
+    Args:
+        collapsed: The exact collapse capacities (Sa) of the records that
+            collapsed, in any order (duplicates allowed).
+        survivor_limits: Each survivor's tested Sa limit — a lower bound on
+            that record's (unknown, larger) capacity.
+        n: The total number of records (collapsed + survived).
+        k: The 0-indexed rank of the order statistic being pinned.
+
     Returns:
         ``c`` when it is pinned at rank ``k``, else ``None``.
     """
@@ -566,6 +574,17 @@ def _censored_median(
     either is unpinned by the observed collapses and survivor limits, the median
     is unknowable and ``None`` is returned.  The all-collapsed case reduces to
     the ordinary median (every rank is a collapse value).
+
+    Args:
+        collapsed: The exact collapse capacities (Sa) of the records that
+            collapsed.
+        survivor_limits: Each survivor's tested Sa limit (a lower bound on its
+            unknown capacity).
+        n: The total number of records (collapsed + survived).
+
+    Returns:
+        The censored median capacity, or ``None`` when the required middle
+        rank(s) cannot be pinned to an exact collapse value.
     """
     if n == 0:
         return None
@@ -628,6 +647,10 @@ def collapse_ida_curves(
         "median_collapse_sa_gamma", "sigma_ln", "n_records", "n_collapsed",
         "n_survived"}``.
     """
+    # A duplicated record id would be processed twice, double-counting its
+    # survivor limit in ``survivor_limits`` while ``capacities`` (a dict)
+    # already collapses it to one entry.  Deduplicate so the two stay aligned.
+    record_ids = list(dict.fromkeys(record_ids))
     t1 = period_1(code)
     g = g_from_units(gf.UNITS)
     capacities: dict[str, Optional[float]] = {}
