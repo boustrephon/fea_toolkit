@@ -14,7 +14,7 @@ and warns when a panel has no supported edge at all.
 
 import pytest
 
-from fea_toolkit.model.geometry import convert_area_loads_to_edge_loads
+from fea_toolkit.model.geometry import convert_area_loads_to_edge_loads, transfer_null_area_loads
 from fea_toolkit.model.sap_data import (
     AreaElement,
     AreaUniformLoad,
@@ -256,3 +256,85 @@ def test_shell_nodal_pressure_resolves_area_local_directions(shell_model, direct
                 assert totals[comp] == pytest.approx(0.0, abs=1e-9)
     finally:
         ops.wipe()
+
+
+# ── Null-area (load-patch) transfer ────────────────────────────────
+
+
+def _patched_slab_model():
+    """A 6x6 m slab meshed into a 3x3 grid of 2x2 m quads, plus a null patch.
+
+    The patch is a null (``"NONE"``) area over the lower-left 4x4 m quadrant,
+    whose four sub-element centroids (1,1) (3,1) (1,3) (3,3) all lie strictly
+    inside the patch footprint.
+    """
+    nodes = {}
+    for i in range(4):
+        for j in range(4):
+            nid = f"g{i}_{j}"
+            nodes[nid] = Node(node_id=nid, node_tag=len(nodes) + 1, x=i * 2.0, y=j * 2.0, z=0.0)
+
+    areas: dict = {}
+    assignments: dict = {}
+    for i in range(3):
+        for j in range(3):
+            aid = f"q{i}_{j}"
+            areas[aid] = AreaElement(
+                area_id=aid,
+                area_tag=100 + len(areas),
+                node_ids=[f"g{i}_{j}", f"g{i+1}_{j}", f"g{i+1}_{j+1}", f"g{i}_{j+1}"],
+                thickness=0.2,
+            )
+            assignments[aid] = "Slab200"
+
+    patch = AreaElement(
+        area_id="patch", area_tag=200, node_ids=["g0_0", "g2_0", "g2_2", "g0_2"]
+    )
+    patch.null = True
+    areas["patch"] = patch
+    return nodes, areas, assignments
+
+
+def test_null_area_load_reparents_onto_the_slab_mesh():
+    """A load patch's pressure lands on the slab sub-elements under it."""
+    nodes, areas, assignments = _patched_slab_model()
+    loads = [AreaUniformLoad(pattern="LIVE", area_id="patch", direction="Z", value=2.0)]
+    result = transfer_null_area_loads(areas, assignments, nodes, loads)
+
+    reparented = {ld.area_id for ld in result}
+    assert "patch" not in reparented
+    assert reparented == {"q0_0", "q1_0", "q0_1", "q1_1"}
+    assert all(ld.value == 2.0 and ld.pattern == "LIVE" for ld in result)
+
+    # Total conserved: 4 x 4 m2 sub-elements at 2 kN/m2 == 2 kN/m2 x 16 m2.
+    total = sum(ld.value * 4.0 for ld in result)
+    assert total == pytest.approx(2.0 * 16.0, abs=1e-9)
+
+
+def test_non_null_area_load_is_untouched():
+    nodes, areas, assignments = _patched_slab_model()
+    loads = [AreaUniformLoad(pattern="LIVE", area_id="q0_0", direction="Z", value=2.0)]
+    assert transfer_null_area_loads(areas, assignments, nodes, loads) == loads
+
+
+def test_null_area_with_no_slab_beneath_keeps_its_load():
+    """A patch at an isolated elevation has no slab under it — keep the load."""
+    nodes, areas, assignments = _patched_slab_model()
+    for nid in areas["patch"].node_ids:
+        nd = nodes[nid]
+        nodes[nid] = Node(node_id=nid, node_tag=nd.node_tag, x=nd.x, y=nd.y, z=5.0)
+    loads = [AreaUniformLoad(pattern="LIVE", area_id="patch", direction="Z", value=2.0)]
+    result = transfer_null_area_loads(areas, assignments, nodes, loads)
+    assert [ld.area_id for ld in result] == ["patch"]
+
+
+def test_to_frame_null_area_load_is_left_alone():
+    """SAP UNIFORM TO FRAME loads on a patch go through edge conversion, not this."""
+    nodes, areas, assignments = _patched_slab_model()
+    loads = [
+        AreaUniformLoad(pattern="LIVE", area_id="patch", direction="Z", value=2.0, to_frame=True)
+    ]
+    result = transfer_null_area_loads(areas, assignments, nodes, loads)
+    assert len(result) == 1
+    assert result[0].area_id == "patch" and result[0].to_frame is True
+

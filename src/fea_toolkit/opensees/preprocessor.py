@@ -30,6 +30,7 @@ from ..model.geometry import (
     split_elements,
     split_slabs_at_wall_intersections,
     subdivide_area_mesh,
+    transfer_null_area_loads,
 )
 from ..model.gravity_axial import fill_column_gravity_axial
 from ..model.mesh_model import MeshModel, NodalSpring, PanelZoneSpec, WallElement
@@ -750,6 +751,17 @@ class Preprocessor:
                 )
         else:
             area_element_types = {}
+
+        # ── 5b. Transfer null-area (load-patch) uniform loads onto the slab ──
+        # A null area is a load patch, not a shell: its uniform pressure must
+        # reach the enclosing slab, not the patch's own corners.  Re-parent
+        # after meshing so the slab sub-elements under each patch carry it.
+        md.area_uniform_loads = transfer_null_area_loads(
+            md.area_elements,
+            md.area_assignments,
+            md.nodes,
+            getattr(md, "area_uniform_loads", []),
+        )
 
         # ── 6. Detect constraint edges (opt-in diagnostic) ──────
         raw_edges = []

@@ -34,6 +34,7 @@ from .geometry_frames import (
     split_elements,
     split_elements_at_joints,
     subdivide_elements,
+    transfer_null_area_loads,
     trapezoidal_force_split,
 )
 from .geometry_mesh import (
@@ -86,6 +87,7 @@ __all__ = [
     "split_slabs_at_wall_intersections",
     "subdivide_area_mesh",
     "subdivide_elements",
+    "transfer_null_area_loads",
     "trapezoidal_force_split",
     "warn_frame_overlaps",
 ]

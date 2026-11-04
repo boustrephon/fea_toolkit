@@ -32,6 +32,7 @@ from .geometry_core import (
     point_on_segment,
     polygon_area_3d,
 )
+from .openings import point_in_polygon_2d
 from .sap_data import (
     AreaElement,
     AreaUniformLoad,
@@ -952,6 +953,110 @@ def convert_area_loads_to_edge_loads(
             )
 
     return result_loads
+
+
+def transfer_null_area_loads(
+    area_elements: dict[str, AreaElement],
+    area_assignments: dict[str, str],
+    nodes: dict[str, Node],
+    area_uniform_loads: list[AreaUniformLoad],
+) -> list[AreaUniformLoad]:
+    """Re-parent null-area uniform loads onto the slab mesh under each patch.
+
+    A null (``"NONE"``) area is a *load patch*, not a shell: its uniform
+    pressure must reach the slab it overlays.  After meshing, the patch's
+    pressure is re-assigned to the active slab sub-elements whose centroid
+    lies inside the patch polygon.  Because those sub-elements tile the patch,
+    the builder's existing per-shell nodal distribution sums the transferred
+    force back to ``pressure × patch_area`` — the load is conserved, not
+    doubled.  A patch with no slab beneath it keeps its load on the patch's
+    own corners (the pre-existing fallback), so nothing is silently dropped.
+
+    Only *uniform* pressures are transferred; gravity and one-way / deck
+    distribution are deferred follow-ons.  ``to_frame`` (SAP ``UNIFORM TO
+    FRAME``) loads are left untouched — they are edge loads on the patch's
+    perimeter frames and flow through the edge-load conversion instead.
+
+    Args:
+        area_elements: ``{area_id: AreaElement}`` (post-mesh: parents inactive,
+            sub-elements active; null areas remain active and unmeshed).
+        area_assignments: ``{area_id: section_name}`` — a slab sub-element has
+            a section assignment; a null area has none.
+        nodes: ``{node_id: Node}``.
+        area_uniform_loads: The model's uniform area-load list.
+
+    Returns:
+        A new ``list[AreaUniformLoad]``: non-null and ``to_frame`` loads
+        unchanged, null-area loads replaced by one re-parented load per patch
+        sub-element.
+    """
+    null_ids = {aid for aid, a in area_elements.items() if getattr(a, "null", False)}
+    transferred = [
+        ld
+        for ld in area_uniform_loads
+        if ld.area_id in null_ids and not getattr(ld, "to_frame", False)
+    ]
+    if not transferred:
+        return area_uniform_loads
+
+    retained = [
+        ld
+        for ld in area_uniform_loads
+        if ld.area_id not in null_ids or getattr(ld, "to_frame", False)
+    ]
+    slabs = [
+        (aid, a)
+        for aid, a in area_elements.items()
+        if not getattr(a, "inactive", False)
+        and not getattr(a, "null", False)
+        and not getattr(a, "opening", False)
+        and area_assignments.get(aid)
+    ]
+
+    for ld in transferred:
+        patch = area_elements.get(ld.area_id)
+        if patch is None:
+            retained.append(ld)
+            continue
+        sub_ids = _slab_sub_elements_under(patch, slabs, nodes)
+        if not sub_ids:
+            retained.append(ld)
+            continue
+        retained.extend(replace(ld, area_id=sub_id) for sub_id in sub_ids)
+
+    return retained
+
+
+def _slab_sub_elements_under(
+    patch: AreaElement,
+    slabs: list[tuple[str, AreaElement]],
+    nodes: dict[str, Node],
+    z_tol: float = 1e-6,
+) -> list[str]:
+    """Slab sub-element ids whose centroid lies inside *patch*'s footprint.
+
+    The patch and candidate slabs are assumed coplanar and approximately
+    horizontal; both are projected to the (x, y) plane for the point-in-polygon
+    test on each candidate's centroid.
+    """
+    corners = [(nodes[n].x, nodes[n].y) for n in patch.node_ids if n in nodes]
+    if len(corners) < 3:
+        return []
+    zs = [nodes[n].z for n in patch.node_ids if n in nodes]
+    patch_z = sum(zs) / len(zs) if zs else 0.0
+
+    result: list[str] = []
+    for aid, area in slabs:
+        pts = [nodes[n] for n in area.node_ids if n in nodes]
+        if len(pts) < 3:
+            continue
+        if abs(sum(p.z for p in pts) / len(pts) - patch_z) > z_tol:
+            continue
+        cx = sum(p.x for p in pts) / len(pts)
+        cy = sum(p.y for p in pts) / len(pts)
+        if point_in_polygon_2d((cx, cy), corners):
+            result.append(aid)
+    return result
 
 
 def _nearest_edge_tributary(
