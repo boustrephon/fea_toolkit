@@ -11,11 +11,60 @@ into the rows the Inspector appends, exactly as
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from .sap_data import AreaElement, FrameElement, Node
 
-__all__ = ["meshing_rows"]
+__all__ = ["frame_role", "meshing_rows"]
+
+
+def frame_role(model: Any, frame: FrameElement) -> Optional[str]:
+    """Non-structural role of a frame that carries no section assignment.
+
+    CSI draws *null* (``"NONE"``) frames for purposes other than contributing
+    member stiffness.  They are the non-structural companions to the null areas
+    of :func:`~fea_toolkit.model.sap_data.is_null_section`: a frame *with* a
+    section assignment is structural (its geometric type — beam/column/brace —
+    is :class:`~fea_toolkit.model.mesh_model.MeshModel.frame_element_types`),
+    but a frame *without* one is classified here:
+
+    * ``"line spring"`` — the frame carries a SAFE line-spring assignment
+      (its stiffness distributes to the frame's endpoints; the frame itself is
+      not built as a member);
+    * ``"patch boundary"`` — the frame is a boundary edge of a null (load-patch
+      / meshing-guide) area, so it is a meshing constraint rather than a member;
+    * ``"mesh guide"`` — any other assignment-free frame (a bare line the mesh
+      is meant to conform to).
+
+    Args:
+        model: A ``SAPModelData`` or ``MeshModel``, or ``None``.
+        frame: The :class:`FrameElement` to classify.
+
+    Returns:
+        The role string, or ``None`` when the frame has a section assignment
+        (structural) or *model* carries none of the lookup collections.
+    """
+    if model is None or frame is None:
+        return None
+
+    assignments = getattr(model, "frame_assignments", None) or {}
+    if assignments.get(frame.elem_id):
+        return None
+
+    line_springs = getattr(model, "line_spring_assignments", None) or {}
+    if frame.elem_id in line_springs:
+        return "line spring"
+
+    areas = getattr(model, "area_elements", None) or {}
+    for area in areas.values():
+        if not getattr(area, "null", False):
+            continue
+        nids = area.node_ids
+        for k in range(len(nids)):
+            if {frame.node_i, frame.node_j} == {nids[k], nids[(k + 1) % len(nids)]}:
+                return "patch boundary"
+
+    return "mesh guide"
 
 
 def _area_meshing_rows(model: Any, area: AreaElement) -> list:
@@ -62,10 +111,13 @@ def _area_meshing_rows(model: Any, area: AreaElement) -> list:
 
 
 def _frame_meshing_rows(model: Any, frame: FrameElement) -> list:
+    rows: list[tuple[str, str]] = []
+    role = frame_role(model, frame)
+    if role:
+        rows.append(("Role", role))
     auto = (getattr(model, "frame_auto_mesh", None) or {}).get(frame.elem_id)
     if not auto:
-        return []
-    rows: list[tuple[str, str]] = []
+        return rows
     for key, label in (
         ("Auto Mesh", "Auto Mesh"),
         ("At Intermediate Joints", "Auto Mesh At Joints"),
@@ -97,9 +149,9 @@ def meshing_rows(model: Any, obj: Any) -> list:
     An area reports its role (floor/wall), its per-area mesh option and
     add-restraints flag, the governing maximum mesh size, whether its edges are
     auto-constrained, and whether it is an opening or has been meshed away
-    (``inactive``).  A frame reports its auto-mesh settings; a node reports
-    whether it is included in the floor mesh.  Rows with nothing to say are
-    omitted.
+    (``inactive``).  A frame reports its non-structural role (via
+    :func:`frame_role`) and its auto-mesh settings; a node reports whether it is
+    included in the floor mesh.  Rows with nothing to say are omitted.
 
     Args:
         model: A ``SAPModelData`` or ``MeshModel``, or ``None``.

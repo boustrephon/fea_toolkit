@@ -16,6 +16,8 @@ def _model(
     floor_mesh_options=None,
     frames=None,
     frame_auto_mesh=None,
+    frame_assignments=None,
+    line_spring_assignments=None,
 ):
     areas = areas or {}
     frames = frames or {}
@@ -25,13 +27,14 @@ def _model(
         materials={},
         sections={},
         frame_elements=frames,
-        frame_assignments=dict.fromkeys(frames, ""),
+        frame_assignments=frame_assignments if frame_assignments is not None else dict.fromkeys(frames, ""),
         area_elements=areas,
         area_assignments=dict.fromkeys(areas, ""),
         groups={},
         frame_auto_mesh=frame_auto_mesh or {},
         area_roles=area_roles or {},
         floor_mesh_options=floor_mesh_options or {},
+        line_spring_assignments=line_spring_assignments or {},
     )
 
 
@@ -110,6 +113,7 @@ def test_node_reports_include_in_mesh():
 def test_frame_reports_its_auto_mesh_settings():
     md = _model(
         frames={"F1": FrameElement("F1", 1, "1", "2")},
+        frame_assignments={"F1": "SEC"},
         frame_auto_mesh={
             "F1": {
                 "Auto Mesh": "Yes",
@@ -132,3 +136,45 @@ def test_an_element_without_meshing_reports_nothing():
     assert meshing_rows(md, md.area_elements["A1"]) == []
     assert meshing_rows(None, md.area_elements["A1"]) == []
     assert meshing_rows(md, None) == []
+
+
+# ── Non-structural frame role ─────────────────────────────────────
+
+
+def test_assignment_free_frame_is_a_mesh_guide():
+    md = _model(frames={"F1": FrameElement("F1", 1, "1", "2")})
+    assert meshing_rows(md, md.frame_elements["F1"]) == [("Role", "mesh guide")]
+
+
+def test_frame_with_a_section_has_no_non_structural_role():
+    md = _model(
+        frames={"F1": FrameElement("F1", 1, "1", "2")},
+        frame_assignments={"F1": "SEC"},
+    )
+    assert meshing_rows(md, md.frame_elements["F1"]) == []
+
+
+def test_line_spring_frame_reports_the_line_spring_role():
+    md = _model(
+        frames={"F1": FrameElement("F1", 1, "1", "2")},
+        line_spring_assignments={"F1": "LS1"},
+    )
+    assert ("Role", "line spring") in meshing_rows(md, md.frame_elements["F1"])
+
+
+def test_null_area_boundary_frame_reports_the_patch_boundary_role():
+    md = _model(
+        areas={"P": AreaElement("P", 1, ["1", "2", "3", "4"])},
+        frames={"F1": FrameElement("F1", 1, "1", "2")},
+    )
+    md.area_elements["P"].null = True
+    assert ("Role", "patch boundary") in meshing_rows(md, md.frame_elements["F1"])
+
+
+def test_a_diagonal_of_a_null_area_is_not_a_patch_boundary():
+    md = _model(
+        areas={"P": AreaElement("P", 1, ["1", "2", "3", "4"])},
+        frames={"F1": FrameElement("F1", 1, "1", "3")},
+    )
+    md.area_elements["P"].null = True
+    assert ("Role", "mesh guide") in meshing_rows(md, md.frame_elements["F1"])
