@@ -1,0 +1,72 @@
+name: Build executable
+
+# Builds a Nuitka "standalone" executable and (on a version tag) attaches it to
+# a GitHub Release.
+#
+# Two modes:
+#   * default / tag push — the "separate" build, which bundles no OpenSeesPy and
+#     is a clean GPL-3.0-or-later bundle publishable without an OpenSees licence;
+#   * workflow_dispatch "with_opensees" — the licensed build, which bundles
+#     OpenSeesPy and is gated behind the OPENSEES_COMMERCIAL_LICENCE secret (the
+#     build script aborts unless that secret is set to "1").
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      with_opensees:
+        description: "Bundle OpenSeesPy (requires a commercial licence)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # needed for setuptools-scm versioning
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[report]"
+          pip install nuitka
+
+      - name: Build (separate — no OpenSeesPy)
+        if: ${{ !inputs.with_opensees }}
+        run: scripts/build_nuitka.sh
+
+      - name: Build (with OpenSeesPy — licensed)
+        if: ${{ inputs.with_opensees }}
+        env:
+          OPENSEES_COMMERCIAL_LICENCE: ${{ secrets.OPENSEES_COMMERCIAL_LICENCE }}
+        run: |
+          pip install openseespy
+          scripts/build_nuitka.sh --with-opensees
+
+      - name: Package
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          tar -C build/nuitka -czf build/nuitka/fea_toolkit-linux-x86_64.tar.gz fea_toolkit.dist
+          ls -la build/nuitka/
+
+      - name: Publish release assets
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            build/nuitka/fea_toolkit-linux-x86_64.tar.gz \
+            --title "${{ github.ref_name }}" --generate-notes \
+            || gh release upload "${{ github.ref_name }}" \
+              build/nuitka/fea_toolkit-linux-x86_64.tar.gz --clobber

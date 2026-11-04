@@ -31,8 +31,7 @@ from pathlib import Path
 from typing import NamedTuple, Optional
 
 import fea_toolkit
-
-from .license import add_license_argument, print_license
+from fea_toolkit.license import add_license_argument, print_license
 
 # --- Lazy introspection helpers -------------------------------------
 
