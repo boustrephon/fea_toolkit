@@ -222,3 +222,45 @@ def test_builder_ent_for_compression_only():
     # ENT (elastic-no-tension) material builds and the support still emits.
     AnalysisBuilder(mm, {"verbose": False, "soil_spring_compression_only": True}).build_domain()
     assert len(ops.getEleTags()) == 1
+
+
+def test_ent_zerolength_resists_downward_not_uplift():
+    """Ground-as-node-i: downward is compression (ENT resists), uplift is tension.
+
+    Verifies the ``zeroLength`` node order used by ``_create_point_springs``
+    against the ``ENT`` (elastic-no-tension) convention: with the fixed ground
+    node as node i and the model node as node j, a downward (-Z) displacement is
+    compression — which ENT resists — while uplift is tension, which it releases.
+    """
+    import openseespy.opensees as ops
+
+    k = 1000.0
+    load = 100.0
+
+    def _build(sign: float) -> int:
+        ops.wipe()
+        ops.model("basic", "-ndm", 3, "-ndf", 6)
+        ops.node(1, 0.0, 0.0, 0.0)  # ground (node i)
+        ops.node(2, 0.0, 0.0, 0.0)  # model node (node j)
+        ops.fix(1, 1, 1, 1, 1, 1, 1)
+        ops.fix(2, 1, 1, 0, 1, 1, 1)  # only Z free
+        ops.uniaxialMaterial("ENT", 1, k)
+        ops.element("zeroLength", 1, 1, 2, "-mat", 1, "-dir", 3)
+        ops.timeSeries("Linear", 1)
+        ops.pattern("Plain", 1, 1)
+        ops.load(2, 0.0, 0.0, sign * load, 0.0, 0.0, 0.0)
+        ops.system("BandGeneral")
+        ops.numberer("RCM")
+        ops.constraints("Plain")
+        ops.integrator("LoadControl", 1.0)
+        ops.algorithm("Newton")
+        ops.analysis("Static")
+        return int(ops.analyze(1))
+
+    # Downward: ENT resists compression → node 2 settles by load/k.
+    assert _build(-1.0) == 0
+    assert ops.nodeDisp(2, 3) == pytest.approx(-load / k)
+
+    # Uplift: ENT releases tension → the Z DOF has no stiffness and the solve
+    # cannot converge (the node would lift freely).
+    assert _build(1.0) < 0

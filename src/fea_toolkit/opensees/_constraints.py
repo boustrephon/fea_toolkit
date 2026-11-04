@@ -769,12 +769,14 @@ class ConstraintMixin:
 
         Each resolved :class:`~fea_toolkit.model.mesh_model.NodalSpring`
         anchors a coincident, fully-fixed ground node to its model node via a
-        ``zeroLength`` carrying one uniaxial material per enabled DOF.  Linear
-        DOFs use ``Elastic``; DOFs flagged ``compression_only`` use the
-        elastic-no-tension ``ENT`` material when ``soil_spring_compression_only``
-        is enabled (otherwise they stay linear, so the domain still solves under
-        a linear static analysis).  Runs last in ``build_domain`` so its tag
-        allocation sees every element already created.
+        ``zeroLength`` carrying one uniaxial material per enabled DOF, with the
+        ground node as node i and the model node as node j.  Linear DOFs use
+        ``Elastic``; DOFs flagged ``compression_only`` use the elastic-no-tension
+        ``ENT`` material when ``soil_spring_compression_only`` is enabled
+        (otherwise they stay linear, so the domain still solves under a linear
+        static analysis).  A spring whose stiffness vector is all zeros is
+        skipped before any ground node is created.  Runs last in ``build_domain``
+        so its tag allocation sees every element already created.
         """
         springs = getattr(self.mesh_model, "point_springs", None) or []
         if not springs or not self.config.get("build_soil_springs", True):
@@ -811,7 +813,7 @@ class ConstraintMixin:
 
         for spring in springs:
             nd = self.mesh_model.nodes.get(spring.node_id)
-            if nd is None or not spring.stiffness:
+            if nd is None or not any(spring.stiffness):
                 continue
 
             ground_tag = next_node_tag
@@ -840,8 +842,12 @@ class ConstraintMixin:
                 dirs.append(dof)
                 mats.append(mat_tag)
 
+            # Ground node is node i, model node is node j: a zeroLength's
+            # direction-3 (axial) deformation is then (disp_j - disp_i), so a
+            # downward (-Z) model displacement is *compression* — exactly what
+            # ``ENT`` resists — while uplift is tension, which ``ENT`` releases.
             ops.element(
-                "zeroLength", next_tag, nd.node_tag, ground_tag, "-mat", *mats, "-dir", *dirs
+                "zeroLength", next_tag, ground_tag, nd.node_tag, "-mat", *mats, "-dir", *dirs
             )
             next_tag += 1
 
