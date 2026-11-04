@@ -27,7 +27,9 @@ def _model(
         materials={},
         sections={},
         frame_elements=frames,
-        frame_assignments=frame_assignments if frame_assignments is not None else dict.fromkeys(frames, ""),
+        frame_assignments=frame_assignments
+        if frame_assignments is not None
+        else dict.fromkeys(frames, ""),
         area_elements=areas,
         area_assignments=dict.fromkeys(areas, ""),
         groups={},

@@ -282,14 +282,12 @@ def _patched_slab_model():
             areas[aid] = AreaElement(
                 area_id=aid,
                 area_tag=100 + len(areas),
-                node_ids=[f"g{i}_{j}", f"g{i+1}_{j}", f"g{i+1}_{j+1}", f"g{i}_{j+1}"],
+                node_ids=[f"g{i}_{j}", f"g{i + 1}_{j}", f"g{i + 1}_{j + 1}", f"g{i}_{j + 1}"],
                 thickness=0.2,
             )
             assignments[aid] = "Slab200"
 
-    patch = AreaElement(
-        area_id="patch", area_tag=200, node_ids=["g0_0", "g2_0", "g2_2", "g0_2"]
-    )
+    patch = AreaElement(area_id="patch", area_tag=200, node_ids=["g0_0", "g2_0", "g2_2", "g0_2"])
     patch.null = True
     areas["patch"] = patch
     return nodes, areas, assignments
@@ -337,4 +335,3 @@ def test_to_frame_null_area_load_is_left_alone():
     result = transfer_null_area_loads(areas, assignments, nodes, loads)
     assert len(result) == 1
     assert result[0].area_id == "patch" and result[0].to_frame is True
-
