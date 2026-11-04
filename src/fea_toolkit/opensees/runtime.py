@@ -58,22 +58,42 @@ def opensees_available() -> bool:
         return False
 
 
+def _normalise_python(path: str) -> str:
+    """Resolve a virtualenv *directory* to the interpreter inside it.
+
+    A user may point the setting at the environment itself (``.../venv``) rather
+    than its interpreter; this resolves it to ``.../venv/bin/python`` (or
+    ``.../venv/Scripts/python.exe`` on Windows).  Non-directory values — a bare
+    command name (``python3``) or a full executable path — pass through
+    unchanged.
+    """
+    if os.path.isdir(path):
+        for candidate in (
+            os.path.join(path, "bin", "python"),
+            os.path.join(path, "Scripts", "python.exe"),
+        ):
+            if os.path.isfile(candidate):
+                return candidate
+    return path
+
+
 def resolve_opensees_python(explicit: Optional[str] = None) -> str:
     """Resolve the interpreter that should run analysis out-of-process.
 
     Args:
         explicit: A caller-supplied path (e.g. the GUI's configured
-            ``opensees.python`` setting).  ``None`` or ``""`` falls through to
-            the environment variable, then auto-detection.
+            ``opensees.python`` setting) — an interpreter path or a virtualenv
+            directory.  ``None`` or ``""`` falls through to the environment
+            variable, then auto-detection.
 
     Returns:
         A path (or bare command name) usable as ``argv[0]`` for a subprocess.
     """
     if explicit:
-        return explicit
+        return _normalise_python(explicit)
     env = os.environ.get(ENV_VAR)
     if env:
-        return env
+        return _normalise_python(env)
     if opensees_available():
         return sys.executable
     for candidate in ("python3", "python"):

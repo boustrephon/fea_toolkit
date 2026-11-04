@@ -54,6 +54,19 @@ class TestResolveOpenseesPython:
         )
         assert runtime.resolve_opensees_python(None) == "/usr/bin/python3"
 
+    def test_a_virtualenv_directory_is_resolved_to_its_interpreter(self, tmp_path):
+        venv_bin = tmp_path / "venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        interpreter = venv_bin / "python"
+        interpreter.write_text("")
+        interpreter.chmod(0o755)
+
+        resolved = runtime.resolve_opensees_python(str(tmp_path / "venv"))
+        assert resolved == str(interpreter)
+
+    def test_a_non_directory_value_passes_through_unchanged(self):
+        assert runtime.resolve_opensees_python("python3") == "python3"
+
 
 class TestShouldDelegate:
     def test_delegates_only_when_opensees_absent(self, monkeypatch):
