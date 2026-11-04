@@ -20,8 +20,10 @@
 #   scripts/build_nuitka.sh                  # separate (no OpenSeesPy)
 #   scripts/build_nuitka.sh --with-opensees  # licensed build (gated)
 #
-# Overridable via the environment: PYTHON (default "python"), ENTRY (default
-# src/fea_toolkit/__main__.py), OUTPUT_NAME (default "fea_toolkit").
+# Overridable via the environment: PYTHON (default "python"), PACKAGE (default
+# "src/fea_toolkit", the package directory compiled in "-m" mode so
+# fea_toolkit.__main__ runs with the correct package context), OUTPUT_NAME
+# (default "fea_toolkit").
 
 set -euo pipefail
 
@@ -48,11 +50,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 PYTHON="${PYTHON:-python}"
-ENTRY="${ENTRY:-src/fea_toolkit/__main__.py}"
+PACKAGE="${PACKAGE:-src/fea_toolkit}"
 OUTPUT_NAME="${OUTPUT_NAME:-fea_toolkit}"
 
 ARGS=(
     --standalone
+    --python-flag=-m
     --assume-yes-for-downloads
     --output-dir="$ROOT/build/nuitka"
     --output-filename="$OUTPUT_NAME"
@@ -74,8 +77,10 @@ if [[ "$WITH_OPENSEES" -eq 1 ]]; then
         ARGS+=("--include-data-dir=$OS_LIB=openseespylinux/lib")
     fi
 else
-    # Separate build: keep OpenSees (and the uninstalled [gui] Qt stack) out of
-    # the binary so it stays a clean GPL-3.0 bundle.
+    # Separate build: keep OpenSees, the [gui] Qt stack, and the macOS pyobjc
+    # bridge (AppKit/Foundation, imported by gui/app.py to retitle the menu) out
+    # of the binary so it stays a clean GPL-3.0 bundle that builds without an
+    # app bundle.
     ARGS+=(
         --nofollow-import-to=openseespy
         --nofollow-import-to=openseespylinux
@@ -84,10 +89,13 @@ else
         --nofollow-import-to=PySide6
         --nofollow-import-to=pyvistaqt
         --nofollow-import-to=qtpy
+        --nofollow-import-to=AppKit
+        --nofollow-import-to=Foundation
+        --nofollow-import-to=objc
     )
 fi
 
-ARGS+=("$ENTRY")
+ARGS+=("$PACKAGE")
 
 MODE="separate"
 [[ "$WITH_OPENSEES" -eq 1 ]] && MODE="with-opensees"
