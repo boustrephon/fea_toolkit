@@ -13,7 +13,11 @@ What it does per level (a set of coplanar, horizontal floor areas):
 
 * each floor area polygon becomes a gmsh ``PlaneSurface``,
 * each opening (void) polygon is cut out as a hole in the surface that contains
-  it,
+  it — and a boundary loop contained by another loop (a floor union with an
+  island) is likewise treated as a hole rather than a separate surface,
+* null (``"NONE"`` / load-patch) area boundary edges are *embedded* as mesh
+  constraints so the patch boundary is tiled exactly for
+  :func:`fea_toolkit.model.geometry_frames.transfer_null_area_loads`,
 * beam frame edges (frames that carry a section assignment) and column / wall
   support points are *embedded* as 1-D / 0-D entities so the mesh conforms to
   them,
@@ -31,6 +35,7 @@ the core package never needs it.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Optional
 
 import numpy as np
@@ -104,6 +109,35 @@ def _chain_loops(edges: list[tuple[tuple, tuple]]) -> list[list[tuple]]:
     return loops
 
 
+def _interior_point_2d(poly: list[tuple[float, float]]) -> tuple[float, float]:
+    """A point strictly inside a simple 2-D polygon.
+
+    The vertex centroid is usually interior; when it is not (a concave loop),
+    fall back to an edge midpoint nudged slightly toward the centroid, which the
+    even-odd :func:`point_in_polygon_2d` test then confirms.
+    """
+    n = len(poly)
+    cx = sum(p[0] for p in poly) / n
+    cy = sum(p[1] for p in poly) / n
+    if point_in_polygon_2d((cx, cy), poly):
+        return (cx, cy)
+    for i in range(n):
+        x0, y0 = poly[i]
+        x1, y1 = poly[(i + 1) % n]
+        mx = (x0 + x1) / 2.0
+        my = (y0 + y1) / 2.0
+        dx, dy = cx - mx, cy - my
+        denom = (dx * dx + dy * dy) ** 0.5
+        if denom < 1e-12:
+            continue
+        for frac in (1e-2, 1e-3, 1e-4, 1e-5):
+            px = mx + (dx / denom) * frac
+            py = my + (dy / denom) * frac
+            if point_in_polygon_2d((px, py), poly):
+                return (px, py)
+    return (cx, cy)  # best effort — the centroid is the last resort
+
+
 def mesh_floors(
     area_elements: dict[str, AreaElement],
     area_assignments: dict[str, str],
@@ -114,6 +148,7 @@ def mesh_floors(
     frame_assignments: Optional[dict[str, str]] = None,
     restraints: Optional[dict[str, Any]] = None,
     sections: Optional[dict[str, Any]] = None,
+    excluded_area_ids: Optional[set[str]] = None,
     next_tag: int = 1,
     target_length: Optional[float] = None,
     recombine: bool = True,
@@ -122,8 +157,9 @@ def mesh_floors(
     """Mesh SAFE floor areas into quads, preserving openings and constraints.
 
     Args:
-        area_elements: ``{area_id: AreaElement}`` (modified in place — original
-            floor areas are marked inactive, sub-elements appended).
+        area_elements: ``{area_id: AreaElement}`` (modified in place — each
+            meshed parent area is *replaced* by a copy with ``inactive=True``
+            via :func:`dataclasses.replace`, and sub-elements are appended).
         area_assignments: ``{area_id: section_name}`` (modified in place).
         nodes: ``{node_id: Node}`` — new mesh nodes are appended here.
         floor_mesh_options: SAFE ``floor_mesh_options``; ``max_size`` drives the
@@ -138,6 +174,9 @@ def mesh_floors(
             walls) are embedded as mesh nodes.
         sections: ``{name: Section}`` — used to resolve overlay precedence from
             each section's ``shape`` (``"Stiff"`` > ``"Drop"`` > anything else).
+        excluded_area_ids: Optional ``set[str]`` of area ids to exclude from
+            floor meshing (loads-only areas) — they are never converted into
+            floor shells.
         next_tag: First free numeric tag for new nodes and elements.
         target_length: Fallback element size when ``floor_mesh_options`` has no
             ``max_size``.
@@ -162,6 +201,7 @@ def mesh_floors(
         )
 
     roles = area_roles or {}
+    excluded_ids = excluded_area_ids or set()
     opening_ids = {aid for aid, a in area_elements.items() if getattr(a, "opening", False)}
     null_ids = {aid for aid, a in area_elements.items() if getattr(a, "null", False)}
 
@@ -175,12 +215,18 @@ def mesh_floors(
 
     floors_by_level: dict[float, list[str]] = {}
     openings_by_level: dict[float, list[str]] = {}
+    nulls_by_level: dict[float, list[str]] = {}
     skipped: list[str] = []
 
     for aid, area in area_elements.items():
         if getattr(area, "inactive", False):
             continue
+        if aid in excluded_ids:
+            continue  # loads-only area: never a floor shell
         if aid in null_ids:
+            z = _level_of(aid)
+            if z is not None:
+                nulls_by_level.setdefault(z, []).append(aid)
             continue  # geometric object: not a shell, not a hole (loads deferred)
         if aid in opening_ids:
             z = _level_of(aid)
@@ -209,12 +255,15 @@ def mesh_floors(
 
     existing_area_tags = {a.area_tag for a in area_elements.values()}
     existing_node_tags = {nd.node_tag for nd in nodes.values()}
-    next_area_tag = max(existing_area_tags, default=0) + 1 if existing_area_tags else 1
-    next_node_tag = max(existing_node_tags, default=0) + 1 if existing_node_tags else 1
+    # One shared counter for every new node and sub-AreaElement, seeded above
+    # both the existing node and area tags and the caller's ``next_tag`` hint.
+    next_free_tag = max(max(existing_area_tags | existing_node_tags, default=0) + 1, next_tag)
 
-    def _mesh_level(level_z: float, floor_ids: list[str], open_ids: list[str]) -> None:
+    def _mesh_level(
+        level_z: float, floor_ids: list[str], open_ids: list[str], null_ids_at_level: list[str]
+    ) -> None:
         """Build and mesh one level's planar floor union in the current gmsh model."""
-        nonlocal next_area_tag, next_node_tag
+        nonlocal next_free_tag
 
         # ── 2-D polygons (XY projection) for containment tests ──
         floor_polys: dict[str, list[tuple[float, float]]] = {}
@@ -297,14 +346,48 @@ def mesh_floors(
                 signed.append(line if a < b else -line)
             return gmsh.model.geo.add_curve_loop(signed)
 
-        # ── Outer surfaces (CCW) with opening holes (CW) ──
-        outer_surfaces: list[tuple[int, list[tuple[float, float]]]] = []
-        for verts in outer_loops:
+        # ── Outer surfaces (CCW) with nested holes and opening voids (CW) ──
+        # A floor union can be a ring: its outer boundary encloses an inner
+        # boundary loop (an island such as a courtyard).  A loop contained by
+        # another is a *hole* in the containing surface — its curve loop is
+        # added clockwise and no ``PlaneSurface`` is made for it — not a
+        # separate surface.  Containment uses an *interior* point of the
+        # candidate loop (not its vertex centroid, which can fall outside a
+        # concave loop).
+        norm_loops: list[tuple[list[tuple], list[tuple[float, float]]]] = []
+        for loop in outer_loops:
+            verts = list(loop)
             poly = [(v[0], v[1]) for v in verts]
             if _signed_area(poly) < 0.0:
                 verts.reverse()
                 poly.reverse()
-            hole_loops: list[int] = []
+            norm_loops.append((verts, poly))
+
+        parent_of: dict[int, int] = {}
+        for i, (_vi, poly_i) in enumerate(norm_loops):
+            ip = _interior_point_2d(poly_i)
+            for j, (_vj, poly_j) in enumerate(norm_loops):
+                if j == i:
+                    continue
+                if point_in_polygon_2d(ip, poly_j):
+                    parent_of[i] = j
+                    break
+
+        nested_holes: dict[int, list[int]] = {}
+        for i, (verts, _poly) in enumerate(norm_loops):
+            parent = parent_of.get(i)
+            if parent is None:
+                continue
+            # Clockwise curve loop (relative to the CCW parent surface).
+            ov = [(v[0], v[1], level_z) for v in verts]
+            ov.reverse()
+            nested_holes.setdefault(parent, []).append(_curve_loop(ov))
+
+        outer_surfaces: list[tuple[int, list[tuple[float, float]]]] = []
+        for i, (verts, poly) in enumerate(norm_loops):
+            if i in parent_of:
+                continue  # a hole, not a surface of its own
+            hole_loops: list[int] = list(nested_holes.get(i, []))
             for opoly in open_polys.values():
                 cx = sum(p[0] for p in opoly) / len(opoly)
                 cy = sum(p[1] for p in opoly) / len(opoly)
@@ -331,6 +414,26 @@ def mesh_floors(
             if surf is None:
                 continue
             line_to_surf[_line(a, b)] = surf
+
+        # ── Null (load-patch) boundary edges: embedded so the mesh tiles each
+        # patch boundary exactly — ``transfer_null_area_loads`` re-parents a
+        # null area's pressure onto the slab sub-elements whose centroid lies
+        # inside it, which is only exact when the patch boundary is a mesh
+        # edge. ──
+        for aid in null_ids_at_level:
+            poly = _poly_2d(area_elements[aid].node_ids, nodes)
+            n = len(poly)
+            if n < 3:
+                continue
+            for i in range(n):
+                a = (poly[i][0], poly[i][1], level_z)
+                b = (poly[(i + 1) % n][0], poly[(i + 1) % n][1], level_z)
+                if a == b:
+                    continue
+                surf = _surface_for(((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0))
+                if surf is None:
+                    continue
+                line_to_surf.setdefault(_line(a, b), surf)
 
         # ── Beam constraint lines (frames with a section assignment) ──
         if frame_elements:
@@ -391,17 +494,17 @@ def mesh_floors(
             if existing is not None:
                 sub_node_map[gtag] = existing
                 continue
-            nid = f"_floor_{next_node_tag}"
+            nid = f"_floor_{next_free_tag}"
             nodes[nid] = Node(
                 node_id=nid,
-                node_tag=next_node_tag,
+                node_tag=next_free_tag,
                 x=float(c[0]),
                 y=float(c[1]),
                 z=float(c[2]),
             )
             coord_to_id[k] = nid
             sub_node_map[gtag] = nid
-            next_node_tag += 1
+            next_free_tag += 1
 
         # ── Extract 2-D elements (quads + triangles) ──
         elem_types, _elem_tags, elem_node_tags = gmsh.model.mesh.get_elements(2)
@@ -429,18 +532,21 @@ def mesh_floors(
                 continue
             sec_name = area_assignments.get(winner, "")
             thickness = getattr(area_elements[winner], "thickness", 0.0)
-            sub_id = f"{winner}_floor_{next_area_tag}"
+            sub_id = f"{winner}_floor_{next_free_tag}"
             area_elements[sub_id] = AreaElement(
-                area_id=sub_id, area_tag=next_area_tag, node_ids=ctags, thickness=thickness
+                area_id=sub_id, area_tag=next_free_tag, node_ids=ctags, thickness=thickness
             )
             if sec_name:
                 area_assignments[sub_id] = sec_name
-            next_area_tag += 1
+            next_free_tag += 1
 
         # ── Deactivate every meshed parent area (replaced by the level mesh) ──
+        # ``replace`` (not ``area_elements[aid].inactive = True``) keeps this
+        # copy-on-write: the parent AreaElement may be shared with the caller's
+        # SAPModelData.
         if cells:
             for aid in floor_ids:
-                area_elements[aid].inactive = True
+                area_elements[aid] = replace(area_elements[aid], inactive=True)
 
     gmsh.initialize()
     if not verbose:
@@ -449,9 +555,10 @@ def mesh_floors(
         for level_z in sorted(floors_by_level):
             floor_ids = floors_by_level[level_z]
             open_ids = openings_by_level.get(level_z, [])
-            _mesh_level(level_z, floor_ids, open_ids)
+            null_ids_at_level = nulls_by_level.get(level_z, [])
+            _mesh_level(level_z, floor_ids, open_ids, null_ids_at_level)
             gmsh.model.remove()
     finally:
         gmsh.finalize()
 
-    return area_elements, area_assignments, nodes, max(next_area_tag, next_node_tag), skipped
+    return area_elements, area_assignments, nodes, next_free_tag, skipped

@@ -17,10 +17,10 @@ from fea_toolkit.model.sap_data import (
     ShellSection,
 )
 
-_REAL_SF = (
-    "/Users/andrew/Library/Mobile Documents/com~apple~CloudDocs/Work/"
-    "Reference/Analysis/CSi SAFE/SAFE Model/B3.$sf"
-)
+#: A reduced single-slab SAFE model (a slab + drop panel + an opening), parsed
+#: by :mod:`fea_toolkit.io.safe_db_parser`.  The meshing integration test below
+#: uses it so it has no developer-specific or external file dependency.
+_SLAB_FIXTURE = Path(__file__).parent / "fixtures" / "sample.$sf"
 
 
 def _node(nid, tag, x, y, z=0.0):
@@ -198,11 +198,10 @@ def test_chain_loops_reconstructs_a_square():
     assert len(loops[0]) == 4
 
 
-@pytest.mark.skipif(not Path(_REAL_SF).exists(), reason="real SAFE model not present")
-def test_real_b3_mesh_buildable():
+def test_parsed_slab_meshes_buildable():
     from fea_toolkit.io.safe_db_parser import SAFEDBParser
 
-    md = SAFEDBParser(_REAL_SF).parse().get_model_data()
+    md = SAFEDBParser(_SLAB_FIXTURE).parse().get_model_data()
     areas, assigns, _, _, _ = mesh_floors(
         md.area_elements,
         md.area_assignments,

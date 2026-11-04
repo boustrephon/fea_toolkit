@@ -26,12 +26,14 @@ from ..model.geometry import (
     find_constraint_edges,
     find_wall_nodes_inside_slabs,
     mesh_area_elements,
+    polygon_area_3d,
     print_wall_inside_slab_report,
     split_elements,
     split_slabs_at_wall_intersections,
     subdivide_area_mesh,
     transfer_null_area_loads,
 )
+from ..model.geometry_frames import _slab_sub_elements_under
 from ..model.gravity_axial import fill_column_gravity_axial
 from ..model.mesh_model import MeshModel, NodalSpring, PanelZoneSpec, WallElement
 from ..model.openings import collect_opening_areas
@@ -434,21 +436,6 @@ def _line_rot_dof(a: "Node", b: "Node") -> int:
     if dy >= dz:
         return 5  # line along Y → torsion about Y
     return 6  # vertical line → torsion about Z
-
-
-def _polygon_area_3d(points: list[tuple[float, float, float]]) -> float:
-    """Planar polygon area via the half-norm of the summed cross products."""
-    if len(points) < 3:
-        return 0.0
-    p0 = points[0]
-    total = [0.0, 0.0, 0.0]
-    for i in range(1, len(points) - 1):
-        a = [points[i][k] - p0[k] for k in range(3)]
-        b = [points[i + 1][k] - p0[k] for k in range(3)]
-        total[0] += a[1] * b[2] - a[2] * b[1]
-        total[1] += a[2] * b[0] - a[0] * b[2]
-        total[2] += a[0] * b[1] - a[1] * b[0]
-    return 0.5 * math.sqrt(sum(c * c for c in total))
 
 
 class Preprocessor:
@@ -1458,6 +1445,11 @@ class Preprocessor:
         max_node_tag = max((nd.node_tag for nd in md.nodes.values()), default=0)
         next_tag = max(max_elem_tag, max_node_tag) + 1
 
+        # Loads-only areas (from the shell selection) are never floor-meshed
+        # into shells — pass them through as an explicit exclusion rather than
+        # disguising them with a fabricated area role.
+        loads_only = set(selection.get_area_ids(md)) if selection is not None else set()
+
         areas, assignments, nodes, _, skipped = mesh_floors(
             md.area_elements,
             md.area_assignments,
@@ -1468,6 +1460,7 @@ class Preprocessor:
             frame_assignments=getattr(md, "frame_assignments", None),
             restraints=getattr(md, "restraints", None),
             sections=getattr(md, "sections", None),
+            excluded_area_ids=loads_only,
             next_tag=next_tag,
             verbose=self.config.get("verbose", False),
         )
@@ -1482,9 +1475,11 @@ class Preprocessor:
 
         # SAFE beams were embedded as mesh constraint lines — mark them
         # AtJoints so the frame-splitting pass connects them to every shell
-        # node along their length.
+        # node along their length.  Each frame's ``frame_auto_mesh`` entry is
+        # *replaced* (not mutated) so a per-frame dict shared with the caller's
+        # ``SAPModelData`` is never written through.
         for fid in getattr(md, "frame_assignments", {}) or {}:
-            md.frame_auto_mesh.setdefault(fid, {})["AtJoints"] = True
+            md.frame_auto_mesh[fid] = {**md.frame_auto_mesh.get(fid, {}), "AtJoints": True}
 
     def _resolve_springs(
         self, md: SAPModelData, frame_elements: dict[str, "FrameElement"]
@@ -1494,8 +1489,10 @@ class Preprocessor:
         Point springs map 1:1 onto their assigned node.  Line springs are
         distributed to the endpoints of every active frame leaf assigned the
         spring (vertical → UZ, rotational → torsion about the line axis) per
-        tributary half-length; area springs are distributed evenly over the
-        corners of the (meshed) area per tributary area (U1/U2/U3 → DOF 1/2/3).
+        tributary half-length.  Area springs are distributed evenly over the
+        corners of the area per tributary area (U1/U2/U3 → DOF 1/2/3); a spring
+        on a meshed (inactive) parent is distributed over the active slab
+        sub-elements under its footprint instead of being dropped.
 
         Stiffnesses targeting the same node accumulate, and a DOF is marked
         ``compression_only`` when any contributing SAFE spring is flagged
@@ -1560,20 +1557,39 @@ class Preprocessor:
             if sp is None:
                 continue
             area = md.area_elements.get(aid)
-            if area is None or getattr(area, "inactive", False):
+            if area is None:
                 continue
-            nids = [n for n in area.node_ids if n in nodes]
-            if not nids:
-                continue
-            area_val = _polygon_area_3d([(nodes[n].x, nodes[n].y, nodes[n].z) for n in nids])
-            per_node = area_val / len(nids)
-            for label, k in sp.stiffness.items():
-                dof = _AREA_SPRING_DOF.get(label.upper())
-                if dof is None:
+            # A spring assigned to a meshed (inactive) parent must reach the
+            # active slab pieces that tiled its footprint, not vanish with the
+            # parent.  Resolve those pieces with the same centroid test as
+            # ``transfer_null_area_loads`` (``_slab_sub_elements_under``).
+            if getattr(area, "inactive", False):
+                slabs = [
+                    (a2id, a2)
+                    for a2id, a2 in md.area_elements.items()
+                    if not getattr(a2, "inactive", False)
+                    and not getattr(a2, "null", False)
+                    and not getattr(a2, "opening", False)
+                    and md.area_assignments.get(a2id)
+                ]
+                sub_ids = _slab_sub_elements_under(area, slabs, nodes)
+                targets = [md.area_elements[sid] for sid in sub_ids if sid in md.area_elements]
+            else:
+                targets = [area]
+
+            for target in targets:
+                nids = [n for n in target.node_ids if n in nodes]
+                if not nids:
                     continue
-                compression = "compression" in sp.nonlinear_options.get(label, "").lower()
-                for nid in nids:
-                    _add(nid, dof, k * per_node, compression)
+                area_val = polygon_area_3d([(nodes[n].x, nodes[n].y, nodes[n].z) for n in nids])
+                per_node = area_val / len(nids)
+                for label, k in sp.stiffness.items():
+                    dof = _AREA_SPRING_DOF.get(label.upper())
+                    if dof is None:
+                        continue
+                    compression = "compression" in sp.nonlinear_options.get(label, "").lower()
+                    for nid in nids:
+                        _add(nid, dof, k * per_node, compression)
 
         return [
             NodalSpring(node_id=nid, stiffness=vec, compression_only=comp_only.get(nid, set()))
