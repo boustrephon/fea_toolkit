@@ -149,7 +149,18 @@ EOF
 fi
 
 if [[ "$GUI" -eq 1 ]]; then
-    echo "build_nuitka.sh: built -> $ROOT/build/nuitka/ (look for $OUTPUT_NAME.app)"
+    # Nuitka names the .app bundle after the *entry script* (fea_gui_entry.app),
+    # not after --output-filename or --macos-app-name (the latter only sets the
+    # bundle's product/display name inside Info.plist).  Rename it to match
+    # OUTPUT_NAME so the documented ``fea_toolkit.app`` path holds.
+    ENTRY_BASE="$(basename "$GUI_ENTRY" .py)"
+    APP_DIR="$ROOT/build/nuitka/$ENTRY_BASE.app"
+    TARGET_APP="$ROOT/build/nuitka/$OUTPUT_NAME.app"
+    if [[ "$APP_DIR" != "$TARGET_APP" && -d "$APP_DIR" ]]; then
+        rm -rf "$TARGET_APP"
+        mv "$APP_DIR" "$TARGET_APP"
+    fi
+    echo "build_nuitka.sh: built -> $TARGET_APP"
 else
     echo "build_nuitka.sh: built -> $ROOT/build/nuitka/$OUTPUT_NAME.dist/"
 fi
