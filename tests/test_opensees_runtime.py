@@ -12,19 +12,23 @@ from fea_toolkit.opensees._exchange import nested_from_jsonable, nested_to_jsona
 
 
 class TestOpenseesAvailable:
-    def test_false_when_find_spec_raises_import_error(self, monkeypatch):
-        import importlib.util
+    def test_false_when_import_raises(self, monkeypatch):
+        import importlib
 
-        def _raising(_name):
-            raise ImportError("excluded")
+        real_import = importlib.import_module
 
-        monkeypatch.setattr(importlib.util, "find_spec", _raising)
+        def _raising(name, *args, **kwargs):
+            if name == "openseespy":
+                raise ImportError("excluded")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(importlib, "import_module", _raising)
         assert runtime.opensees_available() is False
 
-    def test_true_when_find_spec_resolves(self, monkeypatch):
-        import importlib.util
+    def test_true_when_import_succeeds(self, monkeypatch):
+        import importlib
 
-        monkeypatch.setattr(importlib.util, "find_spec", lambda _name: object())
+        monkeypatch.setattr(importlib, "import_module", lambda name: object())
         assert runtime.opensees_available() is True
 
 
@@ -166,3 +170,33 @@ class TestExchangeCodec:
         np.testing.assert_allclose(decoded.data["modal"]["eigenvalues"], [22.0, 246.0])
         assert decoded.data["shapes"][0][1] == (0.1, 0.2, 0.3)
         assert decoded.metadata["config"]["element_type"] == "elasticBeamColumn"
+
+
+class TestDescribeOpenseesRuntime:
+    def test_in_process_reports_the_version(self, monkeypatch):
+        monkeypatch.setattr(runtime, "opensees_available", lambda: True)
+        monkeypatch.setattr(runtime, "opensees_version", lambda: "3.8.0.0")
+        assert runtime.describe_opensees_runtime() == "OpenSeesPy 3.8.0.0 available in-process."
+
+    def test_out_of_process_reports_the_interpreter_and_version(self, monkeypatch):
+        monkeypatch.setattr(runtime, "opensees_available", lambda: False)
+        monkeypatch.setattr(runtime, "resolve_opensees_python", lambda explicit: "/venv/bin/python")
+        monkeypatch.setattr(runtime, "opensees_version_of", lambda python: "3.8.0")
+        message = runtime.describe_opensees_runtime("/venv")
+        assert "delegate to /venv/bin/python" in message
+        assert "OpenSeesPy 3.8.0" in message
+
+    def test_out_of_process_omits_the_version_when_the_probe_fails(self, monkeypatch):
+        monkeypatch.setattr(runtime, "opensees_available", lambda: False)
+        monkeypatch.setattr(runtime, "resolve_opensees_python", lambda explicit: "/venv/bin/python")
+        monkeypatch.setattr(runtime, "opensees_version_of", lambda python: "")
+        message = runtime.describe_opensees_runtime(None)
+        assert message == "OpenSeesPy not bundled — analyses delegate to /venv/bin/python."
+
+    def test_version_of_probes_a_real_interpreter(self):
+        # This test interpreter carries OpenSeesPy (see the module docstring).
+        version = runtime.opensees_version_of(runtime.sys.executable)
+        assert version  # a non-empty version string, e.g. "3.8.0"
+
+    def test_version_of_returns_empty_for_a_missing_interpreter(self):
+        assert runtime.opensees_version_of("/nonexistent/python/interpreter") == ""

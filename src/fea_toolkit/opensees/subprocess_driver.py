@@ -49,12 +49,16 @@ def _load_model(model_path: str) -> tuple[Any, Any]:
     return sap, mesh
 
 
-def _run_static(sap: Any, mesh: Any, cases: dict, config: Optional[dict]) -> dict:
+def _run_static(
+    sap: Any, mesh: Any, cases: dict, combinations: Optional[dict], config: Optional[dict]
+) -> dict:
     """Solve a static case set, returning ``run_case_set``'s result plus ``raw``."""
     from ..analysis.linear import run_case_set
 
     raw: dict = {}
-    result = run_case_set(sap, mesh, cases, config=config or None, raw_out=raw)
+    result = run_case_set(
+        sap, mesh, cases, combinations=combinations or None, config=config or None, raw_out=raw
+    )
     result["raw"] = raw
     return result
 
@@ -149,6 +153,9 @@ def main(argv: Optional[list] = None) -> int:
         help="Analysis type.",
     )
     parser.add_argument("--cases", default="{}", help="JSON {case: {pattern: factor}} (static).")
+    parser.add_argument(
+        "--combinations", default="{}", help="JSON {combination: {leaf: factor}} (static)."
+    )
     parser.add_argument("--config", default="{}", help="JSON AnalysisBuilder config (static).")
     parser.add_argument(
         "--params-file",
@@ -162,8 +169,9 @@ def main(argv: Optional[list] = None) -> int:
         sap, mesh = _load_model(args.model)
         if args.analysis == "static":
             cases = json.loads(args.cases)
+            combinations = json.loads(args.combinations)
             config = json.loads(args.config)
-            result = _run_static(sap, mesh, cases, config)
+            result = _run_static(sap, mesh, cases, combinations, config)
             _write_case_set(args.out_dir, result)
             solved = len(result["cases"])
             failed = ", ".join(result["failed"]) if result["failed"] else "none"

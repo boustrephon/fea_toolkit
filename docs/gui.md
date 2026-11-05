@@ -357,7 +357,13 @@ traceback in the Message Log.
 Every OpenSees solve verb — `run_static`, `modal`, `response_spectrum` and
 `pushover` — uses this path when `openseespy` cannot be imported in-process; a
 `response_spectrum` / `pushover` step ships the modal result its `modal` step
-produced to the subprocess rather than re-running it.
+produced to the subprocess rather than re-running it.  The **Analysis ▸ Run**
+dialog (static cases) uses the same out-of-process solve.
+
+At start-up the Message Log reports where OpenSeesPy was found and its version
+— `OpenSeesPy 3.8.0.0 available in-process.` or `OpenSeesPy not bundled —
+analyses delegate to <interpreter> (OpenSeesPy 3.8.0.0).` — so a misconfigured
+environment is visible immediately instead of at the first failed solve.
 
 See `build_nuitka.md` for the full build-and-distribute guide (naming the app,
 adding an icon, and setting up the OpenSeesPy environment).

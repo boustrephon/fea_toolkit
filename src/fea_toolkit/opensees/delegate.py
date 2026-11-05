@@ -31,7 +31,7 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from .runtime import resolve_opensees_python, run_python
 
@@ -39,6 +39,7 @@ __all__ = [
     "run_modal_out_of_process",
     "run_pushover_out_of_process",
     "run_rs_out_of_process",
+    "run_static_cases_out_of_process",
     "run_static_out_of_process",
 ]
 
@@ -66,22 +67,92 @@ def run_static_out_of_process(context: Any, cases: dict, config: dict) -> tuple[
         RuntimeError: If the subprocess exits non-zero (its trailing output is
             included in the message).
     """
-    from ..io.npz_reader import read_results_npz
-    from ..io.stage_writer import write_model_file
-    from ._exchange import nested_from_jsonable
-
     mesh = context.model
     if mesh is None:
         raise ValueError("run_static needs a prepared topology — run a 'mesh' step first")
 
     python = resolve_opensees_python(context.opensees_python)
     context.log(f"delegating static analysis to {python} (no bundled OpenSees)")
+    return _static_out_of_process(
+        sap=context.model_data,
+        mesh=mesh,
+        cases=cases,
+        combinations=None,
+        config=config,
+        python=python,
+        log=context.log,
+    )
+
+
+def run_static_cases_out_of_process(
+    *,
+    sap: Any,
+    mesh: Any,
+    cases: dict,
+    combinations: Optional[dict] = None,
+    config: Optional[dict] = None,
+    opensees_python: Optional[str] = None,
+    log: Any = None,
+) -> dict:
+    """Run a static case set (and reduce combinations) out-of-process.
+
+    The GUI's ``Analysis ▸ Run`` path calls this directly instead of a recipe
+    verb, so it works without a :class:`~fea_toolkit.workflow.steps.StepContext`.
+
+    Args:
+        sap: The parsed :class:`~fea_toolkit.model.sap_data.SAPModelData`.
+        mesh: The prepared :class:`~fea_toolkit.model.mesh_model.MeshModel`.
+        cases: ``{case_name: {pattern: factor}}``, in run order.
+        combinations: ``{combination_name: {leaf_case: factor}}`` to reduce.
+        config: ``AnalysisBuilder`` config dict (may be ``None``).
+        opensees_python: The configured interpreter (or ``None`` for the env
+            var / auto-detection), as accepted by :func:`resolve_opensees_python`.
+        log: Optional one-line sink for subprocess output.
+
+    Returns:
+        The :func:`~fea_toolkit.analysis.linear.run_case_set` result dict —
+        ``arrays`` / ``cases`` / ``failed`` / ``unreduced`` / ``cancelled`` /
+        ``summaries``.
+
+    Raises:
+        RuntimeError: If the subprocess exits non-zero (its trailing output is
+            included in the message).
+    """
+    python = resolve_opensees_python(opensees_python)
+    if log is not None:
+        log(f"delegating static analysis to {python} (no bundled OpenSees)")
+    _raw, result = _static_out_of_process(
+        sap=sap,
+        mesh=mesh,
+        cases=cases,
+        combinations=combinations,
+        config=config,
+        python=python,
+        log=log,
+    )
+    return result
+
+
+def _static_out_of_process(
+    *,
+    sap: Any,
+    mesh: Any,
+    cases: dict,
+    combinations: Optional[dict],
+    config: Optional[dict],
+    python: str,
+    log: Any,
+) -> tuple[dict, dict]:
+    """Write the model, run the static driver, and read back ``(raw, result)``."""
+    from ..io.npz_reader import read_results_npz
+    from ..io.stage_writer import write_model_file
+    from ._exchange import nested_from_jsonable
 
     with tempfile.TemporaryDirectory(prefix="fea_toolkit_static_") as tmp:
         tmp_path = Path(tmp)
         model_file = tmp_path / "model.npz"
         out_dir = tmp_path / "out"
-        write_model_file(str(model_file), sap=context.model_data, mesh=mesh, fmt="npz")
+        write_model_file(str(model_file), sap=sap, mesh=mesh, fmt="npz")
 
         args = [
             "-m",
@@ -92,12 +163,14 @@ def run_static_out_of_process(context: Any, cases: dict, config: dict) -> tuple[
             "static",
             "--cases",
             json.dumps(cases, sort_keys=True),
+            "--combinations",
+            json.dumps(combinations or {}, sort_keys=True),
             "--config",
             json.dumps(config or {}, sort_keys=True),
             "--out-dir",
             str(out_dir),
         ]
-        code, output = run_python(python, args, log=context.log)
+        code, output = run_python(python, args, log=log)
         if code != 0:
             tail = "\n".join(output.splitlines()[-_TRACEBACK_TAIL:]) if output else ""
             raise RuntimeError(

@@ -8,6 +8,8 @@ environment".  This module answers two questions for them:
 * :func:`opensees_available` — can *this* interpreter import ``openseespy``?
 * :func:`resolve_opensees_python` — which interpreter should run analysis
   out-of-process?
+* :func:`describe_opensees_runtime` — a one-line summary of where OpenSeesPy
+  will run and its version, for the GUI message log.
 
 Resolution order (highest precedence first):
 
@@ -25,7 +27,7 @@ The module imports only the standard library, so it is importable in the
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import os
 import shutil
 import subprocess
@@ -35,7 +37,10 @@ from typing import Callable, Optional
 
 __all__ = [
     "ENV_VAR",
+    "describe_opensees_runtime",
     "opensees_available",
+    "opensees_version",
+    "opensees_version_of",
     "resolve_opensees_python",
     "run_python",
     "should_delegate",
@@ -44,18 +49,24 @@ __all__ = [
 #: Environment variable overriding the configured OpenSees interpreter.
 ENV_VAR = "FEA_TOOLKIT_OPENSEES_PYTHON"
 
+#: Wall-clock limit for the one-shot version probe in :func:`opensees_version_of`.
+_VERSION_TIMEOUT = 20.0
+
 
 def opensees_available() -> bool:
-    """Return True when ``openseespy`` can be imported in this interpreter.
+    """Return True when ``openseespy`` can actually be imported in this interpreter.
 
-    In the "separate" Nuitka build ``openseespy`` is excluded with
-    ``--nofollow-import-to`` and Nuitka substitutes a stub that raises
-    :class:`ImportError`; either that or an absent package means "not here".
+    ``find_spec`` is **not** enough: the "separate" Nuitka build embeds an
+    ``openseespy`` stub (``--nofollow-import-to``) whose spec resolves but whose
+    import raises :class:`ImportError` ("Module … actively excluded from Nuitka
+    compilation"), so an actual import is the only honest test.  Either the
+    excluded stub or an absent package means "not here".
     """
     try:
-        return importlib.util.find_spec("openseespy") is not None
+        importlib.import_module("openseespy")
     except ImportError:
         return False
+    return True
 
 
 def _normalise_python(path: str) -> str:
@@ -166,3 +177,69 @@ def run_python(
             proc.wait()
             raise
     return proc.returncode, "\n".join(lines)
+
+
+def opensees_version() -> str:
+    """Return the installed ``openseespy`` package version, or ``""`` when absent.
+
+    Read from distribution metadata (``importlib.metadata``), which needs no
+    ``openseespy`` import — so this is cheap and safe in the "separate" build
+    (where the package is absent) and in the source install alike.
+    """
+    import importlib.metadata
+
+    try:
+        return importlib.metadata.version("openseespy")
+    except importlib.metadata.PackageNotFoundError:
+        return ""
+
+
+def opensees_version_of(python: str) -> str:
+    """Return the OpenSeesPy package version of the *python* interpreter, or ``""``.
+
+    Probes ``python -c "import importlib.metadata as m; print(m.version('openseespy'))"``
+    — a metadata read, not an ``openseespy`` import, so it stays fast and cannot
+    trigger the excluded-module stub.  A missing interpreter, a non-zero exit or
+    a timeout yield ``""``, so the caller falls back to reporting just the path.
+    """
+    try:
+        code, output = run_python(
+            python,
+            ["-c", "import importlib.metadata as m; print(m.version('openseespy'))"],
+            timeout=_VERSION_TIMEOUT,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if code != 0:
+        return ""
+    for raw_line in reversed(output.splitlines()):
+        stripped = raw_line.strip()
+        if stripped:
+            return stripped
+    return ""
+
+
+def describe_opensees_runtime(explicit: Optional[str] = None) -> str:
+    """Return a one-line summary of where OpenSeesPy will run, for a message log.
+
+    Args:
+        explicit: The configured interpreter (the GUI's ``opensees.python``
+            setting); ``None``/``""`` falls through to the environment variable
+            then auto-detection.
+
+    Returns:
+        A single sentence — "OpenSeesPy <version> available in-process." when
+        bundled, otherwise "OpenSeesPy not bundled — analyses delegate to
+        <interpreter> (OpenSeesPy <version>)." (the version is omitted when the
+        probe fails).
+    """
+    if opensees_available():
+        version = opensees_version()
+        if version:
+            return f"OpenSeesPy {version} available in-process."
+        return "OpenSeesPy available in-process."
+    python = resolve_opensees_python(explicit)
+    version = opensees_version_of(python)
+    if version:
+        return f"OpenSeesPy not bundled — analyses delegate to {python} (OpenSeesPy {version})."
+    return f"OpenSeesPy not bundled — analyses delegate to {python}."

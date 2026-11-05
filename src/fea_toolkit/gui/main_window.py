@@ -48,7 +48,7 @@ from .controllers.marquee import (
     segment_inside_rect,
 )
 from .controllers.selection import CATEGORY_GROUPS, CATEGORY_NOUNS, SelectionIndex
-from .controllers.settings import load_gui_settings, save_display_settings
+from .controllers.settings import load_gui_settings, load_opensees_setting, save_display_settings
 from .controllers.view_registry import FIGURE, GEOMETRY, RESULTS, TABLE, View, ViewRegistry
 from .controllers.view_state import clear_view_state, load_view_state, save_view_state
 from .controllers.worker import TaskWorker
@@ -238,6 +238,7 @@ class MainWindow(QMainWindow):
         self._decorate_view()
         for note in self._policy_notes:
             self.log(note, "warn")
+        self._log_opensees_runtime()
         button = "Left-click" if self._policy.pick_button == "left" else "Right-click"
         self.log(f"Ready.  {button} an element to select it; drag to orbit.")
 
@@ -1717,6 +1718,21 @@ class MainWindow(QMainWindow):
         self._units_label.setText(model_header(self._model).units_label())
 
     # ── Logging ─────────────────────────────────────────────────────
+
+    def _log_opensees_runtime(self) -> None:
+        """Report where OpenSeesPy will run (and its version) to the message log.
+
+        One line at start-up tells the user whether the "separate" build found
+        OpenSeesPy in-process or will delegate to the configured interpreter —
+        including the OpenSeesPy version, so a wrong or stale environment is
+        visible immediately instead of at the first failed solve.
+        """
+        from ..opensees.runtime import describe_opensees_runtime
+
+        try:
+            self.log(describe_opensees_runtime(load_opensees_setting()))
+        except Exception as exc:  # a broken interpreter must not break start-up
+            self.log(f"Could not detect the OpenSeesPy runtime: {exc}", "warn")
 
     def log(self, message: str, level: str = "info") -> None:
         """Append a line to the message log (``info`` | ``warn`` | ``error``)."""
@@ -4264,12 +4280,38 @@ class MainWindow(QMainWindow):
         self._actions["analysis.stop"].setEnabled(True)
         self._actions["analysis.run"].setEnabled(False)
 
+        # In the "separate" build (no bundled OpenSeesPy) the case set is solved
+        # out-of-process; the decision is made here (on the GUI thread) so the
+        # worker only runs the chosen path.  Cancellation and per-case progress
+        # do not cross the process boundary.
+        from ..opensees.runtime import opensees_available, resolve_opensees_python
+
+        delegate = not opensees_available()
+        opensees_python = None
+        if delegate:
+            opensees_python = load_opensees_setting()
+            self.log(
+                f"OpenSeesPy not bundled — delegating analysis to "
+                f"{resolve_opensees_python(opensees_python)}."
+            )
+
         # The task reports progress through the worker's signal; the reporter is
         # published in a one-element list because the worker does not exist yet
         # where the task is defined.
         reporter: list = []
 
         def task(should_cancel: Any) -> dict:
+            if delegate:
+                from ..opensees.delegate import run_static_cases_out_of_process
+
+                return run_static_cases_out_of_process(
+                    sap=md,
+                    mesh=mesh,
+                    cases=cases,
+                    combinations=combos,
+                    config=config or None,
+                    opensees_python=opensees_python,
+                )
             from ..analysis.linear import run_case_set
 
             return run_case_set(
