@@ -28,11 +28,19 @@ import typing as t
 from ..model.mesh_model import MeshModel
 from ..model.sap_data import (
     AreaElement,
+    AreaGravityLoad,
+    AreaSpring,
+    AreaUniformLoad,
+    FrameDistributedLoad,
     FrameElement,
     FrameEndOffset,
+    FramePointLoad,
     Group,
+    JointLoad,
+    LineSpring,
     Material,
     Node,
+    PointSpring,
     Restraint,
     SAPModelData,
     Section,
@@ -62,6 +70,20 @@ class ResolvedSource:
     #: Joint constraint assignments (``{joint_id: constraint_name}``), when
     #: the source carries them (``SAPModelData.constraint_assignments``).
     constraint_assignments: dict[str, str] = dataclasses.field(default_factory=dict)
+    #: SAFE point/area spring definitions and their per-object assignments
+    #: (``{joint_id: name}`` / ``{area_id: name}``); empty for SAP2000/ETABS.
+    point_springs: dict[str, PointSpring] = dataclasses.field(default_factory=dict)
+    point_spring_assignments: dict[str, str] = dataclasses.field(default_factory=dict)
+    area_springs: dict[str, AreaSpring] = dataclasses.field(default_factory=dict)
+    area_spring_assignments: dict[str, str] = dataclasses.field(default_factory=dict)
+    line_springs: dict[str, LineSpring] = dataclasses.field(default_factory=dict)
+    line_spring_assignments: dict[str, str] = dataclasses.field(default_factory=dict)
+    #: Authored loads carried through for Rhino UserText documentation.
+    area_uniform_loads: list[AreaUniformLoad] = dataclasses.field(default_factory=list)
+    area_gravity_loads: list[AreaGravityLoad] = dataclasses.field(default_factory=list)
+    joint_loads: list[JointLoad] = dataclasses.field(default_factory=list)
+    frame_dist_loads: list[FrameDistributedLoad] = dataclasses.field(default_factory=list)
+    frame_point_loads: list[FramePointLoad] = dataclasses.field(default_factory=list)
     units: dict[str, str] = dataclasses.field(default_factory=dict)
     model_name: str = ""
     #: Stage file raw dict (when resolved from NPZ/H5), else None.
@@ -104,6 +126,17 @@ def _resolve_from_model(source: t.Any, stage: str) -> ResolvedSource:
         restraints=dict(getattr(source, "restraints", {})),
         frame_end_offsets=dict(getattr(source, "frame_end_offsets", {})),
         constraint_assignments=dict(getattr(source, "constraint_assignments", {})),
+        point_springs=dict(getattr(source, "point_springs", {}) or {}),
+        point_spring_assignments=dict(getattr(source, "point_spring_assignments", {}) or {}),
+        area_springs=dict(getattr(source, "area_springs", {}) or {}),
+        area_spring_assignments=dict(getattr(source, "area_spring_assignments", {}) or {}),
+        line_springs=dict(getattr(source, "line_springs", {}) or {}),
+        line_spring_assignments=dict(getattr(source, "line_spring_assignments", {}) or {}),
+        area_uniform_loads=list(getattr(source, "area_uniform_loads", []) or []),
+        area_gravity_loads=list(getattr(source, "area_gravity_loads", []) or []),
+        joint_loads=list(getattr(source, "joint_loads", []) or []),
+        frame_dist_loads=list(getattr(source, "frame_dist_loads", []) or []),
+        frame_point_loads=list(getattr(source, "frame_point_loads", []) or []),
         units=dict(getattr(source, "units", {})),
         model_name=str(getattr(source, "model_name", "")),
     )

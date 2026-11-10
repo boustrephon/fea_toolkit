@@ -8,7 +8,8 @@ related: [viewer.md, results_schema.md, tcl_export.md]
 ---
 # Rhino 3-D Export
 
-Export a parsed SAP2000 model (from `.s2k` or JSON) into the active
+Export a parsed structural model (SAP2000 `.s2k` / `.$2k`, ETABS `.e2k` /
+`.$et`, SAFE `.f2k` / `.$sf`, or a parsed-model JSON) into the active
 Rhinoceros 3-D document as organised, metadata-rich geometry.
 
 ---
@@ -57,34 +58,38 @@ sys.path.insert(0, r"/path/to/fea_toolkit/src")
 
 ### Inside Rhino 8 (Mac or Windows) — file picker (recommended)
 
-This script opens a native file dialog to pick a `.s2k`, `.$2k` or `.json`
-file, then imports it into the Rhino document.
+This script opens a native file dialog to pick a `.s2k` / `.$2k` (SAP2000),
+`.e2k` / `.$et` (ETABS), `.f2k` / `.$sf` (SAFE) or `.json` file, then imports
+it into the Rhino document.
 
 IMPORTANT: edit the path to the fea_toolkit.
 
 ```python
 #! python 3
 """
-Import a SAP2000 model into Rhino via a native file dialog.
+Import a structural model (SAP2000, ETABS or SAFE) into Rhino via a native
+file dialog.
 
-Opens a system file picker filtered for ``.s2k``, ``.$2k`` and ``.json`` files.
-The selected model is parsed and imported with full layer structure,
-UserText metadata (NodeID, FrameID, SAP_* properties), and Rhino groups.
+Opens a system file picker filtered for SAP2000 (``.s2k`` / ``.$2k``),
+ETABS (``.e2k`` / ``.$et``), SAFE (``.f2k`` / ``.$sf``) and parsed-model
+``.json`` files.  The selected model is parsed and imported with full layer
+structure, UserText metadata (NodeID, FrameID, SAP_* properties), and Rhino
+groups.
 
 Features
 --------
 - Native Rhino file dialog (no hard-coded paths in the script)
-- Auto-detects ``.s2k`` vs JSON format
+- Auto-detects every supported format via ``load_model_data()``
 - Creates centreline geometry, 3-D extrusions, colour-coded joints,
-  and Rhino groups matching SAP2000 group definitions
+  and Rhino groups matching the model's group definitions
 - Runs ``_Zoom _Extents`` after import
 
 Requirements
 ------------
 - Must run **inside Rhino 8** under CPython 3.9+
 - ``fea_toolkit`` must be on ``sys.path`` (adjust the line below)
-- A parsed model file (``.s2k``, ``.$2k``, ``.e2k``, ``.$et`` or ``.json``);
-  ETABS text exports are read through ``load_model_data()``
+- A parsed model file (``.s2k`` / ``.$2k``, ``.e2k`` / ``.$et``, ``.f2k``,
+  ``.$sf`` or ``.json``); every format is read through ``load_model_data()``
 """
 
 import sys
@@ -96,7 +101,7 @@ from fea_toolkit.rhino import RhinoImporter
 
 # --- File picker (native Rhino dialog) -----------------------------------
 dialog = Rhino.UI.OpenFileDialog()
-dialog.Filter = "Structural model files (*.s2k;*.S2K;*.$2k;*.e2k;*.E2K;*.$et;*.json)|*.s2k;*.S2K;*.$2k;*.e2k;*.E2K;*.$et;*.json|All files (*.*)|*.*"
+dialog.Filter = "Structural model files (*.s2k;*.S2K;*.$2k;*.e2k;*.E2K;*.$et;*.f2k;*.F2K;*.$sf;*.$SF;*.json)|*.s2k;*.S2K;*.$2k;*.e2k;*.E2K;*.$et;*.f2k;*.F2K;*.$sf;*.$SF;*.json|All files (*.*)|*.*"
 dialog.Title = "Select model file"
 
 if not dialog.ShowDialog():
@@ -119,8 +124,9 @@ else:
     Rhino.RhinoApp.RunScript("_Zoom _Extents", False)
 ```
 
-The dialog filters for `.s2k`, `.$2k`, `.e2k`, `.$et` and `.json` files.  Pick a
-file and the model is imported with full layer structure, metadata, and groups.
+The dialog filters for `.s2k` / `.$2k` (SAP2000), `.e2k` / `.$et` (ETABS),
+`.f2k` / `.$sf` (SAFE) and `.json` files.  Pick a file and the model is imported
+with full layer structure, metadata, and groups.
 
 ### Direct path (alternative)
 
@@ -135,7 +141,7 @@ sys.path.append(r'/path/to/fea_toolkit/src')
 from fea_toolkit.io.model_loader import load_model_data
 from fea_toolkit.rhino import RhinoImporter
 
-# Any supported model file (.s2k / .e2k / .$et / .json):
+# Any supported model file (.s2k / .e2k / .f2k / .$sf / .json):
 md = load_model_data('/path/to/model.s2k')
 
 importer = RhinoImporter(md)
@@ -315,6 +321,16 @@ and `RES_*`) lives in [Rhino Attributes](rhino_attributes.md).
 | `SAP_JointIDs` | `1,2,3,4` |
 | `SAP_Thickness` | `0.2` |
 | `SAP_Material` | `C30/37` |
+
+### Springs and loads
+
+SAFE soil springs and authored loads add further `SAP_*` keys on the owning
+object: `SAP_Spring` / `SAP_Spring_Nonlinear` (joints),
+`SAP_LineSpring` / `SAP_LineSpring_Nonlinear` (frames),
+`SAP_AreaSpring` / `SAP_AreaSpring_Nonlinear` (shells), and
+`SAP_JointLoads`, `SAP_Loads`, `SAP_GravityLoads`, `SAP_FrameDistLoads`,
+`SAP_FramePointLoads`.  See [Rhino Attributes](rhino_attributes.md) for the
+full reference.
 
 ---
 
@@ -627,6 +643,39 @@ n = create_deformed_geometry(
   ``_j_local`` arrays automatically when ``use_local=True`` (the default).
 - The deformed overlay is **file-driven**: it works whether or not the
   original geometry was imported into the document.
+
+## Gmsh `.msh` import
+
+A Gmsh ASCII mesh (format 4.x) can be imported directly into Rhino without a
+parsed structural model — the round-trip path for Gmsh-based constrained
+remeshing (`fea_toolkit.mesh.remesh`): remesh an area, write the `.msh`, then
+bring the surface mesh back into Rhino as layers.
+
+```python
+#! python 3
+import sys
+sys.path.append(r'/path/to/fea_toolkit/src')
+
+from fea_toolkit.rhino import import_msh
+
+report = import_msh(
+    "/path/to/mesh.msh",
+    root_layer="MSH",       # one layer per Gmsh physical group
+    create_points=True,     # also create 0D-entity points
+)
+# {'groups': 2, 'elements': 120, 'points': 4, 'layers': {...}}
+```
+
+* The parser (`fea_toolkit.io.msh_parser`, exposed as `parse_msh_text` /
+  `read_msh`) is pure Python and reads the `$MeshFormat` / `$PhysicalNames` /
+  `$Entities` / `$Nodes` / `$Elements` sections.  Only ASCII 4.x meshes are
+  supported — binary and legacy 2.2 files raise `ValueError`.
+* Each **physical group** becomes a layer under *root_layer* (coloured from
+  the shell palette) holding one `Rhino.Geometry.Mesh` of its 2D
+  triangles/quads; a mesh with no physical groups lands under an
+  `Ungrouped` layer.
+* Imported objects carry `FEA_Stage=msh` plus `MSH_Group`,
+  `MSH_ElemCount` and `MSH_PointTag` UserStrings for filtering.
 
 ## Technical Notes
 

@@ -10,12 +10,12 @@ Inside Rhino::
     import sys
     sys.path.append(r'/path/to/fea_toolkit/src')
 
-    from fea_toolkit.io.s2k_parser import SAP2000Parser
+    from fea_toolkit.io.model_loader import load_model_data
     from fea_toolkit.rhino.importer import RhinoImporter
 
-    parser = SAP2000Parser('/path/to/model.s2k')
-    parser.parse()
-    md = parser.get_model_data()
+    # Any supported format: .s2k / .$2k (SAP2000), .e2k / .$et (ETABS),
+    # .f2k / .$sf (SAFE), or a parsed-model .json.
+    md = load_model_data('/path/to/model.s2k')
 
     importer = RhinoImporter(md)
     report = importer.run()

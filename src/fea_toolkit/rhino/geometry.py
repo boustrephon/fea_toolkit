@@ -157,6 +157,159 @@ def _local_axes(
 # ========================================================================
 
 
+# ── Spring / load UserText metadata ───────────────────────────────────────
+
+
+def _compact_stiffness(stiffness: dict[str, float]) -> str:
+    """Non-zero spring stiffness terms as ``DOF=value, ...``."""
+    return ", ".join(f"{dof}={value:g}" for dof, value in stiffness.items() if value)
+
+
+def joint_spring_user_strings(md: SAPModelData, nid: str) -> dict[str, str]:
+    """UserText pairs documenting a joint's point spring (empty when none).
+
+    Keys: ``SAP_Spring`` (name + non-zero stiffnesses) and, for a nonlinear
+    spring, ``SAP_Spring_Nonlinear``.
+    """
+    name = (getattr(md, "point_spring_assignments", None) or {}).get(str(nid))
+    if not name:
+        return {}
+    spring = (getattr(md, "point_springs", None) or {}).get(name)
+    if spring is None:
+        return {"SAP_Spring": name}
+    k = _compact_stiffness(spring.stiffness)
+    out = {"SAP_Spring": f"{name} ({k})" if k else name}
+    if getattr(spring, "nonlinear_option", "") not in ("", "None (Linear)"):
+        out["SAP_Spring_Nonlinear"] = spring.nonlinear_option
+    return out
+
+
+def area_spring_user_strings(md: SAPModelData, aid: str) -> dict[str, str]:
+    """UserText pairs documenting an area's area spring (empty when none).
+
+    Keys: ``SAP_AreaSpring`` (name + non-zero stiffnesses) and
+    ``SAP_AreaSpring_Nonlinear`` when any direction is nonlinear.
+    """
+    name = (getattr(md, "area_spring_assignments", None) or {}).get(str(aid))
+    if not name:
+        return {}
+    spring = (getattr(md, "area_springs", None) or {}).get(name)
+    if spring is None:
+        return {"SAP_AreaSpring": name}
+    k = _compact_stiffness(spring.stiffness)
+    out = {"SAP_AreaSpring": f"{name} ({k})" if k else name}
+    if spring.nonlinear_options:
+        out["SAP_AreaSpring_Nonlinear"] = ", ".join(
+            f"{dof}:{opt}" for dof, opt in spring.nonlinear_options.items()
+        )
+    return out
+
+
+def joint_load_user_strings(md: SAPModelData, nid: str) -> dict[str, str]:
+    """UserText for a joint's applied loads (``SAP_JointLoads``; empty if none)."""
+    loads = [
+        load for load in (getattr(md, "joint_loads", None) or []) if str(load.node_id) == str(nid)
+    ]
+    if not loads:
+        return {}
+    parts = []
+    for load in loads:
+        text = f"{load.pattern}=({load.fx:g},{load.fy:g},{load.fz:g})"
+        if load.mx or load.my or load.mz:
+            text += f" M=({load.mx:g},{load.my:g},{load.mz:g})"
+        parts.append(text)
+    return {"SAP_JointLoads": "; ".join(parts)}
+
+
+def area_load_summaries(md: SAPModelData) -> dict[str, dict[str, str]]:
+    """Index area loads by area id, formatted for UserText.
+
+    Returns ``{area_id: {key: value}}`` where ``SAP_Loads`` (uniform pressures)
+    and ``SAP_GravityLoads`` (gravity multipliers) are present only for areas
+    that carry such loads.  ``area_id`` keys are strings.
+    """
+    uniform: dict[str, list[t.Any]] = {}
+    for load in getattr(md, "area_uniform_loads", None) or []:
+        uniform.setdefault(str(load.area_id), []).append(load)
+    gravity: dict[str, list[t.Any]] = {}
+    for load in getattr(md, "area_gravity_loads", None) or []:
+        gravity.setdefault(str(load.area_id), []).append(load)
+
+    summaries: dict[str, dict[str, str]] = {}
+    for aid in set(uniform) | set(gravity):
+        entry: dict[str, str] = {}
+        if aid in uniform:
+            entry["SAP_Loads"] = "; ".join(
+                f"{load.pattern}={load.value:g}({load.direction})" for load in uniform[aid]
+            )
+        if aid in gravity:
+            entry["SAP_GravityLoads"] = "; ".join(
+                f"{load.pattern}=({load.multiplier_x:g},"
+                f"{load.multiplier_y:g},{load.multiplier_z:g})"
+                for load in gravity[aid]
+            )
+        summaries[aid] = entry
+    return summaries
+
+
+def line_spring_user_strings(md: SAPModelData, fid: str) -> dict[str, str]:
+    """UserText pairs documenting a frame's line spring (empty when none).
+
+    Keys: ``SAP_LineSpring`` (name + non-zero stiffnesses) and
+    ``SAP_LineSpring_Nonlinear`` when nonlinear.
+    """
+    name = (getattr(md, "line_spring_assignments", None) or {}).get(str(fid))
+    if not name:
+        return {}
+    spring = (getattr(md, "line_springs", None) or {}).get(name)
+    if spring is None:
+        return {"SAP_LineSpring": name}
+    parts = []
+    if spring.vertical_stiffness:
+        parts.append(f"vert={spring.vertical_stiffness:g}")
+    if spring.rotational_stiffness:
+        parts.append(f"rot={spring.rotational_stiffness:g}")
+    out = {"SAP_LineSpring": f"{name} ({', '.join(parts)})" if parts else name}
+    if getattr(spring, "nonlinear_option", "") not in ("", "None (Linear)"):
+        out["SAP_LineSpring_Nonlinear"] = spring.nonlinear_option
+    return out
+
+
+def _dist_load_text(load: t.Any) -> str:
+    mag = f"{load.val_a:g}" if load.val_a == load.val_b else f"{load.val_a:g}→{load.val_b:g}"
+    return f"{load.pattern}={mag}({load.direction})"
+
+
+def _point_load_text(load: t.Any) -> str:
+    return f"{load.pattern}={load.value:g}({load.direction})@{load.rdist:g}"
+
+
+def frame_load_summaries(md: SAPModelData) -> dict[str, dict[str, str]]:
+    """Index frame loads by frame id, formatted for UserText.
+
+    Returns ``{frame_id: {key: value}}`` with ``SAP_FrameDistLoads`` and
+    ``SAP_FramePointLoads`` present only for frames that carry such loads.
+    """
+    dist: dict[str, list[t.Any]] = {}
+    for load in getattr(md, "frame_dist_loads", None) or []:
+        if not getattr(load, "inactive", False):
+            dist.setdefault(str(load.frame_id), []).append(load)
+    point: dict[str, list[t.Any]] = {}
+    for load in getattr(md, "frame_point_loads", None) or []:
+        if not getattr(load, "inactive", False):
+            point.setdefault(str(load.frame_id), []).append(load)
+
+    summaries: dict[str, dict[str, str]] = {}
+    for fid in set(dist) | set(point):
+        entry: dict[str, str] = {}
+        if fid in dist:
+            entry["SAP_FrameDistLoads"] = "; ".join(_dist_load_text(load) for load in dist[fid])
+        if fid in point:
+            entry["SAP_FramePointLoads"] = "; ".join(_point_load_text(load) for load in point[fid])
+        summaries[fid] = entry
+    return summaries
+
+
 def create_joint_points(
     md: SAPModelData,
     joint_layer_index: int,
@@ -215,6 +368,11 @@ def create_joint_points(
             constraint_name = getattr(md, "constraint_assignments", {}).get(nid)
             if constraint_name:
                 attrs.SetUserString("SAP_Constraint", str(constraint_name))
+
+            for key, value in joint_spring_user_strings(md, nid).items():
+                attrs.SetUserString(key, value)
+            for key, value in joint_load_user_strings(md, nid).items():
+                attrs.SetUserString(key, value)
             obj.CommitChanges()
         except Exception:
             continue
@@ -311,6 +469,7 @@ def create_frame_lines(
     doc = sc.doc
     count = 0
     default_layer = frame_section_layers.get("Default", 0)
+    load_summaries = frame_load_summaries(md)
 
     for eid, elem in md.frame_elements.items():
         try:
@@ -355,6 +514,11 @@ def create_frame_lines(
                 attrs.SetUserString("SAP_Shape", sec.shape)
                 attrs.SetUserString("SAP_Area", str(sec.A))
 
+            for key, value in line_spring_user_strings(md, eid).items():
+                attrs.SetUserString(key, value)
+            for key, value in load_summaries.get(eid, {}).items():
+                attrs.SetUserString(key, value)
+
             obj.CommitChanges()
         except Exception:
             continue
@@ -387,6 +551,7 @@ def create_frame_extrusions(
     doc = sc.doc
     count = 0
     default_layer = frame_extrusion_layers.get("Default", 0)
+    load_summaries = frame_load_summaries(md)
 
     for eid, elem in md.frame_elements.items():
         try:
@@ -508,6 +673,10 @@ def create_frame_extrusions(
                                         )
                                         if getattr(elem, "parent_id", None):
                                             attrs.SetUserString("FEA_ParentID", str(elem.parent_id))
+                                        for key, value in line_spring_user_strings(md, eid).items():
+                                            attrs.SetUserString(key, value)
+                                        for key, value in load_summaries.get(eid, {}).items():
+                                            attrs.SetUserString(key, value)
                                         obj.CommitChanges()
                             continue
 
@@ -561,6 +730,10 @@ def create_frame_extrusions(
                 attrs.SetUserString("FEA_ElemTag", str(getattr(elem, "elem_tag", "")))
                 if getattr(elem, "parent_id", None):
                     attrs.SetUserString("FEA_ParentID", str(elem.parent_id))
+                for key, value in line_spring_user_strings(md, eid).items():
+                    attrs.SetUserString(key, value)
+                for key, value in load_summaries.get(eid, {}).items():
+                    attrs.SetUserString(key, value)
                 obj.CommitChanges()
         except Exception:
             continue
@@ -640,6 +813,7 @@ def create_shell_breps(
     doc = sc.doc
     count = 0
     default_layer = shell_section_layers.get("Default", 0)
+    load_summaries = area_load_summaries(md)
 
     for aid, area in md.area_elements.items():
         try:
@@ -682,6 +856,11 @@ def create_shell_breps(
                 attrs.SetUserString("SAP_Thickness", str(thickness))
                 attrs.SetUserString("SAP_Material", sec.material)
 
+            for key, value in area_spring_user_strings(md, aid).items():
+                attrs.SetUserString(key, value)
+            for key, value in load_summaries.get(aid, {}).items():
+                attrs.SetUserString(key, value)
+
             obj.CommitChanges()
         except Exception:
             continue
@@ -707,6 +886,7 @@ def create_shell_extrusions(
     doc = sc.doc
     count = 0
     default_layer = shell_extrusion_layers.get("Default", 0)
+    load_summaries = area_load_summaries(md)
 
     for aid, area in md.area_elements.items():
         try:
@@ -771,6 +951,10 @@ def create_shell_extrusions(
             attrs.SetUserString("FEA_ElemTag", str(getattr(area, "area_tag", "")))
             if getattr(area, "parent_id", None):
                 attrs.SetUserString("FEA_ParentID", str(area.parent_id))
+            for key, value in area_spring_user_strings(md, aid).items():
+                attrs.SetUserString(key, value)
+            for key, value in load_summaries.get(aid, {}).items():
+                attrs.SetUserString(key, value)
             obj.CommitChanges()
         except Exception:
             continue
