@@ -251,16 +251,27 @@ def _parse_nodes(lines: list[str]) -> dict[int, tuple[float, float, float]]:
     header = _first_tokens(lines)
     if len(header) < 2:
         raise ValueError("malformed $Nodes section: section header has fewer than 2 fields")
-    num_entity_blocks = int(header[0])
-    num_nodes_total = int(header[1])
+    try:
+        num_entity_blocks = int(header[0])
+        num_nodes_total = int(header[1])
+    except ValueError as exc:
+        raise ValueError("malformed $Nodes section: block-count header is not an integer") from exc
     i = 1  # skip "numEntityBlocks numNodes minNodeTag maxNodeTag"
     n = len(lines)
     blocks_seen = 0
     while i < n:
         block_header = _split_tokens(lines[i])
+        if not block_header:
+            i += 1
+            continue
         if len(block_header) < 4:
             raise ValueError("malformed $Nodes section: block header has fewer than 4 fields")
-        num_nodes = int(block_header[3])
+        try:
+            num_nodes = int(block_header[3])
+        except ValueError as exc:
+            raise ValueError(
+                "malformed $Nodes section: node-block count is not an integer"
+            ) from exc
         blocks_seen += 1
         i += 1
         tags: list[int] = []
@@ -302,19 +313,32 @@ def _parse_elements(
     header = _first_tokens(lines)
     if len(header) < 2:
         raise ValueError("malformed $Elements section: section header has fewer than 2 fields")
-    num_entity_blocks = int(header[0])
-    num_elements_total = int(header[1])
+    try:
+        num_entity_blocks = int(header[0])
+        num_elements_total = int(header[1])
+    except ValueError as exc:
+        raise ValueError(
+            "malformed $Elements section: block-count header is not an integer"
+        ) from exc
     i = 1  # skip "numEntityBlocks numElements minElementTag maxElementTag"
     n = len(lines)
     blocks_seen = 0
     while i < n:
         block_header = _split_tokens(lines[i])
+        if not block_header:
+            i += 1
+            continue
         if len(block_header) < 4:
             raise ValueError("malformed $Elements section: block header has fewer than 4 fields")
         dim = int(block_header[0])
         entity_tag = int(block_header[1])
         etype = int(block_header[2])
-        num_elems = int(block_header[3])
+        try:
+            num_elems = int(block_header[3])
+        except ValueError as exc:
+            raise ValueError(
+                "malformed $Elements section: element-block count is not an integer"
+            ) from exc
         if etype not in _ELEMENT_TYPES:
             raise ValueError(
                 f"unsupported Gmsh element type {etype} in entity ({dim}, {entity_tag})"
