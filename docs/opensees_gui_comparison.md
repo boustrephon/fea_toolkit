@@ -79,9 +79,12 @@ article touches (OpenSeesPyView, OSLite) but with far greater analysis depth.
   however, lives in `benchmarks/` (SAC / IK-2005 generic-frame collapse) rather
   than the general `analysis/` pipeline — a scope, not an absence.
 - **3D-only by design** sidesteps the 2D limitation the article flags on FM-2D,
-  Hyperomet, INSPECT-SPSW and DYANAS.  A 3D model captures torsional effects
-  only when it represents the mass, stiffness and accidental eccentricity that
-  drive them — the third dimension alone does not remove torsional blind spots.
+  Hyperomet, INSPECT-SPSW and DYANAS.  A 3D model captures *inherent* torsion —
+  the twist from an asymmetric distribution of mass and stiffness — without any
+  added eccentricity: the third dimension simply lets that real eccentricity
+  produce rotation.  *Accidental* torsion is separate, a code-prescribed extra
+  eccentricity that must be represented explicitly when its effects are
+  required, so a 3D model alone does not remove that blind spot.
 - **Nonlinear modelling depth.**  Fiber sections (Mander confinement), lumped
   hinges with four backbones (ASCE 41, bilinear, trilinear, collapse-level
   `IMKBilin`), `beamWithHinges`, `NDMaterial`/`LayeredShell` walls, MVLEM/SFI-MVLEM
