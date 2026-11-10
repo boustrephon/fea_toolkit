@@ -381,6 +381,11 @@ for automated cross-referencing.
   Tags: `imk`, `ibarra-krawinkler`, `lignos-krawinkler`, `deterioration`, `hinge`, `element-classification`, `member-classification`, `benchmark`, `sac`
   Related: [IMK (IMKBilin) Steel Hinge — Deterioration Model](imk_deterioration_model.md) · [Element Classification](element_classification.md) · [Benchmark Roadmap — extended proposals](benchmark_roadmap.md)
 
+- [OpenSees GUIs — Comparison and fea_toolkit Positioning](opensees_gui_comparison.md) — ✅ Complete
+  > How fea_toolkit compares against the 15 OpenSees GUIs reviewed by Shabani (2023), mapped onto the article's own feature axes, with prioritized feature additions.
+  Tags: `comparison`, `opensees`, `gui`, `roadmap`, `analysis-types`, `interoperability`, `ssi`, `ida`, `pbee`
+  Related: [Desktop GUI Roadmap](gui_roadmap.md) · [Analysis Helpers](analysis.md) · [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md) · [Benchmark Roadmap — extended proposals](benchmark_roadmap.md) · [Structural Modeling Guidance](modeling_guidance.md)
+
 - [Pushover Results Storage & Nonlinear Visualization](pushover_results_storage_viz.md) — ⚠️ Partial
   > Implementation plan and status for per-element pushover result recording (frame end forces, shell stress resultants, plasticity indicators) and nonlinear visualization.
   Tags: `pushover`, `results`, `storage`, `visualization`, `npz`, `planning`
@@ -482,6 +487,7 @@ Tags across all documentation files:
 - **`analysis`** — [analysis.md](analysis.md), [load_cases_and_combinations.md](load_cases_and_combinations.md)
 - **`analysis-builder`** — [builder_reference.md](builder_reference.md), [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`analysis-type`** — [modal_analysis.md](modal_analysis.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [pushover_analysis.md](pushover_analysis.md), [storey_response.md](storey_response.md)
+- **`analysis-types`** — [opensees_gui_comparison.md](opensees_gui_comparison.md)
 - **`api-reference`** — [llm_guide.md](llm_guide.md)
 - **`app-name`** — [build_nuitka.md](build_nuitka.md)
 - **`architecture`** — [analysis.md](analysis.md), [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [builder_reference.md](builder_reference.md), [dev_notes.md](dev_notes.md), [gui_roadmap.md](gui_roadmap.md), [layered_analysis_workflow.md](layered_analysis_workflow.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [workflow.md](workflow.md), [workflow_authoring.md](workflow_authoring.md)
@@ -519,6 +525,7 @@ Tags across all documentation files:
 - **`columns`** — [element_classification.md](element_classification.md)
 - **`combination`** — [load_cases_and_combinations.md](load_cases_and_combinations.md), [load_combinations.md](load_combinations.md)
 - **`command`** — [workflow_palette.md](workflow_palette.md)
+- **`comparison`** — [opensees_gui_comparison.md](opensees_gui_comparison.md)
 - **`composite`** — [benchmark_register.md](benchmark_register.md), [cft_confinement_plan.md](cft_confinement_plan.md), [load_combinations.md](load_combinations.md)
 - **`config`** — [element_properties_config.md](element_properties_config.md)
 - **`confinement`** — [cft_confinement_plan.md](cft_confinement_plan.md), [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
@@ -577,7 +584,7 @@ Tags across all documentation files:
 - **`gpl`** — [licence.md](licence.md)
 - **`gravity`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`ground-motion`** — [benchmark_register.md](benchmark_register.md), [ground_motion_data.md](ground_motion_data.md), [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md)
-- **`gui`** — [gui.md](gui.md), [gui_roadmap.md](gui_roadmap.md), [project_bundle.md](project_bundle.md), [workflow_authoring.md](workflow_authoring.md), [workflow_palette.md](workflow_palette.md)
+- **`gui`** — [gui.md](gui.md), [gui_roadmap.md](gui_roadmap.md), [opensees_gui_comparison.md](opensees_gui_comparison.md), [project_bundle.md](project_bundle.md), [workflow_authoring.md](workflow_authoring.md), [workflow_palette.md](workflow_palette.md)
 - **`guidance`** — [modeling_guidance.md](modeling_guidance.md)
 - **`guide`** — [llm_guide.md](llm_guide.md)
 - **`hdf5`** — [model_stage_file.md](model_stage_file.md), [project_bundle.md](project_bundle.md), [report_generation.md](report_generation.md)
@@ -587,7 +594,7 @@ Tags across all documentation files:
 - **`hysteretic`** — [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`ibarra-krawinkler`** — [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [imk_deterioration_model.md](imk_deterioration_model.md), [imk_member_classification.md](imk_member_classification.md)
 - **`icon`** — [build_nuitka.md](build_nuitka.md)
-- **`ida`** — [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md)
+- **`ida`** — [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [opensees_gui_comparison.md](opensees_gui_comparison.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md)
 - **`identifiers`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`imk`** — [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [imk_deterioration_model.md](imk_deterioration_model.md), [imk_member_classification.md](imk_member_classification.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md)
 - **`imkbilin`** — [imk_deterioration_model.md](imk_deterioration_model.md)
@@ -598,6 +605,7 @@ Tags across all documentation files:
 - **`interaction`** — [gui.md](gui.md)
 - **`interactive`** — [viewer.md](viewer.md)
 - **`internal`** — [parser_coverage.md](parser_coverage.md)
+- **`interoperability`** — [opensees_gui_comparison.md](opensees_gui_comparison.md)
 - **`io`** — [e2k_import_plan.md](e2k_import_plan.md), [json_serialization.md](json_serialization.md), [model_stage_file.md](model_stage_file.md), [pipeline_logging.md](pipeline_logging.md), [results_schema.md](results_schema.md), [safe_import.md](safe_import.md), [tcl_import.md](tcl_import.md)
 - **`jntOffset`** — [member_offsets.md](member_offsets.md)
 - **`joint`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
@@ -641,7 +649,7 @@ Tags across all documentation files:
 - **`nuitka`** — [build_nuitka.md](build_nuitka.md)
 - **`offsets`** — [member_offsets.md](member_offsets.md)
 - **`openings`** — [shell_openings.md](shell_openings.md)
-- **`opensees`** — [build_nuitka.md](build_nuitka.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [tcl_export.md](tcl_export.md)
+- **`opensees`** — [build_nuitka.md](build_nuitka.md), [opensees_gui_comparison.md](opensees_gui_comparison.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [tcl_export.md](tcl_export.md)
 - **`openseespy`** — [licence.md](licence.md), [openseespy_local_build.md](openseespy_local_build.md)
 - **`openseesrt`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`orchestration`** — [analysis.md](analysis.md)
@@ -650,6 +658,7 @@ Tags across all documentation files:
 - **`panel-zone`** — [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md)
 - **`parser`** — [e2k_import_plan.md](e2k_import_plan.md), [json_serialization.md](json_serialization.md), [parser_coverage.md](parser_coverage.md), [safe_import.md](safe_import.md)
 - **`partial-fixity`** — [member_releases.md](member_releases.md)
+- **`pbee`** — [opensees_gui_comparison.md](opensees_gui_comparison.md)
 - **`peak-oriented`** — [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md)
 - **`phase-b`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`pipeline`** — [pipeline_logging.md](pipeline_logging.md), [workflow.md](workflow.md)
@@ -684,7 +693,7 @@ Tags across all documentation files:
 - **`rigid-end-offset`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`rigid-zones`** — [member_offsets.md](member_offsets.md)
 - **`rigidDiaphragm`** — [diaphragm_constraints.md](diaphragm_constraints.md)
-- **`roadmap`** — [gui_roadmap.md](gui_roadmap.md)
+- **`roadmap`** — [gui_roadmap.md](gui_roadmap.md), [opensees_gui_comparison.md](opensees_gui_comparison.md)
 - **`round-trip`** — [model_stage_file.md](model_stage_file.md)
 - **`runtime`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`s2k`** — [model_review.md](model_review.md)
@@ -714,6 +723,7 @@ Tags across all documentation files:
 - **`solver`** — [modal_analysis.md](modal_analysis.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`splitting`** — [element_splitting.md](element_splitting.md)
 - **`springs`** — [safe_import.md](safe_import.md)
+- **`ssi`** — [opensees_gui_comparison.md](opensees_gui_comparison.md)
 - **`static`** — [cantilever_benchmark.md](cantilever_benchmark.md)
 - **`steel`** — [imk_deterioration_model.md](imk_deterioration_model.md), [modeling_guidance.md](modeling_guidance.md)
 - **`steel02`** — [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
