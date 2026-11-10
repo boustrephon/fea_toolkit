@@ -209,7 +209,14 @@ def area_spring_user_strings(md: SAPModelData, aid: str) -> dict[str, str]:
 
 
 def _joint_load_index(md: SAPModelData) -> dict[str, list[t.Any]]:
-    """Index joint loads by node id (string keys) for O(1) lookup."""
+    """Index joint loads by node id (string keys) for O(1) lookup.
+
+    Args:
+        md: Model source.
+
+    Returns:
+        Mapping of node id (string) -> the joint loads applied at that node.
+    """
     index: dict[str, list[t.Any]] = {}
     for load in getattr(md, "joint_loads", None) or []:
         index.setdefault(str(load.node_id), []).append(load)
@@ -217,7 +224,14 @@ def _joint_load_index(md: SAPModelData) -> dict[str, list[t.Any]]:
 
 
 def _format_joint_loads(loads: list[t.Any]) -> str:
-    """Format one node's joint loads as ``pattern=(fx,fy,fz) [M=(mx,my,mz)]``."""
+    """Format one node's joint loads as ``pattern=(fx,fy,fz) [M=(mx,my,mz)]``.
+
+    Args:
+        loads: Joint loads applied at a single node.
+
+    Returns:
+        A ``"; "``-joined string with one ``pattern=(…) [M=(…)]`` term per load.
+    """
     parts = []
     for load in loads:
         text = f"{load.pattern}=({load.fx:g},{load.fy:g},{load.fz:g})"
@@ -228,7 +242,15 @@ def _format_joint_loads(loads: list[t.Any]) -> str:
 
 
 def joint_load_user_strings(md: SAPModelData, nid: str) -> dict[str, str]:
-    """UserText for a joint's applied loads (``SAP_JointLoads``; empty if none)."""
+    """UserText for a joint's applied loads (``SAP_JointLoads``; empty if none).
+
+    Args:
+        md: Model source.
+        nid: Joint id.
+
+    Returns:
+        ``{"SAP_JointLoads": …}`` when the joint carries loads, else ``{}``.
+    """
     loads = _joint_load_index(md).get(str(nid))
     if not loads:
         return {}
@@ -556,6 +578,17 @@ def _stamp_frame_extrusion_attrs(
 
     Shared by the lightweight-Extrusion path and the swept-Brep fallback in
     :func:`create_frame_extrusions` so both stay consistent.
+
+    Args:
+        attrs: Rhino object attributes to stamp.
+        md: Model source.
+        eid: Frame element id.
+        elem: Frame element.
+        sec: Assigned section.
+        sec_name: Section name.
+        stage: Pipeline stage label stamped as ``FEA_Stage``.
+        load_summaries: Precomputed frame load summaries (see
+            :func:`frame_load_summaries`).
     """
     attrs.SetUserString("SAP_Type", "FrameExtrusion")
     attrs.SetUserString("SAP_FrameID", str(eid))
