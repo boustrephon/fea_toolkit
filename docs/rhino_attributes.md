@@ -93,11 +93,11 @@ object (joint, frame or shell) only when present:
 |---|---|---|---|
 | `SAP_Spring` | Joint | `PS (UX=100, UZ=200)` | point-spring name + non-zero stiffnesses |
 | `SAP_Spring_Nonlinear` | Joint | `Compression Only` | only when the spring is nonlinear |
-| `SAP_LineSpring` | Frame | `LS (vert=1500)` | line-spring name + vertical stiffness |
+| `SAP_LineSpring` | Frame | `LS (vert=1500)` | line-spring name + `vert=` / `rot=` stiffness terms |
 | `SAP_LineSpring_Nonlinear` | Frame | `Compression Only` | only when nonlinear |
 | `SAP_AreaSpring` | Shell | `AS (U3=1500)` | area-spring name + non-zero stiffnesses |
 | `SAP_AreaSpring_Nonlinear` | Shell | `U3:Compression Only` | per-direction nonlinear options |
-| `SAP_JointLoads` | Joint | `Live=(0,0,-10)` | applied joint forces/moments per pattern |
+| `SAP_JointLoads` | Joint | `Live=(0,0,-10)` | applied joint forces per pattern; appends `M=(mx,my,mz)` when moments are non-zero |
 | `SAP_Loads` | Shell | `Live=5(Gravity)` | uniform area pressures per pattern |
 | `SAP_GravityLoads` | Shell | `Dead=(0,0,-1)` | area gravity multipliers per pattern |
 | `SAP_FrameDistLoads` | Frame | `Dead=2(Z); Wind=0→3(X)` | distributed frame loads per pattern |

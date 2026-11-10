@@ -496,8 +496,10 @@ def import_msh(
 
     Raises:
         RuntimeError: If not running inside Rhino 8.
-        ValueError: If the file is not a supported ASCII 4.x mesh.
+        ValueError: If the file is not a supported ASCII 4.1 mesh.
     """
+    RhinoImporter._ensure_rhino()
+
     import Rhino.DocObjects as rd
     import Rhino.Geometry as rg
     import scriptcontext as sc
@@ -513,6 +515,8 @@ def import_msh(
 
 def _import_msh_mesh(msh, doc, rd, rg, root_layer, create_points, verbose):
     """Create the layers and mesh objects for a parsed :class:`MSHMesh`."""
+    import System
+
     root = root_layer or "MSH"
     root_idx = create_root_layer(root)
 
@@ -533,7 +537,7 @@ def _import_msh_mesh(msh, doc, rd, rg, root_layer, create_points, verbose):
             continue
         layer_idx = _msh_group_layer(root, root_idx, gname, idx)
         guid = _add_msh_faces(msh, faces, gname, layer_idx, doc, rd, rg)
-        if guid is not None:
+        if guid != System.Guid.Empty:
             results["elements"] += len(faces)
             results["layers"][gname] = layer_idx
             if verbose:
@@ -548,7 +552,7 @@ def _import_msh_mesh(msh, doc, rd, rg, root_layer, create_points, verbose):
             attr.SetUserString("FEA_Stage", "msh")
             attr.SetUserString("FEA_Kind", "MSH_Point")
             attr.SetUserString("MSH_PointTag", str(tag))
-            if doc.Objects.AddPoint(rg.Point3d(x, y, z), attr) is not None:
+            if doc.Objects.AddPoint(rg.Point3d(x, y, z), attr) != System.Guid.Empty:
                 results["points"] += 1
         if verbose:
             print(f"  Points: {results['points']}")
@@ -569,7 +573,11 @@ def _msh_group_layer(root: str, root_idx: int, gname: str, idx: int) -> int:
 
 
 def _add_msh_faces(msh, faces, gname, layer_idx, doc, rd, rg):
-    """Build one Rhino mesh from *faces* and add it to the document."""
+    """Build one Rhino mesh from *faces* and add it to the document.
+
+    Returns the object ``Guid`` — Rhino returns ``System.Guid.Empty`` (never
+    ``None``) when the add fails.
+    """
     # Deduplicate nodes locally so shared boundary nodes are welded within a
     # group while each group stays an independent mesh (hence independent layer).
     verts: list[tuple[float, float, float]] = []

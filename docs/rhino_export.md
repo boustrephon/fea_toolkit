@@ -646,7 +646,7 @@ n = create_deformed_geometry(
 
 ## Gmsh `.msh` import
 
-A Gmsh ASCII mesh (format 4.x) can be imported directly into Rhino without a
+A Gmsh ASCII mesh (format 4.1) can be imported directly into Rhino without a
 parsed structural model — the round-trip path for Gmsh-based constrained
 remeshing (`fea_toolkit.mesh.remesh`): remesh an area, write the `.msh`, then
 bring the surface mesh back into Rhino as layers.
@@ -668,7 +668,7 @@ report = import_msh(
 
 * The parser (`fea_toolkit.io.msh_parser`, exposed as `parse_msh_text` /
   `read_msh`) is pure Python and reads the `$MeshFormat` / `$PhysicalNames` /
-  `$Entities` / `$Nodes` / `$Elements` sections.  Only ASCII 4.x meshes are
+  `$Entities` / `$Nodes` / `$Elements` sections.  Only ASCII 4.1 meshes are
   supported — binary and legacy 2.2 files raise `ValueError`.
 * Each **physical group** becomes a layer under *root_layer* (coloured from
   the shell palette) holding one `Rhino.Geometry.Mesh` of its 2D

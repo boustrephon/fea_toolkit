@@ -19,6 +19,17 @@ INPUT="${1:?usage: make_app_icon.sh <icon.svg|icon.png>}"
 OUT="${ICON_OUT:-build/fea_toolkit.icns}"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Resolve INPUT and OUT against the caller's working directory *before* cd'ing,
+# so relative paths keep the caller's context.  The default OUT stays relative
+# to the repository root (the repo's build/ directory).
+[[ "$INPUT" == /* ]] || INPUT="$(pwd)/$INPUT"
+if [[ -n "${ICON_OUT:-}" ]]; then
+    [[ "$OUT" == /* ]] || OUT="$(pwd)/$OUT"
+else
+    OUT="$ROOT/build/fea_toolkit.icns"
+fi
+
 cd "$ROOT"
 
 WORK="$(mktemp -d)"
@@ -49,6 +60,10 @@ fi
 # `sips` upscales silently; warn against a blurry master.
 WIDTH="$(sips -g pixelWidth "$MASTER" | awk '/pixelWidth/ {print $2}')"
 HEIGHT="$(sips -g pixelHeight "$MASTER" | awk '/pixelHeight/ {print $2}')"
+if [[ "$WIDTH" -ne "$HEIGHT" ]]; then
+    echo "make_app_icon.sh: error — master is ${WIDTH}x${HEIGHT}px; a square master is required." >&2
+    exit 1
+fi
 if [[ "$WIDTH" -lt 1024 || "$HEIGHT" -lt 1024 ]]; then
     echo "make_app_icon.sh: warning — master is ${WIDTH}x${HEIGHT}px; 1024×1024 or larger is recommended." >&2
 fi

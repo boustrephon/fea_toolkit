@@ -40,7 +40,7 @@ article touches (OpenSeesPyView, OSLite) but with far greater analysis depth.
 | **Hyperomet** | ✓ | URM buildings (DM-MVLEM / Unified method); IDA (hunt-&-fill); *no* result visualisation |
 | **INSPECT-SPSW** | ✓ | Steel plate shear walls (strip method, 2D); cyclic pushover |
 | **MSBridge** | ✗ | Multi-span bridges; foundation soil springs; isolation bearings; PBEE loss plots; *exports to SAP2000 .s2k* |
-| **NextFEMdesigner** | ✗ | General FEA pre/post (default OOFEM, also drives OpenSees); 20+ import/export formats; fiber sections free; code checks paid |
+| **NextFEMdesigner** | ✗ | General FEA pre/post (default OOFEM, also drives OpenSees); SAP2000 `.s2k` import + OpenSees export; 20+ import/export formats; fiber sections free; code checks paid |
 | **OpenSees Navigator** | ✗ | MATLAB; templates + **SAP2000 .s2k import**; AISC/CISC sections; AISC design checks; hybrid simulation (OpenFresco) |
 | **OpenSeesPL** | ✗ | 3D pile–ground interaction; soil materials; liquefaction; pushover/mode/base-accel |
 | **OpenSeesPyView** | ✓ | OpenSeesPy GUI; DXF export of model + mode shapes; modal only |
@@ -66,18 +66,22 @@ article touches (OpenSeesPyView, OSLite) but with far greater analysis depth.
 
 ## 4. Capability notes
 
-- **CSI interoperability is the differentiator.**  Only OpenSees Navigator among
-  the 15 imports SAP2000 `.s2k` (and it "currently does not convert element
-  loads and nodal constraints"; the article's own tables mark most tools `✗`
-  on import/export).  fea_toolkit parses SAP2000/ETABS/SAFE text into one
-  `SAPModelData` and emits the OpenSees domain — a bridge none of the others
-  offer at this depth.  (MSBridge runs the reverse direction: OpenSees → SAP2000.)
+- **CSI interoperability is the differentiator.**  Two of the 15 import
+  SAP2000 `.s2k`: OpenSees Navigator (which "currently does not convert element
+  loads and nodal constraints") and NextFEM (which documents joint constraints
+  and loads, and exports OpenSees models, but is not established at
+  fea_toolkit's conversion depth).  fea_toolkit parses SAP2000/ETABS/SAFE text
+  into one `SAPModelData` and emits the OpenSees domain — a bridge none of the
+  others offer at this depth.  (MSBridge runs the reverse direction:
+  OpenSees → SAP2000.)
 - **Analysis breadth.**  fea_toolkit covers every analysis column the article
   uses *plus* response spectrum and code-specified capacities.  Its IDA,
   however, lives in `benchmarks/` (SAC / IK-2005 generic-frame collapse) rather
   than the general `analysis/` pipeline — a scope, not an absence.
 - **3D-only by design** sidesteps the 2D limitation the article flags on FM-2D,
-  Hyperomet, INSPECT-SPSW and DYANAS (no torsional blind spot).
+  Hyperomet, INSPECT-SPSW and DYANAS.  A 3D model captures torsional effects
+  only when it represents the mass, stiffness and accidental eccentricity that
+  drive them — the third dimension alone does not remove torsional blind spots.
 - **Nonlinear modelling depth.**  Fiber sections (Mander confinement), lumped
   hinges with four backbones (ASCE 41, bilinear, trilinear, collapse-level
   `IMKBilin`), `beamWithHinges`, `NDMaterial`/`LayeredShell` walls, MVLEM/SFI-MVLEM
@@ -116,9 +120,11 @@ reviewed tool that demonstrates the capability.
    to generate footing/basement spring stiffness from soil properties, not just
    read SAFE support springs.  The article's single most-cited missing feature.
    *(Peers: Build-X, MSBridge, GiD+OpenSees, OpenSeesPL.)*
-3. **Broader geometry import (DXF, then STEP/IGES/IFC).**  Removes the hard
-   dependency on having a CSI model.  DXF is the table-stakes level (OSLite,
-   OpenSeesPyView, NextFEM); STEP/IGES/IFC is the STKO/NextFEM tier.
+3. **Broader geometry import (DXF, then STEP/IGES/IFC).**  Expands the
+   non-CSI input options beyond the `.s2k`/`.e2k`/`.f2k` family.  DXF *import*
+   is the table-stakes level — OSLite (older versions only) and NextFEM import
+   DXF, while OpenSeesPyView exports DXF but does not import it;
+   STEP/IGES/IFC is the STKO/NextFEM tier.
 4. **Unified code-check report.**  Package the existing `capacity/` modules
    (GB 50010, ASCE 41, Elwood, simplified-MCFT, DCR) into a report step rather
    than scattered helpers.  *(Peers: OpenSees Navigator AISC checks, NextFEM.)*

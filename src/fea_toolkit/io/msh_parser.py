@@ -1,4 +1,4 @@
-"""Parse Gmsh ``.msh`` ASCII mesh files (format 4.x) into a small data model.
+"""Parse Gmsh ``.msh`` ASCII mesh files (format 4.1) into a small data model.
 
 A Gmsh ``.msh`` file stores a *discretised* mesh — nodes, elements and their
 physical groups — not the original CAD/NURBS geometry.  This parser reads the
@@ -10,7 +10,7 @@ It is pure Python and imports nothing from the Rhino or OpenSees packages, so
 it is safe to import inside Rhino 8's embedded interpreter and to unit-test
 headlessly.
 
-Only the ASCII (``filetype == 0``) 4.x layout is supported.  The legacy 2.2
+Only the ASCII (``filetype == 0``) 4.1 layout is supported.  The legacy 2.2
 layout and the binary variants raise :class:`ValueError`.
 
 Note on group resolution: in MSH 4.x, elements belong to an *entity*
@@ -118,6 +118,8 @@ class MSHMesh:
 
 def _split_tokens(line: str) -> list[str]:
     """Split a whitespace-delimited line, honouring double-quoted fields."""
+    if '"' not in line:
+        return line.split()
     tokens: list[str] = []
     buf: list[str] = []
     in_quote = False
@@ -251,18 +253,18 @@ def _parse_nodes(lines: list[str]) -> dict[int, tuple[float, float, float]]:
     while i < n:
         header = _split_tokens(lines[i])
         if len(header) < 4:
-            break
+            raise ValueError("malformed $Nodes section: block header has fewer than 4 fields")
         num_nodes = int(header[3])
         i += 1
         tags: list[int] = []
         for _ in range(num_nodes):
             if i >= n:
-                return nodes
+                raise ValueError("malformed $Nodes section: premature end of node-tag block")
             tags.append(int(_split_tokens(lines[i])[0]))
             i += 1
         for tag in tags:
             if i >= n:
-                return nodes
+                raise ValueError("malformed $Nodes section: premature end of coordinate block")
             coord_tokens = _split_tokens(lines[i])
             nodes[tag] = tuple(float(c) for c in coord_tokens[:3])
             i += 1
@@ -282,7 +284,7 @@ def _parse_elements(
     while i < n:
         header = _split_tokens(lines[i])
         if len(header) < 4:
-            break
+            raise ValueError("malformed $Elements section: block header has fewer than 4 fields")
         dim = int(header[0])
         entity_tag = int(header[1])
         etype = int(header[2])
@@ -296,7 +298,7 @@ def _parse_elements(
         i += 1
         for _ in range(num_elems):
             if i >= n:
-                return elements
+                raise ValueError("malformed $Elements section: premature end of element block")
             tokens = _split_tokens(lines[i])
             tag = int(tokens[0])
             node_tags = tuple(int(t) for t in tokens[1 : 1 + nnodes])
@@ -318,8 +320,8 @@ def parse_msh_text(text: str) -> MSHMesh:
         The parsed :class:`MSHMesh`.
 
     Raises:
-        ValueError: If the file is not a supported ASCII 4.x mesh (missing
-            ``$MeshFormat``, a binary ``filetype``, a non-4.x version, or an
+        ValueError: If the file is not a supported ASCII 4.1 mesh (missing
+            ``$MeshFormat``, a binary ``filetype``, a non-4.1 version, or an
             unsupported element type).
     """
     sections = _sections(text)
@@ -327,12 +329,14 @@ def parse_msh_text(text: str) -> MSHMesh:
     fmt = _first_tokens(sections.get("MeshFormat", []))
     if not fmt:
         raise ValueError("not a Gmsh .msh file: missing $MeshFormat section")
+    if len(fmt) < 2:
+        raise ValueError("malformed $MeshFormat section: expected 'version filetype [datasize]'")
     version = fmt[0]
     file_type = int(fmt[1])
     if file_type != 0:
         raise ValueError(f"binary Gmsh .msh (filetype {file_type}) is not supported")
-    if version.split(".")[0] != "4":
-        raise ValueError(f"unsupported Gmsh .msh version {version!r}: only 4.x ASCII is supported")
+    if version != "4.1":
+        raise ValueError(f"unsupported Gmsh .msh version {version!r}: only 4.1 ASCII is supported")
 
     physical_names = _parse_physical_names(sections.get("PhysicalNames", []))
     entity_physical_tags, points = _parse_entities(sections.get("Entities", []))
@@ -359,7 +363,7 @@ def read_msh(path: Union[str, Path]) -> MSHMesh:
 
     Raises:
         FileNotFoundError: If *path* does not exist.
-        ValueError: If the file is not a supported ASCII 4.x mesh.
+        ValueError: If the file is not a supported ASCII 4.1 mesh.
         UnicodeDecodeError: If the file is not UTF-8 text.
     """
     path = Path(path)

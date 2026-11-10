@@ -198,27 +198,41 @@ def area_spring_user_strings(md: SAPModelData, aid: str) -> dict[str, str]:
         return {"SAP_AreaSpring": name}
     k = _compact_stiffness(spring.stiffness)
     out = {"SAP_AreaSpring": f"{name} ({k})" if k else name}
-    if spring.nonlinear_options:
+    nonlinear = {
+        dof: opt for dof, opt in spring.nonlinear_options.items() if opt and opt != "None (Linear)"
+    }
+    if nonlinear:
         out["SAP_AreaSpring_Nonlinear"] = ", ".join(
-            f"{dof}:{opt}" for dof, opt in spring.nonlinear_options.items()
+            f"{dof}:{opt}" for dof, opt in nonlinear.items()
         )
     return out
 
 
-def joint_load_user_strings(md: SAPModelData, nid: str) -> dict[str, str]:
-    """UserText for a joint's applied loads (``SAP_JointLoads``; empty if none)."""
-    loads = [
-        load for load in (getattr(md, "joint_loads", None) or []) if str(load.node_id) == str(nid)
-    ]
-    if not loads:
-        return {}
+def _joint_load_index(md: SAPModelData) -> dict[str, list[t.Any]]:
+    """Index joint loads by node id (string keys) for O(1) lookup."""
+    index: dict[str, list[t.Any]] = {}
+    for load in getattr(md, "joint_loads", None) or []:
+        index.setdefault(str(load.node_id), []).append(load)
+    return index
+
+
+def _format_joint_loads(loads: list[t.Any]) -> str:
+    """Format one node's joint loads as ``pattern=(fx,fy,fz) [M=(mx,my,mz)]``."""
     parts = []
     for load in loads:
         text = f"{load.pattern}=({load.fx:g},{load.fy:g},{load.fz:g})"
         if load.mx or load.my or load.mz:
             text += f" M=({load.mx:g},{load.my:g},{load.mz:g})"
         parts.append(text)
-    return {"SAP_JointLoads": "; ".join(parts)}
+    return "; ".join(parts)
+
+
+def joint_load_user_strings(md: SAPModelData, nid: str) -> dict[str, str]:
+    """UserText for a joint's applied loads (``SAP_JointLoads``; empty if none)."""
+    loads = _joint_load_index(md).get(str(nid))
+    if not loads:
+        return {}
+    return {"SAP_JointLoads": _format_joint_loads(loads)}
 
 
 def area_load_summaries(md: SAPModelData) -> dict[str, dict[str, str]]:
@@ -326,6 +340,7 @@ def create_joint_points(
     doc = sc.doc
     count = 0
     obj_ids: list[str] = []
+    joint_loads_index = _joint_load_index(md)
 
     for nid, node in md.nodes.items():
         try:
@@ -371,8 +386,9 @@ def create_joint_points(
 
             for key, value in joint_spring_user_strings(md, nid).items():
                 attrs.SetUserString(key, value)
-            for key, value in joint_load_user_strings(md, nid).items():
-                attrs.SetUserString(key, value)
+            loads = joint_loads_index.get(str(nid))
+            if loads:
+                attrs.SetUserString("SAP_JointLoads", _format_joint_loads(loads))
             obj.CommitChanges()
         except Exception:
             continue
@@ -526,6 +542,40 @@ def create_frame_lines(
     return count
 
 
+def _stamp_frame_extrusion_attrs(
+    attrs,
+    md: SAPModelData,
+    eid: str,
+    elem,
+    sec,
+    sec_name: str,
+    stage: str,
+    load_summaries: dict[str, dict[str, str]],
+) -> None:
+    """Stamp the shared ``SAP_*`` / ``FEA_*`` + spring/load UserStrings.
+
+    Shared by the lightweight-Extrusion path and the swept-Brep fallback in
+    :func:`create_frame_extrusions` so both stay consistent.
+    """
+    attrs.SetUserString("SAP_Type", "FrameExtrusion")
+    attrs.SetUserString("SAP_FrameID", str(eid))
+    attrs.SetUserString("SAP_Section", sec_name)
+    attrs.SetUserString("SAP_JointI", str(elem.node_i))
+    attrs.SetUserString("SAP_JointJ", str(elem.node_j))
+    attrs.SetUserString("SAP_Material", sec.material)
+    attrs.SetUserString("SAP_Shape", sec.shape)
+    attrs.SetUserString("SAP_Angle", str(elem.angle))
+    attrs.SetUserString("FEA_Stage", stage)
+    attrs.SetUserString("FEA_Kind", "FrameExtrusion")
+    attrs.SetUserString("FEA_ElemTag", str(getattr(elem, "elem_tag", "")))
+    if getattr(elem, "parent_id", None):
+        attrs.SetUserString("FEA_ParentID", str(elem.parent_id))
+    for key, value in line_spring_user_strings(md, eid).items():
+        attrs.SetUserString(key, value)
+    for key, value in load_summaries.get(eid, {}).items():
+        attrs.SetUserString(key, value)
+
+
 def create_frame_extrusions(
     md: SAPModelData,
     frame_extrusion_layers: dict[str, int],
@@ -658,25 +708,16 @@ def create_frame_extrusions(
                                     obj = doc.Objects.Find(obj_id)
                                     if obj:
                                         attrs = obj.Attributes
-                                        attrs.SetUserString("SAP_Type", "FrameExtrusion")
-                                        attrs.SetUserString("SAP_FrameID", str(eid))
-                                        attrs.SetUserString("SAP_Section", sec_name)
-                                        attrs.SetUserString("SAP_JointI", str(elem.node_i))
-                                        attrs.SetUserString("SAP_JointJ", str(elem.node_j))
-                                        attrs.SetUserString("SAP_Material", sec.material)
-                                        attrs.SetUserString("SAP_Shape", sec.shape)
-                                        attrs.SetUserString("SAP_Angle", str(elem.angle))
-                                        attrs.SetUserString("FEA_Stage", stage)
-                                        attrs.SetUserString("FEA_Kind", "FrameExtrusion")
-                                        attrs.SetUserString(
-                                            "FEA_ElemTag", str(getattr(elem, "elem_tag", ""))
+                                        _stamp_frame_extrusion_attrs(
+                                            attrs,
+                                            md,
+                                            eid,
+                                            elem,
+                                            sec,
+                                            sec_name,
+                                            stage,
+                                            load_summaries,
                                         )
-                                        if getattr(elem, "parent_id", None):
-                                            attrs.SetUserString("FEA_ParentID", str(elem.parent_id))
-                                        for key, value in line_spring_user_strings(md, eid).items():
-                                            attrs.SetUserString(key, value)
-                                        for key, value in load_summaries.get(eid, {}).items():
-                                            attrs.SetUserString(key, value)
                                         obj.CommitChanges()
                             continue
 
@@ -717,23 +758,9 @@ def create_frame_extrusions(
                 if obj is None:
                     continue
                 attrs = obj.Attributes
-                attrs.SetUserString("SAP_Type", "FrameExtrusion")
-                attrs.SetUserString("SAP_FrameID", str(eid))
-                attrs.SetUserString("SAP_Section", sec_name)
-                attrs.SetUserString("SAP_JointI", str(elem.node_i))
-                attrs.SetUserString("SAP_JointJ", str(elem.node_j))
-                attrs.SetUserString("SAP_Material", sec.material)
-                attrs.SetUserString("SAP_Shape", sec.shape)
-                attrs.SetUserString("SAP_Angle", str(elem.angle))
-                attrs.SetUserString("FEA_Stage", stage)
-                attrs.SetUserString("FEA_Kind", "FrameExtrusion")
-                attrs.SetUserString("FEA_ElemTag", str(getattr(elem, "elem_tag", "")))
-                if getattr(elem, "parent_id", None):
-                    attrs.SetUserString("FEA_ParentID", str(elem.parent_id))
-                for key, value in line_spring_user_strings(md, eid).items():
-                    attrs.SetUserString(key, value)
-                for key, value in load_summaries.get(eid, {}).items():
-                    attrs.SetUserString(key, value)
+                _stamp_frame_extrusion_attrs(
+                    attrs, md, eid, elem, sec, sec_name, stage, load_summaries
+                )
                 obj.CommitChanges()
         except Exception:
             continue

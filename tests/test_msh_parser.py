@@ -115,7 +115,44 @@ class TestErrors:
 
     def test_legacy_version_raises(self):
         text = MINIMAL_MSH.replace("4.1 0 8", "2.2 0 8", 1)
-        with pytest.raises(ValueError, match=r"only 4\.x"):
+        with pytest.raises(ValueError, match=r"only 4\.1"):
+            parse_msh_text(text)
+
+    def test_unsupported_4_0_version_raises(self):
+        text = MINIMAL_MSH.replace("4.1 0 8", "4.0 0 8", 1)
+        with pytest.raises(ValueError, match=r"only 4\.1"):
+            parse_msh_text(text)
+
+    def test_malformed_mesh_format_raises(self):
+        text = MINIMAL_MSH.replace("4.1 0 8", "4.1", 1)
+        with pytest.raises(ValueError, match=r"malformed \$MeshFormat"):
+            parse_msh_text(text)
+
+    def test_nodes_block_header_too_short_raises(self):
+        text = "$MeshFormat\n4.1 0 8\n$EndMeshFormat\n$Nodes\n1 1 1 2\n0 1\n1\n0 0 0\n$EndNodes\n"
+        with pytest.raises(ValueError, match=r"\$Nodes"):
+            parse_msh_text(text)
+
+    def test_nodes_premature_end_raises(self):
+        text = "$MeshFormat\n4.1 0 8\n$EndMeshFormat\n$Nodes\n1 1 1 1\n0 1 0 1\n1\n$EndNodes\n"
+        with pytest.raises(ValueError, match=r"\$Nodes"):
+            parse_msh_text(text)
+
+    def test_elements_block_header_too_short_raises(self):
+        text = "$MeshFormat\n4.1 0 8\n$EndMeshFormat\n$Elements\n1 1 1 2\n2 1\n$EndElements\n"
+        with pytest.raises(ValueError, match=r"\$Elements"):
+            parse_msh_text(text)
+
+    def test_elements_premature_end_raises(self):
+        text = (
+            "$MeshFormat\n4.1 0 8\n$EndMeshFormat\n"
+            "$Elements\n"
+            "1 2 1 2\n"
+            "2 1 3 2\n"
+            "1 1 2 3 4\n"
+            "$EndElements\n"
+        )
+        with pytest.raises(ValueError, match=r"\$Elements"):
             parse_msh_text(text)
 
     def test_missing_mesh_format_raises(self):
