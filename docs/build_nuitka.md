@@ -85,8 +85,27 @@ scripts/build_nuitka.sh --gui --icon build/fea_toolkit.icns
 # or: ICON=build/fea_toolkit.icns scripts/build_nuitka.sh --gui
 ```
 
-Any size image can be converted to `.icns` with the built-in `iconutil` from a
-`128`–`1024` px PNG set (`iconutil -c icns Icon.iconset`).
+#### Authoring the icon (Inkscape)
+
+Inkscape is ideal for this: design the icon once as **vector** SVG at
+**1024 × 1024 px** (the macOS retina maximum), then convert to `.icns` with
+`scripts/make_app_icon.sh`:
+
+```bash
+scripts/make_app_icon.sh build/fea_toolkit.svg     # → build/fea_toolkit.icns
+scripts/make_app_icon.sh build/fea_toolkit.png     # a single ≥1024 px PNG also works
+```
+
+The helper rasterises an SVG with Inkscape's CLI (`--export-type=png`), then
+downscales with the built-in `sips` into the `iconutil` icon-set
+(`icon_16x16.png` … `icon_512x512@2x.png`) and runs `iconutil -c icns`.  It is
+macOS-only (uses `sips` + `iconutil`); set `INKSCAPE` if the binary isn't on
+`PATH` (the script also probes `/Applications/Inkscape.app`), and `ICON_OUT` to
+change the destination.
+
+Windows builds would use an `.ico` instead (`--windows-icon-from-ico`); the
+current `scripts/build_nuitka.sh` only wires up the macOS `.icns`, so no `.ico`
+is produced yet.
 
 ## Pointing the separate build at OpenSeesPy
 
