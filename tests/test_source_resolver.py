@@ -153,7 +153,13 @@ class TestResolveFromStageFile:
     def test_resolve_from_stage_arrays_excludes_inactive_and_drops_springs(self, tmp_path):
         """Inactive elements are excluded at write time; geometry arrays drop
         the SAFE spring/load collections (those survive only the in-memory path)."""
-        from fea_toolkit.model.sap_data import FrameElement, Node, PointSpring, SAPModelData
+        from fea_toolkit.model.sap_data import (
+            FrameElement,
+            JointLoad,
+            Node,
+            PointSpring,
+            SAPModelData,
+        )
 
         md = SAPModelData(
             nodes={
@@ -174,7 +180,11 @@ class TestResolveFromStageFile:
             frame_auto_mesh={},
             point_springs={"PS": PointSpring(name="PS", stiffness={"UZ": 100.0})},
             point_spring_assignments={"1": "PS"},
+            joint_loads=[JointLoad(pattern="Dead", node_id="1", fz=-50.0)],
         )
+        # The source model carries a joint load; the NPZ geometry arrays do not
+        # persist it, so it must not survive the stage-file round-trip.
+        assert len(md.joint_loads) == 1
         path = tmp_path / "model.npz"
         write_model_stages(str(path), sap=md, fmt="npz", model_json=False)
 
