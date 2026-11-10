@@ -1,9 +1,10 @@
 # fea_toolkit
 
 A toolkit for importing, analysing, and visualising structural
-engineering models.  Parses SAP2000 `.s2k` text models, builds OpenSees
-models for structural analysis, and exports to Rhino 3-D for
-visualisation and Grasshopper workflows.
+engineering models.  Parses SAP2000 `.s2k`, ETABS `.e2k` / `.$et` and
+CSi SAFE `.f2k` / `.$sf` text models, builds OpenSees models for
+structural analysis, and exports to Rhino 3-D for visualisation and
+Grasshopper workflows.
 
 
 ## Project Summary
@@ -199,10 +200,10 @@ consumes a well-defined data structure, making it easy to pick up at
 any point (e.g. load a cached NPZ and jump straight to visualisation).
 
 ```
-SAP2000 .s2k / .json
+SAP2000 .s2k / ETABS .e2k / SAFE .f2k / .json
        │
        ▼  ┌──────────────────────┐
-       │  │  SAP2000Parser       │  Stage 1 — Data Ingestion
+       │  │  load_model_data()   │  Stage 1 — Data Ingestion
        │  │  → SAPModelData      │
        │  └──────────────────────┘
        │
@@ -1237,7 +1238,8 @@ additional to, `fea_toolkit`'s GPL-3.0 terms.
 
 ## SAP2000 and CSI
 
-`fea_toolkit` reads `.s2k` text files exported from SAP2000.  **SAP2000® and
+`fea_toolkit` reads `.s2k` (SAP2000), `.e2k` / `.$et` (ETABS) and `.f2k` /
+`.$sf` (SAFE) text files exported from CSi products.  **SAP2000® and
 CSi® are registered trademarks of Computers and Structures, Inc.**  This
 project is an independent interoperability tool and is not affiliated with,
 authorised by, sponsored by or endorsed by CSI; no CSI branding is used.
