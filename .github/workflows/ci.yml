@@ -57,7 +57,10 @@ jobs:
           # IPython backs the *notebook* display path (pyvista's static-image
           # fallback) exercised by the notebook-mode plotting tests; a real
           # Jupyter session already provides it.
-          pip install ruff pytest h5py ipython tabulate
+          # ruff is pinned to the same version as .pre-commit-config.yaml so
+          # CI and the local pre-commit hook lint with one rule set (an
+          # unpinned ruff drifts ahead and re-lints the tree with new rules).
+          pip install ruff==0.16.1 pytest h5py ipython tabulate
 
       - name: Register OpenSeesPy bundled libraries
         # The Linux OpenSeesPy wheel bundles libblas/liblapack/libgfortran
@@ -122,7 +125,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[gui]"
-          pip install ruff pytest
+          pip install ruff==0.16.1 pytest
 
       - name: Register OpenSeesPy bundled libraries
         # Future GUI tests (analysis actions) import ``AnalysisBuilder`` ->
