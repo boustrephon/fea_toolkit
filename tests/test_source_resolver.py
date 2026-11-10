@@ -150,6 +150,47 @@ class TestResolveFromStageFile:
         )
         assert all(n in src.nodes for n in src.area_elements["S1"].node_ids)
 
+    def test_resolve_from_stage_arrays_excludes_inactive_and_drops_springs(self, tmp_path):
+        """Inactive elements are excluded at write time; geometry arrays drop
+        the SAFE spring/load collections (those survive only the in-memory path)."""
+        from fea_toolkit.model.sap_data import FrameElement, Node, PointSpring, SAPModelData
+
+        md = SAPModelData(
+            nodes={
+                "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+                "2": Node(node_id="2", node_tag=2, x=0.0, y=0.0, z=0.0),
+            },
+            restraints={},
+            materials={},
+            sections={},
+            frame_elements={
+                "F1": FrameElement(elem_id="F1", elem_tag=1, node_i="1", node_j="2"),
+                "F2": FrameElement(elem_id="F2", elem_tag=2, node_i="1", node_j="2", inactive=True),
+            },
+            area_elements={},
+            frame_assignments={"F1": "S1", "F2": "S1"},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+            point_springs={"PS": PointSpring(name="PS", stiffness={"UZ": 100.0})},
+            point_spring_assignments={"1": "PS"},
+        )
+        path = tmp_path / "model.npz"
+        write_model_stages(str(path), sap=md, fmt="npz", model_json=False)
+
+        rs = resolve_model_source(str(path), stage="sap")
+
+        # Inactive elements are excluded at write time, so only the active frame
+        # is resolved back from the geometry arrays.
+        assert set(rs.frame_elements) == {"F1"}
+        assert set(rs.nodes) == {"1", "2"}
+
+        # The lightweight geometry arrays do not persist SAFE springs/loads (those
+        # are carried only by the in-memory SAPModelData path), so the resolved
+        # source starts with empty spring/load collections.
+        assert rs.point_spring_assignments == {}
+        assert rs.joint_loads == []
+
 
 class TestResolveErrors:
     def test_unsupported_source(self):

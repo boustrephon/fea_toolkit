@@ -13,7 +13,6 @@ from fea_toolkit.model.sap_data import (
     AreaSpring,
     AreaUniformLoad,
     FrameDistributedLoad,
-    FrameElement,
     FramePointLoad,
     JointLoad,
     LineSpring,
@@ -232,32 +231,3 @@ def test_frame_load_summaries():
         }
     }
     assert frame_load_summaries(_model()) == {}
-
-
-def test_resolve_from_stage_arrays_excludes_inactive_and_drops_springs(tmp_path):
-    from fea_toolkit.io.stage_writer import write_model_stages
-
-    md = _model(
-        point_springs={"PS": PointSpring(name="PS", stiffness={"UZ": 100.0})},
-        point_spring_assignments={"1": "PS"},
-        frame_elements={
-            "F1": FrameElement(elem_id="F1", elem_tag=1, node_i="1", node_j="2"),
-            "F2": FrameElement(elem_id="F2", elem_tag=2, node_i="1", node_j="2", inactive=True),
-        },
-        frame_assignments={"F1": "S1", "F2": "S1"},
-    )
-    path = tmp_path / "model.npz"
-    write_model_stages(str(path), sap=md, fmt="npz", model_json=False)
-
-    rs = resolve_model_source(str(path), stage="sap")
-
-    # Inactive elements are excluded at write time, so only the active frame is
-    # resolved back from the geometry arrays.
-    assert set(rs.frame_elements) == {"F1"}
-    assert set(rs.nodes) == {"1", "2"}
-
-    # The lightweight geometry arrays do not persist SAFE springs/loads (those
-    # are carried only by the in-memory SAPModelData path), so the resolved
-    # source starts with empty spring/load collections.
-    assert rs.point_spring_assignments == {}
-    assert rs.joint_loads == []
