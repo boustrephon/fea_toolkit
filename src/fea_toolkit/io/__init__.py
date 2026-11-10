@@ -39,6 +39,7 @@ from .ground_motion import (
 )
 from .model_loader import load_model_data
 from .model_store import InMemoryModelStore, ModelHeader, ModelStore, model_header
+from .msh_parser import MSHElement, MSHMesh, parse_msh_text, read_msh
 from .npz_reader import (
     GEOMETRY_ARRAY_KEYS,
     describe_results_npz,
@@ -150,6 +151,8 @@ __all__ = [
     "ETABSParser",
     "GroundMotionManifest",
     "InMemoryModelStore",
+    "MSHElement",
+    "MSHMesh",
     "ModelHeader",
     "ModelStore",
     "NpzResultsRepository",
@@ -187,11 +190,13 @@ __all__ = [
     "npz_to_pyvista_modal_mesh",
     "npz_to_pyvista_shell_mesh",
     "npz_to_rhino_colour_data",
+    "parse_msh_text",
     "parse_tcl_model",
     "read_combination_set",
     "read_dictionary_arrays",
     "read_metadata",
     "read_model_stages",
+    "read_msh",
     "read_peer_record",
     "read_results",
     "read_results_npz",

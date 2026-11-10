@@ -26,7 +26,7 @@ import copy
 import typing as t
 
 from ..model.sap_data import SAPModelData
-from .colors import RESTRAINT_COLORS
+from .colors import RESTRAINT_COLORS, SHELL_PALETTE
 from .geometry import (
     create_frame_extrusions,
     create_frame_lines,
@@ -38,8 +38,10 @@ from .groups import create_sap_groups, create_selection_groups
 from .layers import (
     create_frame_layers,
     create_joints_layer,
+    create_or_get_layer,
     create_root_layer,
     create_shell_layers,
+    sanitize_layer_name,
     suppress_redraw,
 )
 
@@ -458,3 +460,143 @@ class RhinoImporter:
                 obj.CommitChanges()
             except Exception:
                 continue
+
+
+# ═══════════════════════════════════════════════════════════════
+# Gmsh .msh import
+# ═══════════════════════════════════════════════════════════════
+
+#: Gmsh element types imported as Rhino mesh faces (triangle / quadrangle).
+_MSH_FACE_TYPES = frozenset({2, 3})
+
+
+def import_msh(
+    path,
+    root_layer: str = "MSH",
+    create_points: bool = True,
+    verbose: bool = True,
+) -> dict[str, t.Any]:
+    """Import a Gmsh ``.msh`` ASCII mesh into Rhino, one layer per physical group.
+
+    Each physical group (e.g. ``surface_1``) becomes a Rhino layer under
+    *root_layer* and receives one :class:`Rhino.Geometry.Mesh` built from its
+    2D elements (triangles/quads).  A mesh with no physical groups is
+    collected under an ``Ungrouped`` layer.
+
+    Args:
+        path: Path to the ``.msh`` file.
+        root_layer: Full path of the root layer (default ``"MSH"``).
+        create_points: If True, also create Rhino point objects for the 0D
+            entities on a ``{root_layer}/Points`` layer.
+        verbose: Print progress.
+
+    Returns:
+        Dict with ``groups`` (count), ``elements``, ``points`` and a
+        ``layers`` mapping of group name -> layer index.
+
+    Raises:
+        RuntimeError: If not running inside Rhino 8.
+        ValueError: If the file is not a supported ASCII 4.x mesh.
+    """
+    import Rhino.DocObjects as rd
+    import Rhino.Geometry as rg
+    import scriptcontext as sc
+
+    from ..io.msh_parser import read_msh
+
+    msh = read_msh(path)
+    doc = sc.doc
+
+    with suppress_redraw():
+        return _import_msh_mesh(msh, doc, rd, rg, root_layer, create_points, verbose)
+
+
+def _import_msh_mesh(msh, doc, rd, rg, root_layer, create_points, verbose):
+    """Create the layers and mesh objects for a parsed :class:`MSHMesh`."""
+    root = root_layer or "MSH"
+    root_idx = create_root_layer(root)
+
+    groups = msh.group_elements()
+    results: dict[str, t.Any] = {
+        "groups": len(groups),
+        "elements": 0,
+        "points": 0,
+        "layers": {},
+    }
+
+    if verbose:
+        print(f"Importing {len(msh.elements)} elements in {len(groups)} groups...")
+
+    for idx, (gname, elems) in enumerate(sorted(groups.items())):
+        faces = [e for e in elems if e.dim == 2 and e.etype in _MSH_FACE_TYPES]
+        if not faces:
+            continue
+        layer_idx = _msh_group_layer(root, root_idx, gname, idx)
+        guid = _add_msh_faces(msh, faces, gname, layer_idx, doc, rd, rg)
+        if guid is not None:
+            results["elements"] += len(faces)
+            results["layers"][gname] = layer_idx
+            if verbose:
+                print(f"  {gname}: {len(faces)} elements")
+
+    if create_points and msh.points:
+        pts_layer = create_or_get_layer(f"{root}/Points", parent_layer_index=root_idx)
+        for tag, (x, y, z) in msh.points.items():
+            attr = rd.ObjectAttributes()
+            attr.LayerIndex = pts_layer
+            attr.Name = f"MSH_Point_{tag}"
+            attr.SetUserString("FEA_Stage", "msh")
+            attr.SetUserString("FEA_Kind", "MSH_Point")
+            attr.SetUserString("MSH_PointTag", str(tag))
+            if doc.Objects.AddPoint(rg.Point3d(x, y, z), attr) is not None:
+                results["points"] += 1
+        if verbose:
+            print(f"  Points: {results['points']}")
+
+    return results
+
+
+def _msh_group_layer(root: str, root_idx: int, gname: str, idx: int) -> int:
+    """Create (or reuse) a per-group layer, coloured from the shell palette."""
+    try:
+        from System.Drawing import Color
+    except ImportError:
+        Color = None
+    safe = sanitize_layer_name(gname)
+    rgb = SHELL_PALETTE[idx % len(SHELL_PALETTE)]
+    color = Color.FromArgb(*rgb) if Color else None
+    return create_or_get_layer(f"{root}/{safe}", parent_layer_index=root_idx, color=color)
+
+
+def _add_msh_faces(msh, faces, gname, layer_idx, doc, rd, rg):
+    """Build one Rhino mesh from *faces* and add it to the document."""
+    # Deduplicate nodes locally so shared boundary nodes are welded within a
+    # group while each group stays an independent mesh (hence independent layer).
+    verts: list[tuple[float, float, float]] = []
+    vmap: dict[int, int] = {}
+    for elem in faces:
+        for ntag in elem.node_tags:
+            if ntag not in vmap:
+                vmap[ntag] = len(verts)
+                verts.append(msh.nodes[ntag])
+
+    mesh = rg.Mesh()
+    for v in verts:
+        mesh.Vertices.Add(float(v[0]), float(v[1]), float(v[2]))
+    for elem in faces:
+        idxs = [vmap[nt] for nt in elem.node_tags]
+        if elem.etype == 3 and len(idxs) == 4:
+            mesh.Faces.AddFace(idxs[0], idxs[1], idxs[2], idxs[3])
+        elif len(idxs) >= 3:
+            mesh.Faces.AddFace(idxs[0], idxs[1], idxs[2])
+    mesh.Normals.ComputeNormals()
+    mesh.Compact()
+
+    attr = rd.ObjectAttributes()
+    attr.LayerIndex = layer_idx
+    attr.Name = f"MSH_{gname}"
+    attr.SetUserString("FEA_Stage", "msh")
+    attr.SetUserString("FEA_Kind", "MSH_Surface")
+    attr.SetUserString("MSH_Group", gname)
+    attr.SetUserString("MSH_ElemCount", str(len(faces)))
+    return doc.Objects.AddMesh(mesh, attr)

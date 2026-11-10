@@ -7,7 +7,7 @@ from .colour_from_npz import (
     create_result_flags,
     mark_unconnected_edges,
 )
-from .importer import RhinoImporter
+from .importer import RhinoImporter, import_msh
 from .results import (
     apply_results,
     colour_frames_from_results,
@@ -25,5 +25,6 @@ __all__ = [
     "create_all_result_flags",
     "create_deformed_geometry",
     "create_result_flags",
+    "import_msh",
     "mark_unconnected_edges",
 ]
