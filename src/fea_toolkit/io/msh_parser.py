@@ -248,13 +248,20 @@ def _parse_nodes(lines: list[str]) -> dict[int, tuple[float, float, float]]:
     nodes: dict[int, tuple[float, float, float]] = {}
     if not lines:
         return nodes
+    header = _first_tokens(lines)
+    if len(header) < 2:
+        raise ValueError("malformed $Nodes section: section header has fewer than 2 fields")
+    num_entity_blocks = int(header[0])
+    num_nodes_total = int(header[1])
     i = 1  # skip "numEntityBlocks numNodes minNodeTag maxNodeTag"
     n = len(lines)
+    blocks_seen = 0
     while i < n:
-        header = _split_tokens(lines[i])
-        if len(header) < 4:
+        block_header = _split_tokens(lines[i])
+        if len(block_header) < 4:
             raise ValueError("malformed $Nodes section: block header has fewer than 4 fields")
-        num_nodes = int(header[3])
+        num_nodes = int(block_header[3])
+        blocks_seen += 1
         i += 1
         tags: list[int] = []
         for _ in range(num_nodes):
@@ -266,8 +273,21 @@ def _parse_nodes(lines: list[str]) -> dict[int, tuple[float, float, float]]:
             if i >= n:
                 raise ValueError("malformed $Nodes section: premature end of coordinate block")
             coord_tokens = _split_tokens(lines[i])
+            if len(coord_tokens) < 3:
+                raise ValueError(
+                    "malformed $Nodes section: coordinate record has fewer than 3 fields"
+                )
             nodes[tag] = tuple(float(c) for c in coord_tokens[:3])
             i += 1
+    if blocks_seen != num_entity_blocks:
+        raise ValueError(
+            f"malformed $Nodes section: expected {num_entity_blocks} node blocks, "
+            f"found {blocks_seen}"
+        )
+    if len(nodes) != num_nodes_total:
+        raise ValueError(
+            f"malformed $Nodes section: expected {num_nodes_total} nodes, found {len(nodes)}"
+        )
     return nodes
 
 
@@ -279,31 +299,53 @@ def _parse_elements(
     elements: list[MSHElement] = []
     if not lines:
         return elements
+    header = _first_tokens(lines)
+    if len(header) < 2:
+        raise ValueError("malformed $Elements section: section header has fewer than 2 fields")
+    num_entity_blocks = int(header[0])
+    num_elements_total = int(header[1])
     i = 1  # skip "numEntityBlocks numElements minElementTag maxElementTag"
     n = len(lines)
+    blocks_seen = 0
     while i < n:
-        header = _split_tokens(lines[i])
-        if len(header) < 4:
+        block_header = _split_tokens(lines[i])
+        if len(block_header) < 4:
             raise ValueError("malformed $Elements section: block header has fewer than 4 fields")
-        dim = int(header[0])
-        entity_tag = int(header[1])
-        etype = int(header[2])
-        num_elems = int(header[3])
+        dim = int(block_header[0])
+        entity_tag = int(block_header[1])
+        etype = int(block_header[2])
+        num_elems = int(block_header[3])
         if etype not in _ELEMENT_TYPES:
             raise ValueError(
                 f"unsupported Gmsh element type {etype} in entity ({dim}, {entity_tag})"
             )
         _, nnodes = _ELEMENT_TYPES[etype]
         ptags = entity_physical_tags.get((dim, entity_tag), ())
+        blocks_seen += 1
         i += 1
         for _ in range(num_elems):
             if i >= n:
                 raise ValueError("malformed $Elements section: premature end of element block")
             tokens = _split_tokens(lines[i])
+            if len(tokens) < 1 + nnodes:
+                raise ValueError(
+                    f"malformed $Elements section: element record has fewer than "
+                    f"{1 + nnodes} fields for element type {etype}"
+                )
             tag = int(tokens[0])
             node_tags = tuple(int(t) for t in tokens[1 : 1 + nnodes])
             elements.append(MSHElement(dim, tag, etype, node_tags, ptags))
             i += 1
+    if blocks_seen != num_entity_blocks:
+        raise ValueError(
+            f"malformed $Elements section: expected {num_entity_blocks} element blocks, "
+            f"found {blocks_seen}"
+        )
+    if len(elements) != num_elements_total:
+        raise ValueError(
+            f"malformed $Elements section: expected {num_elements_total} elements, "
+            f"found {len(elements)}"
+        )
     return elements
 
 
@@ -320,17 +362,20 @@ def parse_msh_text(text: str) -> MSHMesh:
         The parsed :class:`MSHMesh`.
 
     Raises:
-        ValueError: If the file is not a supported ASCII 4.1 mesh (missing
-            ``$MeshFormat``, a binary ``filetype``, a non-4.1 version, or an
-            unsupported element type).
+        ValueError: If the file is not a supported ASCII 4.1 mesh — a missing
+            or malformed ``$MeshFormat`` header (fewer than three fields), a
+            binary ``filetype``, a non-4.1 version, an unsupported element
+            type, or a malformed / incomplete ``$Nodes`` or ``$Elements``
+            section (wrong block or record counts, an element record missing
+            node tags, or a coordinate record with fewer than three values).
     """
     sections = _sections(text)
 
     fmt = _first_tokens(sections.get("MeshFormat", []))
     if not fmt:
         raise ValueError("not a Gmsh .msh file: missing $MeshFormat section")
-    if len(fmt) < 2:
-        raise ValueError("malformed $MeshFormat section: expected 'version filetype [datasize]'")
+    if len(fmt) < 3:
+        raise ValueError("malformed $MeshFormat section: expected 'version filetype datasize'")
     version = fmt[0]
     file_type = int(fmt[1])
     if file_type != 0:

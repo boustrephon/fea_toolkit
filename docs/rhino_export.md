@@ -669,7 +669,11 @@ report = import_msh(
 * The parser (`fea_toolkit.io.msh_parser`, exposed as `parse_msh_text` /
   `read_msh`) is pure Python and reads the `$MeshFormat` / `$PhysicalNames` /
   `$Entities` / `$Nodes` / `$Elements` sections.  Only ASCII 4.1 meshes are
-  supported — binary and legacy 2.2 files raise `ValueError`.
+  supported — binary and legacy 2.2 files raise `ValueError`.  Malformed
+  input is rejected too: a `$MeshFormat` header with fewer than three fields,
+  an element record missing node tags, a coordinate record with fewer than
+  three values, or a `$Nodes` / `$Elements` section whose block count or
+  record total does not match its header all raise `ValueError`.
 * Each **physical group** becomes a layer under *root_layer* (coloured from
   the shell palette) holding one `Rhino.Geometry.Mesh` of its 2D
   triangles/quads; a mesh with no physical groups lands under an
