@@ -1669,12 +1669,11 @@ def _get_sd_sections(sections: dict[str, list[GroupedLine]]) -> dict[str, SDSect
             x = _as_float(attrs.get("X", 0.0))
             y = _as_float(attrs.get("Y", 0.0))
             corners.setdefault(name, {}).setdefault(shape_idx, {})[corner_idx] = (x, y)
-        elif attrs.get("SHAPETYPE"):
-            if str(attrs["SHAPETYPE"]).upper() == "POLYGON":
-                material = (
-                    str(attrs["MATERIAL"]) if "MATERIAL" in attrs else base_materials.get(name, "")
-                )
-                polygons.setdefault(name, {})[shape_idx] = (material, [])
+        elif attrs.get("SHAPETYPE") and str(attrs["SHAPETYPE"]).upper() == "POLYGON":
+            material = (
+                str(attrs["MATERIAL"]) if "MATERIAL" in attrs else base_materials.get(name, "")
+            )
+            polygons.setdefault(name, {})[shape_idx] = (material, [])
 
     built: dict[str, SDSection] = {}
     for name, shape_map in polygons.items():
