@@ -661,6 +661,10 @@ def results_arrays(
             arrays.update(collect_ida_arrays(ida_results))
         else:
             arrays.update(collect_single_ida_arrays(ida_results))
+            ida_transient = collect_ida_transient_arrays(ida_results)
+            if ida_transient:
+                analysis_types.append("transient")
+                arrays.update(ida_transient)
     # NOTE: Legacy flat aliases (shell_fx, shell_fy, ...) were previously
     # written here for backward compatibility.  As of 2026-07 all consumers
     # use the namespaced ``shell_forces/*`` keys or the geometry-native
@@ -1407,6 +1411,31 @@ def collect_single_ida_arrays(
         arrays[f"ida/{key_name}"] = np.asarray(value, dtype=dtype)
 
     return arrays
+
+
+def collect_ida_transient_arrays(ida_result: dict[str, Any]) -> dict[str, np.ndarray]:
+    """Collect the collapse-rung transient block from a generic ``run_ida`` result.
+
+    The generic :func:`~fea_toolkit.analysis.ida.run_ida` driver retains the
+    full time-history response of the first rung that collapsed (its
+    ``transient`` field) so a standalone plotter can render the response at the
+    extreme intensity, beyond the scalar drift ladder.  This wraps that history
+    under a ``transient/ida_<record>/...`` block via
+    :func:`collect_transient_arrays`.
+
+    Args:
+        ida_result: The :func:`~fea_toolkit.analysis.ida.run_ida` result dict.
+
+    Returns:
+        ``{array_name: np.ndarray}`` (empty when the result carries no transient
+        history).
+    """
+    transient = ida_result.get("transient")
+    if not transient or "times" not in transient:
+        return {}
+    record_id = Path(str(ida_result.get("record", "record"))).stem
+    record_id = record_id.replace("/", "_").replace("\\", "_")
+    return collect_transient_arrays({f"ida_{record_id}": transient})
 
 
 def write_pushover_results_npz(

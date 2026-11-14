@@ -340,3 +340,50 @@ def test_single_record_ida_round_trips(tmp_path):
     messages = validate_arrays(data)
     errors = [m for m in messages if not m.startswith("[WARN]")]
     assert not errors, f"validation errors: {errors}"
+
+
+def test_single_record_ida_collects_the_collapse_transient_block():
+    """The retained collapse-rung history is written under ``transient/ida_<record>/``."""
+    from fea_toolkit.io.npz_writer import collect_ida_transient_arrays
+
+    result = {
+        "record": "gm/record.txt",
+        "transient": {
+            "times": np.linspace(0.0, 1.0, 11),
+            "base_shear": np.zeros(11),
+            "direction": "X",
+            "displacements": {1: np.zeros((11, 3)), 2: np.zeros((11, 3))},
+            "converged_steps": 9,
+        },
+    }
+    arrays = collect_ida_transient_arrays(result)
+    assert "transient/ida_record/time" in arrays
+    assert arrays["transient/ida_record/node_tag"].tolist() == [1, 2]
+    assert arrays["transient/ida_record/converged_steps"].item() == 9
+
+
+def test_single_record_ida_archive_stamps_both_ida_and_transient(tmp_path):
+    """An IDA archive with a retained transient carries both analysis kinds."""
+    from fea_toolkit.io.npz_writer import write_results_npz
+
+    result = {
+        "record": "gm/record.txt",
+        "intensities": [0.5, 1.0, 2.0],
+        "drifts": [0.01, 0.02, 0.05],
+        "converged": [True, True, False],
+        "collapse_intensity": 2.0,
+        "collapse_criterion": "nonconvergence",
+        "drift_measure": "interstorey_d_max",
+        "transient": {
+            "times": np.linspace(0.0, 1.0, 11),
+            "base_shear": np.zeros(11),
+            "direction": "X",
+            "displacements": {1: np.zeros((11, 3))},
+        },
+    }
+    path = write_results_npz(str(tmp_path / "ida.npz"), make_sample_model(), ida_results=result)
+    with np.load(path, allow_pickle=False) as z:
+        types = [str(t) for t in z["analysis_types"]]
+        assert "ida" in types
+        assert "transient" in types
+        assert "transient/ida_record/time" in z.files

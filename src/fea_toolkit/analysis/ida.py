@@ -259,8 +259,11 @@ def run_ida(
         ``collapse_intensity``, ``collapse_criterion``, ``collapse_drift``,
         ``bisection``, ``record``, ``structure_height``, the drift provenance
         (``drift_measure``, ``storey_method``, ``storey_confidence``,
-        ``n_storeys``) and the intensity-measure provenance (``T1``,
-        ``Sa_T1``, ``Sa_T1_g``, ``sa_method``, ``collapse_Sa_T1_g``).
+        ``n_storeys``), the intensity-measure provenance (``T1``, ``Sa_T1``,
+        ``Sa_T1_g``, ``sa_method``, ``collapse_Sa_T1_g``) and the retained
+        collapse-rung response (``transient`` — the full time-history ``data``
+        of the first rung that collapsed, or the highest rung evaluated when
+        nothing collapsed — and its ``transient_scale``).
     """
     from .nonlinear_dynamic import run_nonlinear_dynamic_analysis
 
@@ -309,7 +312,7 @@ def run_ida(
         sa_t1_g = 1.0
         sa_method = "scale_as_im"
 
-    def _run(im: float) -> tuple[float, bool]:
+    def _run(im: float) -> tuple[float, bool, dict]:
         accel = accel_base * im
         result = run_nonlinear_dynamic_analysis(
             mesh_model,
@@ -326,13 +329,35 @@ def run_ida(
         )
         drift, _ = _peak_drift(result.data, height, node_z, storey_elevations)
         converged = bool(result.data.get("converged_steps") == num_steps)
-        return drift, converged
+        return drift, converged, result.data
+
+    # ── Collapse-rung transient retention ─────────────────────────────
+    # The full time-history response of the first rung that trips the collapse
+    # criterion (or, when nothing collapses, the highest rung evaluated) is
+    # retained so a standalone plotter can render the response at the extreme
+    # intensity — beyond the scalar drift ladder.  Only these two histories are
+    # ever held, so the memory cost stays bounded.
+    collapse_data: Optional[dict] = None
+    collapse_transient_im: Optional[float] = None
+    last_data: Optional[dict] = None
+    last_im: Optional[float] = None
+
+    def _note(im: float, ok: bool, drift: float, data: dict) -> None:
+        nonlocal collapse_data, collapse_transient_im, last_data, last_im
+        last_data = data
+        last_im = im
+        if collapse_data is None and (
+            not ok or (collapse_drift is not None and drift > collapse_drift)
+        ):
+            collapse_data = data
+            collapse_transient_im = im
 
     ladder = [float(im) for im in intensities]
     drifts: list[float] = []
     converged: list[bool] = []
     for im in ladder:
-        drift, ok = _run(im)
+        drift, ok, data = _run(im)
+        _note(im, ok, drift, data)
         drifts.append(drift)
         converged.append(ok)
 
@@ -345,7 +370,8 @@ def run_ida(
         top = ladder[-1]
         while 0 < top < max_scale:
             top = min(2.0 * top, max_scale)
-            drift, ok = _run(top)
+            drift, ok, data = _run(top)
+            _note(top, ok, drift, data)
             ladder.append(top)
             drifts.append(drift)
             converged.append(ok)
@@ -363,7 +389,8 @@ def run_ida(
             evaluations: list[dict[str, Any]] = []
             while (hi - lo) / hi > tolerance:
                 mid = 0.5 * (lo + hi)
-                drift, ok = _run(mid)
+                drift, ok, data = _run(mid)
+                _note(mid, ok, drift, data)
                 evaluations.append({"intensity": mid, "drift": drift, "converged": ok})
                 if (not ok) or (collapse_drift is not None and drift > collapse_drift):
                     hi = mid
@@ -376,6 +403,9 @@ def run_ida(
                 "evaluations": evaluations,
             }
             im_collapse = 0.5 * (lo + hi)
+
+    transient = collapse_data if collapse_data is not None else last_data
+    transient_scale = collapse_transient_im if collapse_data is not None else last_im
 
     return {
         "record": ground_motion_file,
@@ -396,4 +426,6 @@ def run_ida(
         "Sa_T1_g": sa_t1_g,
         "sa_method": sa_method,
         "collapse_Sa_T1_g": (im_collapse * sa_t1_g) if im_collapse is not None else None,
+        "transient": transient,
+        "transient_scale": transient_scale,
     }

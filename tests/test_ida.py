@@ -243,3 +243,41 @@ def test_run_ida_falls_back_to_scale_as_im_without_a_period(monkeypatch):
     assert result["sa_method"] == "scale_as_im"
     assert result["Sa_T1_g"] == 1.0
     assert result["T1"] is None
+
+
+def test_run_ida_retains_the_collapse_rung_transient(monkeypatch):
+    """The collapse rung's full time-history response is retained."""
+    import fea_toolkit.analysis.nonlinear_dynamic as nld_module
+
+    monkeypatch.setattr(nld_module, "run_nonlinear_dynamic_analysis", _fake_runner(threshold=1.8))
+    result = run_ida(
+        make_sample_model(),
+        _modal(),
+        "record.txt",
+        [0.5, 1.0, 2.0],
+        accel_base=np.ones(20),
+        num_steps=10,
+        tolerance=None,
+    )
+    assert result["transient_scale"] == 2.0  # the first non-converged rung
+    assert result["transient"]["converged_steps"] == 9  # num_steps - 1
+    assert set(result["transient"]["displacements"]) == {1, 2}
+
+
+def test_run_ida_retains_the_top_rung_transient_without_collapse(monkeypatch):
+    """Nothing collapses → the highest rung's response is the fallback."""
+    import fea_toolkit.analysis.nonlinear_dynamic as nld_module
+
+    monkeypatch.setattr(nld_module, "run_nonlinear_dynamic_analysis", _fake_runner(threshold=99.0))
+    result = run_ida(
+        make_sample_model(),
+        _modal(),
+        "record.txt",
+        [0.5, 1.0],
+        accel_base=np.ones(20),
+        num_steps=10,
+        tolerance=None,
+    )
+    assert result["collapse_intensity"] is None
+    assert result["transient_scale"] == 1.0
+    assert result["transient"]["converged_steps"] == 10

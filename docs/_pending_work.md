@@ -90,6 +90,14 @@ The generic `analysis/ida.py` driver (promoted from `benchmarks/`, the
    (scale-as-IM fallback when no period), and ``plot_ida_curve`` / the
    ``chart`` verb's ``ida`` choice draw the curve on the physical ``Sa(T1)/g``
    axis — the GUI displays it through the existing figure view.
+4. ~~**Collapse-rung transient block (full standalone plotting).**~~ ✅
+   **Landed (2026-11-14)** — `run_ida` retains the full time-history response
+   of the first rung that collapsed (or the highest rung when nothing
+   collapsed) as its ``transient`` / ``transient_scale`` fields, and
+   ``npz_writer.collect_ida_transient_arrays`` writes it under a
+   ``transient/ida_<record>/…`` block (``analysis_types`` then carries both
+   ``"ida"`` and ``"transient"``), so a standalone plotter can render the
+   response at the extreme intensity — beyond the scalar drift ladder.
 
 **Known limitation (multi-tower ETABS).**  A multi-tower ETABS model shares one
 flat `STORY DATA` table whose levels sit at independent per-tower elevations;

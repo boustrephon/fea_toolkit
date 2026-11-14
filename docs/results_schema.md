@@ -560,6 +560,15 @@ returns the sorted record ids, and `describe_results_npz()` reports them under
 `ida_records`.  The plotting entry points are
 `fea_toolkit.plotting.plot_ida_curves()` and `plot_collapse_fragility()`.
 
+A single-record archive also carries the driver's **retained collapse-rung
+response** — the full time-history of the first rung that collapsed (or the
+highest rung when nothing collapsed) — written by
+`collect_ida_transient_arrays()` under a `transient/ida_<record>/…` block
+(`fea_toolkit.io.npz_writer`), with `analysis_types` then listing both `"ida"`
+and `"transient"`.  That lets a standalone plotter render the response at the
+extreme intensity through the same `transient/<case>/…` arrays as a direct NLD
+run, rather than only the scalar drift ladder.
+
 ### Metadata
 
 | Array | Shape | dtype | Description |
