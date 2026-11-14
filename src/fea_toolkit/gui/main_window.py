@@ -933,6 +933,17 @@ class MainWindow(QMainWindow):
             self._on_recipe_export,
             tip="Write the recipe as a runnable Python script",
         )
+        a["recipe.command"] = self._real_action(
+            "Command\u2026",
+            self._on_recipe_command,
+            shortcut="Ctrl+K",
+            tip="Compile a command string into a recipe step (verb + KEY=VALUE clauses)",
+        )
+        a["recipe.import"] = self._real_action(
+            "Import script\u2026",
+            self._on_recipe_import,
+            tip="Import a recipe's RECIPE = {...} literal from a Python script",
+        )
         for key in ("recipe.run", "recipe.clear", "recipe.save", "recipe.export"):
             a[key].setEnabled(False)
         a["analysis.run"] = self._real_action(
@@ -1105,6 +1116,9 @@ class MainWindow(QMainWindow):
         m.addAction(a["recipe.open"])
         m.addAction(a["recipe.save"])
         m.addAction(a["recipe.export"])
+        m.addAction(a["recipe.import"])
+        m.addSeparator()
+        m.addAction(a["recipe.command"])
         m.addSeparator()
         m.addAction(a["recipe.clear"])
 
@@ -2811,6 +2825,9 @@ class MainWindow(QMainWindow):
             label: What the Message Log should say is happening.
         """
         self._recipe_panel.add_step(step.verb, step.selection, step.params, optional=step.optional)
+        from ..workflow import step_to_command
+
+        self.log(f"command: {step_to_command(step)}")
         self._pending_label = label
         self._on_recipe_run()
 
@@ -3760,6 +3777,41 @@ class MainWindow(QMainWindow):
             self.log(f"Could not write {path}: {exc}", "error")
             return
         self.log(f"Exported recipe: {path}")
+
+    def _on_recipe_command(self) -> None:
+        """**Recipe ▸ Command…** (Ctrl+K): compile a command string into a step.
+
+        The palette reuses the recipe editor's selection grammar; on accept the
+        compiled step is appended and echoed to the log so the session stays
+        replayable.
+        """
+        from ..workflow import step_to_command
+        from .views.command_palette import get_step
+
+        mesh = self._store.preprocessed() if self._store is not None else None
+        initial = {"geometry"} if mesh is not None else ()
+        step = get_step(self, list(self._recipe_panel.recipe), initial=initial)
+        if step is None:
+            return
+        self._recipe_panel.add_step(step.verb, step.selection, step.params, optional=step.optional)
+        self.log(f"command: {step_to_command(step)}")
+
+    def _on_recipe_import(self) -> None:
+        """**Recipe ▸ Import script…**: read a recipe's RECIPE literal from a script."""
+        from pathlib import Path
+
+        from ..workflow import Recipe
+
+        path, _ = QFileDialog.getOpenFileName(self, "Import recipe script", "", "Python (*.py)")
+        if not path:
+            return
+        try:
+            recipe = Recipe.from_python(Path(path).read_text(encoding="utf-8"))
+        except (OSError, ValueError, SyntaxError) as exc:
+            self.log(f"Could not import {path}: {exc}", "error")
+            return
+        self._recipe_panel.set_recipe(recipe)
+        self.log(f"Imported recipe: {path} ({len(recipe)} steps)")
 
     # ── Handlers ────────────────────────────────────────────────────
 

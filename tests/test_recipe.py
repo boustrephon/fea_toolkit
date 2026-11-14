@@ -179,6 +179,13 @@ class TestManifest:
                 assert isinstance(param, ParamSpec), f"{verb}.{name}"
                 assert param.help, f"{verb}.{name} has no help text"
 
+    def test_every_needs_entry_names_a_producible_kind(self):
+        """A verb's prerequisite must be a kind some verb actually produces."""
+        produced = {spec.kind for spec in STEP_SPECS.values()}
+        for verb, spec in STEP_SPECS.items():
+            for need in spec.needs:
+                assert need in produced, f"{verb} needs {need!r}, which no verb produces"
+
     def test_analysis_results_that_are_not_cases_have_their_own_kind(self):
         """RS and pushover return an ``AnalysisResult``, not solved case payloads —
         so they must not claim the ``cases`` kind that ``combine`` / ``chart`` read."""

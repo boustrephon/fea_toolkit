@@ -9,7 +9,11 @@ related: [workflow_authoring.md, gui_roadmap.md]
 
 # Workflow Phase D — the command palette and script interop (P31)
 
-> **Status: 🚧 Planned** — design record; not yet implemented.
+> **Status: ✅ Implemented 2026-11-14** — the grammar, palette, echo and script
+> import below are all live; the "Open decisions" at the foot were resolved in
+> favour of the recommended options (grammar "param key wins, else selection";
+> echo on recipe-affecting actions only; `from_python` on the `RECIPE = {…}`
+> literal, no `exec`).
 > Sources: `docs/_pending_work.md` (P31), `docs/workflow_authoring.md`
 > (§ *Precursors*, roadmap row **D**).  Cross-cutting enabler: **Decision 0**,
 > the `kind`/`needs` precursor mechanism.

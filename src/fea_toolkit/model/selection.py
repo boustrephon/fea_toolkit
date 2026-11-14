@@ -232,6 +232,23 @@ def _scan_clauses(expr: str) -> tuple[list[tuple[bool, str, str]], str]:
     return clauses, ""
 
 
+def scan_clauses(expr: str) -> tuple[list[tuple[bool, str, str]], str]:
+    """Public form of :func:`_scan_clauses` — the command palette's tokenizer.
+
+    The workflow command grammar reuses this scanner so a command's scope shares
+    one spelling with :meth:`Selection.from_string` (no second selection
+    language).  See :func:`_scan_clauses` for the contract.
+
+    Args:
+        expr: The ``KEY=VALUE`` expression to scan.
+
+    Returns:
+        ``(clauses, leftover)`` — the ``(negated, key, raw value)`` triples and
+        any unparsed text.
+    """
+    return _scan_clauses(expr)
+
+
 def _split_values(raw: str) -> list[str]:
     """Split a clause's raw value on unquoted commas and unquote each item.
 

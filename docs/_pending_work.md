@@ -15,7 +15,7 @@ category: [planning]
 > `csm_test_model_plan.md`, `deprecation_plan.md` and `linting_fix_plan.md`
 > are ✅ complete and tagged `category: [archive]` (P9's Phase 3 triage resolved 2026-10-11 — baseline renewed,
 > the remaining diagnostics accepted as known-benign per `.clinerules` §11).
-> The **active front** is the workflow/GUI layer (P31, P35).
+> The **active front** is the workflow/GUI layer (P35).
 
 **Near term — finish the workflow layer.**
 
@@ -39,8 +39,11 @@ category: [planning]
    collection → renderer → GUI toggle)~~ ✅ **Landed 2026-10-12** — see the
    P36 entry below.
 4. **P35** — named selections first, then the `open`/`close`/`save`/`select`
-   document verbs.  **P31** (command palette) is independent input ergonomics
-   and can run in parallel with any of the above.
+   document verbs.  ~~**P31** (command palette) is independent input ergonomics
+   and can run in parallel with any of the above.~~ ✅ **Landed 2026-11-14** —
+   the command grammar (`compile_command` / `step_to_command`), `satisfied_kinds`,
+   the `Ctrl+K` palette, the command echo and `Recipe.from_python` (see the P31
+   entry below).
 
 **Then — physics / feature gaps.**  P6b, P7 (fibre patches, Python-native NLD),
 then P19 / P23 / P25.
@@ -56,6 +59,29 @@ scoping primitive (P35's `selections` field must round-trip through
 `to_string()`/`from_string()`); `generate_report`'s public signature stays
 unchanged through P32; heavy imports stay inside the verb functions so
 `import fea_toolkit.workflow` never loads OpenSees.
+
+### IDA promotion — follow-ups (2026-11-14)
+
+The generic `analysis/ida.py` driver (promoted from `benchmarks/`, the
+"IDA before P31/P35" tranche) carries two known follow-ups, recorded so they
+are not lost:
+
+1. **Roof-drift proxy vs per-storey `d_max`.**  The generic driver's collapse
+   drift measure is the *peak roof-drift ratio* (max horizontal nodal
+   displacement / structure height), not the benchmark's per-storey interstorey
+   `d_max`.  The `collapse_drift` default (0.10) is calibrated to interstorey
+   drift, so a soft-storey frame can be mis-ranked.  **Revisit before trusting
+   generic IDA collapse intensities for real assessment** — the upgrade is to
+   group nodes by `z` into levels and take the max relative lateral drift
+   between adjacent levels (`analysis/ida.py::_peak_roof_drift`).
+2. **NPZ serialisation of the generic IDA result.**  `run_ida` returns a plain
+   dict (benchmark `_ida_run` shape); it is not yet wired through
+   `io.npz_writer.collect_ida_arrays`, so a generic IDA run cannot be written
+   out for standalone plotting.  Align the result with the schema-v5
+   `ida/{record}/…` block when persistence is wanted.
+
+Neither blocks the workflow/GUI front (P35); both are recorded here to be
+picked up after it.
 
 ### GUI/workflow follow-ups — the nine-item batch (2026-10-12)
 
@@ -665,7 +691,12 @@ the licensing position is recorded in `docs/licence.md`.
 #### P31 — Workflow Phase D: the command palette and script interop
 Source: `docs/workflow_authoring.md` § *Roadmap*.
 
-**Status: 🚧 Planned** — design in [docs/workflow_palette.md](workflow_palette.md).
+**Status: ✅ Landed 2026-11-14** — design in [docs/workflow_palette.md](workflow_palette.md).
+The command grammar (`compile_command` / `step_to_command` in
+`workflow/command.py`, reusing `Selection.scan_clauses`), `satisfied_kinds` in
+`workflow/recipe.py`, the `Ctrl+K` palette (`gui/views/command_palette.py`),
+the command echo (presets and the palette log their `step_to_command` form),
+and `Recipe.from_python` (the `RECIPE = {…}` literal, no `exec`).
 
 **What.** Authoring ergonomics, independent of P30:
 
