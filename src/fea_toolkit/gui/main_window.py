@@ -15,8 +15,10 @@ the viewport, plus the node / shell display toggles.
 
 import contextlib
 import gc
+import math
 from typing import Any, Optional
 
+import numpy as np
 from qtpy.QtCore import QItemSelection, QItemSelectionModel, QItemSelectionRange, Qt, QTimer, QUrl
 from qtpy.QtGui import QAction, QDesktopServices, QGuiApplication, QKeySequence
 from qtpy.QtWidgets import (
@@ -186,6 +188,79 @@ def _model_file_format(path: str, chosen_filter: str) -> tuple[str, str]:
     return "h5", path + ".h5"
 
 
+class _NldStepHistory:
+    """Lazy per-step displacement frames for a nonlinear-dynamic result.
+
+    A transient history is one 2-D array per node (``(n_steps, 3)``).  The
+    per-step ``{node_id: (dx, dy, dz)}`` dicts an animation frame needs are
+    materialised one at a time by :meth:`frame` — never eagerly — so a large
+    model's history costs one array per node, not one dict per step.
+    """
+
+    __slots__ = ("_arrays",)
+
+    def __init__(self, arrays: dict) -> None:
+        self._arrays = arrays
+
+    def __len__(self) -> int:
+        return max((a.shape[0] for a in self._arrays.values()), default=0)
+
+    def __bool__(self) -> bool:
+        return bool(self._arrays)
+
+    def frame(self, k: int) -> dict:
+        """The ``{node_id: (dx, dy, dz)}`` field at step *k*."""
+        field: dict = {}
+        for node_id, arr in self._arrays.items():
+            if k >= arr.shape[0]:
+                continue
+            field[node_id] = np.array([arr[k, 0], arr[k, 1], arr[k, 2]], dtype=float)
+        return field
+
+    def peak_frame(self) -> dict:
+        """The step whose largest nodal displacement norm is greatest."""
+        best_k = 0
+        best_norm = -1.0
+        for k in range(len(self)):
+            norm = 0.0
+            for arr in self._arrays.values():
+                if k < arr.shape[0]:
+                    norm = max(norm, float(math.hypot(arr[k, 0], arr[k, 1], arr[k, 2])))
+            if norm > best_norm:
+                best_norm, best_k = norm, k
+        return self.frame(best_k)
+
+
+def _frame_disp_norm(frame: dict) -> float:
+    """The largest nodal displacement magnitude in a per-step frame."""
+    if not frame:
+        return 0.0
+    best = 0.0
+    for value in frame.values():
+        arr = np.asarray(value, dtype=float)
+        if arr.size >= 3:
+            best = max(best, float(math.hypot(arr[0], arr[1], arr[2])))
+        elif arr.size == 2:
+            best = max(best, float(math.hypot(arr[0], arr[1])))
+    return best
+
+
+def _step_frame_at(frames: Any, k: int) -> dict:
+    """The per-step frame at index *k* — for a list or an :class:`_NldStepHistory`."""
+    if isinstance(frames, _NldStepHistory):
+        return frames.frame(k)
+    return frames[k]
+
+
+def _peak_step_frame(frames: Any) -> dict:
+    """The step frame with the largest nodal displacement norm, else ``{}``."""
+    if isinstance(frames, _NldStepHistory):
+        return frames.peak_frame()
+    if not frames:
+        return {}
+    return max(frames, key=_frame_disp_norm)
+
+
 class MainWindow(QMainWindow):
     """Top-level window hosting the 3-D viewport and the application chrome.
 
@@ -230,6 +305,7 @@ class MainWindow(QMainWindow):
         self._anim_timer: Optional[QTimer] = None
         self._anim_displacements: dict = {}
         self._anim_base_scale: float = 1.0
+        self._anim_peak_frame: dict = {}
         self._anim_phase: float = 0.0
         self._anim_frames: list = []
         self._anim_frame_index: int = 0
@@ -1726,6 +1802,10 @@ class MainWindow(QMainWindow):
         # keeps the state the settings file loaded (off unless the user asked).
         self._set_toggle_checked("view.show_extruded", self._display.show_extruded)
         self._stop_animation()
+        # A fresh model's transient histories belong to the previous session —
+        # clear them so a stale nonlinear-dynamic result can never animate.
+        self._nld_frames.clear()
+        self._nld_times.clear()
         self._set_toggle_checked("results.animate", False)
         self._set_toggle_checked("results.deformed", False)
         self._sync_force_toggles(False)
@@ -2040,9 +2120,14 @@ class MainWindow(QMainWindow):
             repository is not None and bool(case) and repository.has_displacements(case)
         )
         # Animation animates the deformed shape, so it is enabled exactly when
-        # the deformed overlay is (a displacement field is its only input).
+        # the deformed overlay is (a displacement field is its only input) — or
+        # when the active view is a nonlinear-dynamic table whose transient
+        # history is stored separately and animates in the viewport.
+        nld_key = active.key if active is not None else None
+        has_nld_history = bool(nld_key and self._nld_frames.get(nld_key))
         self._actions["results.animate"].setEnabled(
-            repository is not None and bool(case) and repository.has_displacements(case)
+            has_nld_history
+            or (repository is not None and bool(case) and repository.has_displacements(case))
         )
         # The same rule for the flag diagram, on end forces — and the quantity
         # selector is greyed with it, so it cannot look like it is choosing
@@ -2242,45 +2327,37 @@ class MainWindow(QMainWindow):
                 return frames, self._nld_times.get(key, [])
         return [], []
 
-    def _nld_step_frames(self, payload: Any) -> tuple[list, list]:
-        """Per-step displacement fields for a nonlinear-dynamic result.
+    def _nld_step_frames(self, payload: Any) -> tuple[Any, list]:
+        """Per-step displacement frames for a nonlinear-dynamic result.
 
         The ``nonlinear_dynamic`` verb's payload carries the transient
         ``data["displacements"]`` — ``{node_tag: ndarray(shape=(n_steps, 3))}``
-        — keyed by the OpenSees node tag the solver assigned.  Each record step
-        becomes ``{node_id: (dx, dy, dz)}`` so the deformed-shape overlay can
-        step through the history.  Returns ``([], [])`` when the payload holds
-        no transient.
+        — keyed by the OpenSees node tag the solver assigned.  Each history is
+        converted to a NumPy array once and re-keyed to the node id the overlay
+        draws, and the per-step ``{node_id: (dx, dy, dz)}`` fields are built one
+        tick at a time by the returned :class:`_NldStepHistory` — never eagerly
+        on the GUI thread.  Returns an empty history when the payload holds no
+        transient.
         """
-        import numpy as np
-
         data = getattr(payload, "data", None) or {}
         if not isinstance(data, dict):
-            return [], []
+            return _NldStepHistory({}), []
         history = data.get("displacements") or {}
         if not isinstance(history, dict) or not history:
-            return [], []
+            return _NldStepHistory({}), []
         tag_to_id = self._viewer.node_ids_by_tag() if self._viewer is not None else {}
-        first = next(iter(history.values()))
-        n_step = len(first) if first is not None else 0
-        frames = []
-        for k in range(n_step):
-            field: dict = {}
-            for tag, hist in history.items():
-                row = np.asarray(hist, dtype=float)
-                if k >= row.shape[0]:
-                    continue
-                node_id = tag_to_id.get(tag, str(tag))
-                field[node_id] = np.array(
-                    [float(row[k, 0]), float(row[k, 1]), float(row[k, 2])],
-                    dtype=float,
-                )
-            frames.append(field)
+        arrays: dict = {}
+        for tag, hist in history.items():
+            arr = np.asarray(hist, dtype=float)
+            if arr.ndim != 2 or arr.shape[1] < 3:
+                continue
+            node_id = tag_to_id.get(tag, str(tag))
+            arrays[node_id] = arr
         times = data.get("times")
         time_labels = (
             [float(t) for t in np.asarray(times, dtype=float)] if times is not None else []
         )
-        return frames, time_labels
+        return _NldStepHistory(arrays), time_labels
 
     def _on_animate_toggled(self, checked: bool) -> None:
         """**Results ▸ Animate deformed shape**: animate the active shape.
@@ -2294,17 +2371,17 @@ class MainWindow(QMainWindow):
         """
         if not checked:
             self._stop_animation()
-            # Leave the shape at rest — the final step for a pushover history, the
-            # un-animated scale for a single field — not frozen mid-animation, but
-            # only while the deformed-shape toggle is on; otherwise clear it.
+            # Leave the shape at rest — the peak step for a pushover / nonlinear
+            # history, the un-animated scale for a single field — not frozen
+            # mid-animation, but only while the deformed-shape toggle is on;
+            # otherwise clear it.
             if not self._actions["results.deformed"].isChecked():
                 self._clear_deformed()
                 return
             fraction = self._deformed_scale.value() / 100.0
             if self._anim_step_mode and self._anim_frames:
-                self._viewer.overlay_deformed(
-                    self._anim_frames[-1], scale=None, auto_fraction=fraction
-                )
+                peak = self._anim_peak_frame or _peak_step_frame(self._anim_frames)
+                self._viewer.overlay_deformed(peak, scale=None, auto_fraction=fraction)
                 self._viewer.show()
             elif self._anim_displacements:
                 self._viewer.overlay_deformed(
@@ -2320,7 +2397,16 @@ class MainWindow(QMainWindow):
             self._anim_frames = frames
             self._anim_frame_index = 0
             self._anim_times = times
-            self._anim_base_scale = self._viewer.deformed_amplification(frames[-1], fraction)
+            # A nonlinear-dynamic result is a table view, so bring the viewport
+            # forward before the history is drawn into it.
+            self._stack.setCurrentWidget(self._viewport_container)
+            # Base the scale on the peak frame, not the last one, so a decaying
+            # history whose peak is mid-record is never amplified by its
+            # near-zero final frame.
+            self._anim_peak_frame = _peak_step_frame(frames)
+            self._anim_base_scale = self._viewer.deformed_amplification(
+                self._anim_peak_frame, fraction
+            )
         else:
             displacements = self._active_displacements()
             if not displacements:
@@ -2344,7 +2430,7 @@ class MainWindow(QMainWindow):
     def _anim_tick(self) -> None:
         """Redraw the animated shape at the next phase (oscillate) or step."""
         if self._anim_step_mode and self._anim_frames:
-            frame = self._anim_frames[self._anim_frame_index]
+            frame = _step_frame_at(self._anim_frames, self._anim_frame_index)
             if self._anim_times:
                 self.statusBar().showMessage(
                     f"t = {self._anim_times[self._anim_frame_index]:.3f} s"
@@ -2845,7 +2931,13 @@ class MainWindow(QMainWindow):
         )
         if not ok:
             return
-        selection = Selection.from_string(expression.strip()) if expression.strip() else Selection()
+        try:
+            selection = (
+                Selection.from_string(expression.strip()) if expression.strip() else Selection()
+            )
+        except ValueError as exc:
+            self.log(f"Invalid selection expression: {exc}", "error")
+            return
         self._named_selections[name] = NamedSelection(name=name, selection=selection)
         self.log(f"Named selection {name!r}: {selection.to_string() or 'whole model'}")
         self._rebuild_tree()
@@ -3234,13 +3326,20 @@ class MainWindow(QMainWindow):
             except (TypeError, ValueError):
                 return "\u2014"
 
+        def _int(key: str) -> str:
+            value = data.get(key)
+            try:
+                return str(int(value))
+            except (TypeError, ValueError):
+                return "\u2014"
+
         rows = (
             ("Peak displacement", _num("peak_displacement")),
             ("Peak base shear", _num("peak_base_shear")),
             ("Peak plastic rotation", _num("peak_plastic_rotation")),
-            ("Yielded hinges", _num("num_yielded_hinges")),
+            ("Yielded hinges", _int("num_yielded_hinges")),
             ("Dissipated energy", _num("max_dissipated_energy")),
-            ("Converged steps", _num("converged_steps")),
+            ("Converged steps", _int("converged_steps")),
             ("T1 / T2 (s)", f"{_num('period_1')} / {_num('period_2')}"),
             ("Direction", str(data.get("direction", ""))),
             ("Record", str(data.get("gm_file", ""))),
@@ -3254,6 +3353,9 @@ class MainWindow(QMainWindow):
             self._nld_frames[_table_key(label)] = frames
             self._nld_times[_table_key(label)] = times
             self.log(f"{label}: transient history stored for animation ({len(frames)} steps).")
+            # The table view is now animatable, so refresh the Results menu
+            # (it was greyed for a view with no displacement field).
+            self._set_view_actions_enabled()
         else:
             self.log(f"{label}: no transient displacement history to animate.", "warn")
 
@@ -3280,10 +3382,18 @@ class MainWindow(QMainWindow):
             except (TypeError, ValueError):
                 return "\u2014"
 
+        def _count(value: Any) -> str:
+            if value is None:
+                return "\u2014"
+            try:
+                return str(len(value))
+            except TypeError:
+                return "\u2014"
+
         rows = (
             ("Collapse intensity", _num(data.get("collapse_intensity"))),
             ("Collapse criterion", str(data.get("collapse_criterion") or "\u2014")),
-            ("Rungs", str(len(data.get("intensities", []) or []))),
+            ("Rungs", _count(data.get("intensities"))),
             ("Structure height", _num(data.get("structure_height"))),
         )
         self._show_table_result(
