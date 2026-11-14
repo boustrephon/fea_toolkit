@@ -411,7 +411,11 @@ class Selection:
     the existing ``story`` behaviour.  Consumers that *act* on the result are
     **strict**: the viewer raises a ``ValueError`` for a criterion the source
     cannot resolve, so nothing is silently swallowed where it would have
-    produced a misleading picture.
+    produced a misleading picture.  Separately, a ``Selection`` whose
+    :attr:`selections` / :attr:`exclude_selections` fields still name saved
+    selections (unresolved references) raises a ``ValueError`` from the query
+    methods rather than silently matching everything — resolve them first with
+    :func:`~fea_toolkit.model.named_selection.resolve_named_selections`.
 
     Args:
         element_types: Filter by element type(s) — ``'Frame'``, ``'Area'``,
@@ -825,6 +829,35 @@ class Selection:
             return True
         return self.exclude_element_types is not None and "Node" not in self.exclude_element_types
 
+    def selects_nodes_explicitly(self) -> bool:
+        """Public form of :meth:`_selects_nodes_explicitly`.
+
+        ``True`` when this selection opts into nodes in their own right —
+        ``element_types`` names ``Node``, a joint-only criterion is set, an
+        explicit node id / exclusion is given, or a type is excluded without
+        naming ``Node`` — rather than nodes merely being *eligible* (in which
+        case a section / material / elevation criterion would trivially match
+        every node).
+        """
+        return self._selects_nodes_explicitly()
+
+    def _require_resolved(self) -> None:
+        """Raise when named-selection references are still unresolved.
+
+        ``selections`` / ``exclude_selections`` name saved selections that
+        :func:`~fea_toolkit.model.named_selection.resolve_named_selections`
+        expands into concrete ids before matching.  Matching against unresolved
+        references would silently ignore them and select *everything*, so the
+        public query methods fail explicitly instead.
+        """
+        if self.selections or self.exclude_selections:
+            names = list(self.selections or []) + list(self.exclude_selections or [])
+            raise ValueError(
+                "Selection has unresolved named-selection references "
+                f"{names!r}; "
+                "resolve them first (resolve_named_selections) before matching"
+            )
+
     def _frame_matches(
         self,
         model: Union["SAPModelData", "MeshModel"],
@@ -929,7 +962,12 @@ class Selection:
 
         Both :class:`SAPModelData` and :class:`MeshModel` expose the same
         ``frame_elements`` mapping, so the same lookup serves both.
+
+        Raises:
+            ValueError: If :attr:`selections` / :attr:`exclude_selections` are
+                still set (unresolved named-selection references).
         """
+        self._require_resolved()
         return [eid for eid in model.frame_elements if self._frame_matches(model, eid)]
 
     def get_area_ids(self, model: Union["SAPModelData", "MeshModel"]) -> list[str]:
@@ -937,7 +975,12 @@ class Selection:
 
         Both :class:`SAPModelData` and :class:`MeshModel` expose the same
         ``area_elements`` mapping, so the same lookup serves both.
+
+        Raises:
+            ValueError: If :attr:`selections` / :attr:`exclude_selections` are
+                still set (unresolved named-selection references).
         """
+        self._require_resolved()
         return [eid for eid in model.area_elements if self._area_matches(model, eid)]
 
     def get_node_ids(self, model: Union["SAPModelData", "MeshModel"]) -> list[str]:
@@ -945,7 +988,12 @@ class Selection:
 
         Both :class:`SAPModelData` and :class:`MeshModel` expose the same
         ``nodes`` mapping, so the same lookup serves both.
+
+        Raises:
+            ValueError: If :attr:`selections` / :attr:`exclude_selections` are
+                still set (unresolved named-selection references).
         """
+        self._require_resolved()
         return [nid for nid in model.nodes if self._node_matches(model, nid)]
 
     # ── Dict filters ─────────────────────────────────────────────────────────
@@ -1353,6 +1401,7 @@ class Selection:
                 mesh_model, storey_data=stories,
             )
         """
+        self._require_resolved()
         # ── Build story name → elevation lookup ──
         story_elevations: Optional[dict[str, float]] = None
         if self.story is not None:

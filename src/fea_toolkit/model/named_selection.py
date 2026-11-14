@@ -81,7 +81,10 @@ def resolve_named_selections(
         before its ids are read.  Criteria-derived frame/area ids are
         type-qualified (``"Frame:…"`` / ``"Area:…"``) so a frame and an area
         that share a SAP label stay distinct, while explicitly picked ids are
-        kept as authored.  References to unknown names are ignored, except that
+        kept as authored.  Criteria-derived **node** ids are merged only when
+        the resolved sub-selection explicitly selects nodes (a section /
+        material / elevation criterion would otherwise trivially match every
+        joint).  References to unknown names are ignored, except that
         a *positive* reference resolving to no members keeps an empty list for
         that entity kind (``element_ids=[]`` / ``node_ids=[]``) — never
         ``None`` — so a consumer like ``scale_sections`` reads it as an empty
@@ -116,7 +119,12 @@ def resolve_named_selections(
             # caller picked explicitly are kept as authored.
             elements.extend(f"Frame:{eid}" for eid in resolved_sub.get_frame_ids(model))
             elements.extend(f"Area:{aid}" for aid in resolved_sub.get_area_ids(model))
-            nodes.extend(resolved_sub.get_node_ids(model))
+            # Node ids come only from an explicit node selection: a section /
+            # material / elevation criterion matches every node trivially (nodes
+            # ignore those criteria), so reading ``get_node_ids`` there would
+            # drag unrelated joints into the scope.
+            if resolved_sub.selects_nodes_explicitly():
+                nodes.extend(resolved_sub.get_node_ids(model))
         return elements, nodes
 
     def _resolve(sel: Selection, seen: tuple) -> Selection:
