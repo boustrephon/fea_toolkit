@@ -961,11 +961,17 @@ class MainWindow(QMainWindow):
             self._on_nonlinear_dynamic_preset,
             tip="Nonlinear dynamic analysis of a ground-motion record (time history)",
         )
+        a["analysis.ida"] = self._real_action(
+            "IDA\u2026",
+            self._on_ida_preset,
+            tip="Incremental dynamic analysis \u2014 collapse intensity over a record ladder",
+        )
         for key in (
             "analysis.modal",
             "analysis.spectrum",
             "analysis.pushover",
             "analysis.nonlinear_dynamic",
+            "analysis.ida",
         ):
             a[key].setEnabled(False)
         a["analysis.stop"] = self._real_action(
@@ -1089,6 +1095,7 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         m.addAction(a["analysis.pushover"])
         m.addAction(a["analysis.nonlinear_dynamic"])
+        m.addAction(a["analysis.ida"])
         m.addSeparator()
         m.addAction(a["analysis.stop"])
 
@@ -2842,6 +2849,10 @@ class MainWindow(QMainWindow):
         """**Analysis ▸ Nonlinear time-history**: compose and run a nonlinear_dynamic step."""
         self._analysis_preset("nonlinear_dynamic", "Nonlinear dynamic")
 
+    def _on_ida_preset(self) -> None:
+        """**Analysis ▸ IDA**: compose and run an ida step."""
+        self._analysis_preset("ida", "IDA")
+
     def _analysis_preset(self, verb: str, label: str) -> None:
         """Compose an analysis step in a dialog, append it, and run the recipe.
 
@@ -2852,7 +2863,7 @@ class MainWindow(QMainWindow):
 
         Args:
             verb: The analysis verb — ``"modal"``, ``"response_spectrum"``,
-                ``"pushover"`` or ``"nonlinear_dynamic"``.
+                ``"pushover"``, ``"nonlinear_dynamic"`` or ``"ida"``.
             label: What the Message Log should say is happening.
         """
         store = self._store
@@ -2876,13 +2887,15 @@ class MainWindow(QMainWindow):
         prefill: dict = {}
         if verb == "modal" and default_modal:
             prefill["name"] = default_modal
-        elif verb in ("response_spectrum", "pushover", "nonlinear_dynamic") and default_modal:
+        elif (
+            verb in ("response_spectrum", "pushover", "nonlinear_dynamic", "ida") and default_modal
+        ):
             prefill["modal_case"] = default_modal
 
         edited = StepDialog.edit(Step(verb=verb, params=prefill), self, store.raw())
         if edited is None:
             return
-        if verb in ("response_spectrum", "pushover", "nonlinear_dynamic"):
+        if verb in ("response_spectrum", "pushover", "nonlinear_dynamic", "ida"):
             from dataclasses import replace
 
             selected = self._ensure_modal_precursor(default_modal)
@@ -3058,7 +3071,7 @@ class MainWindow(QMainWindow):
             payload: ``(RecipeRun, [log lines])`` from the worker.
         """
         from ..workflow import CASES, FIGURE, TABLE
-        from ..workflow.steps import MODAL, NLD, PUSHOVER, RS
+        from ..workflow.steps import IDA, MODAL, NLD, PUSHOVER, RS
 
         run, messages = payload
         self._last_run = run
@@ -3082,6 +3095,8 @@ class MainWindow(QMainWindow):
                 self._show_rs_result(result.label, result.payload)
             elif result.kind == NLD:
                 self._show_nonlinear_dynamic_result(result.label, result.payload)
+            elif result.kind == IDA:
+                self._show_ida_result(result.label, result.payload)
             elif result.kind == TABLE:
                 self._show_table_result(result.label, result.payload)
             elif result.kind == FIGURE:
@@ -3163,6 +3178,48 @@ class MainWindow(QMainWindow):
             self.log(f"{label}: transient history stored for animation ({len(frames)} steps).")
         else:
             self.log(f"{label}: no transient displacement history to animate.", "warn")
+
+    def _show_ida_result(self, label: str, payload: Any) -> None:
+        """Summarise an IDA run as a collapse table and an IDA-curve figure.
+
+        The ``ida`` verb's payload is the
+        :func:`~fea_toolkit.analysis.ida.run_ida` result dict — the intensity
+        ladder, per-rung drift ratios and convergence flags, and the collapse
+        intensity / criterion / bisection bracket.  The curve is plotted by
+        :func:`~fea_toolkit.plotting.viz_ida.plot_ida_curve` and the collapse
+        quantities distilled into a one-row table.
+        """
+        from ..workflow.steps import Table
+
+        data = payload if isinstance(payload, dict) else {}
+        if not data:
+            self.log(f"{label}: the IDA run produced no result.", "warn")
+            return
+
+        def _num(value: Any) -> str:
+            try:
+                return f"{float(value):.4g}"
+            except (TypeError, ValueError):
+                return "\u2014"
+
+        rows = (
+            ("Collapse intensity", _num(data.get("collapse_intensity"))),
+            ("Collapse criterion", str(data.get("collapse_criterion") or "\u2014")),
+            ("Rungs", str(len(data.get("intensities", []) or []))),
+            ("Structure height", _num(data.get("structure_height"))),
+        )
+        self._show_table_result(
+            label,
+            Table(title=label, columns=("Quantity", "Value"), rows=rows),
+        )
+
+        from ..plotting.viz_ida import plot_ida_curve
+
+        figure = plot_ida_curve(data, title=label)
+        if figure is not None:
+            self._show_figure_result(f"{label} curve", figure)
+        else:
+            self.log(f"{label}: matplotlib unavailable \u2014 no IDA curve plotted.", "warn")
 
     def _show_modal_result(self, label: str, payload: Any) -> None:
         """Summarise a modal result as a table and one results view per mode.
@@ -3622,6 +3679,7 @@ class MainWindow(QMainWindow):
             "analysis.spectrum",
             "analysis.pushover",
             "analysis.nonlinear_dynamic",
+            "analysis.ida",
         ):
             self._actions[key].setEnabled(enabled)
         # Saving the meshed model needs the same preprocessed ``MeshModel``, but

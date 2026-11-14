@@ -12,7 +12,19 @@ prepare properties, prepare topology, solve, reduce — and is the order a menu
 should offer them.
 """
 
-from .steps import CASES, FIGURE, GEOMETRY, MODAL, MODEL, NLD, PUSHOVER, RS, TABLE, StepSpec
+from .steps import (
+    CASES,
+    FIGURE,
+    GEOMETRY,
+    IDA,
+    MODAL,
+    MODEL,
+    NLD,
+    PUSHOVER,
+    RS,
+    TABLE,
+    StepSpec,
+)
 from .verbs import (
     BRACE_BUCKLING_PARAMS,
     CHART_PARAMS,
@@ -20,6 +32,7 @@ from .verbs import (
     CONNECTIVITY_PARAMS,
     FIX_SHELL_ONLY_BASE_PARAMS,
     HINGE_LENGTH_PARAMS,
+    IDA_PARAMS,
     LOAD_VERIFICATION_PARAMS,
     MEMBER_SHEAR_CAPACITY_PARAMS,
     MESH_CHECKS_PARAMS,
@@ -40,6 +53,7 @@ from .verbs import (
     run_combine,
     run_fix_shell_only_base,
     run_hinge_length,
+    run_ida,
     run_load_verification,
     run_member_shear_capacity,
     run_mesh,
@@ -193,6 +207,14 @@ STEP_SPECS: dict[str, StepSpec] = {
         kind=NLD,
         needs=("geometry", "modal"),
         help="Nonlinear dynamic (time-history) analysis of a ground-motion record.",
+    ),
+    "ida": StepSpec(
+        verb="ida",
+        run=run_ida,
+        params=IDA_PARAMS,
+        kind=IDA,
+        needs=("geometry", "modal"),
+        help="Incremental dynamic analysis — collapse intensity over a record ladder.",
     ),
     "combine": StepSpec(
         verb="combine",

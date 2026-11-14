@@ -38,6 +38,7 @@ from .case_listing import (
     list_static_cases,
 )
 from .combinations import build_combination_results
+from .ida import collapse_criterion, collapse_intensity, run_ida
 from .linear import (
     analysis_load_reaction_summary,
     render_load_reaction_rows,
@@ -78,6 +79,8 @@ __all__ = [
     "analysis_load_reaction_summary",
     "axial_capacity_surface",
     "build_combination_results",
+    "collapse_criterion",
+    "collapse_intensity",
     "elwood_axial_deg_slope",
     "elwood_axial_drift_at_failure",
     "elwood_column_geometry",
@@ -93,6 +96,7 @@ __all__ = [
     "render_load_reaction_rows",
     "report_shear_failure",
     "run_case_set",
+    "run_ida",
     "run_linear_cases",
     "run_modal_analysis",
     "run_nonlinear_dynamic_analysis",

@@ -19,7 +19,8 @@ configurable mouse interaction — and milestone 5's **analysis** slice is in:
 **Analysis ▸ Run static…** solves the model's own load cases in the
 application and shows each as a results view, and **File ▸ Save
 results…** writes one out.  **Modal analysis** / **Response spectrum** /
-**Pushover** / **Nonlinear time-history** are wired up as recipe presets;
+**Pushover** / **Nonlinear time-history** / **IDA** are wired up as recipe
+presets;
 modal analysis still fails to complete (see
 [What is still missing](#what-is-still-missing)).  Load
 glyphs, storey and pushover plots, persistence and the quad view are still
@@ -216,11 +217,11 @@ different case is added beside it.
 wanted — always asking for a path, with a suggested name, so variants that differ
 by a small change can be kept side by side.
 
-**Analysis ▸ Modal analysis**, **Response spectrum**, **Pushover** and
-**Nonlinear time-history** are also
+**Analysis ▸ Modal analysis**, **Response spectrum**, **Pushover**,
+**Nonlinear time-history** and **IDA** are also
 wired as **presets over the recipe** (like **Model ▸ Mesh…**): each opens the
 step dialog for its verb and, on OK, appends the step and runs the recipe — a
-spectrum, pushover or nonlinear-dynamic run prepends a default `modal` step first, since those
+spectrum, pushover, nonlinear-dynamic or IDA run prepends a default `modal` step first, since those
 verbs need its result.  These three are **still in process**: the presets run,
 but the underlying analyses are not yet reliable — modal analysis starts and
 then fails to complete (see [What is still missing](#what-is-still-missing)).
@@ -573,7 +574,7 @@ jarring than a greyed-out one.
 | **Edit** | Duplicate view, Edit view selection… | Copy, Preferences |
 | **View** | Zoom to fit, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show beams, Show shells, Show restraints, Show loads, Colour area loads, Show force diagrams, Clear highlights) | Show element labels, Reset layout |
 | **Model** | Mesh… (composes a `mesh` step in a dialog and runs it on OK), Combinations (Edit… / Open… / Save…) | Selections, Units |
-| **Analysis** | Run static… (`Ctrl+R`), Stop, Modal analysis, Response spectrum, Pushover, Nonlinear time-history | — |
+| **Analysis** | Run static… (`Ctrl+R`), Stop, Modal analysis, Response spectrum, Pushover, Nonlinear time-history, IDA | — |
 | **Recipe** | Run recipe (`Ctrl+Shift+R`), Open recipe…, Save recipe…, Export as Python…, Clear recipe | — |
 | **Results** | Deformed shape (+ Deform %), Force diagrams (+ Force selector + Flags %), Clear results | Storey response, Pushover curve |
 | **Help** | Documentation, Modeling guidance, Benchmark register, LLM guide, Source repository, About | — |

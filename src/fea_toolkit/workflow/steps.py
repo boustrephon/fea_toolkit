@@ -65,6 +65,9 @@ PUSHOVER = "pushover"
 #: A step's output is a nonlinear-dynamic (time-history) result, stored on the
 #: context under ``"nonlinear_dynamic"``.
 NLD = "nonlinear_dynamic"
+#: A step's output is an incremental-dynamic-analysis result (a collapse
+#: intensity over a record ladder), stored on the context under ``"ida"``.
+IDA = "ida"
 #: A step's output is a table of findings — a check's result, rendered as a grid.
 TABLE = "table"
 #: A step's output is a figure — a chart, rendered as an image.

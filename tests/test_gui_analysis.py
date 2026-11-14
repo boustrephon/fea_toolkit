@@ -101,6 +101,37 @@ def test_run_is_greyed_until_the_model_is_preprocessed(window):
     assert window._actions["analysis.run"].isEnabled() is True
 
 
+def test_ida_is_greyed_until_the_model_is_preprocessed(window):
+    """IDA (like Run) needs a preprocessed model, and un-greys with it."""
+    from fea_toolkit.model.mesh_model import MeshModel
+
+    assert window._actions["analysis.ida"].isEnabled() is False
+
+    _preprocess(window)
+
+    assert isinstance(window._store.preprocessed(), MeshModel)
+    assert window._actions["analysis.ida"].isEnabled() is True
+
+
+def test_an_ida_result_registers_a_table_and_a_curve(window):
+    """The IDA result payload becomes a collapse table and an IDA-curve figure."""
+    window._show_ida_result(
+        "IDA",
+        {
+            "intensities": [0.5, 1.0, 2.0],
+            "drifts": [0.01, 0.02, 0.05],
+            "converged": [True, True, False],
+            "collapse_intensity": 2.0,
+            "collapse_criterion": "nonconvergence",
+            "collapse_drift": 0.10,
+            "bisection": None,
+            "structure_height": 10.0,
+        },
+    )
+    assert window._views.get("table:ida") is not None
+    assert window._views.get("figure:ida-curve") is not None
+
+
 def test_running_without_a_preprocessed_model_declines(window):
     """``run_analysis`` refuses rather than preprocessing silently."""
     assert window.run_analysis({"DEAD": {"DEAD": 1.0}}) is False

@@ -380,3 +380,79 @@ def plot_ida_summary(
         return None
     fig.tight_layout()
     return fig
+
+
+def plot_ida_curve(
+    result: dict,
+    *,
+    ax: Any = None,
+    figsize: tuple[float, float] = (7, 5),
+    title: Optional[str] = None,
+) -> Optional[Any]:
+    """Plot a single IDA run's curve — peak drift ratio vs record scale factor.
+
+    Non-converged rungs are marked separately from the converged response, and
+    the collapse intensity (when found) is drawn as a vertical line.
+
+    Args:
+        result: The :func:`~fea_toolkit.analysis.ida.run_ida` result dict
+            (``intensities`` / ``drifts`` / ``converged`` /
+            ``collapse_intensity``).
+        ax: Optional axes to draw into.
+        figsize: Figure size when *ax* is ``None``.
+        title: Optional figure title.
+
+    Returns:
+        The matplotlib figure, or ``None`` if matplotlib is unavailable or the
+        result has no rungs.
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return None
+
+    intensities = np.asarray(result.get("intensities", []), dtype=float)
+    drifts = np.asarray(result.get("drifts", []), dtype=float)
+    converged = np.asarray(result.get("converged", []), dtype=bool)
+    if drifts.size == 0:
+        return None
+    if converged.shape != drifts.shape:
+        converged = np.ones(drifts.shape, dtype=bool)
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.figure
+
+    ax.plot(
+        intensities[converged],
+        drifts[converged],
+        marker="o",
+        color="#1f77b4",
+        label="converged",
+    )
+    if np.any(~converged):
+        ax.plot(
+            intensities[~converged],
+            drifts[~converged],
+            marker="x",
+            linestyle="None",
+            color="#d62728",
+            label="non-converged",
+        )
+    collapse = result.get("collapse_intensity")
+    if collapse is not None and np.isfinite(float(collapse)):
+        ax.axvline(
+            float(collapse),
+            color="#d62728",
+            linestyle="--",
+            linewidth=1.2,
+            label=f"collapse = {float(collapse):.3g}",
+        )
+    ax.set_xlabel("record scale factor (IM)")
+    ax.set_ylabel("peak roof drift ratio")
+    ax.set_title(title if title is not None else "IDA curve")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="upper left", fontsize=8)
+    fig.tight_layout()
+    return fig

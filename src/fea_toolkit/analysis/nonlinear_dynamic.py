@@ -28,6 +28,7 @@ def run_nonlinear_dynamic_analysis(
     name: str = "NonlinearDynamic",
     config: Optional[dict] = None,
     gravity_patterns: Optional[dict[str, float]] = None,
+    accel: Optional[np.ndarray] = None,
 ) -> AnalysisResult:
     """Run a nonlinear dynamic (time-history) analysis.
 
@@ -55,6 +56,11 @@ def run_nonlinear_dynamic_analysis(
             :meth:`AnalysisBuilder.run_transient_analysis` so gravity-dependent
             P-Delta and yield state are retained.  ``None`` skips the gravity
             hand-off.
+        accel: Pre-loaded acceleration record (one value per time step).  When
+            given it is used directly and *ground_motion_file* is only a label
+            (``gm_file``) — the in-memory override IDA uses to scale the record
+            per rung without re-reading the file.  ``None`` reads the record
+            from *ground_motion_file*.
 
     Returns:
         :class:`AnalysisResult` whose ``data`` carries the full transient
@@ -70,14 +76,18 @@ def run_nonlinear_dynamic_analysis(
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
     # ── Ground motion (one acceleration value per line) ──
-    try:
-        accel = np.loadtxt(ground_motion_file, ndmin=1)
-    except Exception as e:
-        raise ValueError(
-            f"Cannot read ground motion file: {ground_motion_file}. "
-            "Each line should be one acceleration value in model "
-            "acceleration units."
-        ) from e
+    # ``accel`` is the in-memory override (IDA scales the record per rung
+    # without re-reading the file); otherwise the record is loaded from disk.
+    if accel is None:
+        try:
+            accel = np.loadtxt(ground_motion_file, ndmin=1)
+        except Exception as e:
+            raise ValueError(
+                f"Cannot read ground motion file: {ground_motion_file}. "
+                "Each line should be one acceleration value in model "
+                "acceleration units."
+            ) from e
+    accel = np.asarray(accel, dtype=float)
     if accel.ndim != 1:
         raise ValueError(
             f"Ground motion file {ground_motion_file!r} must contain a single "

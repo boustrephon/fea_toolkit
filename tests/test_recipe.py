@@ -152,6 +152,7 @@ class TestManifest:
             "response_spectrum",
             "pushover",
             "nonlinear_dynamic",
+            "ida",
             "combine",
             "chart",
         ]
@@ -169,6 +170,7 @@ class TestManifest:
                 "response_spectrum",
                 "pushover",
                 "nonlinear_dynamic",
+                "ida",
                 "table",
                 "figure",
             )
@@ -183,9 +185,11 @@ class TestManifest:
         assert STEP_SPECS["response_spectrum"].kind == "response_spectrum"
         assert STEP_SPECS["pushover"].kind == "pushover"
         assert STEP_SPECS["nonlinear_dynamic"].kind == "nonlinear_dynamic"
+        assert STEP_SPECS["ida"].kind == "ida"
         assert STEP_SPECS["response_spectrum"].kind != "cases"
         assert STEP_SPECS["pushover"].kind != "cases"
         assert STEP_SPECS["nonlinear_dynamic"].kind != "cases"
+        assert STEP_SPECS["ida"].kind != "cases"
 
     def test_importing_the_manifest_does_not_load_opensees(self):
         """A parameter form must be renderable without OpenSees."""
@@ -384,6 +388,57 @@ class TestAnalysisVerbs:
         assert captured["damping_ratio"] == 0.03
         assert captured["gravity_patterns"] == {"DEAD": 1.0}
         assert captured["name"] == "NLD-1"
+
+    def test_ida_declares_its_parameters(self):
+        """The collapse driver exposes the ladder and collapse knobs as parameters."""
+        params = STEP_SPECS["ida"].params
+        assert params["ground_motion_file"].type is str
+        assert params["intensities"].type is list
+        assert params["collapse_drift"].type is float
+        assert params["tolerance"].type is float
+        assert params["direction"].choices == ("X", "Y", "Z")
+        assert params["modal_case"].type is str
+
+    def test_ida_requires_a_ground_motion_file(self):
+        """A record path is mandatory — the verb names it rather than failing later."""
+        from fea_toolkit.workflow.steps import StepContext
+
+        context = StepContext(model_data=_slab_model())
+        with pytest.raises(ValueError, match="ground_motion_file"):
+            STEP_SPECS["ida"].run(context, Step("ida"))
+
+    def test_ida_passes_the_record_and_ladder_through(self, monkeypatch):
+        """Every declared parameter reaches ``run_ida`` unchanged."""
+        import fea_toolkit.analysis.ida as ida_module
+        from fea_toolkit.workflow.steps import StepContext
+
+        captured: dict = {}
+
+        def fake_run_ida(mesh_model, modal_result, **kwargs):
+            captured.update(kwargs)
+            return {"record": kwargs["ground_motion_file"]}
+
+        monkeypatch.setattr(ida_module, "run_ida", fake_run_ida)
+        context = StepContext(model_data=_slab_model(), model=object(), results={"modal": object()})
+        step = Step(
+            "ida",
+            params={
+                "ground_motion_file": "/tmp/record.txt",
+                "intensities": [1.0, 2.0],
+                "collapse_drift": 0.08,
+                "tolerance": 0.005,
+                "direction": "Y",
+                "name": "IDA-1",
+            },
+        )
+        results = STEP_SPECS["ida"].run(context, step)
+
+        assert captured["ground_motion_file"] == "/tmp/record.txt"
+        assert captured["intensities"] == [1.0, 2.0]
+        assert captured["collapse_drift"] == 0.08
+        assert captured["tolerance"] == 0.005
+        assert captured["direction"] == "Y"
+        assert results[0].kind == "ida"
 
     def test_response_spectrum_resolves_each_source(self):
         """``resolve_spectrum`` maps source → (T, Sa) from the right place."""
