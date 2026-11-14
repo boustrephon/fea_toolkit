@@ -269,6 +269,11 @@ for automated cross-referencing.
 
 ## 🧮 OpenSees
 
+- [OpenSees Modeling Sources (2026 Community Survey)](opensees_modeling_sources.md) — 🧭 Guidance
+  > Register of the web sources surveyed in November 2026 for OpenSees modeling choices — material and element combinations, analysis settings, and convergence — across English, Chinese, Turkish, Portuguese, Spanish and Thai sources.
+  Tags: `opensees`, `sources`, `survey`, `modeling`, `nonlinear`, `convergence`, `references`
+  Related: [Structural Modeling Guidance](modeling_guidance.md) · [IMK (IMKBilin) Steel Hinge — Deterioration Model](imk_deterioration_model.md) · [LLM & AI Assistant Guide](llm_guide.md)
+
 - [Custom OpenSeesPy local build — swap recipe](openseespy_local_build.md) — 🚧 Draft
   > How to build a local OpenSeesPy wheel and swap it into the import chain on macOS arm64.
   Tags: `openseespy`, `build`, `macos`, `fea-toolkit`
@@ -532,6 +537,7 @@ Tags across all documentation files:
 - **`connections`** — [member_releases.md](member_releases.md)
 - **`connectivity`** — [model_review.md](model_review.md)
 - **`constraints`** — [constraint_detection.md](constraint_detection.md), [diaphragm_constraints.md](diaphragm_constraints.md)
+- **`convergence`** — [opensees_modeling_sources.md](opensees_modeling_sources.md)
 - **`conversion`** — [units_conversion.md](units_conversion.md)
 - **`cqc`** — [shear_building_benchmark.md](shear_building_benchmark.md)
 - **`cracked-section`** — [stiffness_factors.md](stiffness_factors.md)
@@ -637,19 +643,19 @@ Tags across all documentation files:
 - **`model`** — [load_combinations.md](load_combinations.md)
 - **`model-codec`** — [json_serialization.md](json_serialization.md)
 - **`model-review`** — [ETABS_checklist.md](ETABS_checklist.md), [ETABS_checklist_gb.md](ETABS_checklist_gb.md), [ETABS_checklist_hk.md](ETABS_checklist_hk.md), [ETABS_checklist_is.md](ETABS_checklist_is.md), [SAP2000_checklist_gb.md](SAP2000_checklist_gb.md), [SAP2000_checklist_hk.md](SAP2000_checklist_hk.md)
-- **`modeling`** — [modeling_guidance.md](modeling_guidance.md)
+- **`modeling`** — [modeling_guidance.md](modeling_guidance.md), [opensees_modeling_sources.md](opensees_modeling_sources.md)
 - **`modifiers`** — [stiffness_factors.md](stiffness_factors.md)
 - **`moment-frame`** — [benchmark_roadmap.md](benchmark_roadmap.md), [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [imk_deterioration_model.md](imk_deterioration_model.md), [sac_benchmark.md](sac_benchmark.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`mvlem`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
 - **`nltha`** — [benchmark_roadmap.md](benchmark_roadmap.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
-- **`nonlinear`** — [element_properties_config.md](element_properties_config.md), [modeling_guidance.md](modeling_guidance.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [pushover_analysis.md](pushover_analysis.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
+- **`nonlinear`** — [element_properties_config.md](element_properties_config.md), [modeling_guidance.md](modeling_guidance.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [opensees_modeling_sources.md](opensees_modeling_sources.md), [pushover_analysis.md](pushover_analysis.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`nonlinear-dynamic`** — [benchmark_register.md](benchmark_register.md), [ground_motion_data.md](ground_motion_data.md), [imk_deterioration_model.md](imk_deterioration_model.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md)
 - **`notes`** — [dev_notes.md](dev_notes.md)
 - **`npz`** — [model_stage_file.md](model_stage_file.md), [project_bundle.md](project_bundle.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
 - **`nuitka`** — [build_nuitka.md](build_nuitka.md)
 - **`offsets`** — [member_offsets.md](member_offsets.md)
 - **`openings`** — [shell_openings.md](shell_openings.md)
-- **`opensees`** — [build_nuitka.md](build_nuitka.md), [opensees_gui_comparison.md](opensees_gui_comparison.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [tcl_export.md](tcl_export.md)
+- **`opensees`** — [build_nuitka.md](build_nuitka.md), [opensees_gui_comparison.md](opensees_gui_comparison.md), [opensees_modeling_sources.md](opensees_modeling_sources.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [tcl_export.md](tcl_export.md)
 - **`openseespy`** — [licence.md](licence.md), [openseespy_local_build.md](openseespy_local_build.md)
 - **`openseesrt`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`orchestration`** — [analysis.md](analysis.md)
@@ -680,6 +686,7 @@ Tags across all documentation files:
 - **`recipe`** — [workflow_authoring.md](workflow_authoring.md), [workflow_palette.md](workflow_palette.md)
 - **`refactor`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`reference`** — [builder_reference.md](builder_reference.md), [mander_confinement_validation.md](mander_confinement_validation.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
+- **`references`** — [opensees_modeling_sources.md](opensees_modeling_sources.md)
 - **`release`** — [versioning.md](versioning.md)
 - **`releases`** — [member_releases.md](member_releases.md)
 - **`report`** — [pipeline_logging.md](pipeline_logging.md)
@@ -721,6 +728,7 @@ Tags across all documentation files:
 - **`si`** — [units_conversion.md](units_conversion.md)
 - **`slabs`** — [element_classification.md](element_classification.md)
 - **`solver`** — [modal_analysis.md](modal_analysis.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
+- **`sources`** — [opensees_modeling_sources.md](opensees_modeling_sources.md)
 - **`splitting`** — [element_splitting.md](element_splitting.md)
 - **`springs`** — [safe_import.md](safe_import.md)
 - **`ssi`** — [opensees_gui_comparison.md](opensees_gui_comparison.md)
@@ -731,6 +739,7 @@ Tags across all documentation files:
 - **`stiffness`** — [stiffness_factors.md](stiffness_factors.md)
 - **`storage`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md)
 - **`storey`** — [diaphragm_constraints.md](diaphragm_constraints.md), [storey_response.md](storey_response.md)
+- **`survey`** — [opensees_modeling_sources.md](opensees_modeling_sources.md)
 - **`tcl`** — [member_releases.md](member_releases.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [sac_benchmark.md](sac_benchmark.md), [tcl_export.md](tcl_export.md), [tcl_import.md](tcl_import.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md), [xara_pushover_workflow.md](xara_pushover_workflow.md), [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`test-model`** — [csm_test_model_plan.md](csm_test_model_plan.md)
 - **`theory`** — [mander_confinement_validation.md](mander_confinement_validation.md)

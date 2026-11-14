@@ -464,3 +464,30 @@ BibTeX keys in `papers/references.bib` (the entries this document draws on):
 
 - OpenSees `IMKBilin` material (`IMKBilin.cpp`; the deprecated alias is `Bilin`).
 
+## 8. External validation (community survey, 2026)
+
+Collected 2026-11 from English / Chinese / Turkish / Portuguese / Spanish / Thai
+sources; it confirms the IMK choice above and adds one operational caveat.
+
+- **Lineage.**  The IMK family (`Bilinear`, `Pinching`, `Clough`) was
+  implemented by Ibarra & Krawinkler (2005) in SNAP and recoded in C++ in
+  OpenSees' `SRC/material/uniaxial/snap` directory; the `ModIMK*` / `IMK*`
+  spellings are the updated forms (Scott, "An Update of the IMK Models").  This
+  is the same lineage §4 traces to `IMKBilin`.
+- **Endorsement.**  NIST GCR 17-917-46v2 (Steel Moment Frames) treats
+  concentrated-hinge models with IMK-type cyclic deterioration and fibre models
+  as equally suitable for overall frame response; fibres are preferred only for
+  arbitrary / hybrid sections and biaxial P–M interaction.  That is the same
+  trade-off §1 records (hinges scale better to large frames; fibres keep more
+  physics).
+- **Damping caveat for the lumped-hinge path.**  The IMK hinges here are
+  `zeroLength` springs with near-rigid `K0`, so exclude them from
+  stiffness-proportional Rayleigh damping — otherwise the inflated damping
+  forces destabilise the transient (Zareian & Medina 2010; also adopted in NIST
+  GCR 17-917-46v2).  See `modeling_guidance.md` §4.
+
+Sources: `openseesdigital.com/2019/12/08/an-update-of-the-imk-models/` ·
+NIST GCR 17-917-46v2 (`nvlpubs.nist.gov/nistpubs/gcr/2017/NIST.GCR.17-917-46v2.pdf`) ·
+Zareian & Medina, *Comput Struct* 88 (2010) 45–53 ·
+`ir.lib.uwo.ca/csce2016/London/Structural/21` (UWO STR-833, panel zones).
+

@@ -408,6 +408,28 @@ affecting accuracy.
 Full theory and worked example: `docs/pushover_analysis.md`
 → *Gravity convergence (LayeredShell RC models)*.
 
+### Convergence error codes (`-2` vs `-3`) and √N tolerance scaling
+
+The integer returned by ``analyze`` distinguishes a **model** problem from an
+**analysis** problem — diagnose the right one before touching solver settings
+(cross-checked against the community survey in `docs/modeling_guidance.md` §8):
+
+| Return code | Signature | Meaning | Fix |
+|---|---|---|---|
+| `-2` | `…factorization failed, matrix singular U(i,i) = 0` (then `Integrator failed at iteration: 0`) | **Stiffness singularity — not a convergence failure.** A rigid-body mode, unconnected DOF, or wrong connectivity makes the tangent singular before any iteration. | Check boundary conditions and connectivity; run a modal analysis to surface the free/rigid mode. |
+| `-3` | `CTest*::test() - failed to converge … analyze failed, returned: -3` | **Genuine convergence failure** — the iteration could not satisfy the convergence test at this step. | Adjust the algorithm / shrink the time step / relax the tolerance; check the material models first (`modeling_guidance.md` §6). |
+
+**Tolerance scaling (√N).**  The convergence test compares the 2-norm of a
+residual or displacement vector against an absolute tolerance.  With residuals
+spread over ``N`` equations the norm grows roughly as ``√N``, so a fixed norm
+tolerance is much stricter on a large model.  Scale the norm tolerance by **√N**
+(a ballpark ``N`` is fine) to keep the per-DOF accuracy unchanged — the default
+``1e-8`` is already far tighter than physically necessary, and
+``solver_test_tol: 2e-4`` (the RC + LayeredShell floor above) is a realistic
+target.  Use ``NormDispIncr`` instead of ``NormUnbalance`` for very stiff members
+or the ``Penalty`` constraint handler, whose penalty forces enter the residual
+norm.
+
 ### Solver selection: avoid `BandSPD` on fully-constrained patch tests
 
 **Rule (LLMs: follow this)**: when a test or script builds a *single

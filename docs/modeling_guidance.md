@@ -136,6 +136,12 @@ affected by the integration-rule softening length.)
   periods would mis-scale it.
 - For large models use the ARPACK eigen solver (`eigen_solver="default"`); the
   dense solver is impractically slow above a few thousand DOF.
+- **Exclude `zeroLength` lumped-hinge springs from stiffness-proportional
+  Rayleigh damping.**  The near-rigid `K0 = stiff_factor·6EI/L` hinge stiffness
+  inflates stiffness-proportional damping forces and destabilises the transient
+  (Zareian & Medina 2010; the same convention is adopted in NIST GCR
+  17-917-46v2).  The lumped hinge is the toolkit default, so this applies to
+  every `hinge_model='lumped'` transient run.
 
 ## 5. Units & materials
 
@@ -153,6 +159,9 @@ affected by the integration-rule softening length.)
 | divergence on strong records with `Clough` | degrading unloading stiffness | switch to `Hysteretic` / `Steel02` |
 | gravity `Norm = NaN` | single-step load shock | add `gravity_num_substeps` |
 | `BandGen` stall / NaN on large models | banded factorisation | `solver_system: "UmfPack"` |
+| `analyze … returned: -2` + "matrix singular" | **stiffness singularity, not convergence** — rigid-body mode / unconnected DOF | check boundary conditions & connectivity; run modal to find the free mode |
+| `analyze … returned: -3` | genuine convergence failure in the iteration | adjust algorithm / shrink the time step / relax tolerance (see §8) |
+| `ForceBeamColumn3d::update() -- failed to get compatible …` | section constitutive response: bad material, near-singular section stiffness, fibres oriented wrong for 2D bending, or not discretised in both directions in 3D | inspect the tagged element's sections; swap materials to their elastic equivalents one at a time |
 
 (Full solver tables: `llm_guide.md` §5.)
 
@@ -182,3 +191,83 @@ The four-way cyclic-law study on the 3-story (10 records each) ranks them:
 **`Hysteretic` is the robust default; `Clough` degradation is unstable on the
 strong records.** Full numbers: `sac_trilinear_hinge_approaches.md` and the
 nonlinear verification paper.
+
+## 8. External community survey (2026) — cross-validation
+
+> This section records what the wider OpenSees community (English, Chinese,
+> Turkish, Portuguese, Spanish and Thai sources) reports as working or failing,
+> in so far as it confirms or extends the guidance above.  Collected 2026-11;
+> see the source register at the end.  Like the rest of this document it is
+> guidance, not rules.
+
+### 8.1 Material models — build up nonlinearity progressively
+
+- Concrete: `Concrete01` (no tension, Karsan–Jirsa unloading) and `Concrete02`
+  (linear tension softening) are the robust workhorses; `Concrete04` (Popovics)
+  is used for the confined core beside a `Concrete01` cover (Caglar & Tatar,
+  Turkish RC-column study).  The advanced models (`Concrete23`/`06`/`07`) add
+  convergence risk and are a frequent cause of the `forceBeamColumn` "failed to
+  get compatible" failure.
+- Steel: `Steel02` is the fibre workhorse; `Hysteretic` (trilinear) and the IMK
+  family serve the hinge path (see `imk_deterioration_model.md`).
+- **Build up in stages** (Scott, "A Marathon, Not a Sprint"): elastic sections →
+  `ElasticNoTension` + `Steel01` → `Concrete01` → `Concrete02`/`Steel02` → only
+  then `Concrete23`/`Steel08`.  Re-run gravity + lateral at every stage and make
+  sure each change in response is explicable.  When a stage stops converging,
+  the last material switched is the culprit — swap it back to its elastic
+  equivalent and diagnose before proceeding.
+
+### 8.2 Element combinations
+
+- Force-based (`forceBeamColumn`, `nonlinearBeamColumn`) when axial–moment
+  interaction matters (RC moment frames), with **3–5 integration points** —
+  community consensus is "not more than 5".  Displacement-based
+  (`dispBeamColumn`) for several short elements (e.g. piles with p-y springs).
+- `beamWithHinges` when yielding is confined to member ends and strain softening
+  is expected.  Berkeley Example 7 is the canonical case: a distributed-fibre
+  `nonlinearBeamColumn` RC 3D frame failed to converge at large drift where
+  `beamWithHinges` columns converged.  (Consistent with §1, which prefers the
+  lumped hinge across the full stiffness range.)
+- Strain-softening concrete localises in one element / integration point, giving
+  mesh-dependent response; regularise with Coleman–Spacone ultimate-strain
+  scaling, Scott–Fenves end weights, or `GradientInelasticBeamColumn`.
+- **Walls:** the community reports the coupled `SFI-MVLEM` has an inconsistent
+  tangent and spawns one internal node per fibre, so even an elastic wall takes
+  ~18 Newton iterations and the system size balloons; the mitigation is
+  `KrylovNewton` or `E_SFI_MVLEM_3D` (no internal nodes).  The toolkit reached
+  the same conclusion independently — see `mvlem_wall_analysis.md`.
+- Panel zones (rigid offsets vs a rotational-spring box) change little at design
+  level; refine only for collapse assessment (UWO STR-833).
+
+### 8.3 Analysis settings
+
+- Handlers: `Transformation` for general use; `Penalty` leaks the constraint
+  forces into the convergence norms, so tolerances must account for them.
+- Algorithms: `Newton` (quadratic only with a consistent tangent);
+  `ModifiedNewton` needs a raised iteration cap; `KrylovNewton` / `BFGS` /
+  `Secant` / `Broyden` for sloppy tangents.  **`Linear` is deprecated as a
+  convergence workaround.**
+- Convergence test: the default `NormUnbalance 1e-8` is far tighter than
+  necessary; use `NormDispIncr` for very stiff members or the `Penalty` handler,
+  and scale the tolerance by **√N** for large models.  Relative norms misbehave
+  when the applied load changes abruptly.
+- Error codes: `-2` = singular stiffness (a model problem); `-3` = convergence
+  failure — see §6.
+
+### 8.4 Source register
+
+| Language | Sources |
+|---|---|
+| English | `openseesdigital.com` (M. Scott's blog); `opensees.berkeley.edu` wiki/manuals/examples; NIST GCR 17-917-46v2; UWO STR-833 |
+| Chinese | `hanlindong.com` (SmartAnalyze); `jdcui.com` (崔济东's Q&A notes) |
+| Turkish | METU theses; DergiPark "Fiber Based Modeling Strategies of RC Columns" (Caglar & Tatar) |
+| Portuguese | NOVA Lisboa / FEUP / Porto theses; UNICAMP |
+| Spanish | CEINCI-LAB (Ecuador); `jpi-ingenieria.com`; `github.com/odarroyo/openseespy_starting_tutorials`; UniAndes wall guide |
+| Thai | Chulalongkorn Univ. theses (fibre-based `dispBeamColumn` RC columns — no active Thai forum found) |
+
+Primary URLs: `openseesdigital.com/2020/08/21/a-marathon-not-a-sprint/`,
+`…/2021/02/28/norms-and-tolerance/`, `…/2020/02/23/a-tale-of-two-element-formulations/`,
+`…/2021/10/10/failed-to-get-compatible/`, `…/2020/10/25/the-basics-of-frame-element-localization/`,
+`…/2024/09/02/murum-cura-te-ipsum/`, `…/2019/12/08/an-update-of-the-imk-models/`,
+`hanlindong.com/2019/opensees-converge/`, `jdcui.com/?page_id=1238`,
+`dergipark.org.tr/en/download/article-file/2136610`.
