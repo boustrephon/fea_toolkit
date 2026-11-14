@@ -93,7 +93,7 @@ def test_resolve_named_selections_expands_exclude_references():
         Selection(exclude_selections=["core"], element_types=["Frame"]), store, model
     )
     assert resolved.exclude_selections is None
-    assert resolved.exclude_element_ids == ["1"]  # the model's single UB300 frame
+    assert resolved.exclude_element_ids == ["Frame:1"]  # the model's single UB300 frame
     assert resolved.element_types == ["Frame"]
 
 

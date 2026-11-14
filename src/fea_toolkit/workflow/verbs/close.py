@@ -1,7 +1,8 @@
 """The ``close`` verb — close the working document (optionally saving it).
 
-Drops the prepared topology and results, and the current document path; the
-parsed ``model_data`` stays in memory until an ``open`` step replaces it.
+Drops the prepared topology, results and named selections, and the current
+document path; the parsed ``model_data`` stays in memory until an ``open`` step
+replaces it.
 """
 
 from typing import Any
@@ -20,8 +21,8 @@ def run_close(context: StepContext, step: Step) -> list[StepResult]:
     """Close the working document, optionally saving it first.
 
     Args:
-        context: The run's working state; the prepared ``model``, results and
-            document path are cleared.
+        context: The run's working state; the prepared ``model``, results,
+            named selections and document path are cleared.
         step: The step to run.  ``params`` carry ``save`` and ``versioned``.
 
     Returns:
@@ -44,6 +45,7 @@ def run_close(context: StepContext, step: Step) -> list[StepResult]:
     context.model = None
     context.case_results.clear()
     context.results.clear()
+    context.named_selections.clear()
     context.document_path = ""
     context.document_dirty = False
     context.log("close: document closed")

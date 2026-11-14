@@ -90,6 +90,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         params=OPEN_PARAMS,
         kind=SESSION,
         needs=(),
+        resets_document=True,
         help="Load a model file into the working document.",
     ),
     "save": StepSpec(
@@ -106,6 +107,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         params=CLOSE_PARAMS,
         kind=SESSION,
         needs=(),
+        resets_document=True,
         help="Close the working document (optionally saving it).",
     ),
     "select": StepSpec(

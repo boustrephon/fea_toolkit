@@ -80,7 +80,8 @@ def satisfied_kinds(steps: Any, *, initial: Any = ()) -> set:
     The one ordering vocabulary the palette and the validator share: a linear
     scan (no graph, no topo-sort) accumulates each step's ``kind``; a geometry
     step invalidates the solved-case / modal / figure results a previous
-    topology produced, exactly as :func:`run_recipe` does.
+    topology produced, and an ``open`` / ``close`` step clears them all —
+    exactly as :func:`run_recipe` does.  A ``save`` step changes nothing.
 
     Args:
         steps: An iterable of steps (or a :class:`Recipe`).
@@ -91,7 +92,7 @@ def satisfied_kinds(steps: Any, *, initial: Any = ()) -> set:
         The set of kinds satisfied after the last step.
     """
     from .registry import STEP_SPECS
-    from .steps import CASES, FIGURE, GEOMETRY, MODAL
+    from .steps import CASES, FIGURE, GEOMETRY, MODAL, SESSION
 
     produced = set(initial)
     for step in steps:
@@ -103,6 +104,11 @@ def satisfied_kinds(steps: Any, *, initial: Any = ()) -> set:
         produced.add(spec.kind)
         if spec.kind == GEOMETRY:
             produced.difference_update((CASES, MODAL, FIGURE))
+        elif spec.kind == SESSION and spec.resets_document:
+            # ``open`` / ``close`` replace or close the working document, so the
+            # kinds a previous document produced no longer hold — mirroring
+            # ``run_recipe``'s reset (a ``save`` step keeps them).
+            produced.clear()
     return produced
 
 
@@ -421,6 +427,7 @@ def run_recipe(
     pipeline_log: Any = None,
     on_step: Any = None,
     opensees_python: Any = None,
+    named_selections: Any = None,
 ) -> RecipeRun:
     """Run a recipe's steps in order against *model_data*.
 
@@ -456,6 +463,12 @@ def run_recipe(
             ``openseespy`` (the "separate" build).  Stored on the
             :class:`~fea_toolkit.workflow.steps.StepContext` and read by the
             solve verbs.
+        named_selections: Optional ``{name: NamedSelection}`` store to seed the
+            run's context with — the GUI's window-owned selections, so a step
+            whose ``Selection.selections`` field references a GUI-authored
+            selection resolves it.  Copied into the context, never mutated in
+            place.  ``None`` starts the run with an empty store (the ``select``
+            verb still adds to it).
 
     Returns:
         The :class:`RecipeRun` — its results, tolerated failures and whether it
@@ -470,6 +483,8 @@ def run_recipe(
     from .steps import CASES, FIGURE, GEOMETRY, MODAL, SESSION, StepContext, StepError
 
     context = StepContext(model_data=model_data, model=model)
+    if named_selections is not None:
+        context.named_selections.update(dict(named_selections))
     if cancel is not None:
         context.cancel = cancel
     if pipeline_log is not None:
@@ -539,14 +554,17 @@ def run_recipe(
                 produced.difference_update((CASES, MODAL, FIGURE))
                 context.case_results.clear()
                 context.results.clear()
-            if spec.kind == SESSION:
-                # A document-lifecycle step (``open`` / ``close``) replaced the
-                # working document, so every prior result and named selection is
-                # stale — the precursor chain starts again from the new document.
+            if spec.kind == SESSION and spec.resets_document:
+                # A document-lifecycle step (``open`` / ``close``) replaced or
+                # closed the working document, so every prior result is stale —
+                # the precursor chain starts again from the new document.  A
+                # ``save`` step preserves geometry availability and the solved
+                # results.  Named selections are owned by the verbs themselves:
+                # ``open`` replaces the store with the loaded document's, and
+                # ``close`` clears it.
                 produced.clear()
                 context.case_results.clear()
                 context.results.clear()
-                context.named_selections.clear()
             if context.cancelled:
                 # A solve cancelled between cases still completed its run;
                 # record a distinct status instead of a misleading "ok".

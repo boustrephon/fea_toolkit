@@ -13,34 +13,6 @@ from .selection import Selection
 
 __all__ = ["NamedSelection", "resolve_named_selections"]
 
-#: Every criterion field of :class:`Selection` — used to tell an *unrestricted*
-#: (match-everything) selection from one that scopes to something.
-_CRITERIA_FIELDS = (
-    "element_types",
-    "sections",
-    "materials",
-    "groups",
-    "constraints",
-    "element_ids",
-    "node_ids",
-    "elevation_range",
-    "story",
-    "exclude_element_types",
-    "exclude_sections",
-    "exclude_materials",
-    "exclude_groups",
-    "exclude_constraints",
-    "exclude_element_ids",
-    "exclude_node_ids",
-    "exclude_elevation_range",
-    "exclude_story",
-)
-
-
-def _is_unrestricted(selection: "Selection") -> bool:
-    """Whether *selection* carries no criteria at all (matches everything)."""
-    return all(getattr(selection, field) is None for field in _CRITERIA_FIELDS)
-
 
 @dataclass
 class NamedSelection:
@@ -104,63 +76,86 @@ def resolve_named_selections(
 
     Returns:
         A new :class:`Selection` with ``selections`` / ``exclude_selections``
-        cleared and the named selections' ids merged in.  References to unknown
-        names are ignored, except that a *positive* reference resolving to
-        nothing (with no other criterion) becomes an explicit empty scope —
-        ``element_ids=[]`` / ``node_ids=[]`` — so a consumer like
-        ``scale_sections`` never reads it as an unrestricted (match-everything)
-        selection.
+        cleared and the named selections' ids merged in.  A named selection
+        whose own criteria reference further selections is resolved recursively
+        before its ids are read.  Criteria-derived frame/area ids are
+        type-qualified (``"Frame:…"`` / ``"Area:…"``) so a frame and an area
+        that share a SAP label stay distinct, while explicitly picked ids are
+        kept as authored.  References to unknown names are ignored, except that
+        a *positive* reference resolving to no members keeps an empty list for
+        that entity kind (``element_ids=[]`` / ``node_ids=[]``) — never
+        ``None`` — so a consumer like ``scale_sections`` reads it as an empty
+        scope, not an unrestricted (match-everything) selection.
+
+    Raises:
+        ValueError: If a named selection (transitively) references itself.
     """
     if not selection.selections and not selection.exclude_selections:
         return selection
 
-    def _ids(ns: "NamedSelection") -> tuple[list[str], list[str]]:
-        """A named selection's (elements, nodes) — explicit ids plus criteria."""
+    def _expand(ns: "NamedSelection", seen: tuple) -> tuple[list[str], list[str]]:
+        """A named selection's (elements, nodes) with its own references resolved.
+
+        ``seen`` is the reference chain walked to reach *ns*; a name already on
+        it is a cycle (a selection that transitively references itself) and is
+        rejected rather than recursed into forever.
+        """
+        if ns.name in seen:
+            raise ValueError(
+                f"named selection {ns.name!r} references itself "
+                f"(cycle: {' -> '.join((*seen, ns.name))})"
+            )
         elements = list(ns.element_ids)
         nodes = list(ns.node_ids)
-        if ns.selection.to_string():
-            elements.extend(ns.selection.get_frame_ids(model))
-            elements.extend(ns.selection.get_area_ids(model))
-            nodes.extend(ns.selection.get_node_ids(model))
+        sub = ns.selection
+        if sub is not None and sub.to_string():
+            resolved_sub = _resolve(sub, (*seen, ns.name))
+            # Type-qualify the criteria-derived ids so a frame and an area that
+            # share a SAP label stay distinct (``Selection`` matches both the
+            # bare ``"1"`` and the ``"Frame:1"`` / ``"Area:2"`` forms); ids the
+            # caller picked explicitly are kept as authored.
+            elements.extend(f"Frame:{eid}" for eid in resolved_sub.get_frame_ids(model))
+            elements.extend(f"Area:{aid}" for aid in resolved_sub.get_area_ids(model))
+            nodes.extend(resolved_sub.get_node_ids(model))
         return elements, nodes
 
-    extra_elements: list[str] = []
-    extra_nodes: list[str] = []
-    for name in selection.selections or []:
-        ns = named.get(name)
-        if ns is None:
-            continue
-        elements, nodes = _ids(ns)
-        extra_elements.extend(elements)
-        extra_nodes.extend(nodes)
-
-    extra_exclude_elements: list[str] = []
-    extra_exclude_nodes: list[str] = []
-    for name in selection.exclude_selections or []:
-        ns = named.get(name)
-        if ns is None:
-            continue
-        elements, nodes = _ids(ns)
-        extra_exclude_elements.extend(elements)
-        extra_exclude_nodes.extend(nodes)
-
-    resolved = replace(
-        selection,
-        selections=None,
-        exclude_selections=None,
-        element_ids=((selection.element_ids or []) + extra_elements) or None,
-        node_ids=((selection.node_ids or []) + extra_nodes) or None,
-        exclude_element_ids=((selection.exclude_element_ids or []) + extra_exclude_elements)
-        or None,
-        exclude_node_ids=((selection.exclude_node_ids or []) + extra_exclude_nodes) or None,
-    )
-    # A positive reference that resolves to nothing must not degrade into an
-    # unrestricted (match-everything) scope — a consumer like ``scale_sections``
-    # reads "no criteria" as "every section".  Only positive references are
-    # guarded: an exclusion-only selection resolving to nothing is legitimately
-    # everything.
-    if selection.selections and _is_unrestricted(resolved):
+    def _resolve(sel: Selection, seen: tuple) -> Selection:
+        """Resolve *sel*'s direct references (transitively) into id lists."""
+        if not sel.selections and not sel.exclude_selections:
+            return sel
+        extra_elements: list[str] = []
+        extra_nodes: list[str] = []
+        for name in sel.selections or []:
+            ns = named.get(name)
+            if ns is None:
+                continue
+            elements, nodes = _expand(ns, seen)
+            extra_elements.extend(elements)
+            extra_nodes.extend(nodes)
+        extra_exclude_elements: list[str] = []
+        extra_exclude_nodes: list[str] = []
+        for name in sel.exclude_selections or []:
+            ns = named.get(name)
+            if ns is None:
+                continue
+            elements, nodes = _expand(ns, seen)
+            extra_exclude_elements.extend(elements)
+            extra_exclude_nodes.extend(nodes)
         return replace(
-            selection, selections=None, exclude_selections=None, element_ids=[], node_ids=[]
+            sel,
+            selections=None,
+            exclude_selections=None,
+            # A positive reference must never degrade into "match everything":
+            # when the caller named selections but they resolve to no members,
+            # keep the empty list so the entity kind is scoped to nothing, not
+            # every entity of that kind.  An exclusion-only selection leaves its
+            # positive ids untouched (``None`` = unrestricted).
+            element_ids=(
+                (sel.element_ids or []) + extra_elements if sel.selections else sel.element_ids
+            ),
+            node_ids=(sel.node_ids or []) + extra_nodes if sel.selections else sel.node_ids,
+            exclude_element_ids=((sel.exclude_element_ids or []) + extra_exclude_elements) or None,
+            exclude_node_ids=((sel.exclude_node_ids or []) + extra_exclude_nodes) or None,
         )
-    return resolved
+
+    return _resolve(selection, ())

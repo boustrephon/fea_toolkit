@@ -38,7 +38,7 @@ def run_select(context: StepContext, step: Step) -> list[StepResult]:
 
     Args:
         context: The run's working state; its ``named_selections`` store is
-            written.
+            written and the document is marked dirty.
         step: The step to run.  ``params`` carry ``name`` and either
             ``expression`` or explicit picked ids.
 
@@ -65,6 +65,7 @@ def run_select(context: StepContext, step: Step) -> list[StepResult]:
         node_ids=list(params["pick_nodes"]),
     )
     context.named_selections[name] = named
+    context.document_dirty = True
     context.log(f"select: named selection {name!r} stored")
 
     rows = (

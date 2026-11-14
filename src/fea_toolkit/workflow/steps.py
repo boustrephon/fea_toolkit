@@ -313,7 +313,8 @@ class StepContext:
     opensees_python: Optional[str] = None
     cancelled: bool = False
     #: The open document's path (``""`` until an ``open`` step runs) and whether
-    #: it has unsaved edits — the ``open`` / ``close`` / ``save`` verbs' state.
+    #: it has unsaved edits — cleared by ``open`` / ``close`` / ``save``, set by
+    #: any verb that mutates the document (e.g. ``select``).
     document_path: str = ""
     document_dirty: bool = False
     #: The named-selections store — ``{name: NamedSelection}``, written by the
@@ -335,6 +336,10 @@ class StepSpec:
             produced, e.g. ``("geometry",)`` for a verb that needs a prepared
             topology.  ``run_recipe`` validates the chain in order; a caller may
             read the same field to grey out a step that cannot run yet.
+        resets_document: Whether this :data:`SESSION` step replaces or closes
+            the working document (``open`` / ``close``), invalidating the prior
+            document's prepared topology, results and satisfied prerequisite
+            kinds.  ``False`` for a ``save`` step, which preserves them.
     """
 
     verb: str
@@ -343,6 +348,7 @@ class StepSpec:
     kind: str
     help: str = ""
     needs: tuple = ()
+    resets_document: bool = False
 
     def defaults(self) -> dict[str, Any]:
         """Every parameter's default — the form of a freshly added step.
