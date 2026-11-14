@@ -1342,7 +1342,9 @@ def collect_single_ida_arrays(
     rung is ``scale × Sa_T1_g`` and the collapse capacity is
     ``collapse_scale × Sa_T1_g``.  When the result predates the computation
     (or its modal run carried no period), ``Sa_T1_g`` defaults to ``1.0``
-    (scale-as-IM).  ``source`` carries the record path, and the per-record
+    (scale-as-IM).  Because a real ordinate can also read ``1.0``, the per-record
+    ``sa_method`` provenance (``"sdof_newmark"`` vs ``"scale_as_im"``)
+    discriminates the two; ``source`` carries the record path, and the per-record
     ``drift_measure`` provenance records whether ``drift`` is the interstorey
     ``d_max`` or the roof-drift proxy.
 
@@ -1396,6 +1398,11 @@ def collect_single_ida_arrays(
     if measure:
         arrays[make_ida_key(record_id, "ida/{record}/drift_measure")] = np.asarray(
             str(measure), dtype=str
+        )
+    sa_method = ida_result.get("sa_method")
+    if sa_method:
+        arrays[make_ida_key(record_id, "ida/{record}/sa_method")] = np.asarray(
+            str(sa_method), dtype=str
         )
 
     scalar_specs: dict[str, tuple[str, str]] = {

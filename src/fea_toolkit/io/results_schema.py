@@ -57,9 +57,11 @@ SCHEMA_VERSION_LEGACY = 1
 #:   ``collect_single_ida_arrays``): ``ida/{record}/Sa_T1_g`` stores the spectral
 #:   ordinate from ``ida_result["Sa_T1_g"]`` (a real 5 %-damped ``Sa(T1)/g`` when a
 #:   modal period is available) and defaults to ``1.0`` — scale-as-IM — only when
-#:   unavailable, and an optional per-record
-#:   ``ida/{record}/drift_measure`` records whether ``drift`` is the interstorey
-#:   ``d_max`` or the roof-drift proxy.  A ``4`` archive still reads — it simply
+#:   unavailable; the per-record ``ida/{record}/sa_method`` provenance
+#:   (``"sdof_newmark"`` vs ``"scale_as_im"``) discriminates the two, and an
+#:   optional per-record ``ida/{record}/drift_measure`` records whether ``drift``
+#:   is the interstorey ``d_max`` or the roof-drift proxy.  A ``4`` archive still
+#:   reads — it simply
 #:   has no ``ida`` block, so ``"ida"`` is absent from its ``analysis_types``.
 SCHEMA_VERSION = 5
 
@@ -426,6 +428,11 @@ IDA_SCALAR_ARRAYS: dict[str, tuple] = {
 #: never required (unlike :data:`IDA_PER_RECORD_ARRAYS`).
 IDA_OPTIONAL_PER_RECORD_ARRAYS: dict[str, tuple] = {
     "ida/{record}/drift_measure": ("", "str"),
+    #: Intensity-measure provenance — ``"sdof_newmark"`` (``Sa_T1_g`` is a real
+    #: 5 %-damped ``Sa(T1)/g`` spectral ordinate) or ``"scale_as_im"`` (the
+    #: fallback where ``Sa_T1_g`` is ``1.0`` by convention).  Persisted so a
+    #: reader can tell a genuine spectral ordinate of 1.0 from the fallback.
+    "ida/{record}/sa_method": ("", "str"),
 }
 
 META_ARRAYS: dict[str, tuple] = {
@@ -719,9 +726,10 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
                     f"  Shape mismatch for {arr_name}: "
                     f"expected {expected_shape}, got {actual_shape}"
                 )
-        elif arr.size > 1:
-            # An empty shape descriptor declares a scalar; more than one value
-            # (e.g. a multi-element ``drift_measure``) is a schema violation.
+        elif arr.size != 1:
+            # An empty shape descriptor declares a scalar: exactly one value.
+            # Zero-dimensional scalars and length-one arrays both have size 1
+            # and are accepted; empty and multi-element arrays are rejected.
             messages.append(f"  Expected a scalar value for {arr_name}, got shape {actual_shape}")
 
     # ── Check geometry ─────────────────────────────────────────────
