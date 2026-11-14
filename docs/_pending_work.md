@@ -15,7 +15,7 @@ category: [planning]
 > `csm_test_model_plan.md`, `deprecation_plan.md` and `linting_fix_plan.md`
 > are ✅ complete and tagged `category: [archive]` (P9's Phase 3 triage resolved 2026-10-11 — baseline renewed,
 > the remaining diagnostics accepted as known-benign per `.clinerules` §11).
-> The **active front** is the workflow/GUI layer (P35).
+> The workflow/GUI front (P31, P35) is complete.
 
 **Near term — finish the workflow layer.**
 
@@ -38,8 +38,13 @@ category: [planning]
 3. ~~**P36** — shell (area) result display (repository seam → per-case
    collection → renderer → GUI toggle)~~ ✅ **Landed 2026-10-12** — see the
    P36 entry below.
-4. **P35** — named selections first, then the `open`/`close`/`save`/`select`
-   document verbs.  ~~**P31** (command palette) is independent input ergonomics
+4. ~~**P35** — named selections first, then the `open`/`close`/`save`/`select`
+   document verbs.~~ ✅ **Landed 2026-11-14** — `NamedSelection` +
+   `Selection.selections` (round-trips through `to_string`/`from_string`), the
+   `select` / `open` / `close` / `save` verbs (``SESSION`` kind + ``StepContext``
+   document state + ``next_version_path``), the **Selections** tree group and
+   the `Model ▸ Name selection…` action (see the P35 entry below).
+   ~~**P31** (command palette) is independent input ergonomics
    and can run in parallel with any of the above.~~ ✅ **Landed 2026-11-14** —
    the command grammar (`compile_command` / `step_to_command`), `satisfied_kinds`,
    the `Ctrl+K` palette, the command echo and `Recipe.from_python` (see the P31
@@ -80,8 +85,9 @@ are not lost:
    out for standalone plotting.  Align the result with the schema-v5
    `ida/{record}/…` block when persistence is wanted.
 
-Neither blocks the workflow/GUI front (P35); both are recorded here to be
-picked up after it.
+Neither blocks the workflow/GUI front; both are recorded here to be picked up
+next (they are the highest remaining "correctness before trusting the numbers"
+items).
 
 ### GUI/workflow follow-ups — the nine-item batch (2026-10-12)
 
@@ -722,6 +728,17 @@ Neither blocks the other, and a user gains from either alone.
 
 Source: the 2026-10-02 planning session (post-review); pairs with workflow
 Phase E (P32) and the GUI model tree.
+
+**Status: ✅ Landed 2026-11-14.**  `NamedSelection` +
+`Selection.selections` / `exclude_selections` (round-tripping through
+`to_string` / `from_string`), `resolve_named_selections`, the `select` / `open`
+/ `close` / `save` verbs (``SESSION`` kind + ``StepContext`` document state +
+``next_version_path``), the **Selections** tree group and `Model ▸ Name
+selection…`.  Two follow-ups remain: (1) **graphical-pick authoring** is
+text-only today (the dialog takes an expression, not a viewport pick); (2)
+`resolve_named_selections` is available but not yet wired into the *other*
+verbs' selection resolution — the `selections` field round-trips, but a `mesh`
+/ `scale_sections` step does not yet expand it.
 
 **What.** Two related additions, both agreed:
 

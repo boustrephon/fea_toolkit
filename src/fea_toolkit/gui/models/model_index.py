@@ -190,7 +190,31 @@ def shell_uniform_load_sets_group(model: Any) -> Optional[TreeGroup]:
     )
 
 
-def build_groups(model: Any, views: Optional[list] = None) -> list:
+def selections_group(named: Optional[dict]) -> Optional[TreeGroup]:
+    """The synthetic **Selections** group: one row per named selection.
+
+    Named selections are UI state (like views) rather than model entities, so
+    they are handed in rather than derived from the model — the same precedent
+    as :func:`views_group`.  Returns ``None`` when the store is empty, so the
+    tree never shows an empty row.
+    """
+    if not named:
+        return None
+
+    def load_items() -> list:
+        return [(name, obj) for name, obj in sorted(named.items())]
+
+    return TreeGroup(
+        key="selections",
+        label="Selections",
+        count=len(named),
+        load_items=load_items,
+    )
+
+
+def build_groups(
+    model: Any, views: Optional[list] = None, selections: Optional[dict] = None
+) -> list:
     """Describe the tree groups for *model*.
 
     Args:
@@ -208,6 +232,10 @@ def build_groups(model: Any, views: Optional[list] = None) -> list:
 
     if views:
         groups.append(views_group(list(views)))
+
+    selections_group_ = selections_group(selections or {})
+    if selections_group_ is not None:
+        groups.append(selections_group_)
 
     for attr, label in _DICT_GROUPS:
         bag = getattr(source, attr, None)

@@ -42,10 +42,12 @@ SELECT_KEYS: dict[str, str] = {
     "elevation_range": "elevation_range",
     "story": "story",
     "stories": "story",
+    "selection": "selections",
+    "selections": "selections",
 }
 
 #: Human-readable key list, for CLI help and error messages.
-SELECT_KEYS_HELP = "type, section, material, group, constraint, id, node, z"
+SELECT_KEYS_HELP = "type, section, material, group, constraint, id, node, z, selection"
 
 #: Field → canonical expression key, in the order :meth:`Selection.to_string`
 #: emits them.  The short forms are the ones the help text and the examples in
@@ -59,6 +61,7 @@ SELECT_FIELD_KEYS: dict[str, str] = {
     "element_ids": "id",
     "node_ids": "node",
     "story": "story",
+    "selections": "selection",
     "elevation_range": "z",
 }
 
@@ -511,6 +514,7 @@ class Selection:
     node_ids: Optional[list[str]] = None
     elevation_range: Optional[tuple[float, float]] = None
     story: Optional[list[str]] = None
+    selections: Optional[list[str]] = None
     # Negated counterparts — each ``exclude_*`` field removes the elements that
     # match the corresponding positive criterion (an element is excluded when it
     # matches *any* set ``exclude_*`` field).
@@ -523,6 +527,7 @@ class Selection:
     exclude_node_ids: Optional[list[str]] = None
     exclude_elevation_range: Optional[tuple[float, float]] = None
     exclude_story: Optional[list[str]] = None
+    exclude_selections: Optional[list[str]] = None
 
     def __post_init__(self) -> None:
         """Validate invariants after construction."""

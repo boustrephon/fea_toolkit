@@ -450,7 +450,7 @@ def run_recipe(
         ValueError: If a step names an unknown verb.
     """
     from .registry import STEP_SPECS
-    from .steps import CASES, FIGURE, GEOMETRY, MODAL, StepContext, StepError
+    from .steps import CASES, FIGURE, GEOMETRY, MODAL, SESSION, StepContext, StepError
 
     context = StepContext(model_data=model_data, model=model)
     if cancel is not None:
@@ -521,6 +521,14 @@ def run_recipe(
                 produced.difference_update((CASES, MODAL, FIGURE))
                 context.case_results.clear()
                 context.results.clear()
+            if spec.kind == SESSION:
+                # A document-lifecycle step (``open`` / ``close``) replaced the
+                # working document, so every prior result and named selection is
+                # stale — the precursor chain starts again from the new document.
+                produced.clear()
+                context.case_results.clear()
+                context.results.clear()
+                context.named_selections.clear()
             if context.cancelled:
                 # A solve cancelled between cases still completed its run;
                 # record a distinct status instead of a misleading "ok".

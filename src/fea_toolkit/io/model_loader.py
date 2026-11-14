@@ -145,3 +145,25 @@ def load_model_data(path: Union[str, Path]) -> Union[SAPModelData, MeshModel]:
             "SAP2000Parser.to_json() or model_codec.model_to_json()?"
         )
     return SAP2000Parser.from_json(path).get_model_data()
+
+
+def next_version_path(path: Union[str, Path]) -> str:
+    """The next ``_vN``-suffixed path before the extension — the document verbs' default.
+
+    ``"model.s2k"`` → ``"model_v1.s2k"``, then ``"model_v2.s2k"``, and so on,
+    so a ``save`` with ``versioned=True`` never overwrites an earlier snapshot.
+
+    Args:
+        path: The base path.
+
+    Returns:
+        The lowest ``_vN``-suffixed path that does not yet exist.
+    """
+    base = Path(path)
+    stem, suffix = base.stem, base.suffix
+    index = 1
+    while True:
+        candidate = base.with_name(f"{stem}_v{index}{suffix}")
+        if not candidate.exists():
+            return str(candidate)
+        index += 1

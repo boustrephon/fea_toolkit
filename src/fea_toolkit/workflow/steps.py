@@ -72,6 +72,9 @@ IDA = "ida"
 TABLE = "table"
 #: A step's output is a figure — a chart, rendered as an image.
 FIGURE = "figure"
+#: A step's output is a document-lifecycle change (``open`` / ``close`` /
+#: ``save``) — nothing to render; the working document itself changed.
+SESSION = "session"
 
 
 @dataclass(frozen=True)
@@ -221,8 +224,8 @@ class StepResult:
 
     Attributes:
         kind: :data:`GEOMETRY`, :data:`MODEL`, :data:`CASES`, :data:`MODAL`,
-            :data:`RS`, :data:`PUSHOVER`, :data:`NLD`, :data:`TABLE` or
-            :data:`FIGURE`.
+            :data:`RS`, :data:`PUSHOVER`, :data:`NLD`, :data:`IDA`,
+            :data:`TABLE`, :data:`FIGURE` or :data:`SESSION`.
         label: Display name for the output, e.g. ``"Meshed"``.
         payload: The output itself — a ``MeshModel``, a ``SAPModelData``,
             ``{case_name: result_dict}``, a :class:`Table`, or a matplotlib
@@ -309,6 +312,13 @@ class StepContext:
     pipeline_log: Optional["PipelineLog"] = None
     opensees_python: Optional[str] = None
     cancelled: bool = False
+    #: The open document's path (``""`` until an ``open`` step runs) and whether
+    #: it has unsaved edits — the ``open`` / ``close`` / ``save`` verbs' state.
+    document_path: str = ""
+    document_dirty: bool = False
+    #: The named-selections store — ``{name: NamedSelection}``, written by the
+    #: ``select`` verb and referenced by a step's ``Selection.selections`` field.
+    named_selections: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

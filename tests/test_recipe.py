@@ -135,6 +135,10 @@ class TestManifest:
 
     def test_verbs_are_listed_in_the_order_they_are_meant_to_run(self):
         assert list_verbs() == [
+            "open",
+            "save",
+            "close",
+            "select",
             "check_connectivity",
             "check_self_weight",
             "check_brace_buckling",
@@ -173,6 +177,7 @@ class TestManifest:
                 "ida",
                 "table",
                 "figure",
+                "session",
             )
             assert spec.help, f"{verb} has no help text"
             for name, param in spec.params.items():

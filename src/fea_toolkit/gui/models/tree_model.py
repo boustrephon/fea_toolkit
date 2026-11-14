@@ -45,15 +45,21 @@ class ModelTreeModel(QAbstractItemModel):
 
     # ── Population ──────────────────────────────────────────────────
 
-    def set_model(self, model: Optional[Any], views: Optional[list] = None) -> None:
+    def set_model(
+        self,
+        model: Optional[Any],
+        views: Optional[list] = None,
+        selections: Optional[dict] = None,
+    ) -> None:
         """Rebuild the tree for *model*; ``None`` empties it.
 
         Args:
             model: A ``SAPModelData``, a ``MeshModel`` or an ``AnalysisBuilder``.
             views: Registered views, shown as a **Views** group at the top.
+            selections: Named selections, shown as a **Selections** group.
         """
         self.beginResetModel()
-        self._groups = build_groups(model, views)
+        self._groups = build_groups(model, views, selections=selections)
         self._group_ids = []
         self._children = {}
         self._view_children = {}

@@ -237,6 +237,7 @@ class MainWindow(QMainWindow):
         self._anim_times: list = []
         self._nld_frames: dict = {}
         self._nld_times: dict = {}
+        self._named_selections: dict = {}
 
         self._create_viewport()
         self._create_actions()
@@ -891,7 +892,11 @@ class MainWindow(QMainWindow):
             self._on_mesh_dialog,
             tip="Preprocess: split frames at joints and mesh areas (runs on a worker)",
         )
-        a["model.selections"] = self._placeholder("Selections", "a future release")
+        a["model.selections"] = self._real_action(
+            "Name selection\u2026",
+            self._on_name_selection,
+            tip="Save the current selection under a name (shown in the tree's Selections group)",
+        )
         a["model.units"] = self._placeholder("Units", "a future release")
         a["model.combinations_edit"] = self._real_action(
             "Edit combinations\u2026",
@@ -1892,7 +1897,9 @@ class MainWindow(QMainWindow):
         every table/figure registered by a recipe run invisible in the **Views**
         group.  This repopulates the tree without touching the viewport.
         """
-        self._tree_model.set_model(self._tree_model_source(self._model), self._views.views())
+        self._tree_model.set_model(
+            self._tree_model_source(self._model), self._views.views(), self._named_selections
+        )
 
     def _show_table_view(self, view: View) -> None:
         """Render a ``table`` view — a check's findings as a read-only grid.
@@ -2788,6 +2795,33 @@ class MainWindow(QMainWindow):
             self.log(f"Could not save combinations: {exc}", "error")
             return
         self.log(f"Saved {len(self._external_combinations)} combination(s) to {path}.")
+
+    def _on_name_selection(self) -> None:
+        """**Model ▸ Name selection…**: save the current selection under a name.
+
+        A named selection is a saved
+        :class:`~fea_toolkit.model.named_selection.NamedSelection`; it appears in
+        the tree's **Selections** group and is what a step's
+        ``Selection.selections`` field references by name.
+        """
+        from qtpy.QtWidgets import QInputDialog
+
+        from ..model.named_selection import NamedSelection
+        from ..model.selection import Selection
+
+        name, ok = QInputDialog.getText(self, "Name selection", "Selection name:")
+        name = name.strip()
+        if not ok or not name:
+            return
+        expression, ok = QInputDialog.getText(
+            self, "Selection expression", f"Expression for {name} (empty = whole model):"
+        )
+        if not ok:
+            return
+        selection = Selection.from_string(expression.strip()) if expression.strip() else Selection()
+        self._named_selections[name] = NamedSelection(name=name, selection=selection)
+        self.log(f"Named selection {name!r}: {selection.to_string() or 'whole model'}")
+        self._rebuild_tree()
 
     def _on_mesh_dialog(self) -> None:
         """**Model ▸ Mesh…**: compose the ``mesh`` step in a dialog, then run it.
