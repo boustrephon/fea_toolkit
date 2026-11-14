@@ -196,3 +196,57 @@ def test_reset_then_a_view_change_resumes_saving(qapp, monkeypatch, tmp_path):
     state, notes = load_view_state(str(_FIXTURE))
     assert notes == []
     assert state.get("camera_position")
+
+
+@pytest.mark.needs_gui
+def test_hidden_set_from_a_processed_topology_is_dropped_on_open(qapp, monkeypatch, tmp_path):
+    """A saved hidden set naming elements absent from the raw model is dropped.
+
+    A hidden set captured while the model was split/meshed references child ids
+    (``Frame:5_af_0_1``) that do not exist in the raw file.  Re-applying it
+    would re-hide raw members that merely share ids with the processed
+    topology, so the whole set is treated as stale — not just the stale ids.
+    """
+    from fea_toolkit.gui.main_window import MainWindow
+
+    monkeypatch.setenv(CONFIG_ENV_VAR, str(tmp_path / "gui.json"))
+
+    probe = MainWindow()
+    assert probe.open_path(str(_FIXTURE)) is True
+    real = min(probe._all_element_ids())
+    probe.close()
+
+    # Mix one real id with a stale (meshed-child) id — the signature of a
+    # hidden set captured on a processed topology.
+    save_view_state(str(_FIXTURE), {"hidden_elem_ids": [real, "Area:ghost_child"]})
+
+    win = MainWindow()
+    assert win.open_path(str(_FIXTURE)) is True
+    assert win._hidden_elem_ids == set()
+    win.close()
+
+
+@pytest.mark.needs_gui
+def test_hidden_set_not_saved_when_viewing_the_preprocessed_topology(qapp, monkeypatch, tmp_path):
+    """A hidden set captured on the processed topology is not persisted.
+
+    The camera is view-agnostic, but a hidden set is topology-specific: ids
+    hidden on the split/meshed model do not apply to the raw file a later open
+    restores, so only the camera is saved in that case.
+    """
+    from fea_toolkit.gui.main_window import MainWindow
+
+    monkeypatch.setenv(CONFIG_ENV_VAR, str(tmp_path / "gui.json"))
+    win = MainWindow()
+    assert win.open_path(str(_FIXTURE)) is True
+
+    mesh = object()  # stand-in for the preprocessed topology
+    win._store.set_preprocessed(mesh)
+    win._model = mesh
+
+    win._hidden_elem_ids = {"Area:ghost"}
+    win._save_view_state()
+
+    state, _ = load_view_state(str(_FIXTURE))
+    assert "hidden_elem_ids" not in state
+    win.close()

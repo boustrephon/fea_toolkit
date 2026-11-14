@@ -2782,6 +2782,19 @@ class MainWindow(QMainWindow):
         self._reset_view_baseline = (self._current_camera(), frozenset(self._hidden_elem_ids))
         self.log("Reset the view to defaults.")
 
+    def _drawable_element_ids(self, model: Any) -> set[str]:
+        """Type-qualified ids of the elements *model* can draw.
+
+        Inactive (split/meshed) parents are skipped, so an id that is never
+        drawn cannot leak into the hidden set.
+        """
+        ids: set[str] = set()
+        for etype, attr in (("Frame", "frame_elements"), ("Area", "area_elements")):
+            for key, elem in (getattr(model, attr, {}) or {}).items():
+                if not getattr(elem, "inactive", False):
+                    ids.add(f"{etype}:{key}")
+        return ids
+
     def _all_element_ids(self) -> set[str]:
         """Every ``Frame:``/``Area:`` id the displayed model can draw.
 
@@ -2790,12 +2803,28 @@ class MainWindow(QMainWindow):
         tell them apart on its own.  Inactive (split/meshed) parents are
         skipped, so an id that is never drawn cannot leak into the hidden set.
         """
-        model = self._model
-        ids: set[str] = set()
-        for etype, attr in (("Frame", "frame_elements"), ("Area", "area_elements")):
-            for key, elem in (getattr(model, attr, {}) or {}).items():
-                if not getattr(elem, "inactive", False):
-                    ids.add(f"{etype}:{key}")
+        return self._drawable_element_ids(self._model)
+
+    def _restore_hidden_elements(self, hidden: Any, model: Any) -> set[str]:
+        """Restore a saved hidden set, dropping it when it names another topology.
+
+        A hidden set captured while the model was preprocessed (split/meshed)
+        references child ids (``Frame:5_af_0_1``, ``Area:100_sub_0_0``) that do
+        not exist in the freshly-parsed raw model.  Re-applying it would hide
+        raw members that merely share ids with the processed topology, so when
+        any saved id is not drawable in *model* the whole set is treated as
+        stale and dropped.
+        """
+        if not isinstance(hidden, list):
+            return set()
+        ids = {str(ref) for ref in hidden}
+        if ids and not ids <= self._drawable_element_ids(model):
+            self.log(
+                f"Dropping {len(ids)} hidden element(s) saved for a different "
+                "(preprocessed) topology.",
+                "warn",
+            )
+            return set()
         return ids
 
     def _selected_element_refs(self) -> set[str]:
@@ -4617,8 +4646,7 @@ class MainWindow(QMainWindow):
                     panel.set_recipe(Recipe.from_dict(recipe_dict))
 
         viewport = manifest.get("viewport") or {}
-        hidden = viewport.get("hidden_elem_ids")
-        self._hidden_elem_ids = {str(ref) for ref in hidden} if isinstance(hidden, list) else set()
+        self._hidden_elem_ids = self._restore_hidden_elements(viewport.get("hidden_elem_ids"), sap)
 
         self._apply_display_values(manifest.get("display") or {})
 
@@ -4655,7 +4683,7 @@ class MainWindow(QMainWindow):
             level = "info" if "is stale" in note else "warn"
             self.log(note, level)
         hidden = state.get("hidden_elem_ids")
-        self._hidden_elem_ids = {str(ref) for ref in hidden} if isinstance(hidden, list) else set()
+        self._hidden_elem_ids = self._restore_hidden_elements(hidden, model)
         self.show_model(model)
         self._restore_camera(state.get("camera_position"))
         return True
@@ -5114,7 +5142,14 @@ class MainWindow(QMainWindow):
             baseline_camera, baseline_hidden = self._reset_view_baseline
             if camera == baseline_camera and frozenset(self._hidden_elem_ids) == baseline_hidden:
                 return
-        state = {"hidden_elem_ids": sorted(self._hidden_elem_ids)}
+        state: dict = {}
+        # A hidden set only applies to the raw model a later open restores.  If
+        # the user hid elements while viewing the preprocessed (split/meshed)
+        # topology, those ids reference child elements absent from the raw file,
+        # and restoring them would re-hide raw members that merely share ids
+        # with the processed topology — so keep only the camera in that case.
+        if self._store is None or self._model is not self._store.preprocessed():
+            state["hidden_elem_ids"] = sorted(self._hidden_elem_ids)
         if camera:
             state["camera_position"] = camera
         for note in save_view_state(self._source_label, state):
