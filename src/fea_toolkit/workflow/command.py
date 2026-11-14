@@ -36,12 +36,29 @@ def _literal(value: str) -> Any:
 def _render_value(value: Any) -> str:
     """Render a parameter value for a command string.
 
-    A string is double-quoted (the scanner's own quoting rule), so a value with
-    spaces or a semicolon survives the round-trip; everything else uses
-    :func:`repr`, which :func:`ast.literal_eval` parses back exactly.
+    Strings are double-quoted with :func:`json.dumps` (the scanner's own quoting
+    rule), so a value with spaces, a semicolon or a ``KEY=`` fragment survives
+    the round-trip.  Containers are rendered recursively the same way — every
+    nested string double-quoted — so a structured parameter such as
+    ``{"Wind direction=Y": 1.0}`` stays a single clause instead of splitting on
+    the inner space, and :func:`ast.literal_eval` still parses the result back
+    exactly (bools and ``None`` keep their Python spellings).
     """
     if isinstance(value, str):
         return json.dumps(value)
+    if isinstance(value, bool) or value is None:
+        return repr(value)
+    if isinstance(value, dict):
+        return (
+            "{"
+            + ", ".join(f"{_render_value(k)}: {_render_value(v)}" for k, v in value.items())
+            + "}"
+        )
+    if isinstance(value, (list, tuple)):
+        items = ", ".join(_render_value(item) for item in value)
+        if isinstance(value, tuple):
+            return "(" + items + ("," if len(value) == 1 else "") + ")"
+        return "[" + items + "]"
     return repr(value)
 
 

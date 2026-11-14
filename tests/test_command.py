@@ -55,6 +55,18 @@ def test_compile_dict_and_list_values():
     ]
 
 
+def test_step_to_command_round_trips_nested_string_keys():
+    """A structured parameter's nested string keys must survive the round-trip.
+
+    ``repr`` emits single-quoted dicts, whose inner spaces (``Wind direction=Y``)
+    would split the clause when re-scanned.  The serializer must double-quote
+    nested strings so recompilation succeeds.
+    """
+    step = compile_command('run_static cases={"Wind": {"Wind direction=Y": 1.0}}')
+    again = compile_command(step_to_command(step))
+    assert again.params["cases"] == {"Wind": {"Wind direction=Y": 1.0}}
+
+
 def test_compile_bare_word_parameter_is_a_string():
     assert compile_command("chart chart=storey_displacements").params["chart"] == (
         "storey_displacements"
