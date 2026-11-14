@@ -26,6 +26,11 @@ from .base import AnalysisResult
 
 __all__ = ["collapse_criterion", "collapse_intensity", "run_ida"]
 
+#: Ceiling on bisection refinements, so a tolerance that cannot be represented
+#: in floating point (or a stalled bracket) terminates instead of re-running the
+#: transient analysis indefinitely.
+_BISECTION_MAX_ITER = 100
+
 
 def collapse_intensity(
     intensities: Sequence[float],
@@ -137,14 +142,27 @@ def _cluster_elevations(node_z: dict) -> list[float]:
 def _fundamental_period(modal_result: Any) -> Optional[float]:
     """First-mode period (s) from a modal result, or ``None`` when unavailable.
 
-    The modal result's ``periods`` list is in ascending order, so the first
-    entry is the fundamental period — the ``T1`` the record's ``Sa(T1)`` is
-    evaluated at.
+    :func:`~fea_toolkit.analysis.modal.run_modal_analysis` stores its result as
+    ``data = {"modal": {…}, "shapes": {…}}``, while the builder's own
+    :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.run_modal_analysis`
+    returns the flat modal dict — so both the nested ``{"modal": {"periods": …}}``
+    and the flat ``{"periods": …}`` representations are read.  ``periods`` may be
+    a list or a NumPy array, so it is sized with ``len`` (never truth-tested) and
+    the first entry is the fundamental period (the list is ascending).
     """
     try:
-        periods = modal_result.data["modal"]["periods"]
-        if periods and float(periods[0]) > 0.0:
-            return float(periods[0])
+        data = getattr(modal_result, "data", None)
+        if not isinstance(data, dict):
+            data = {"modal": data}
+        modal = data.get("modal", data)
+        if not isinstance(modal, dict):
+            return None
+        periods = modal.get("periods")
+        if periods is None or np.ndim(periods) == 0 or len(periods) == 0:
+            return None
+        t1 = float(np.asarray(periods).ravel()[0])
+        if t1 > 0.0:
+            return t1
     except (KeyError, TypeError, IndexError, ValueError):
         pass
     return None
@@ -235,7 +253,9 @@ def run_ida(
             as the result label and to load ``accel_base`` when not supplied.
         intensities: Ascending record scale factors (the IM ladder).
         dt: Integration time step (s).
-        num_steps: Integration steps per rung.
+        num_steps: Integration steps per rung.  Reconciled to the record's
+            length (``len(accel_base)``) so the transient evaluates exactly the
+            excitation extent the spectral IM covers.
         direction: Excitation direction (``"X"``/``"Y"``/``"Z"``).
         damping_ratio: Rayleigh damping ratio.
         collapse_drift: Peak drift-ratio collapse threshold (``None`` disables
@@ -278,6 +298,12 @@ def run_ida(
     accel_base = np.asarray(accel_base, dtype=float)
     if accel_base.ndim != 1:
         raise ValueError("The ground motion must be a single column of acceleration values.")
+    # The spectral IM is computed over the whole record (see below), so the
+    # transient must evaluate the same extent.  Reconcile ``num_steps`` to the
+    # record length: a shorter run would leave an unanalysed record suffix that
+    # ``converged_steps == num_steps`` could still call complete, and a longer
+    # run would count an unexcited zero tail as part of the record.
+    num_steps = len(accel_base)
 
     height = _structure_height(mesh_model)
     node_z = _node_z(mesh_model)
@@ -289,6 +315,13 @@ def run_ida(
         storey_elevations = _cluster_elevations(node_z)
         storey_method = "node_clustering" if len(storey_elevations) >= 2 else "roof_proxy"
         storey_confidence = "low" if len(storey_elevations) >= 2 else None
+    # Resolve the structural base (the lowest node elevation) and include it in
+    # the ladder, so the base-to-first-floor interval contributes to the peak
+    # interstorey drift instead of being dropped when the story list omits it.
+    if node_z:
+        base_elevation = min(node_z.values())
+        if not any(abs(float(e) - base_elevation) <= 1e-9 for e in storey_elevations):
+            storey_elevations = sorted([base_elevation, *storey_elevations])
     drift_measure = "interstorey_d_max" if len(storey_elevations) >= 2 else "roof_proxy"
 
     # ── Record intensity measure — Sa(T1, 5 %)/g ─────────────────────
@@ -382,13 +415,21 @@ def run_ida(
     # ── Bisection refinement (Ibarra–Krawinkler 2005) ───────────────
     bisection: Optional[dict[str, Any]] = None
     if tolerance is not None and im_collapse is not None:
+        if not (np.isfinite(tolerance) and tolerance > 0.0):
+            raise ValueError(f"tolerance must be finite and positive, got {tolerance!r}")
         idx = ladder.index(im_collapse)
         if idx > 0:
             lo = ladder[idx - 1]
             hi = im_collapse
             evaluations: list[dict[str, Any]] = []
-            while (hi - lo) / hi > tolerance:
+            for _ in range(_BISECTION_MAX_ITER):
+                if (hi - lo) / hi <= tolerance:
+                    break
                 mid = 0.5 * (lo + hi)
+                if mid <= lo or mid >= hi:
+                    # The bracket can no longer be narrowed in floating point;
+                    # stop rather than re-running the same transient forever.
+                    break
                 drift, ok, data = _run(mid)
                 _note(mid, ok, drift, data)
                 evaluations.append({"intensity": mid, "drift": drift, "converged": ok})

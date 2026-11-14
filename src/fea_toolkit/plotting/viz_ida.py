@@ -393,8 +393,10 @@ def plot_ida_curve(
 
     The x-axis is the physical intensity measure ``scale × Sa_T1_g`` — the
     record's 5 %-damped spectral acceleration at the first-mode period,
-    normalised by gravity — when the result carries ``Sa_T1_g``; it falls back
-    to the raw record scale factor otherwise.  Non-converged rungs are marked
+    normalised by gravity — when the result carries a finite, positive
+    ``Sa_T1_g``; it falls back to the raw record scale factor otherwise (a
+    missing, zero, or non-finite value is treated as absent, so raw-scale data
+    is never labelled as ``Sa(T1, 5 %)/g``).  Non-converged rungs are marked
     separately from the converged response, and the collapse intensity (when
     found) is drawn as a vertical line.
 
@@ -423,7 +425,16 @@ def plot_ida_curve(
     if converged.shape != drifts.shape:
         converged = np.ones(drifts.shape, dtype=bool)
 
-    sa_t1_g = float(result.get("Sa_T1_g", 1.0) or 1.0)
+    sa_t1_g = result.get("Sa_T1_g")
+    try:
+        sa_t1_g = float(sa_t1_g)
+    except (TypeError, ValueError):
+        sa_t1_g = None
+    if sa_t1_g is None or not np.isfinite(sa_t1_g) or sa_t1_g <= 0.0:
+        sa_t1_g = 1.0
+        use_physical_im = False
+    else:
+        use_physical_im = True
     im = intensities * sa_t1_g
 
     if ax is None:
@@ -450,7 +461,7 @@ def plot_ida_curve(
             linewidth=1.2,
             label=f"collapse = {float(collapse) * sa_t1_g:.3g}",
         )
-    if "Sa_T1_g" in result:
+    if use_physical_im:
         ax.set_xlabel("Sa(T1, 5 %) / g")
     else:
         ax.set_xlabel("record scale factor (IM)")

@@ -571,11 +571,14 @@ def peak_interstorey_drift(
     Lightweight, pandas-free analogue of :func:`storey_drifts` for transient
     (time-history) results.  Each node's history is ``(n_steps, >=2)`` (columns
     X, Y, …) or ``(n_steps,)``; the X/Y components are the first two columns.
+    Equivalent elevations are deduplicated, and the structural base must be part
+    of *storey_elevations* for the base-to-first-floor interval to be counted.
     Nodes are assigned to their nearest storey elevation within the
-    ``z_tolerance / 2`` half-band, each storey's horizontal displacement
-    magnitude is taken at every time step, consecutive storeys are differenced
-    and divided by their height interval, and the peak ratio over all intervals
-    and time steps is returned.
+    ``z_tolerance / 2`` half-band, each level's signed horizontal displacement
+    is reduced to a shared floor reference (the mean of its nodes' X / Y
+    histories) at every step, consecutive levels are differenced in X and Y,
+    the magnitude is normalised by their height interval, and the peak ratio
+    over all intervals and time steps is returned.
 
     Args:
         node_z: ``{node_key: z}`` in model length units.
@@ -589,10 +592,17 @@ def peak_interstorey_drift(
         The peak interstorey-drift ratio, or ``0.0`` when fewer than two
         storeys resolve or no node carries a usable history.
     """
-    elevations = np.asarray(sorted(float(e) for e in storey_elevations), dtype=float)
+    # Deduplicate equivalent elevations: a repeated diaphragm / story level
+    # would otherwise leave an empty level whose zero-height interval skips the
+    # drift between the levels on either side of it.
+    elevations = np.unique(np.asarray([float(e) for e in storey_elevations], dtype=float))
     if elevations.size < 2:
         return 0.0
 
+    # Per level, accumulate the signed (ux, uy) histories of every node assigned
+    # to that level.  The signed components are kept so the drift is computed
+    # from relative X / Y displacements, not from independently reduced
+    # magnitudes.
     per_level: dict[int, list] = {i: [] for i in range(elevations.size)}
     for key, z in node_z.items():
         hist = displacements.get(key)
@@ -610,27 +620,36 @@ def peak_interstorey_drift(
         zi = float(z)
         level = int(np.argmin(np.abs(elevations - zi)))
         if abs(elevations[level] - zi) <= z_tolerance / 2:
-            per_level[level].append(np.sqrt(ux**2 + uy**2))
+            per_level[level].append((ux, uy))
 
-    level_peaks: list = [None] * elevations.size
+    # Shared floor reference: each level is reduced to a single signed history
+    # (the mean horizontal displacement of its nodes at every step), so adjacent
+    # levels are differenced by corresponding histories rather than by
+    # independently selected per-node maxima (which can pick different nodes at
+    # different steps).
+    level_ref: list = [None] * elevations.size
     for i in range(elevations.size):
-        mags = per_level[i]
-        if not mags:
+        comps = per_level[i]
+        if not comps:
             continue
-        level_peaks[i] = np.max(np.vstack(mags), axis=0)
+        ux = np.mean(np.vstack([c[0] for c in comps]), axis=0)
+        uy = np.mean(np.vstack([c[1] for c in comps]), axis=0)
+        level_ref[i] = (ux, uy)
 
     peak = 0.0
     for j in range(1, elevations.size):
-        lo, hi = level_peaks[j - 1], level_peaks[j]
+        lo, hi = level_ref[j - 1], level_ref[j]
         if lo is None or hi is None:
             continue
         h = float(elevations[j] - elevations[j - 1])
         if h < 1e-12:
             continue
-        n = min(lo.size, hi.size)
+        n = min(lo[0].size, hi[0].size)
         if n == 0:
             continue
-        peak = max(peak, float(np.max(np.abs(hi[:n] - lo[:n])) / h))
+        dux = hi[0][:n] - lo[0][:n]
+        duy = hi[1][:n] - lo[1][:n]
+        peak = max(peak, float(np.max(np.hypot(dux, duy)) / h))
     return peak
 
 
