@@ -635,7 +635,7 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
     accepts any ``{key: np.ndarray}`` mapping (a loaded NPZ file, or a
     plain dict in tests / in-process consumers).
 
-    Returns a list of error/warning messages (empty = fully valid).
+    Returns a list of error messages (empty = fully valid).
     """
     messages: list[str] = []
 
@@ -667,11 +667,28 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
         dims["N_analysis"] = len(at)
 
     def _check_shape(arr_name: str, arr, shape_desc: str, dtype_str: str):
-        """Validate shape and dtype of a single array."""
+        """Validate shape and dtype of a single array.
+
+        ``dtype_str`` is the schema's declared dtype (``"str"`` / ``"float"`` /
+        ``"int"`` / ``"bool"``) and is enforced here, so a field such as
+        ``ida/{record}/drift_measure`` cannot pass as floats or a multi-element
+        array.  An empty ``shape_desc`` declares a scalar (at most one value).
+        """
         if arr is None:
             return
         expected = shape_desc.strip()
         actual_shape = arr.shape
+
+        kind = getattr(arr.dtype, "kind", None)
+        if dtype_str == "str" and kind not in ("U", "S"):
+            messages.append(f"  Dtype mismatch for {arr_name}: expected str, got {arr.dtype}")
+        elif dtype_str == "float" and kind != "f":
+            messages.append(f"  Dtype mismatch for {arr_name}: expected float, got {arr.dtype}")
+        elif dtype_str == "int" and kind not in ("i", "u"):
+            messages.append(f"  Dtype mismatch for {arr_name}: expected int, got {arr.dtype}")
+        elif dtype_str == "bool" and kind != "b":
+            messages.append(f"  Dtype mismatch for {arr_name}: expected bool, got {arr.dtype}")
+
         if expected:
             parts = expected.split()
             resolved_parts = []
@@ -702,6 +719,10 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
                     f"  Shape mismatch for {arr_name}: "
                     f"expected {expected_shape}, got {actual_shape}"
                 )
+        elif arr.size > 1:
+            # An empty shape descriptor declares a scalar; more than one value
+            # (e.g. a multi-element ``drift_measure``) is a schema violation.
+            messages.append(f"  Expected a scalar value for {arr_name}, got shape {actual_shape}")
 
     # ── Check geometry ─────────────────────────────────────────────
     optional_geo = {
@@ -1050,11 +1071,10 @@ def validate_npz(path: str) -> list[str]:
 
     Loads the archive and delegates to :func:`validate_arrays`, which
     checks that required geometry and analysis arrays exist and that
-    their shapes match the declared dimensions.  Dtype mismatches are
-    reported as warnings (prefixed with ``[WARN]``) but do not block
-    validation.
+    their shapes and dtypes match the schema's declared values (including
+    the scalar shape of the empty-``shape`` fields).
 
-    Returns a list of error/warning messages (empty = fully valid).
+    Returns a list of error messages (empty = fully valid).
     """
     data = None
     try:

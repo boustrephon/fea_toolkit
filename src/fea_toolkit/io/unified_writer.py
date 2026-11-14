@@ -630,6 +630,7 @@ def write_results(
     # single-record generic ``run_ida`` dict (dispatched on the ``records`` key).
     if ida_results:
         from .npz_writer import (
+            _merge_ida_transient,
             collect_ida_arrays,
             collect_ida_transient_arrays,
             collect_single_ida_arrays,
@@ -644,7 +645,7 @@ def write_results(
             # does for a single-record run.
             ida_transient = collect_ida_transient_arrays(ida_results)
             if ida_transient:
-                arrays.update(ida_transient)
+                _merge_ida_transient(arrays, ida_transient)
 
     if static_results:
         analysis_types.append("static")

@@ -664,7 +664,7 @@ def results_arrays(
             ida_transient = collect_ida_transient_arrays(ida_results)
             if ida_transient:
                 analysis_types.append("transient")
-                arrays.update(ida_transient)
+                _merge_ida_transient(arrays, ida_transient)
     # NOTE: Legacy flat aliases (shell_fx, shell_fy, ...) were previously
     # written here for backward compatibility.  As of 2026-07 all consumers
     # use the namespaced ``shell_forces/*`` keys or the geometry-native
@@ -1411,6 +1411,24 @@ def collect_single_ida_arrays(
         arrays[f"ida/{key_name}"] = np.asarray(value, dtype=dtype)
 
     return arrays
+
+
+def _merge_ida_transient(arrays: dict[str, Any], ida_transient: dict[str, Any]) -> None:
+    """Merge an IDA history's transient block, rejecting a case-name collision.
+
+    :func:`collect_ida_transient_arrays` names its case ``ida_<record>``; if the
+    caller also supplied a transient run under that exact case name, an
+    ``arrays.update`` would silently combine two unrelated histories.  Reject
+    the overlap instead of merging them.
+    """
+    overlap = set(arrays) & set(ida_transient)
+    if overlap:
+        raise ValueError(
+            "IDA transient history collides with an existing transient case "
+            f"({sorted(overlap)[:5]} ...); give the IDA record a unique name so "
+            "separate histories cannot be combined"
+        )
+    arrays.update(ida_transient)
 
 
 def collect_ida_transient_arrays(ida_result: dict[str, Any]) -> dict[str, np.ndarray]:

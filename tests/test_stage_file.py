@@ -523,10 +523,11 @@ class TestStageFileValidation:
         # N_mode is resolved from modal/period, so the per-mode rs arrays
         # share its length.
         data["modal/period"] = np.zeros(n_mode)
-        for key, (shape_desc, _dtype) in RS_ARRAYS.items():
+        dtype_map = {"float": float, "int": int, "str": str, "bool": bool}
+        for key, (shape_desc, dtype_str) in RS_ARRAYS.items():
             if key.startswith(("rs/elem_", "rs/node_")):
                 continue  # the optional blocks — deliberately absent
-            data[key] = np.zeros(n_mode if shape_desc else 1)
+            data[key] = np.zeros(n_mode if shape_desc else 1, dtype=dtype_map[dtype_str])
 
         assert validate_arrays(data) == []
 
