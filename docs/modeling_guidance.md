@@ -159,8 +159,8 @@ affected by the integration-rule softening length.)
 | divergence on strong records with `Clough` | degrading unloading stiffness | switch to `Hysteretic` / `Steel02` |
 | gravity `Norm = NaN` | single-step load shock | add `gravity_num_substeps` |
 | `BandGen` stall / NaN on large models | banded factorisation | `solver_system: "UmfPack"` |
-| `analyze … returned: -2` + "matrix singular" | **stiffness singularity, not convergence** — rigid-body mode / unconnected DOF | check boundary conditions & connectivity; run modal to find the free mode |
-| `analyze … returned: -3` | genuine convergence failure in the iteration | adjust algorithm / shrink the time step / relax tolerance (see §8) |
+| `analyze … returned: -2` + "matrix singular" | **singular stiffness (a model problem)** — rigid-body mode / unconnected DOF | check boundary conditions & connectivity; run modal to find the free mode.  `-2` *without* a singular matrix is an integrator failure, not a model problem |
+| `analyze … returned: -3` | a failed convergence test — **or** a singular linear solve inside `solveCurrentStep()`, so read the messages | a singular-matrix message → fix the model (do not tune convergence); otherwise adjust algorithm / shrink the time step / relax tolerance (see §8) |
 | `ForceBeamColumn3d::update() -- failed to get compatible …` | section constitutive response: bad material, near-singular section stiffness, fibres oriented wrong for 2D bending, or not discretised in both directions in 3D | inspect the tagged element's sections; swap materials to their elastic equivalents one at a time |
 
 (Full solver tables: `llm_guide.md` §5.)
@@ -251,8 +251,11 @@ nonlinear verification paper.
   necessary; use `NormDispIncr` for very stiff members or the `Penalty` handler,
   and scale the tolerance by **√N** for large models.  Relative norms misbehave
   when the applied load changes abruptly.
-- Error codes: `-2` = singular stiffness (a model problem); `-3` = convergence
-  failure — see §6.
+- Error codes are a hint, not a diagnosis: `-2` usually means a singular
+  stiffness matrix (a model problem) but can appear without one, and `-3`
+  usually means a failed convergence test but can also come from a singular
+  linear solve inside `solveCurrentStep()` — diagnose by the failure stage and
+  the accompanying solver message, not the code alone — see §6.
 
 ### 8.4 Source register
 

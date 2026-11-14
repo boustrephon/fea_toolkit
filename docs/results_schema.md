@@ -524,7 +524,7 @@ and wired through `write_results_npz()` via the `ida_results` argument.
 | `ida/<record>/converged` | `(N_level,)` | `bool` | Per-level convergence (`converged_steps == num_steps`) |
 | `ida/<record>/collapse_scale` | `()` | `float` | The (bisection-refined) collapse scale factor, or NaN |
 | `ida/<record>/collapse_criterion` | `()` | `str` | `"nonconvergence"` / `"drift"` / `"none"` |
-| `ida/<record>/Sa_T1_g` | `()` | `float` | The record's 5 %-damped `Sa(T1)/g` at scale 1 |
+| `ida/<record>/Sa_T1_g` | `()` | `float` | The record's 5 %-damped `Sa(T1)/g` at scale 1 — a real spectral ordinate when a modal period is available, `1.0` (scale-as-IM) otherwise |
 | `ida/<record>/source` | `()` | `str` | Record provenance `"USGS"` / `"CESMD"` |
 
 **Optional summary scalars** (written when the producer supplies them):
@@ -542,13 +542,16 @@ and wired through `write_results_npz()` via the `ida_results` argument.
 
 The block also accepts a **single-record generic** result from
 `fea_toolkit.analysis.ida.run_ida()`, written by
-`collect_single_ida_arrays()`.  The generic driver computes the record's
-5 %-damped `Sa(T1)/g` once from the unscaled record at the first-mode period
-(via `fea_toolkit.spectrum.sdof_spectral_acceleration`), so
+`collect_single_ida_arrays()`.  When the preceding modal result carries a
+first-mode period, the generic driver computes the record's 5 %-damped
+`Sa(T1)/g` once from the unscaled record at that period (via
+`fea_toolkit.spectrum.sdof_spectral_acceleration`), so
 `ida/<record>/Sa_T1_g` is a real spectral ordinate and the physical IM at each
-rung is `scale × Sa_T1_g`; `source` is the record path.  An optional per-record
-`drift_measure` records whether `drift` is the interstorey `d_max` or the
-roof-drift proxy:
+rung is `scale × Sa_T1_g`; `source` is the record path.  **Without a modal
+period the driver falls back to scale-as-IM** (`Sa_T1_g` defaults to `1.0`), so
+a reader must not interpret the fallback value as a spectral acceleration.  An
+optional per-record `drift_measure` records whether `drift` is the interstorey
+`d_max` or the roof-drift proxy:
 
 | Array | Shape | dtype | Description |
 |---|---|---|---|

@@ -370,14 +370,20 @@ units, a residual of exactly 1.000e-4 can sit marginally *above* a
 tolerance of 1e-4 due to round-off — OpenSees reports this as a
 failure even though the state is physically converged.  Relaxing the
 tolerance by a factor of 2 eliminates these near-miss failures without
-affecting accuracy.
+affecting accuracy.  **That ``2e-4`` value is a ``NormUnbalance``
+tolerance for kN-m units only — it is not a general target.**
+``NormDispIncr`` (a displacement-increment test) and any other unit
+system need their own tolerance chosen from the desired per-DOF
+accuracy, not from this round-off near-miss.
 
 **Practical points (LLMs: follow these rules)**
 
 1. **Always** include ``"solver_test_tol": 2e-4`` and
    ``"solver_test_max_iter": 1000`` in the config for RC + LayeredShell
-   pushover runs (the 2e-4 value applies to the documented kN-m unit
-   system; see `docs/pushover_analysis.md` for other unit systems).
+   pushover runs.  The ``2e-4`` value is a ``NormUnbalance`` tolerance for
+   the documented kN-m unit system **only**; ``NormDispIncr`` (and other unit
+   systems) require a separately chosen tolerance based on the desired
+   accuracy — see `docs/pushover_analysis.md`.
    Note: the default **primary** pushover test budget is 20
    iterations; the per-step automatic fallback (relaxed
    ``NormUnbalance`` + ``ModifiedNewton -initial``, see
@@ -410,23 +416,27 @@ Full theory and worked example: `docs/pushover_analysis.md`
 
 ### Convergence error codes (`-2` vs `-3`) and √N tolerance scaling
 
-The integer returned by ``analyze`` distinguishes a **model** problem from an
-**analysis** problem — diagnose the right one before touching solver settings
-(cross-checked against the community survey in `docs/modeling_guidance.md` §8):
+The integer returned by ``analyze`` is a *hint*, not a diagnosis — read the
+failure **stage** (build, gravity, or a lateral/transient step) and the
+**accompanying solver message** before touching any setting, because the same
+code can mean different things (cross-checked against the community survey in
+`docs/modeling_guidance.md` §8):
 
-| Return code | Signature | Meaning | Fix |
+| Return code | Typical signature | Meaning | Fix |
 |---|---|---|---|
-| `-2` | `…factorization failed, matrix singular U(i,i) = 0` (then `Integrator failed at iteration: 0`) | **Stiffness singularity — not a convergence failure.** A rigid-body mode, unconnected DOF, or wrong connectivity makes the tangent singular before any iteration. | Check boundary conditions and connectivity; run a modal analysis to surface the free/rigid mode. |
-| `-3` | `CTest*::test() - failed to converge … analyze failed, returned: -3` | **Genuine convergence failure** — the iteration could not satisfy the convergence test at this step. | Adjust the algorithm / shrink the time step / relax the tolerance; check the material models first (`modeling_guidance.md` §6). |
+| `-2` | usually `…factorization failed, matrix singular U(i,i) = 0` (then `Integrator failed at iteration: 0`) | An **integrator / factorization failure** — most often a singular tangent (a rigid-body mode, unconnected DOF, or wrong connectivity makes it singular before any iteration), but `-2` can also occur **without** a singular matrix when the integrator fails for another reason. | Read the message: a *singular matrix* points to a model problem — check boundary conditions and connectivity, and run a modal analysis to surface the free/rigid mode. A non-singular integrator failure is a solver problem, not a model one. |
+| `-3` | `CTest*::test() - failed to converge … analyze failed, returned: -3` | A **failed convergence test** at this step — but a singular linear solve inside `solveCurrentStep()` can also surface as `-3`, so the code alone does not prove the iteration merely missed tolerance. | Read the messages and the stage: a singular-matrix message means the model is singular (do **not** tune convergence); otherwise adjust the algorithm / shrink the time step / relax the tolerance, checking the material models first (`modeling_guidance.md` §6). |
 
 **Tolerance scaling (√N).**  The convergence test compares the 2-norm of a
 residual or displacement vector against an absolute tolerance.  With residuals
 spread over ``N`` equations the norm grows roughly as ``√N``, so a fixed norm
 tolerance is much stricter on a large model.  Scale the norm tolerance by **√N**
 (a ballpark ``N`` is fine) to keep the per-DOF accuracy unchanged — the default
-``1e-8`` is already far tighter than physically necessary, and
-``solver_test_tol: 2e-4`` (the RC + LayeredShell floor above) is a realistic
-target.  Use ``NormDispIncr`` instead of ``NormUnbalance`` for very stiff members
+``1e-8`` is already far tighter than physically necessary.  The
+``solver_test_tol: 2e-4`` figure from the RC + LayeredShell section above is a
+``NormUnbalance`` target for kN-m units, **not** a general value: a
+``NormDispIncr`` test or a different unit system needs its own tolerance chosen
+from the desired accuracy.  Use ``NormDispIncr`` instead of ``NormUnbalance`` for very stiff members
 or the ``Penalty`` constraint handler, whose penalty forces enter the residual
 norm.
 

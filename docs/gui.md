@@ -222,7 +222,12 @@ by a small change can be kept side by side.
 wired as **presets over the recipe** (like **Model ▸ Mesh…**): each opens the
 step dialog for its verb and, on OK, appends the step and runs the recipe — a
 spectrum, pushover, nonlinear-dynamic or IDA run prepends a default `modal` step first, since those
-verbs need its result.  These three are **still in process**: the presets run,
+verbs need its result.  **Nonlinear time-history** and **IDA** require
+OpenSeesPy to be available **in-process**: configuring an external OpenSees
+interpreter in the settings file does not enable them, and the out-of-process
+runner does not support these verbs yet (see
+[OpenSees runtime](#opensees-runtime-the-separate-build)).  Modal / spectrum /
+pushover are **still in process**: the presets run,
 but the underlying analyses are not yet reliable — modal analysis starts and
 then fails to complete (see [What is still missing](#what-is-still-missing)).
 
@@ -599,7 +604,7 @@ drives a *separately installed* OpenSees is the recorded route
 | Missing | Effect today |
 |---|---|
 | Modal / spectrum / pushover analyses (milestone 5, the rest) | The three menu entries are wired as recipe presets and run, but the underlying analyses are not yet reliable — modal analysis starts and then fails to complete |
-| Nonlinear time-history result visualisation | **Analysis ▸ Nonlinear time-history** runs; its peak quantities are summarised as a table view and its transient history is animated in the viewport (**Results ▸ Animate** steps through the record) |
+| Nonlinear time-history result visualisation | **Analysis ▸ Nonlinear time-history** runs **only with OpenSeesPy in-process** (the out-of-process runner does not support this verb); its peak quantities are summarised as a table view and its transient history is animated in the viewport (**Results ▸ Animate** steps through the record) |
 | Loads, storey and pushover plots (milestones 6–7) | A case's deformed shape *and* its member end forces **are** drawn in the GUI; load glyphs, storey plots and pushover curves still need the [Visualisation Toolkit](viewer.md) and the `plot_*` functions |
 | Element labels, the Property Tree tab, explicit interaction modes ([P23](_pending_work.md)) | The corresponding menu item and tab are greyed |
 | Window-layout persistence (milestone 8) | The mouse policy and the display-quality knobs **are** remembered (see the settings file above); dock positions and window geometry are not |
