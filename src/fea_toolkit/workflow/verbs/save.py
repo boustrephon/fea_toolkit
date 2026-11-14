@@ -8,6 +8,7 @@ output path must end in ``.json`` (the payload is JSON regardless of the
 original file's format).
 """
 
+import os
 from typing import Any
 
 from ..steps import SESSION, ParamSpec, Step, StepContext, StepResult, validate_params
@@ -32,15 +33,36 @@ SAVE_PARAMS: dict[str, ParamSpec] = {
 }
 
 
+def _publish_no_overwrite(tmp_path: str, base: Any) -> str:
+    """Publish *tmp_path* under the first free ``_vN`` suffix of *base*.
+
+    ``os.link`` creates the destination atomically and raises
+    ``FileExistsError`` when it already exists, so the next suffix is tried
+    instead — neither the new snapshot nor an existing one is lost to a
+    concurrent writer.
+    """
+    index = 1
+    while True:
+        candidate = base.with_name(f"{base.stem}_v{index}{base.suffix}")
+        try:
+            os.link(tmp_path, candidate)
+        except FileExistsError:
+            index += 1
+            continue
+        os.unlink(tmp_path)
+        return str(candidate)
+
+
 def _write_document(context: StepContext, path: str, *, versioned: bool = False) -> str:
     """Write ``context.model_data`` (and its named selections) to a JSON document.
 
     The model is written as a model-codec snapshot; when the context holds named
     selections they are persisted in a document envelope keyed by
     :data:`DOCUMENT_KEY`, so an ``open`` step restores them with the model.
-    Writes go to a temporary file in the destination directory and are
-    atomically moved over the target only once the write has succeeded, so a
-    failed write never clobbers an existing document.
+    Writes go to a temporary file in the destination directory.  A versioned
+    save publishes with atomic **no-overwrite** semantics (the next ``_vN``
+    suffix, retried on a collision), while a non-versioned save atomically
+    replaces the target — a failed write never clobbers an existing document.
     """
     import contextlib
     import json
@@ -49,10 +71,8 @@ def _write_document(context: StepContext, path: str, *, versioned: bool = False)
     from pathlib import Path
 
     from ...io.model_codec import model_to_dict, model_to_json
-    from ...io.model_loader import next_version_path
 
-    target = next_version_path(path) if versioned else path
-    destination = Path(target)
+    destination = Path(path)
     if destination.suffix.lower() != ".json":
         raise ValueError(
             "save: the document is written as model-codec JSON, so the output "
@@ -79,14 +99,18 @@ def _write_document(context: StepContext, path: str, *, versioned: bool = False)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(payload)
-        os.replace(tmp_path, destination)
+        if versioned:
+            target = _publish_no_overwrite(tmp_path, destination)
+        else:
+            os.replace(tmp_path, destination)
+            target = str(destination)
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(tmp_path)
         raise
 
     context.document_dirty = False
-    return str(target)
+    return target
 
 
 def _load_document(path: str) -> tuple[Any, dict]:

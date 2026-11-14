@@ -25,11 +25,18 @@ __all__ = ["compile_command", "missing_needs", "step_to_command"]
 
 
 def _literal(value: str) -> Any:
-    """Parse a parameter value as a Python literal, or a bare word as a string."""
+    """Parse a parameter value as a Python literal, or a bare word as a string.
+
+    ``ast.literal_eval`` raises ``TypeError`` for an unhashable literal key
+    (``{[1]: 2}``) and ``RecursionError`` / ``MemoryError`` for pathological
+    input; all of these are treated as "not a literal", so the bare word falls
+    through to :meth:`ParamSpec.coerce` and is rejected there with a
+    ``ValueError``.
+    """
     stripped = value.strip()
     try:
         return ast.literal_eval(stripped)
-    except (ValueError, SyntaxError):
+    except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
         return stripped
 
 

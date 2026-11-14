@@ -356,17 +356,33 @@ class Recipe:
             The recipe the script's ``RECIPE`` literal describes.
 
         Raises:
-            ValueError: If the script has no ``RECIPE = …`` literal, or its value
-                is not a recipe mapping (handed to :meth:`from_dict`).
+            ValueError: If the script cannot be parsed, has no ``RECIPE = …``
+                literal, or its literal value cannot be evaluated (a non-literal,
+                an unhashable key, or pathological nesting) or is not a recipe
+                mapping — the original parse / evaluation exception is chained
+                as the cause.
         """
         import ast
 
-        tree = ast.parse(source)
+        try:
+            tree = ast.parse(source)
+        except SyntaxError as exc:
+            raise ValueError(f"invalid Python script: {exc}") from exc
         for node in tree.body:
             if isinstance(node, ast.Assign):
                 for target in node.targets:
                     if isinstance(target, ast.Name) and target.id == "RECIPE":
-                        return cls.from_dict(ast.literal_eval(node.value))
+                        try:
+                            value = ast.literal_eval(node.value)
+                        except (
+                            ValueError,
+                            SyntaxError,
+                            TypeError,
+                            MemoryError,
+                            RecursionError,
+                        ) as exc:
+                            raise ValueError(f"RECIPE is not a literal value: {exc}") from exc
+                        return cls.from_dict(value)
         raise ValueError("no RECIPE = {...} literal found in the script")
 
     def __len__(self) -> int:

@@ -148,5 +148,10 @@ def test_from_python_rejects_code_without_a_recipe_literal():
 
 
 def test_from_python_rejects_non_literal_values():
-    with pytest.raises((ValueError, SyntaxError)):
+    with pytest.raises(ValueError):
         Recipe.from_python("RECIPE = __import__('os').system('id')")
+
+
+def test_from_python_rejects_unhashable_literal_key():
+    with pytest.raises(ValueError):
+        Recipe.from_python("RECIPE = {[1]: 2}")
