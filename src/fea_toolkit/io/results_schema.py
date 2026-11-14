@@ -54,8 +54,10 @@ SCHEMA_VERSION_LEGACY = 1
 #:   ``ida/collapse_Sa_T1_g`` summaries and the ``ida/median_collapse_Sa_T1_gamma``
 #:   / ``ida/sigma_ln`` scalars.  The block also accepts a single-record generic
 #:   :func:`~fea_toolkit.analysis.ida.run_ida` result (via
-#:   ``collect_single_ida_arrays``): its intensity measure is the raw record
-#:   scale factor, so ``Sa_T1_g`` is written ``1.0``, and an optional per-record
+#:   ``collect_single_ida_arrays``): ``ida/{record}/Sa_T1_g`` stores the spectral
+#:   ordinate from ``ida_result["Sa_T1_g"]`` (a real 5 %-damped ``Sa(T1)/g`` when a
+#:   modal period is available) and defaults to ``1.0`` — scale-as-IM — only when
+#:   unavailable, and an optional per-record
 #:   ``ida/{record}/drift_measure`` records whether ``drift`` is the interstorey
 #:   ``d_max`` or the roof-drift proxy.  A ``4`` archive still reads — it simply
 #:   has no ``ida`` block, so ``"ida"`` is absent from its ``analysis_types``.

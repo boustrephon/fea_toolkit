@@ -534,7 +534,9 @@ def write_results(
             a single-record :func:`~fea_toolkit.analysis.ida.run_ida` result
             (via :func:`fea_toolkit.io.npz_writer.collect_single_ida_arrays`) —
             written under the ``ida/<record>/...`` block and listed in
-            ``analysis_types`` as ``"ida"``.
+            ``analysis_types`` as ``"ida"``.  A single-record run also retains
+            its collapse-rung transient, written under
+            ``transient/ida_<record>/...`` and advertised as ``"transient"``.
 
     Returns:
         Absolute path to the written file.
@@ -627,12 +629,22 @@ def write_results(
     # IDA collapse results — a multi-record ``collapse_ida_curves`` dict or a
     # single-record generic ``run_ida`` dict (dispatched on the ``records`` key).
     if ida_results:
-        from .npz_writer import collect_ida_arrays, collect_single_ida_arrays
+        from .npz_writer import (
+            collect_ida_arrays,
+            collect_ida_transient_arrays,
+            collect_single_ida_arrays,
+        )
 
         if "records" in ida_results:
             arrays.update(collect_ida_arrays(ida_results))
         else:
             arrays.update(collect_single_ida_arrays(ida_results))
+            # The generic driver retains the collapse-rung response; include it
+            # as a ``transient`` stage, exactly as ``npz_writer.results_arrays``
+            # does for a single-record run.
+            ida_transient = collect_ida_transient_arrays(ida_results)
+            if ida_transient:
+                arrays.update(ida_transient)
 
     if static_results:
         analysis_types.append("static")
@@ -646,6 +658,11 @@ def write_results(
         analysis_types.append("transient")
     if ida_results:
         analysis_types.append("ida")
+    # A single-record generic IDA run retains its collapse-rung transient, which
+    # is a first-class ``transient`` stage (``npz_writer`` emits it the same
+    # way); advertise it when the arrays are present and not already listed.
+    if any(key.startswith("transient/") for key in arrays) and "transient" not in analysis_types:
+        analysis_types.append("transient")
     # Always written — an empty array for a geometry-only file, matching the
     # legacy ``write_results_npz`` manifest so ``describe_results_npz`` and
     # the review's archive summary read identically from either writer.
