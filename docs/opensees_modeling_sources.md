@@ -66,16 +66,23 @@ related: [modeling_guidance.md, imk_deterioration_model.md, llm_guide.md]
   *Fiber Based Modeling Strategies of RC Columns*: Concrete04-confined core +
   Concrete01 cover, physical regularisation, plastic-hinge length = section
   depth.
-- **`open.metu.edu.tr`** — METU theses: steel shear-link `J2BeamFiber`;
-  semi-rigid-connection beam integration.
+- **`open.metu.edu.tr`** — METU theses:
+  - `open.metu.edu.tr/handle/11511/105511` — Kılıç, Doğukan (2023),
+    *Development of shear link model for nonlinear analysis in OpenSees*:
+    steel shear-link `J2BeamFiber`.
+  - `open.metu.edu.tr/handle/11511/105257` — Türkbey, Memduh Ümit (2023),
+    *A novel approach to model a nonlinear frame element with semi-rigid
+    connections in OpenSees structural analysis program*:
+    semi-rigid-connection beam integration.
 - **`web.itu.edu.tr`** — ITU OpenSees-vs-SeismoStruct comparison presentation.
 
 ## Portuguese
 
 - **`hdl.handle.net/10362/11484`** — *Modelação tridimensional de estruturas
   sujeitas a sismos utilizando o OpenSees* (NOVA Lisboa, steel).
-- **`repositorio-aberto.up.pt`** — *ANÁLISES PUSHOVER* (FEUP/Porto, concentrated
-  vs distributed plasticity).
+- **`repositorio-aberto.up.pt/handle/10216/59856`** — Coutinho, Diogo Simões do
+  Amaral (2008), *Análise Pushover de edifícios em betão armado* (FEUP/Porto,
+  concentrated vs distributed plasticity).
 - **`hdl.handle.net/10362/152021`** — *Análise Não Linear de Pórticos de BA
   Reforçados com Pré-Esforço* (NOVA Lisboa, OpenSeesPy `nonlinearBeamColumn`).
 - **UNICAMP** (`doi.org/10.47749/t/unicamp.2006.377861`) — Fontana, physical

@@ -159,7 +159,7 @@ affected by the integration-rule softening length.)
 | divergence on strong records with `Clough` | degrading unloading stiffness | switch to `Hysteretic` / `Steel02` |
 | gravity `Norm = NaN` | single-step load shock | add `gravity_num_substeps` |
 | `BandGen` stall / NaN on large models | banded factorisation | `solver_system: "UmfPack"` |
-| `analyze … returned: -2` + "matrix singular" | **singular stiffness (a model problem)** — rigid-body mode / unconnected DOF | check boundary conditions & connectivity; run modal to find the free mode.  `-2` *without* a singular matrix is an integrator failure, not a model problem |
+| `analyze … returned: -2` + "matrix singular" | **singular stiffness (a model problem)** — rigid-body mode / unconnected DOF | check boundary conditions & connectivity; run modal to find the free mode.  A non-singular `-2` is **not** solver-only: inspect both the model (connectivity) and the integrator inputs (the load/control pairing, e.g. a zero displacement at an uncoupled control DOF) before choosing a remedy |
 | `analyze … returned: -3` | a failed convergence test — **or** a singular linear solve inside `solveCurrentStep()`, so read the messages | a singular-matrix message → fix the model (do not tune convergence); otherwise adjust algorithm / shrink the time step / relax tolerance (see §8) |
 | `ForceBeamColumn3d::update() -- failed to get compatible …` | section constitutive response: bad material, near-singular section stiffness, fibres oriented wrong for 2D bending, or not discretised in both directions in 3D | inspect the tagged element's sections; swap materials to their elastic equivalents one at a time |
 

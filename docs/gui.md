@@ -229,7 +229,11 @@ runner does not support these verbs yet (see
 [OpenSees runtime](#opensees-runtime-the-separate-build)).  Modal / spectrum /
 pushover are **still in process**: the presets run,
 but the underlying analyses are not yet reliable — modal analysis starts and
-then fails to complete (see [What is still missing](#what-is-still-missing)).
+then fails to complete.  Because a spectrum / pushover / nonlinear-dynamic /
+IDA preset prepends a **required** `modal` step, a modal failure stops the
+recipe run at that step, so those dependent analyses cannot complete through
+the preset flow until the modal analysis is reliable (see
+[What is still missing](#what-is-still-missing)).
 
 ### A view is a lens
 
@@ -610,7 +614,7 @@ drives a *separately installed* OpenSees is the recorded route
 | Window-layout persistence (milestone 8) | The mouse policy and the display-quality knobs **are** remembered (see the settings file above); dock positions and window geometry are not |
 | Shell (area) result display ([P36](_pending_work.md)) | Shell force resultants are extracted and stored in NPZ archives, but the GUI draws no per-shell scalar field |
 | Quad view (milestone 10) | A single viewport; use the Camera menu and the view cube |
-| `check` and `chart` verbs, and the command palette ([P30](_pending_work.md) phase C, [P31](_pending_work.md)) | The Recipe panel runs the verbs that exist (`scale_sections`, `mesh`, `run_static`, `combine`, the three model checks, the `capacity.*` checks and `mesh_checks`, and `chart`).  A recipe's solved cases and combinations **are** registered as result views, its checks as a check-table view, and its `chart` step as an embedded figure.  The `chart` kinds — storey displacements/forces, response spectra, pushover, modal, CSM and **IDA** (peak drift vs `Sa(T1, 5 %)/g`) — each render as an embedded figure |
+| `check` and `chart` verbs ([P30](_pending_work.md) phase C) | The Recipe panel runs the verbs that exist (`scale_sections`, `mesh`, `run_static`, `combine`, the three model checks, the `capacity.*` checks and `mesh_checks`, and `chart`).  A recipe's solved cases and combinations **are** registered as result views, its checks as a check-table view, and its `chart` step as an embedded figure.  The `chart` kinds — storey displacements/forces, response spectra, pushover, modal, CSM and **IDA** (peak drift vs `Sa(T1, 5 %)/g`) — each render as an embedded figure.  The **command palette** (`Recipe ▸ Command…`, `Ctrl+K`) is implemented: a command string compiles into a step and is inserted into the recipe (see [Workflow Command Palette](workflow_palette.md)) |
 
 ## Troubleshooting
 
