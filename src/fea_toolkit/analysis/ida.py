@@ -322,6 +322,12 @@ def run_ida(
         base_elevation = min(node_z.values())
         if not any(abs(float(e) - base_elevation) <= 1e-9 for e in storey_elevations):
             storey_elevations = sorted([base_elevation, *storey_elevations])
+    # Normalize the ladder before it is counted or handed to the drift
+    # reduction: duplicate (equivalent) elevations would otherwise inflate the
+    # level count and flip ``drift_measure`` while :func:`peak_interstorey_drift`
+    # sees a different, deduplicated ladder.  Both the measure choice and the
+    # drift calculation must use the same normalized elevations.
+    storey_elevations = sorted({float(e) for e in storey_elevations})
     drift_measure = "interstorey_d_max" if len(storey_elevations) >= 2 else "roof_proxy"
 
     # ── Record intensity measure — Sa(T1, 5 %)/g ─────────────────────
