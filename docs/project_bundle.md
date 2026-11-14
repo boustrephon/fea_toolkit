@@ -30,6 +30,7 @@ project.json    the manifest (recipe, views, active view, viewport, display)
 model.h5        the model stages — sap + mesh (write_model_file; .npz when h5py absent)
 results.npz     static + modal + response-spectrum arrays (the unified schema)
 figures.json    pushover ADRS figure data (adrs / pp / spectrum per direction)
+                and the single-run IDA curve
 tables.json     table-view payloads (modal, response-spectrum)
 ```
 
@@ -150,8 +151,8 @@ like a static load case (Option C).
 re-running anything:
 
 - the model (`sap` + `mesh` stages) and the recipe panel
-- every view, in order — geometry, results, tables, and the regenerated ADRS
-  figures — plus the active view
+- every view, in order — geometry, results, tables, and the regenerated
+  ADRS and IDA-curve figures — plus the active view
 - the camera, the hidden-element set, **and the display knobs** (the numeric
   sliders, force quantity, restraint style, extruded-frame toggle and detail,
   and the element-visibility toggles — `show_nodes` / `show_frames` /

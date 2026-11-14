@@ -10,7 +10,7 @@ category: [planning]
 ## Strategy — the next steps
 
 > This log is the single source of truth for pending work; this section is the
-> *sequencing layer* over it (maintained 2026-10-27).  The standalone plan
+> *sequencing layer* over it (maintained 2026-11-15).  The standalone plan
 > documents are historical records — `analysis_builder_migration_plan.md`,
 > `csm_test_model_plan.md`, `deprecation_plan.md` and `linting_fix_plan.md`
 > are ✅ complete and tagged `category: [archive]` (P9's Phase 3 triage resolved 2026-10-11 — baseline renewed,
@@ -107,6 +107,13 @@ now warns on duplicate story names/elevations, and the guidance is documented
 in `docs/modeling_guidance.md` §9 — split the towers into separate models for
 per-tower results (see also the CSI *Edit > Towers, Stories and Grid Systems*
 help and the ETABS Modelling FAQ).
+
+**Not yet done (follow-up).**  When `identify_stories` resolved per-storey
+`StoryLevel.node_ids` (the `area_elements` / `node_clustering` strategies),
+`run_ida` could map those node IDs to node tags and use that membership for the
+interstorey-drift reduction instead of re-clustering nodes by the default
+elevation band in `peak_interstorey_drift` — today only the `.elevation` is
+read, so a detected membership is discarded.
 
 ### GUI/workflow follow-ups — the nine-item batch (2026-10-12)
 
@@ -374,6 +381,14 @@ unified schema, and it must not.
    benchmark cache.  Only then migrate `benchmarks/sac_run.py` to read its
    peak scalars from a unified transient archive (optional follow-on, not a
    prerequisite).
+   **Follow-up (project-bundle persistence).**  The GUI animates NLD live
+   in-process, but a saved project restores only the summary *table*, not the
+   transient histories — `_nld_frames` / `_nld_times` do not survive reopen.
+   Persist the NLD transient block in the project bundle (via
+   `collect_transient_arrays` into `results.npz`) and restore
+   `_nld_frames` / `_nld_times` under `_table_key(label)` in
+   `open_project_path`, mirroring the IDA-curve figure persistence, so the
+   animate toggle works after reopening without re-running the analysis.
 
 **Where.** `io/results_schema.py`, `io/npz_writer.py`, `io/unified_writer.py`,
 `io/stage_writer.py`, `io/npz_reader.py`, `io/results_repository.py`,
@@ -802,6 +817,14 @@ extension is decided.
 group), ``workflow/steps.py`` (``SESSION`` kind + ``StepContext`` document
 state), ``workflow/verbs/{open,close,save,select}.py``, ``io/`` (versioned-path
 helper), and the GUI's tree + selection-authoring surface.
+
+**Follow-up (document-recipe GUI completion).**  `MainWindow._recipe_finished`
+has no `SESSION` branch, so an `open` step replaces `context.model_data` on the
+worker while the window's `_store` still points at the previous document —
+subsequent mesh / analysis results then apply to a document the window is not
+showing.  Handle the `SESSION` result (transfer the opened / closed document to
+the window's `_store`, or establish a supported worker → GUI transfer
+mechanism) so a recipe beginning with `open` actually drives the window.
 
 ### Tier 4 — Deferred / low-priority
 

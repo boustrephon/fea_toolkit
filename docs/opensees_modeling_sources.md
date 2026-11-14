@@ -44,8 +44,11 @@ related: [modeling_guidance.md, imk_deterioration_model.md, llm_guide.md]
 - **`nvlpubs.nist.gov/nistpubs/gcr/2017/NIST.GCR.17-917-46v2.pdf`** — NIST GCR
   17-917-46v2, *Guidelines for Nonlinear Structural Analysis and Design of
   Buildings, Part IIa — Steel Moment Frames*.
-- **`ir.lib.uwo.ca/csce2016/London/Structural/21`** — UWO STR-833 (Steneker &
-  Wiebe), panel-zone modelling.
+- **`ir.lib.uwo.ca/csce2016/London/Structural/21`** (Scholarship@Western,
+  Western University) — Steneker, P. & Wiebe, L. D. A. (2016), *STR-833:
+  Evaluation of the Contribution of Panel Zones to the Global Performance of
+  Moment Resisting Frames Under Seismic Load*, CSCE 2016 Annual Conference,
+  London, Ontario — panel-zone modelling.
 - **`peer.berkeley.edu`** — Kolozvari (2019), RC shear-wall models.
 
 ## Chinese

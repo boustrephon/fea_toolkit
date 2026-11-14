@@ -476,8 +476,12 @@ sources; it confirms the IMK choice above and adds one operational caveat.
   is the same lineage §4 traces to `IMKBilin`.
 - **Endorsement.**  NIST GCR 17-917-46v2 (Steel Moment Frames) treats
   concentrated-hinge models with IMK-type cyclic deterioration and fibre models
-  as equally suitable for overall frame response; fibres are preferred only for
-  arbitrary / hybrid sections and biaxial P–M interaction.  That is the same
+  as equally suitable for overall frame response; fibres are preferred for
+  arbitrary / hybrid sections and biaxial P–M interaction, and distributed
+  (fibre) models may additionally be warranted where the moment gradient along
+  a member is small or axial loads are high, since a distributed section tracks
+  the variable axial-load and moment interaction along the member.  That is the
+  same
   trade-off §1 records (hinges scale better to large frames; fibres keep more
   physics).
 - **Damping caveat for the lumped-hinge path.**  The IMK hinges here are
