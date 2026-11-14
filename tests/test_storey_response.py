@@ -610,3 +610,22 @@ class TestPeakInterstoreyDrift:
             peak_interstorey_drift(node_z, {1: np.zeros((3, 3)), 2: np.ones((3, 3))}, [0.0, 10.0])
             == 0.0
         )
+
+    def test_torsional_drift_is_not_cancelled_with_node_xy(self):
+        # Two nodes per level at y = ±5.  Pure torsion about the centroid puts
+        # opposite X displacements on the two roof nodes, so the level *mean*
+        # cancels to zero — but the rigid-body fit recovers Rz and adds the
+        # rotational contribution |ΔRz| · r_max / h = 0.02 · 5 / 10 = 0.01.
+        n = 2
+        node_z = {1: 0.0, 2: 0.0, 3: 10.0, 4: 10.0}
+        node_xy = {1: (0.0, -5.0), 2: (0.0, 5.0), 3: (0.0, -5.0), 4: (0.0, 5.0)}
+        base = np.zeros((n, 3))
+        roof_left = np.zeros((n, 3))
+        roof_left[:, 0] = 0.1
+        roof_right = np.zeros((n, 3))
+        roof_right[:, 0] = -0.1
+        d = {1: base, 2: base, 3: roof_left, 4: roof_right}
+        assert peak_interstorey_drift(node_z, d, [0.0, 10.0]) == pytest.approx(0.0)
+        assert peak_interstorey_drift(node_z, d, [0.0, 10.0], node_xy=node_xy) == pytest.approx(
+            0.01
+        )

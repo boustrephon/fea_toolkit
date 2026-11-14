@@ -286,7 +286,9 @@ def test_run_ida_retains_the_collapse_rung_transient(monkeypatch):
         tolerance=None,
     )
     assert result["transient_scale"] == 2.0  # the first non-converged rung
-    assert result["transient"]["converged_steps"] == 19  # len(accel_base) - 1
+    # num_steps is reconciled to len(accel_base) - 1; a non-converged rung
+    # reports one step fewer.
+    assert result["transient"]["converged_steps"] == 18
     assert set(result["transient"]["displacements"]) == {1, 2}
 
 
@@ -306,4 +308,5 @@ def test_run_ida_retains_the_top_rung_transient_without_collapse(monkeypatch):
     )
     assert result["collapse_intensity"] is None
     assert result["transient_scale"] == 1.0
-    assert result["transient"]["converged_steps"] == 20  # the full record extent
+    # num_steps is reconciled to len(accel_base) - 1 — the full excitation extent.
+    assert result["transient"]["converged_steps"] == 19

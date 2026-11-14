@@ -126,6 +126,21 @@ def _node_z(mesh_model: Any) -> dict:
     }
 
 
+def _node_xy(mesh_model: Any) -> dict:
+    """``{OpenSees node tag: (x, y)}`` for the mesh's recorded nodes.
+
+    Complements :func:`_node_z`: the rigid-body drift reduction needs each
+    node's plan position so the rotational (torsional) contribution to
+    interstorey drift is preserved instead of cancelling in the level mean.
+    """
+    nodes = getattr(mesh_model, "nodes", {}) or {}
+    return {
+        node.node_tag: (float(getattr(node, "x", 0.0)), float(getattr(node, "y", 0.0)))
+        for node in nodes.values()
+        if getattr(node, "node_tag", None) is not None
+    }
+
+
 def _cluster_elevations(node_z: dict) -> list[float]:
     """Cluster the mesh's node Z coordinates into storey elevations.
 
@@ -169,12 +184,17 @@ def _fundamental_period(modal_result: Any) -> Optional[float]:
 
 
 def _peak_drift(
-    data: Any, height: float, node_z: dict, storey_elevations: Sequence[float]
+    data: Any,
+    height: float,
+    node_z: dict,
+    node_xy: Optional[dict],
+    storey_elevations: Sequence[float],
 ) -> tuple[float, str]:
     """Peak drift ratio for a transient result — interstorey ``d_max`` or the roof proxy.
 
     With at least two storey elevations the drift is the peak interstorey-drift
-    ratio (:func:`~fea_toolkit.model.storey_response.peak_interstorey_drift`);
+    ratio (:func:`~fea_toolkit.model.storey_response.peak_interstorey_drift`,
+    passed *node_xy* so the torsional contribution is preserved);
     otherwise the roof-drift proxy (max horizontal nodal displacement / height),
     which for a single-interval structure is the same quantity.
 
@@ -191,7 +211,7 @@ def _peak_drift(
         from ..model.storey_response import peak_interstorey_drift
 
         return (
-            peak_interstorey_drift(node_z, displacements, storey_elevations),
+            peak_interstorey_drift(node_z, displacements, storey_elevations, node_xy=node_xy),
             "interstorey_d_max",
         )
     peak = 0.0
@@ -253,9 +273,11 @@ def run_ida(
             as the result label and to load ``accel_base`` when not supplied.
         intensities: Ascending record scale factors (the IM ladder).
         dt: Integration time step (s).
-        num_steps: Integration steps per rung.  Reconciled to the record's
-            length (``len(accel_base)``) so the transient evaluates exactly the
-            excitation extent the spectral IM covers.
+        num_steps: Integration steps per rung.  Reconciled to
+            ``len(accel_base) - 1`` — the step count
+            :func:`~fea_toolkit.spectrum.sdof_spectral_acceleration` integrates
+            — so the transient covers exactly the excitation interval the
+            spectral IM covers.
         direction: Excitation direction (``"X"``/``"Y"``/``"Z"``).
         damping_ratio: Rayleigh damping ratio.
         collapse_drift: Peak drift-ratio collapse threshold (``None`` disables
@@ -298,15 +320,18 @@ def run_ida(
     accel_base = np.asarray(accel_base, dtype=float)
     if accel_base.ndim != 1:
         raise ValueError("The ground motion must be a single column of acceleration values.")
-    # The spectral IM is computed over the whole record (see below), so the
-    # transient must evaluate the same extent.  Reconcile ``num_steps`` to the
-    # record length: a shorter run would leave an unanalysed record suffix that
-    # ``converged_steps == num_steps`` could still call complete, and a longer
-    # run would count an unexcited zero tail as part of the record.
-    num_steps = len(accel_base)
+    # The spectral IM is computed over the whole record by
+    # ``sdof_spectral_acceleration``, which integrates ``len(accel) - 1``
+    # Newmark steps (``accel[1:]`` — ``accel[0]`` is only the quiescent initial
+    # condition).  Reconcile ``num_steps`` to ``len(accel) - 1`` so the transient
+    # covers the same excitation interval: the Path series is defined only
+    # through ``accel[-1]``, so one extra step would append an unexcited zero
+    # tail the spectral IM never sees.
+    num_steps = max(len(accel_base) - 1, 0)
 
     height = _structure_height(mesh_model)
     node_z = _node_z(mesh_model)
+    node_xy = _node_xy(mesh_model)
     if stories:
         storey_elevations = [float(s.elevation) for s in stories]
         storey_method = getattr(stories[0], "method", None) or "identify_stories"
@@ -366,7 +391,7 @@ def run_ida(
             gravity_patterns=gravity_patterns,
             accel=accel,
         )
-        drift, _ = _peak_drift(result.data, height, node_z, storey_elevations)
+        drift, _ = _peak_drift(result.data, height, node_z, node_xy, storey_elevations)
         converged = bool(result.data.get("converged_steps") == num_steps)
         return drift, converged, result.data
 

@@ -560,11 +560,44 @@ def storey_drifts(
     return pd.DataFrame(rows)
 
 
+def _rigid_body_steps(
+    x: np.ndarray, y: np.ndarray, ux_stack: np.ndarray, uy_stack: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    """Fit a rigid body (``Ux, Uy, Rz``) at every step for one level.
+
+    Solves the same least-squares system as :func:`rigid_body_fit` (two
+    translations plus a rotation about the centroid) but vectorised over all
+    time steps, with the design matrix built once from the node positions.
+
+    Returns:
+        ``(Ux, Uy, Rz, r_max)`` — the first three are length-``n_steps`` arrays
+        and ``r_max`` is the farthest node-to-centroid distance (the lever arm
+        multiplying the rotational drift).
+    """
+    x_cm = float(np.mean(x))
+    y_cm = float(np.mean(y))
+    x_t = x - x_cm
+    y_t = y - y_cm
+    n = x.size
+    a_mat = np.zeros((2 * n, 3))
+    a_mat[0::2, 0] = 1.0
+    a_mat[0::2, 2] = -y_t
+    a_mat[1::2, 1] = 1.0
+    a_mat[1::2, 2] = x_t
+    b_mat = np.empty((2 * n, ux_stack.shape[1]))
+    b_mat[0::2, :] = ux_stack
+    b_mat[1::2, :] = uy_stack
+    theta, _, _, _ = np.linalg.lstsq(a_mat, b_mat, rcond=None)
+    r_max = float(np.max(np.hypot(x_t, y_t))) if n else 0.0
+    return theta[0], theta[1], theta[2], r_max
+
+
 def peak_interstorey_drift(
     node_z: dict,
     displacements: dict,
     storey_elevations: Sequence[float],
     z_tolerance: float = 0.5,
+    node_xy: Optional[dict] = None,
 ) -> float:
     """Peak interstorey-drift ratio from per-node displacement histories.
 
@@ -573,12 +606,18 @@ def peak_interstorey_drift(
     X, Y, …) or ``(n_steps,)``; the X/Y components are the first two columns.
     Equivalent elevations are deduplicated, and the structural base must be part
     of *storey_elevations* for the base-to-first-floor interval to be counted.
+
     Nodes are assigned to their nearest storey elevation within the
-    ``z_tolerance / 2`` half-band, each level's signed horizontal displacement
-    is reduced to a shared floor reference (the mean of its nodes' X / Y
-    histories) at every step, consecutive levels are differenced in X and Y,
-    the magnitude is normalised by their height interval, and the peak ratio
-    over all intervals and time steps is returned.
+    ``z_tolerance / 2`` half-band.  When *node_xy* (``{node_key: (x, y)}``) is
+    supplied, each level's motion is reduced by a rigid-body fit — two
+    translations plus a rotation — so opposite displacements at spatially
+    separated nodes do **not** cancel before the drift is computed, and the peak
+    interstorey drift is the translational drift plus the rotational
+    contribution (``|ΔRz| · r_max``), exactly as :func:`storey_drifts` computes
+    it.  Without *node_xy* each level is reduced to the mean of its nodes' X / Y
+    histories (identical for a single node per level).  Consecutive levels are
+    differenced, the magnitude normalised by their height interval, and the peak
+    ratio over all intervals and time steps is returned.
 
     Args:
         node_z: ``{node_key: z}`` in model length units.
@@ -587,6 +626,9 @@ def peak_interstorey_drift(
             interstorey drift).
         z_tolerance: Node→storey matching band (see
             :func:`assign_nodes_to_storeys`).
+        node_xy: Optional ``{node_key: (x, y)}`` node positions in model length
+            units, enabling the rotational contribution.  ``None`` reduces each
+            level to its nodes' mean history.
 
     Returns:
         The peak interstorey-drift ratio, or ``0.0`` when fewer than two
@@ -600,9 +642,9 @@ def peak_interstorey_drift(
         return 0.0
 
     # Per level, accumulate the signed (ux, uy) histories of every node assigned
-    # to that level.  The signed components are kept so the drift is computed
-    # from relative X / Y displacements, not from independently reduced
-    # magnitudes.
+    # to that level, together with its position when *node_xy* is given.  The
+    # signed components are kept so the drift is computed from relative X / Y
+    # displacements, not from independently reduced magnitudes.
     per_level: dict[int, list] = {i: [] for i in range(elevations.size)}
     for key, z in node_z.items():
         hist = displacements.get(key)
@@ -620,21 +662,33 @@ def peak_interstorey_drift(
         zi = float(z)
         level = int(np.argmin(np.abs(elevations - zi)))
         if abs(elevations[level] - zi) <= z_tolerance / 2:
-            per_level[level].append((ux, uy))
+            if node_xy is not None:
+                xy = node_xy.get(key)
+                if xy is None:
+                    continue
+                x, y = float(xy[0]), float(xy[1])
+            else:
+                x, y = 0.0, 0.0
+            per_level[level].append((x, y, ux, uy))
 
-    # Shared floor reference: each level is reduced to a single signed history
-    # (the mean horizontal displacement of its nodes at every step), so adjacent
-    # levels are differenced by corresponding histories rather than by
-    # independently selected per-node maxima (which can pick different nodes at
-    # different steps).
+    # Reduce each level to one rigid-body motion history.  With *node_xy* the
+    # (Ux, Uy, Rz) triple is fit per step (vectorised); without it the level is
+    # its nodes' mean history (exact for a single node per level).
     level_ref: list = [None] * elevations.size
     for i in range(elevations.size):
         comps = per_level[i]
         if not comps:
             continue
-        ux = np.mean(np.vstack([c[0] for c in comps]), axis=0)
-        uy = np.mean(np.vstack([c[1] for c in comps]), axis=0)
-        level_ref[i] = (ux, uy)
+        if node_xy is None:
+            ux = np.mean(np.vstack([c[2] for c in comps]), axis=0)
+            uy = np.mean(np.vstack([c[3] for c in comps]), axis=0)
+            level_ref[i] = (ux, uy, None)
+            continue
+        xs = np.array([c[0] for c in comps])
+        ys = np.array([c[1] for c in comps])
+        ux_stack = np.vstack([c[2] for c in comps])
+        uy_stack = np.vstack([c[3] for c in comps])
+        level_ref[i] = _rigid_body_steps(xs, ys, ux_stack, uy_stack)
 
     peak = 0.0
     for j in range(1, elevations.size):
@@ -649,7 +703,12 @@ def peak_interstorey_drift(
             continue
         dux = hi[0][:n] - lo[0][:n]
         duy = hi[1][:n] - lo[1][:n]
-        peak = max(peak, float(np.max(np.hypot(dux, duy)) / h))
+        if hi[2] is None:
+            peak = max(peak, float(np.max(np.hypot(dux, duy)) / h))
+        else:
+            drz = hi[2][:n] - lo[2][:n]
+            drift = np.hypot(dux, duy) / h + np.abs(drz) / h * hi[3]
+            peak = max(peak, float(np.max(drift)))
     return peak
 
 
