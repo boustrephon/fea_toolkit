@@ -16,11 +16,11 @@ message log and two-way selection between the tree and the 3-D view.
 [Desktop GUI Roadmap](gui_roadmap.md) have landed — viewport, application
 chrome, lazy Model Tree + inspector, and bidirectional selection with
 configurable mouse interaction — and milestone 5's **analysis** slice is in:
-**Analysis ▸ Run…** solves the model's own load cases in the application and
-shows each as a results view, and **File ▸ Save
-results…** writes one out.  The **Modal analysis** / **Response spectrum** /
-**Pushover** entries are wired up as recipe presets but are **still in
-process** — they run, yet modal analysis fails to complete (see
+**Analysis ▸ Run static…** solves the model's own load cases in the
+application and shows each as a results view, and **File ▸ Save
+results…** writes one out.  **Modal analysis** / **Response spectrum** /
+**Pushover** / **Nonlinear time-history** are wired up as recipe presets;
+modal analysis still fails to complete (see
 [What is still missing](#what-is-still-missing)).  Load
 glyphs, storey and pushover plots, persistence and the quad view are still
 ahead; see [What is still missing](#what-is-still-missing).
@@ -51,7 +51,7 @@ runs the Preprocessor and replaces the display with the prepared topology (see
 | **Inspector** dock (left, bottom) | Every field of the selected object, read-only — plus a node's supports, an element's section/material/groups and its applied loads |
 | **Messages** dock (bottom) | Log of what the application did, including any settings-file problems |
 | Status bar | Unit system, cursor coordinates, a busy indicator while preprocessing runs, and read-outs reserved for the analysis milestone |
-| Toolbars | Top: Open, Save results, Run, Stop, Mesh.  Right edge: camera views, display toggles and results controls (Deform %, Flags %) |
+| Toolbars | Top: Open, Save results, Run static, Stop, Mesh.  Right edge: camera views, display toggles and results controls (Deform %, Flags %) |
 
 The Model Tree is **lazy**: groups (Nodes, Frame Elements, Materials, …) list
 their entities only when expanded, so a model with hundreds of thousands of
@@ -177,11 +177,11 @@ turning off the shape leaves the diagram drawn and vice versa.
 
 ### Running an analysis
 
-**Analysis ▸ Run…** solves the model's own load cases inside the application.
+**Analysis ▸ Run static…** solves the model's own load cases inside the application.
 
-1. **Model ▸ Mesh…** must have been run first.  Run
+1. **Model ▸ Mesh…** must have been run first.  Run static
    deliberately does *not* preprocess for you — a topology change is something
-   to see reported, not something to happen silently — so until then Run stays
+   to see reported, not something to happen silently — so until then Run static stays
    greyed and its tooltip names the step it needs.  **The shells matter:**
    in a building-shell model the walls and slabs are what tie the members
    together, so *create shells* must be on (the dialog's default) — a split-only mesh
@@ -199,7 +199,7 @@ turning off the shape leaves the diagram drawn and vice versa.
 3. Optionally author a **custom case**: name it, then tick load patterns and set
    each one's factor — the `{"ULT": {"Dead": 1.4, "Live": 1.6}}` form as a UI.
    It is one more solve, of factored patterns.
-4. **Run** solves on a worker, with a progress bar, a **Stop** that takes effect
+4. **Run static** solves on a worker, with a progress bar, a **Stop** that takes effect
    at the next case boundary, and a Message Log line per case.  The factor is a
    **load** multiplier, not a post-scaling of results — scaling results is what a
    *combination* does.
@@ -214,10 +214,11 @@ different case is added beside it.
 wanted — always asking for a path, with a suggested name, so variants that differ
 by a small change can be kept side by side.
 
-**Analysis ▸ Modal analysis**, **Response spectrum** and **Pushover** are also
+**Analysis ▸ Modal analysis**, **Response spectrum**, **Pushover** and
+**Nonlinear time-history** are also
 wired as **presets over the recipe** (like **Model ▸ Mesh…**): each opens the
 step dialog for its verb and, on OK, appends the step and runs the recipe — a
-spectrum or pushover run prepends a default `modal` step first, since those
+spectrum, pushover or nonlinear-dynamic run prepends a default `modal` step first, since those
 verbs need its result.  These three are **still in process**: the presets run,
 but the underlying analyses are not yet reliable — modal analysis starts and
 then fails to complete (see [What is still missing](#what-is-still-missing)).
@@ -357,7 +358,7 @@ traceback in the Message Log.
 Every OpenSees solve verb — `run_static`, `modal`, `response_spectrum` and
 `pushover` — uses this path when `openseespy` cannot be imported in-process; a
 `response_spectrum` / `pushover` step ships the modal result its `modal` step
-produced to the subprocess rather than re-running it.  The **Analysis ▸ Run**
+produced to the subprocess rather than re-running it.  The **Analysis ▸ Run static**
 dialog (static cases) uses the same out-of-process solve.
 
 At start-up the Message Log reports where OpenSeesPy was found and its version
@@ -509,7 +510,7 @@ Each step is a *verb* applied to a *selection*, with its own parameters:
 The panel offers **Add** (a menu of verbs), **Remove**, **Up / Down** to reorder,
 and a one-line summary of the selected step.  Double-clicking a step, or the
 **Edit step…** button, opens a **Step dialog** — the same shape as
-**Analysis ▸ Run…** — with the step's **selection** (the same expression language
+**Analysis ▸ Run static…** — with the step's **selection** (the same expression language
 as a derived view, e.g. `section=brick wall type=Area`, with a `…` button that
 opens the selection composer) and a **parameter form built from the verb's own
 declaration**, so the form cannot drift from what the verb accepts.  **Add**
@@ -526,7 +527,7 @@ Right-click a step in the list and choose **Help** to open a read-only dialog fo
 that step's verb: its `StepSpec.help`, every parameter's name / type / default /
 choices / help, and its `needs` prerequisite — all rendered from the Qt-free
 `STEP_SPECS`, so the dialog cannot drift from what the verb accepts.  The same
-**Configuration (optional)** group appears at the foot of the **Analysis ▸ Run…**
+**Configuration (optional)** group appears at the foot of the **Analysis ▸ Run static…**
 dialog.
 
 **Recipe ▸ Run recipe** (`Ctrl+Shift+R`) runs the steps in order on a worker
@@ -536,7 +537,7 @@ combination — as a **result view**.  Nothing is written to disk: the views rea
 the run's in-memory archive through the same `ResultsRepository` an opened `.npz`
 is served from.
 
-> **Which one to use.**  **Analysis ▸ Run…** solves a case set against the model
+> **Which one to use.**  **Analysis ▸ Run static…** solves a case set against the model
 > as currently displayed, and is the quicker route once the model's *preparation*
 > is settled.  Use a **recipe** when the preparation is itself part of the answer:
 > it records the mesh, the loads-only selection and the section changes *beside*
@@ -570,11 +571,11 @@ jarring than a greyed-out one.
 | **Edit** | Duplicate view, Edit view selection… | Copy, Preferences |
 | **View** | Zoom to fit, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show beams, Show shells, Show restraints, Show loads, Colour area loads, Show force diagrams, Clear highlights) | Show element labels, Reset layout |
 | **Model** | Mesh… (composes a `mesh` step in a dialog and runs it on OK), Combinations (Edit… / Open… / Save…) | Selections, Units |
-| **Analysis** | Run… (`Ctrl+R`), Stop, Modal analysis, Response spectrum, Pushover | — |
+| **Analysis** | Run static… (`Ctrl+R`), Stop, Modal analysis, Response spectrum, Pushover, Nonlinear time-history | — |
 | **Recipe** | Run recipe (`Ctrl+Shift+R`), Open recipe…, Save recipe…, Export as Python…, Clear recipe | — |
 | **Results** | Deformed shape (+ Deform %), Force diagrams (+ Force selector + Flags %), Clear results | Storey response, Pushover curve |
-| **Help** | Documentation, About | — |
-| Toolbars | Open; Save results; Run / Stop; Mesh | Save results (until a result is shown), Export Tcl / screenshot |
+| **Help** | Documentation, Modeling guidance, Benchmark register, LLM guide, Source repository, About | — |
+| Toolbars | Open; Save results; Run static / Stop; Mesh | Save results (until a result is shown), Export Tcl |
 | View toolbar | Zoom/camera; display toggles (nodes, beams, shells, restraints, force diagrams); **Show loads** + the **Load** source selector + **Loads %** + the **Area** style selector + **Colour area loads**; Deformed shape + Deform %; Force diagrams + Force selector + Flags %; **Shells** opacity and **Shrink** | Show labels |
 
 ## Application identity
@@ -595,6 +596,7 @@ drives a *separately installed* OpenSees is the recorded route
 | Missing | Effect today |
 |---|---|
 | Modal / spectrum / pushover analyses (milestone 5, the rest) | The three menu entries are wired as recipe presets and run, but the underlying analyses are not yet reliable — modal analysis starts and then fails to complete |
+| Nonlinear time-history result visualisation | **Analysis ▸ Nonlinear time-history** runs and its peak quantities are summarised as a table view, but the transient history is not yet animated in the viewport |
 | Loads, storey and pushover plots (milestones 6–7) | A case's deformed shape *and* its member end forces **are** drawn in the GUI; load glyphs, storey plots and pushover curves still need the [Visualisation Toolkit](viewer.md) and the `plot_*` functions |
 | Element labels, the Property Tree tab, explicit interaction modes ([P23](_pending_work.md)) | The corresponding menu item and tab are greyed |
 | Window-layout persistence (milestone 8) | The mouse policy and the display-quality knobs **are** remembered (see the settings file above); dock positions and window geometry are not |

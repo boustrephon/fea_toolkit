@@ -60,6 +60,15 @@ from .views.property_inspector import PropertyInspector
 from .views.qt_mouse import install_mouse_filter
 
 _PROJECT_URL = "https://github.com/boustrephon/fea_toolkit"
+_DOCS_URL = "https://boustrephon.github.io/fea_toolkit/"
+#: Documentation pages the Help menu links to, keyed by short name — the MkDocs
+#: site serves each ``docs/*.md`` as a ``<name>/`` directory URL.
+_DOC_PAGES = {
+    "gui": "gui/",
+    "modeling": "modeling_guidance/",
+    "benchmarks": "benchmark_register/",
+    "llm": "llm_guide/",
+}
 _CURSOR_POLL_MS = 60
 _SELECT_COLOR = (1.0, 0.45, 0.0)  # selected frame / area element
 _SELECT_NODE_COLOR = (0.15, 0.55, 1.0)  # selected node
@@ -735,6 +744,24 @@ class MainWindow(QMainWindow):
         a["view.xz"] = self._real_action("Front (XZ)", self._view_xz, tip="Look along the Y axis")
         a["view.yz"] = self._real_action("Side (YZ)", self._view_yz, tip="Look along the X axis")
         a["help.docs"] = self._real_action("Documentation", self._on_docs)
+        a["help.modeling"] = self._real_action(
+            "Modeling guidance",
+            lambda: self._open_docs("modeling"),
+            tip="Open the modeling guidance for choosing elements and hinges",
+        )
+        a["help.benchmarks"] = self._real_action(
+            "Benchmark register",
+            lambda: self._open_docs("benchmarks"),
+            tip="Open the register of validated benchmark studies",
+        )
+        a["help.llm"] = self._real_action(
+            "LLM guide", lambda: self._open_docs("llm"), tip="Open the LLM / AI assistant guide"
+        )
+        a["help.source"] = self._real_action(
+            "Source repository",
+            lambda: QDesktopServices.openUrl(QUrl(_PROJECT_URL)),
+            tip="Open the project repository on GitHub",
+        )
         a["help.about"] = self._real_action(f"About {APP_NAME}", self._on_about)
 
         # ── macOS application-menu roles ──
@@ -770,7 +797,11 @@ class MainWindow(QMainWindow):
             tip="Reload a saved project (.zip archive) without re-running analyses",
         )
         a["file.export_tcl"] = self._placeholder("Export Tcl", "Milestone 7")
-        a["file.export_image"] = self._placeholder("Export screenshot", "Milestone 7")
+        a["file.export_image"] = self._real_action(
+            "Export screenshot\u2026",
+            self._on_export_image,
+            tip="Save the current viewport to a PNG image",
+        )
         a["edit.copy"] = self._real_action(
             "Copy selection",
             self._on_copy_selection,
@@ -902,10 +933,10 @@ class MainWindow(QMainWindow):
         for key in ("recipe.run", "recipe.clear", "recipe.save", "recipe.export"):
             a[key].setEnabled(False)
         a["analysis.run"] = self._real_action(
-            "Run\u2026",
+            "Run static\u2026",
             self._on_analysis_run,
             shortcut="Ctrl+R",
-            tip="Choose static cases or combinations to solve (needs a preprocessed model)",
+            tip="Solve the model's linear static cases or combinations (needs a preprocessed model)",
         )
         a["analysis.modal"] = self._real_action(
             "Modal analysis",
@@ -922,7 +953,17 @@ class MainWindow(QMainWindow):
             self._on_pushover_preset,
             tip="Nonlinear static (pushover) analysis with CSM evaluation",
         )
-        for key in ("analysis.modal", "analysis.spectrum", "analysis.pushover"):
+        a["analysis.nonlinear_dynamic"] = self._real_action(
+            "Nonlinear time-history\u2026",
+            self._on_nonlinear_dynamic_preset,
+            tip="Nonlinear dynamic analysis of a ground-motion record (time history)",
+        )
+        for key in (
+            "analysis.modal",
+            "analysis.spectrum",
+            "analysis.pushover",
+            "analysis.nonlinear_dynamic",
+        ):
             a[key].setEnabled(False)
         a["analysis.stop"] = self._real_action(
             "Stop",
@@ -1040,8 +1081,11 @@ class MainWindow(QMainWindow):
         m = bar.addMenu("&Analysis")
         m.addAction(a["analysis.run"])
         m.addSeparator()
-        for key in ("analysis.modal", "analysis.spectrum", "analysis.pushover"):
-            m.addAction(a[key])
+        m.addAction(a["analysis.modal"])
+        m.addAction(a["analysis.spectrum"])
+        m.addSeparator()
+        m.addAction(a["analysis.pushover"])
+        m.addAction(a["analysis.nonlinear_dynamic"])
         m.addSeparator()
         m.addAction(a["analysis.stop"])
 
@@ -1069,6 +1113,11 @@ class MainWindow(QMainWindow):
 
         m = bar.addMenu("&Help")
         m.addAction(a["help.docs"])
+        m.addAction(a["help.modeling"])
+        m.addAction(a["help.benchmarks"])
+        m.addAction(a["help.llm"])
+        m.addSeparator()
+        m.addAction(a["help.source"])
         m.addSeparator()
         m.addAction(a["help.about"])
 
@@ -2721,6 +2770,10 @@ class MainWindow(QMainWindow):
         """**Analysis ▸ Pushover**: compose a pushover step and run it."""
         self._analysis_preset("pushover", "Pushover")
 
+    def _on_nonlinear_dynamic_preset(self) -> None:
+        """**Analysis ▸ Nonlinear time-history**: compose and run a nonlinear_dynamic step."""
+        self._analysis_preset("nonlinear_dynamic", "Nonlinear dynamic")
+
     def _analysis_preset(self, verb: str, label: str) -> None:
         """Compose an analysis step in a dialog, append it, and run the recipe.
 
@@ -2730,8 +2783,8 @@ class MainWindow(QMainWindow):
         exportable step rather than a hidden handler.
 
         Args:
-            verb: The analysis verb — ``"modal"``, ``"response_spectrum"`` or
-                ``"pushover"``.
+            verb: The analysis verb — ``"modal"``, ``"response_spectrum"``,
+                ``"pushover"`` or ``"nonlinear_dynamic"``.
             label: What the Message Log should say is happening.
         """
         store = self._store
@@ -2755,13 +2808,13 @@ class MainWindow(QMainWindow):
         prefill: dict = {}
         if verb == "modal" and default_modal:
             prefill["name"] = default_modal
-        elif verb in ("response_spectrum", "pushover") and default_modal:
+        elif verb in ("response_spectrum", "pushover", "nonlinear_dynamic") and default_modal:
             prefill["modal_case"] = default_modal
 
         edited = StepDialog.edit(Step(verb=verb, params=prefill), self, store.raw())
         if edited is None:
             return
-        if verb in ("response_spectrum", "pushover"):
+        if verb in ("response_spectrum", "pushover", "nonlinear_dynamic"):
             from dataclasses import replace
 
             selected = self._ensure_modal_precursor(default_modal)
@@ -2937,7 +2990,7 @@ class MainWindow(QMainWindow):
             payload: ``(RecipeRun, [log lines])`` from the worker.
         """
         from ..workflow import CASES, FIGURE, TABLE
-        from ..workflow.steps import MODAL, PUSHOVER, RS
+        from ..workflow.steps import MODAL, NLD, PUSHOVER, RS
 
         run, messages = payload
         self._last_run = run
@@ -2959,6 +3012,8 @@ class MainWindow(QMainWindow):
                 self._show_pushover_result(result.label, result.payload)
             elif result.kind == RS:
                 self._show_rs_result(result.label, result.payload)
+            elif result.kind == NLD:
+                self._show_nonlinear_dynamic_result(result.label, result.payload)
             elif result.kind == TABLE:
                 self._show_table_result(result.label, result.payload)
             elif result.kind == FIGURE:
@@ -2993,6 +3048,47 @@ class MainWindow(QMainWindow):
         view = self._views.add_figure(key, label, figure, source=f"Recipe: {label}")
         self._show_view(view, rebuild_tree=True)
         self.log(f"Added figure view: {label}.")
+
+    def _show_nonlinear_dynamic_result(self, label: str, payload: Any) -> None:
+        """Summarise a nonlinear-dynamic (time-history) result as a table.
+
+        The ``nonlinear_dynamic`` verb's payload is an
+        :class:`~fea_toolkit.analysis.base.AnalysisResult` whose ``data`` holds
+        the full transient (``times`` and the per-node displacement / velocity /
+        acceleration arrays) plus the peak reductions.  The peaks and the run's
+        convergence are distilled into a one-row table; the transient arrays
+        stay on the result for a future animation view.
+        """
+        from ..workflow.steps import Table
+
+        data = getattr(payload, "data", None) or {}
+        if not isinstance(data, dict):
+            self.log(f"{label}: the nonlinear-dynamic result has no data.", "warn")
+            return
+
+        def _num(key: str) -> str:
+            value = data.get(key)
+            try:
+                return f"{float(value):.4g}"
+            except (TypeError, ValueError):
+                return "\u2014"
+
+        rows = (
+            ("Peak displacement", _num("peak_displacement")),
+            ("Peak base shear", _num("peak_base_shear")),
+            ("Peak plastic rotation", _num("peak_plastic_rotation")),
+            ("Yielded hinges", _num("num_yielded_hinges")),
+            ("Dissipated energy", _num("max_dissipated_energy")),
+            ("Converged steps", _num("converged_steps")),
+            ("T1 / T2 (s)", f"{_num('period_1')} / {_num('period_2')}"),
+            ("Direction", str(data.get("direction", ""))),
+            ("Record", str(data.get("gm_file", ""))),
+        )
+        self._show_table_result(
+            label,
+            Table(title=label, columns=("Quantity", "Value"), rows=rows),
+        )
+        self.log(f"{label}: transient history stored for animation.")
 
     def _show_modal_result(self, label: str, payload: Any) -> None:
         """Summarise a modal result as a table and one results view per mode.
@@ -3446,7 +3542,13 @@ class MainWindow(QMainWindow):
         mesh = store.preprocessed() if store is not None else None
         running = self._worker is not None and self._worker.isRunning()
         enabled = mesh is not None and not running
-        for key in ("analysis.run", "analysis.modal", "analysis.spectrum", "analysis.pushover"):
+        for key in (
+            "analysis.run",
+            "analysis.modal",
+            "analysis.spectrum",
+            "analysis.pushover",
+            "analysis.nonlinear_dynamic",
+        ):
             self._actions[key].setEnabled(enabled)
         # Saving the meshed model needs the same preprocessed ``MeshModel``, but
         # is safe while an analysis runs (the topology is frozen), so it is not
@@ -3458,10 +3560,10 @@ class MainWindow(QMainWindow):
         action = self._actions["analysis.run"]
         if mesh is None:
             action.setToolTip(
-                "Run \u2014 needs a preprocessed model: Model \u25b8 Split elements or Mesh areas"
+                "Run static \u2014 needs a preprocessed model: Model \u25b8 Split elements or Mesh areas"
             )
         else:
-            action.setToolTip("Choose static cases or combinations to solve")
+            action.setToolTip("Solve the model's linear static cases or combinations")
 
     def _set_recipe_actions_enabled(self) -> None:
         """Enable the recipe actions that the panel's contents allow.
@@ -3680,6 +3782,29 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # pragma: no cover - defensive
             self.log(f"Could not build the IDA view: {exc}", "error")
         return True
+
+    def _on_export_image(self) -> None:
+        """**File ▸ Export screenshot…**: save the viewport to a PNG.
+
+        Uses PyVista's ``screenshot()``, so what is written is exactly what the
+        viewport shows.  The path is always prompted for, with a suggested name.
+        """
+        from pathlib import Path
+
+        stem = Path(self._source_label).stem or "viewport"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export screenshot", f"{stem}.png", "PNG image (*.png)"
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".png"):
+            path += ".png"
+        try:
+            self._interactor.screenshot(path)
+        except Exception as exc:  # pragma: no cover - a filesystem/GL failure
+            self.log(f"Could not export the screenshot: {exc}", "error")
+            return
+        self.log(f"Saved screenshot to {path}.")
 
     def _on_save_results(self) -> None:
         """**File ▸ Save results…**: write the displayed result to a chosen NPZ.
@@ -4157,7 +4282,16 @@ class MainWindow(QMainWindow):
         self._interactor.view_yz()
 
     def _on_docs(self) -> None:
-        QDesktopServices.openUrl(QUrl(_PROJECT_URL))
+        """**Help ▸ Documentation**: open the documentation site."""
+        QDesktopServices.openUrl(QUrl(_DOCS_URL))
+
+    def _open_docs(self, page: str) -> None:
+        """Open one documentation page on the MkDocs site.
+
+        Args:
+            page: A key in ``_DOC_PAGES`` naming the page to open.
+        """
+        QDesktopServices.openUrl(QUrl(_DOCS_URL + _DOC_PAGES[page]))
 
     def _on_about(self) -> None:
         from .. import __version__ as version
@@ -4166,8 +4300,13 @@ class MainWindow(QMainWindow):
             self,
             f"About {APP_NAME}",
             f"<b>{APP_NAME}</b> {version}<br><br>"
-            "A FEA to OpenSees/Rhino conversion toolkit.<br>"
-            "GUI: Milestone 4 (selection sync).",
+            "A pathway to OpenSees structural analysis \u2014 import an FEA model, "
+            "visualise its geometry, materials, sections and results, and run "
+            "linear, modal, response-spectrum, pushover and nonlinear "
+            "time-history analyses.<br><br>"
+            "A study and teaching tool, documented at "
+            '<a href="https://boustrephon.github.io/fea_toolkit/">'
+            "boustrephon.github.io/fea_toolkit</a>.",
         )
 
     # ── Analysis (Analysis menu) ────────────────────────────────────

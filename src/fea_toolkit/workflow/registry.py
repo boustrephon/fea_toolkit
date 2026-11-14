@@ -12,7 +12,7 @@ prepare properties, prepare topology, solve, reduce — and is the order a menu
 should offer them.
 """
 
-from .steps import CASES, FIGURE, GEOMETRY, MODAL, MODEL, PUSHOVER, RS, TABLE, StepSpec
+from .steps import CASES, FIGURE, GEOMETRY, MODAL, MODEL, NLD, PUSHOVER, RS, TABLE, StepSpec
 from .verbs import (
     BRACE_BUCKLING_PARAMS,
     CHART_PARAMS,
@@ -25,6 +25,7 @@ from .verbs import (
     MESH_CHECKS_PARAMS,
     MESH_PARAMS,
     MODAL_PARAMS,
+    NLD_PARAMS,
     PUSHOVER_PARAMS,
     RS_PARAMS,
     RUN_STATIC_PARAMS,
@@ -44,6 +45,7 @@ from .verbs import (
     run_mesh,
     run_mesh_checks,
     run_modal,
+    run_nonlinear_dynamic,
     run_pushover,
     run_response_spectrum,
     run_save_model,
@@ -183,6 +185,14 @@ STEP_SPECS: dict[str, StepSpec] = {
         kind=PUSHOVER,
         needs=("geometry", "modal"),
         help="Nonlinear static (pushover) analysis with CSM evaluation.",
+    ),
+    "nonlinear_dynamic": StepSpec(
+        verb="nonlinear_dynamic",
+        run=run_nonlinear_dynamic,
+        params=NLD_PARAMS,
+        kind=NLD,
+        needs=("geometry", "modal"),
+        help="Nonlinear dynamic (time-history) analysis of a ground-motion record.",
     ),
     "combine": StepSpec(
         verb="combine",

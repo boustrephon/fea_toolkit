@@ -22,8 +22,8 @@ The goal is to create a Python package `fea_toolkit` that:
   sub‑elements.
 - Builds OpenSees models with configurable element types
   (`elasticBeamColumn`, `forceBeamColumn`, etc.), applies loads, and runs
-  **linear static**, **modal**, **response spectrum**, and **pushover**
-  analysis.
+  **linear static**, **modal**, **response spectrum**, **pushover** and
+  **nonlinear dynamic (time-history)** analysis.
 - **3D-only analysis engine** — all analysis runs in the OpenSees 3D
   domain (`ndm=3`, `ndf=6`); planar ("2D") frames are modelled as planar
   3D models with out-of-plane restraints.  2D OpenSees analyses are used
@@ -878,7 +878,7 @@ cross‑reference section.
 
 ### Conclusion
 
-The **SAP2000 → OpenSees pipeline** is now **largely functional**. You can parse a model, split elements and loads (including frame-frame intersections), build an OpenSees model, and run linear static, modal, response-spectrum, and pushover analyses. The code is modular and well‑structured; the priority-ordered backlog lives in `docs/_pending_work.md`.
+The **SAP2000 → OpenSees pipeline** is now **largely functional**. You can parse a model, split elements and loads (including frame-frame intersections), build an OpenSees model, and run linear static, modal, response-spectrum, pushover and nonlinear dynamic (time-history) analyses. The code is modular and well‑structured; the priority-ordered backlog lives in `docs/_pending_work.md`.
 
 The project is well on track to meet your original goals. Let me know which of the remaining tasks you would like to tackle next, and I will provide the necessary code and guidance.
 

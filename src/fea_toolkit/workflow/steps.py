@@ -33,6 +33,7 @@ __all__ = [
     "GEOMETRY",
     "MODAL",
     "MODEL",
+    "NLD",
     "PUSHOVER",
     "RS",
     "TABLE",
@@ -61,6 +62,9 @@ RS = "response_spectrum"
 #: A step's output is a pushover (nonlinear static) result, stored on the
 #: context under ``"pushover"`` rather than as solved cases.
 PUSHOVER = "pushover"
+#: A step's output is a nonlinear-dynamic (time-history) result, stored on the
+#: context under ``"nonlinear_dynamic"``.
+NLD = "nonlinear_dynamic"
 #: A step's output is a table of findings — a check's result, rendered as a grid.
 TABLE = "table"
 #: A step's output is a figure — a chart, rendered as an image.
@@ -214,7 +218,8 @@ class StepResult:
 
     Attributes:
         kind: :data:`GEOMETRY`, :data:`MODEL`, :data:`CASES`, :data:`MODAL`,
-            :data:`RS`, :data:`PUSHOVER`, :data:`TABLE` or :data:`FIGURE`.
+            :data:`RS`, :data:`PUSHOVER`, :data:`NLD`, :data:`TABLE` or
+            :data:`FIGURE`.
         label: Display name for the output, e.g. ``"Meshed"``.
         payload: The output itself — a ``MeshModel``, a ``SAPModelData``,
             ``{case_name: result_dict}``, a :class:`Table`, or a matplotlib

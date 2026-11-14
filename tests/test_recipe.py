@@ -151,6 +151,7 @@ class TestManifest:
             "modal",
             "response_spectrum",
             "pushover",
+            "nonlinear_dynamic",
             "combine",
             "chart",
         ]
@@ -167,6 +168,7 @@ class TestManifest:
                 "modal",
                 "response_spectrum",
                 "pushover",
+                "nonlinear_dynamic",
                 "table",
                 "figure",
             )
@@ -180,8 +182,10 @@ class TestManifest:
         so they must not claim the ``cases`` kind that ``combine`` / ``chart`` read."""
         assert STEP_SPECS["response_spectrum"].kind == "response_spectrum"
         assert STEP_SPECS["pushover"].kind == "pushover"
+        assert STEP_SPECS["nonlinear_dynamic"].kind == "nonlinear_dynamic"
         assert STEP_SPECS["response_spectrum"].kind != "cases"
         assert STEP_SPECS["pushover"].kind != "cases"
+        assert STEP_SPECS["nonlinear_dynamic"].kind != "cases"
 
     def test_importing_the_manifest_does_not_load_opensees(self):
         """A parameter form must be renderable without OpenSees."""
@@ -325,6 +329,61 @@ class TestAnalysisVerbs:
         assert config["pushover_record_frame_forces"] is True
         assert config["pushover_record_shell_forces"] is False
         assert config["pushover_record_section_deformations"] is True
+
+    def test_nonlinear_dynamic_declares_its_parameters(self):
+        """The record-driven verb exposes the transient's knobs as parameters."""
+        params = STEP_SPECS["nonlinear_dynamic"].params
+        assert params["ground_motion_file"].type is str
+        assert params["dt"].type is float
+        assert params["direction"].choices == ("X", "Y", "Z")
+        assert params["damping_ratio"].type is float
+        assert params["gravity_patterns"].type is dict
+        assert params["modal_case"].type is str
+
+    def test_nonlinear_dynamic_requires_a_ground_motion_file(self):
+        """A record path is mandatory — the verb names it rather than failing later."""
+        from fea_toolkit.workflow.steps import StepContext
+
+        context = StepContext(model_data=_slab_model())
+        with pytest.raises(ValueError, match="ground_motion_file"):
+            STEP_SPECS["nonlinear_dynamic"].run(context, Step("nonlinear_dynamic"))
+
+    def test_nonlinear_dynamic_passes_the_record_through(self, monkeypatch):
+        """Every declared parameter reaches ``run_nonlinear_dynamic_analysis``."""
+        import fea_toolkit.analysis.nonlinear_dynamic as nld_module
+        from fea_toolkit.workflow.steps import StepContext
+
+        captured: dict = {}
+
+        def fake_run_nonlinear_dynamic_analysis(_mesh, _modal, **kwargs):
+            captured.update(kwargs)
+            return object()
+
+        monkeypatch.setattr(
+            nld_module, "run_nonlinear_dynamic_analysis", fake_run_nonlinear_dynamic_analysis
+        )
+        context = StepContext(model_data=_slab_model(), model=object(), results={"modal": object()})
+        step = Step(
+            "nonlinear_dynamic",
+            params={
+                "ground_motion_file": "/tmp/record.txt",
+                "dt": 0.01,
+                "num_steps": 500,
+                "direction": "Y",
+                "damping_ratio": 0.03,
+                "gravity_patterns": {"DEAD": 1.0},
+                "name": "NLD-1",
+            },
+        )
+        STEP_SPECS["nonlinear_dynamic"].run(context, step)
+
+        assert captured["ground_motion_file"] == "/tmp/record.txt"
+        assert captured["dt"] == 0.01
+        assert captured["num_steps"] == 500
+        assert captured["direction"] == "Y"
+        assert captured["damping_ratio"] == 0.03
+        assert captured["gravity_patterns"] == {"DEAD": 1.0}
+        assert captured["name"] == "NLD-1"
 
     def test_response_spectrum_resolves_each_source(self):
         """``resolve_spectrum`` maps source → (T, Sa) from the right place."""
@@ -768,7 +827,7 @@ class TestExportTclCheckbox:
     """Analysis verbs carry an ``export_tcl`` QC checkbox instead of a step."""
 
     def test_every_analysis_verb_declares_the_checkbox(self):
-        for verb in ("run_static", "modal", "response_spectrum", "pushover"):
+        for verb in ("run_static", "modal", "response_spectrum", "pushover", "nonlinear_dynamic"):
             spec = STEP_SPECS[verb]
             assert "export_tcl" in spec.params, verb
             assert "export_tcl_path" in spec.params, verb

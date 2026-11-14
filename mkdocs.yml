@@ -4,7 +4,7 @@
 #   DISABLE_MKDOCS_2_WARNING=true NO_MKDOCS_2_WARNING=true mkdocs build --strict
 
 site_name: fea_toolkit
-site_description: FEA to OpenSees/Rhino conversion toolkit
+site_description: Import, analyse and visualise structural models — a pathway to OpenSees nonlinear analysis
 site_url: https://boustrephon.github.io/fea_toolkit/
 repo_url: https://github.com/boustrephon/fea_toolkit
 edit_uri: blob/main/docs/

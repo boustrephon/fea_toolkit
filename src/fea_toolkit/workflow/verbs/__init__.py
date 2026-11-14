@@ -34,6 +34,7 @@ from .fix_shell_only_base import FIX_SHELL_ONLY_BASE_PARAMS, run_fix_shell_only_
 from .load_verification import LOAD_VERIFICATION_PARAMS, run_load_verification
 from .mesh import MESH_PARAMS, run_mesh
 from .modal import MODAL_PARAMS, run_modal
+from .nonlinear_dynamic import NLD_PARAMS, run_nonlinear_dynamic
 from .pushover import PUSHOVER_PARAMS, run_pushover
 from .response_spectrum import RS_PARAMS, run_response_spectrum
 from .run_static import RUN_STATIC_PARAMS, run_static
@@ -52,6 +53,7 @@ __all__ = [
     "MESH_CHECKS_PARAMS",
     "MESH_PARAMS",
     "MODAL_PARAMS",
+    "NLD_PARAMS",
     "PUSHOVER_PARAMS",
     "RS_PARAMS",
     "RUN_STATIC_PARAMS",
@@ -71,6 +73,7 @@ __all__ = [
     "run_mesh",
     "run_mesh_checks",
     "run_modal",
+    "run_nonlinear_dynamic",
     "run_pushover",
     "run_response_spectrum",
     "run_save_model",
