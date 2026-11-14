@@ -68,6 +68,22 @@ def test_resolve_named_selections_ignores_unknown_names():
     assert resolved.sections == ["BEAM"]
 
 
+def test_reference_only_unknown_name_resolves_to_no_match_not_unrestricted():
+    """A reference-only selection whose name is unknown must not mean 'everything'.
+
+    The established contract ignores unknown reference names, but an unresolved
+    *positive* reference must still resolve to an empty scope — never an
+    unrestricted (match-everything) selection that a consumer like
+    ``scale_sections`` would read as "every section".
+    """
+    model = make_sample_model()
+    resolved = resolve_named_selections(Selection(selections=["missing"]), {}, model)
+    assert resolved.selections is None
+    assert resolved.get_frame_ids(model) == []
+    assert resolved.get_area_ids(model) == []
+    assert resolved.get_node_ids(model) == []
+
+
 def test_resolve_named_selections_expands_exclude_references():
     model = make_sample_model()
     store = {

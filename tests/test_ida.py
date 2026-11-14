@@ -117,7 +117,10 @@ def test_run_ida_bisection(monkeypatch):
         tolerance=0.01,
     )
     assert result["bisection"] is not None
-    assert 1.5 < result["collapse_intensity"] < 2.0
+    # The fake runner's convergence boundary is exactly 1.8; the driver's
+    # relative-tolerance bisection must land within the requested tolerance of
+    # that boundary.
+    assert result["collapse_intensity"] == pytest.approx(1.8, rel=0.01)
 
 
 def test_run_ida_requires_a_one_dimensional_record():
@@ -226,6 +229,29 @@ def test_run_ida_computes_the_sa_t1_g_intensity_measure(monkeypatch):
     assert result["collapse_Sa_T1_g"] == pytest.approx(2.0 * result["Sa_T1_g"])
 
 
+def test_run_ida_accepts_a_flat_modal_period_representation(monkeypatch):
+    """A flat modal dict (a NumPy array, no nested 'modal' key) still yields T1."""
+    import fea_toolkit.analysis.nonlinear_dynamic as nld_module
+
+    monkeypatch.setattr(nld_module, "run_nonlinear_dynamic_analysis", _fake_runner(threshold=1.8))
+    result = run_ida(
+        make_sample_model(),
+        AnalysisResult(
+            name="Modal",
+            analysis_type="ModalAnalysis",
+            data={"periods": np.array([1.0, 0.5])},
+        ),
+        "record.txt",
+        [0.5, 1.0],
+        accel_base=np.ones(20),
+        num_steps=10,
+        tolerance=None,
+    )
+    assert result["T1"] == 1.0
+    assert result["sa_method"] == "sdof_newmark"
+    assert result["Sa_T1_g"] > 0.0
+
+
 def test_run_ida_falls_back_to_scale_as_im_without_a_period(monkeypatch):
     """No modal period → the IM stays the raw scale factor, flagged."""
     import fea_toolkit.analysis.nonlinear_dynamic as nld_module
@@ -260,7 +286,7 @@ def test_run_ida_retains_the_collapse_rung_transient(monkeypatch):
         tolerance=None,
     )
     assert result["transient_scale"] == 2.0  # the first non-converged rung
-    assert result["transient"]["converged_steps"] == 9  # num_steps - 1
+    assert result["transient"]["converged_steps"] == 19  # len(accel_base) - 1
     assert set(result["transient"]["displacements"]) == {1, 2}
 
 
@@ -280,4 +306,4 @@ def test_run_ida_retains_the_top_rung_transient_without_collapse(monkeypatch):
     )
     assert result["collapse_intensity"] is None
     assert result["transient_scale"] == 1.0
-    assert result["transient"]["converged_steps"] == 10
+    assert result["transient"]["converged_steps"] == 20  # the full record extent

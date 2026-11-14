@@ -580,6 +580,18 @@ class TestPeakInterstoreyDrift:
             0.02
         )
 
+    def test_repeated_elevations_are_deduplicated(self):
+        # A repeated diaphragm/story elevation must not leave an empty level
+        # whose zero-height interval skips the base-to-roof drift.
+        node_z = {1: 0.0, 2: 10.0}
+        n = 5
+        base = np.zeros((n, 3))
+        roof = np.zeros((n, 3))
+        roof[:, 0] = 0.2 * np.linspace(0.0, 1.0, n)
+        assert peak_interstorey_drift(
+            node_z, {1: base, 2: roof}, [0.0, 0.0, 10.0]
+        ) == pytest.approx(0.02)
+
     def test_three_levels_take_the_max_interval(self):
         node_z = {1: 0.0, 2: 5.0, 3: 10.0}
         n = 4

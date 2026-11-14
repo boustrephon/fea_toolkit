@@ -424,10 +424,13 @@ class TestResultViews:
         node_ids = list(window._model.nodes)
         node_tags = [window._model.nodes[nid].node_tag for nid in node_ids]
         n_steps = 5
+        # A decaying history whose peak (0.008) is mid-record and whose final
+        # value (0.0001) is near zero — so a last-frame amplification is caught.
+        envelope = np.array([0.0, 0.004, 0.008, 0.002, 0.0001])
         history = {
             tag: np.column_stack(
                 (
-                    np.linspace(0.0, 0.004, n_steps),
+                    envelope,
                     np.zeros(n_steps),
                     np.zeros(n_steps),
                 )
@@ -440,7 +443,7 @@ class TestResultViews:
             data={
                 "times": np.arange(n_steps) * 0.005,
                 "displacements": history,
-                "peak_displacement": 0.004,
+                "peak_displacement": 0.008,
                 "converged_steps": n_steps,
                 "direction": "X",
                 "gm_file": "record.txt",
@@ -450,14 +453,25 @@ class TestResultViews:
 
         key = "table:nonlinear-dynamic"
         assert len(window._nld_frames[key]) == n_steps
-        assert set(window._nld_frames[key][0]) == set(node_ids)
+        assert set(window._nld_frames[key].frame(0)) == set(node_ids)
         assert window._nld_times[key] == [0.0, 0.005, 0.01, 0.015, 0.02]
+        # The table view carries a transient history, so Results ▸ Animate is
+        # enabled even though it is not a displacement-field results view.
+        assert window._actions["results.animate"].isEnabled() is True
 
         window._on_animate_toggled(True)
         assert window._anim_timer is not None and window._anim_timer.isActive()
         assert window._anim_step_mode is True
         assert len(window._anim_frames) == n_steps
         assert window._anim_times == window._nld_times[key]
+
+        # The base scale must come from the peak frame (0.008 at step 2), not
+        # the near-zero final frame (0.0001) — a last-frame scale is ~80x larger.
+        fraction = window._deformed_scale.value() / 100.0
+        last_frame_scale = window._viewer.deformed_amplification(
+            window._nld_frames[key].frame(n_steps - 1), fraction
+        )
+        assert window._anim_base_scale < last_frame_scale
 
         window._on_animate_toggled(False)
         assert not window._anim_timer.isActive()
