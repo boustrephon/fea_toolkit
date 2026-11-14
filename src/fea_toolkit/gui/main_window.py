@@ -2802,9 +2802,11 @@ class MainWindow(QMainWindow):
         A named selection is a saved
         :class:`~fea_toolkit.model.named_selection.NamedSelection`; it appears in
         the tree's **Selections** group and is what a step's
-        ``Selection.selections`` field references by name.
+        ``Selection.selections`` field references by name.  It is authored from
+        either the current viewport / tree selection (a graphical pick, when one
+        exists) or a ``Selection.from_string`` expression.
         """
-        from qtpy.QtWidgets import QInputDialog
+        from qtpy.QtWidgets import QInputDialog, QMessageBox
 
         from ..model.named_selection import NamedSelection
         from ..model.selection import Selection
@@ -2813,6 +2815,31 @@ class MainWindow(QMainWindow):
         name = name.strip()
         if not ok or not name:
             return
+
+        pick = self.current_selection()
+        if pick is not None:
+            n_entities = len(pick.element_ids or []) + len(pick.node_ids or [])
+            entity_word = "entity" if n_entities == 1 else "entities"
+            use_pick = QMessageBox.question(
+                self,
+                "Name selection",
+                f"Use the current viewport/tree selection ({n_entities} {entity_word}) "
+                "instead of an expression?",
+            )
+            if use_pick == QMessageBox.StandardButton.Yes:
+                named = NamedSelection(
+                    name=name,
+                    element_ids=list(pick.element_ids or []),
+                    node_ids=list(pick.node_ids or []),
+                )
+                self._named_selections[name] = named
+                self.log(
+                    f"Named selection {name!r}: {len(named.element_ids)} element(s), "
+                    f"{len(named.node_ids)} node(s) from the viewport pick"
+                )
+                self._rebuild_tree()
+                return
+
         expression, ok = QInputDialog.getText(
             self, "Selection expression", f"Expression for {name} (empty = whole model):"
         )

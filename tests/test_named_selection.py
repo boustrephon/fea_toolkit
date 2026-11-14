@@ -1,5 +1,7 @@
 """Named selections, the Selection.selections field and the document verbs (P35)."""
 
+import pytest
+
 from examples.sample_model import make_sample_model
 from fea_toolkit.model.named_selection import NamedSelection, resolve_named_selections
 from fea_toolkit.model.selection import Selection
@@ -64,6 +66,41 @@ def test_resolve_named_selections_ignores_unknown_names():
     )
     assert resolved.selections is None
     assert resolved.sections == ["BEAM"]
+
+
+def test_resolve_named_selections_expands_exclude_references():
+    model = make_sample_model()
+    store = {
+        "core": NamedSelection(name="core", selection=Selection(sections=["UB300"])),
+    }
+    resolved = resolve_named_selections(
+        Selection(exclude_selections=["core"], element_types=["Frame"]), store, model
+    )
+    assert resolved.exclude_selections is None
+    assert resolved.exclude_element_ids == ["1"]  # the model's single UB300 frame
+    assert resolved.element_types == ["Frame"]
+
+
+def test_a_recipe_step_referencing_a_named_selection_expands_it():
+    """A ``scale_sections`` step expands its ``selection=core`` reference at run time."""
+    from fea_toolkit.workflow import Recipe, Step, run_recipe
+
+    model = make_sample_model()
+    original_A = model.sections["UB300"].A
+    recipe = Recipe(
+        steps=[
+            Step("select", params={"name": "core", "expression": "section=UB300"}),
+            Step(
+                "scale_sections",
+                selection=Selection.from_string("selection=core"),
+                params={"factor": 0.5},
+            ),
+        ]
+    )
+    run = run_recipe(recipe, model)
+    assert [result.kind for result in run.results] == ["table", "model"]
+    scaled = run.results[-1].payload
+    assert pytest.approx(original_A * 0.5) == scaled.sections["UB300"].A
 
 
 def test_next_version_path_increments(tmp_path):

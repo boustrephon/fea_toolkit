@@ -23,10 +23,11 @@ properties copies it first (see
 import contextlib
 import copy
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pprint import pformat
 from typing import Any, Optional
 
+from ..model.named_selection import resolve_named_selections
 from ..model.selection import Selection
 
 __all__ = ["Recipe", "RecipeRun", "run_recipe", "satisfied_kinds"]
@@ -394,6 +395,22 @@ class RecipeRun:
     step_status: list = field(default_factory=list)
 
 
+def _resolve_step_selection(step: Any, context: Any) -> Any:
+    """Expand a step's named-selection references into explicit ids.
+
+    A step's ``Selection.selections`` / ``exclude_selections`` fields name saved
+    selections; the verb layer expands them against the document's store before
+    the verb runs, so ``mesh`` / ``scale_sections`` / the check verbs see
+    concrete element and node ids, never unresolved references.  A step with no
+    named-selection reference is returned unchanged.
+    """
+    selection = step.selection
+    if selection is None or not (selection.selections or selection.exclude_selections):
+        return step
+    resolved = resolve_named_selections(selection, context.named_selections, context.model_data)
+    return replace(step, selection=resolved)
+
+
 def run_recipe(
     recipe: Recipe,
     model_data: Any,
@@ -510,7 +527,8 @@ def run_recipe(
                     f"step {index} ({step.verb}) needs {missing[0]!r} — "
                     f"run a step that produces {missing[0]!r} first"
                 )
-            run.results.extend(spec.run(context, step))
+            resolved_step = _resolve_step_selection(step, context)
+            run.results.extend(spec.run(context, resolved_step))
             produced.add(spec.kind)
             if spec.kind == GEOMETRY:
                 # A meshing step replaced ``context.model``, so the results the

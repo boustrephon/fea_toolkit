@@ -745,11 +745,13 @@ Phase E (P32) and the GUI model tree.
 `to_string` / `from_string`), `resolve_named_selections`, the `select` / `open`
 / `close` / `save` verbs (``SESSION`` kind + ``StepContext`` document state +
 ``next_version_path``), the **Selections** tree group and `Model ▸ Name
-selection…`.  Two follow-ups remain: (1) **graphical-pick authoring** is
-text-only today (the dialog takes an expression, not a viewport pick); (2)
-`resolve_named_selections` is available but not yet wired into the *other*
-verbs' selection resolution — the `selections` field round-trips, but a `mesh`
-/ `scale_sections` step does not yet expand it.
+selection…`.  The two follow-ups landed too: (1) **graphical-pick authoring** —
+`Name selection…` now offers to save the current viewport / tree selection (a
+pick) as the named selection's ids, falling back to the expression prompt when
+there is no pick; (2) `resolve_named_selections` is wired into the verb layer
+(`run_recipe` resolves a step's `selections` / `exclude_selections` against the
+document's store before the verb runs), so a `mesh` / `scale_sections` / check
+step that references a named selection now sees concrete ids.
 
 **What.** Two related additions, both agreed:
 

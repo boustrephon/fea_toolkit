@@ -59,38 +59,66 @@ def resolve_named_selections(
 ) -> Selection:
     """Expand a selection's named-selection references into explicit ids.
 
-    The ``Selection.selections`` field names saved selections; this is the
-    single place the verb layer resolves them, merging each named selection's
-    criteria and picked ids into the caller's ``element_ids`` / ``node_ids``.
-    The returned selection has ``selections=None`` so the reference is consumed,
-    never passed on unresolved.
+    The ``Selection.selections`` field names saved selections whose members are
+    *included*, and ``Selection.exclude_selections`` names those whose members
+    are *excluded*; this is the single place the verb layer resolves them,
+    merging each named selection's criteria and picked ids into the caller's
+    ``element_ids`` / ``node_ids`` (and ``exclude_element_ids`` /
+    ``exclude_node_ids``).  The returned selection has ``selections`` and
+    ``exclude_selections`` cleared so the reference is consumed, never passed on
+    unresolved.
 
     Args:
-        selection: The selection to resolve (its ``selections`` field is read).
+        selection: The selection to resolve (its ``selections`` and
+            ``exclude_selections`` fields are read).
         named: The document's ``{name: NamedSelection}`` store.
         model: The model each named selection's criteria resolve against.
 
     Returns:
-        A new :class:`Selection` with ``selections`` cleared and the named
-        selections' ids merged in.  References to unknown names are ignored.
+        A new :class:`Selection` with ``selections`` / ``exclude_selections``
+        cleared and the named selections' ids merged in.  References to unknown
+        names are ignored.
     """
-    if not selection.selections:
+    if not selection.selections and not selection.exclude_selections:
         return selection
+
+    def _ids(ns: "NamedSelection") -> tuple[list[str], list[str]]:
+        """A named selection's (elements, nodes) — explicit ids plus criteria."""
+        elements = list(ns.element_ids)
+        nodes = list(ns.node_ids)
+        if ns.selection.to_string():
+            elements.extend(ns.selection.get_frame_ids(model))
+            elements.extend(ns.selection.get_area_ids(model))
+            nodes.extend(ns.selection.get_node_ids(model))
+        return elements, nodes
+
     extra_elements: list[str] = []
     extra_nodes: list[str] = []
-    for name in selection.selections:
+    for name in selection.selections or []:
         ns = named.get(name)
         if ns is None:
             continue
-        extra_elements.extend(ns.element_ids)
-        extra_nodes.extend(ns.node_ids)
-        if ns.selection.to_string():
-            extra_elements.extend(ns.selection.get_frame_ids(model))
-            extra_elements.extend(ns.selection.get_area_ids(model))
-            extra_nodes.extend(ns.selection.get_node_ids(model))
+        elements, nodes = _ids(ns)
+        extra_elements.extend(elements)
+        extra_nodes.extend(nodes)
+
+    extra_exclude_elements: list[str] = []
+    extra_exclude_nodes: list[str] = []
+    for name in selection.exclude_selections or []:
+        ns = named.get(name)
+        if ns is None:
+            continue
+        elements, nodes = _ids(ns)
+        extra_exclude_elements.extend(elements)
+        extra_exclude_nodes.extend(nodes)
+
     return replace(
         selection,
         selections=None,
+        exclude_selections=None,
         element_ids=((selection.element_ids or []) + extra_elements) or None,
         node_ids=((selection.node_ids or []) + extra_nodes) or None,
+        exclude_element_ids=((selection.exclude_element_ids or []) + extra_exclude_elements)
+        or None,
+        exclude_node_ids=((selection.exclude_node_ids or []) + extra_exclude_nodes) or None,
     )
