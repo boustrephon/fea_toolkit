@@ -206,7 +206,7 @@ class _NldStepHistory:
         return max((a.shape[0] for a in self._arrays.values()), default=0)
 
     def __bool__(self) -> bool:
-        return bool(self._arrays)
+        return self.__len__() > 0
 
     def frame(self, k: int) -> dict:
         """The ``{node_id: (dx, dy, dz)}`` field at step *k*."""
@@ -218,17 +218,23 @@ class _NldStepHistory:
         return field
 
     def peak_frame(self) -> dict:
-        """The step whose largest nodal displacement norm is greatest."""
-        best_k = 0
-        best_norm = -1.0
-        for k in range(len(self)):
-            norm = 0.0
-            for arr in self._arrays.values():
-                if k < arr.shape[0]:
-                    norm = max(norm, float(math.hypot(arr[k, 0], arr[k, 1], arr[k, 2])))
-            if norm > best_norm:
-                best_norm, best_k = norm, k
-        return self.frame(best_k)
+        """The step whose largest nodal displacement norm is greatest.
+
+        Each node's displacement norms are computed once with NumPy over its
+        whole history, then reduced per step across nodes — so an empty history
+        returns ``{}`` and the *first* maximum step wins, exactly as the
+        per-step / per-node loop did.
+        """
+        n_steps = self.__len__()
+        if n_steps == 0:
+            return {}
+        step_max = np.full(n_steps, -np.inf)
+        for arr in self._arrays.values():
+            if arr.shape[0] == 0:
+                continue
+            norms = np.linalg.norm(arr[: arr.shape[0], :3], axis=1)
+            step_max[: arr.shape[0]] = np.maximum(step_max[: arr.shape[0]], norms)
+        return self.frame(int(np.argmax(step_max)))
 
 
 def _frame_disp_norm(frame: dict) -> float:
@@ -239,9 +245,9 @@ def _frame_disp_norm(frame: dict) -> float:
     for value in frame.values():
         arr = np.asarray(value, dtype=float)
         if arr.size >= 3:
-            best = max(best, float(math.hypot(arr[0], arr[1], arr[2])))
+            best = max(best, float(np.linalg.norm(arr[:3])))
         elif arr.size == 2:
-            best = max(best, float(math.hypot(arr[0], arr[1])))
+            best = max(best, float(np.linalg.norm(arr[:2])))
     return best
 
 
@@ -1970,6 +1976,7 @@ class MainWindow(QMainWindow):
         else:
             return
         self._inspector.show_object(self._views.get(view.key))
+        self._set_view_actions_enabled()
         self.log(f"Showing view: {view.name}.")
 
     def _rebuild_tree(self) -> None:
@@ -2465,7 +2472,6 @@ class MainWindow(QMainWindow):
             self._viewer.overlay_deformed(frame, scale=self._anim_base_scale)
             self._viewer.show()
             return
-        import math
 
         self._anim_phase += 0.25  # ≈ 6.25 rad/s at 40 ms → ~1 Hz
         scale = self._anim_base_scale * math.sin(self._anim_phase)
@@ -4646,11 +4652,22 @@ class MainWindow(QMainWindow):
                     panel.set_recipe(Recipe.from_dict(recipe_dict))
 
         viewport = manifest.get("viewport") or {}
-        self._hidden_elem_ids = self._restore_hidden_elements(viewport.get("hidden_elem_ids"), sap)
+        active = self._preferred_open_view(manifest.get("active_view"))
+        # Validate hidden ids against the topology the restored view draws: the
+        # mesh when a processed/meshed view is preferred, the parsed model
+        # otherwise — so ids that are not drawable in that topology are rejected
+        # rather than silently re-hiding the wrong members.
+        hidden_model = (
+            mesh
+            if mesh is not None and active is not None and active.key in ("processed", "meshed")
+            else sap
+        )
+        self._hidden_elem_ids = self._restore_hidden_elements(
+            viewport.get("hidden_elem_ids"), hidden_model
+        )
 
         self._apply_display_values(manifest.get("display") or {})
 
-        active = self._preferred_open_view(manifest.get("active_view"))
         if active is None:
             views = self._views.views()
             active = views[0] if views else None
@@ -4664,18 +4681,24 @@ class MainWindow(QMainWindow):
     def open_path(self, path: str) -> bool:
         """Parse *path* and display it; return False on failure (no dialog).
 
+        A saved document (a ``__document__`` envelope written by the ``save``
+        verb) is decoded through the envelope-aware loader so its named
+        selections are restored with the model, rather than the full envelope
+        being handed to the bare model decoder.
+
         Dialog-free so tests can drive it directly.
         """
-        from ..io.model_loader import load_model_data
+        from ..workflow.verbs.save import _load_document
 
         self.log(f"Opening {path} \u2026")
         try:
-            model = load_model_data(path)
+            model, selections = _load_document(path)
         except Exception as exc:
             self.log(f"Failed to open {path}: {exc}", "error")
             return False
         self._save_view_state()  # preserve the outgoing model's view before switching
         self._remember_source(model, source=path)
+        self._named_selections = selections
         state, notes = load_view_state(path)
         for note in notes:
             # A stale state (the model was re-edited) is an ordinary outcome, so
