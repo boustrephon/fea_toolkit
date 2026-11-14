@@ -68,26 +68,30 @@ unchanged through P32; heavy imports stay inside the verb functions so
 ### IDA promotion — follow-ups (2026-11-14)
 
 The generic `analysis/ida.py` driver (promoted from `benchmarks/`, the
-"IDA before P31/P35" tranche) carries two known follow-ups, recorded so they
-are not lost:
+"IDA before P31/P35" tranche) carried two known follow-ups; both landed
+2026-11-14:
 
-1. **Roof-drift proxy vs per-storey `d_max`.**  The generic driver's collapse
-   drift measure is the *peak roof-drift ratio* (max horizontal nodal
-   displacement / structure height), not the benchmark's per-storey interstorey
-   `d_max`.  The `collapse_drift` default (0.10) is calibrated to interstorey
-   drift, so a soft-storey frame can be mis-ranked.  **Revisit before trusting
-   generic IDA collapse intensities for real assessment** — the upgrade is to
-   group nodes by `z` into levels and take the max relative lateral drift
-   between adjacent levels (`analysis/ida.py::_peak_roof_drift`).
-2. **NPZ serialisation of the generic IDA result.**  `run_ida` returns a plain
-   dict (benchmark `_ida_run` shape); it is not yet wired through
-   `io.npz_writer.collect_ida_arrays`, so a generic IDA run cannot be written
-   out for standalone plotting.  Align the result with the schema-v5
-   `ida/{record}/…` block when persistence is wanted.
+1. ~~**Roof-drift proxy vs per-storey `d_max`.**~~ ✅ **Landed** — `run_ida`
+   now takes a `stories` list (resolved by the `ida` verb via
+   `identify_stories(model_data)`); with ≥ 2 levels the drift is the peak
+   interstorey-drift ratio (`model/storey_response.peak_interstorey_drift`),
+   otherwise the roof proxy, and the result records `drift_measure` /
+   `storey_method` / `storey_confidence` / `n_storeys`.
+2. ~~**NPZ serialisation of the generic IDA result.**~~ ✅ **Landed** —
+   `npz_writer.collect_single_ida_arrays` writes a single-record result under
+   the schema-v5 `ida/<record>/…` block (`Sa_T1_g = 1.0`, scale-as-IM, with a
+   `drift_measure` provenance scalar), dispatched from `write_results_npz` /
+   `write_results` / `AnalysisBuilder.export_results`, and the `ida` verb gains
+   an `export_path` param.
 
-Neither blocks the workflow/GUI front; both are recorded here to be picked up
-next (they are the highest remaining "correctness before trusting the numbers"
-items).
+**Known limitation (multi-tower ETABS).**  A multi-tower ETABS model shares one
+flat `STORY DATA` table whose levels sit at independent per-tower elevations;
+`identify_stories` cannot associate a level with its tower, so levels from
+different towers are merged and per-tower drift is not computed.  The detector
+now warns on duplicate story names/elevations, and the guidance is documented
+in `docs/modeling_guidance.md` §9 — split the towers into separate models for
+per-tower results (see also the CSI *Edit > Towers, Stories and Grid Systems*
+help and the ETABS Modelling FAQ).
 
 ### GUI/workflow follow-ups — the nine-item batch (2026-10-12)
 

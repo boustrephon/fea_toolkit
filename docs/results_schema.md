@@ -540,6 +540,18 @@ and wired through `write_results_npz()` via the `ida_results` argument.
 | `ida/median_collapse_Sa_T1_gamma` | `()` | `float` | Median `(Sa,c/g)/γ` |
 | `ida/sigma_ln` | `()` | `float` | Collapse dispersion `σ_ln` |
 
+The block also accepts a **single-record generic** result from
+`fea_toolkit.analysis.ida.run_ida()`, written by
+`collect_single_ida_arrays()`.  For that producer the intensity measure is the
+raw record **scale factor** (not `Sa(T1)/g`), so `ida/<record>/Sa_T1_g` is
+written `1.0`, `source` is the record path, and an optional per-record
+`drift_measure` records whether `drift` is the interstorey `d_max` or the
+roof-drift proxy:
+
+| Array | Shape | dtype | Description |
+|---|---|---|---|
+| `ida/<record>/drift_measure` | `()` | `str` | **Optional** provenance — `"interstorey_d_max"` or `"roof_proxy"` (generic producer only) |
+
 `N_level` is resolved **per record** (ragged across records) from the `scale`
 anchor, exactly like the transient block's per-case `N_t`.  `ida_record_names()`
 returns the sorted record ids, and `describe_results_npz()` reports them under

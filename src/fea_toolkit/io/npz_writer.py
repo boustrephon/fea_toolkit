@@ -600,11 +600,12 @@ def results_arrays(
             :func:`~fea_toolkit.analysis.nonlinear_dynamic.run_nonlinear_dynamic_analysis`).
             Written under the ``transient/<case>/...`` block via
             :func:`collect_transient_arrays` and listed in ``analysis_types``.
-        ida_results: Optional dict from
+        ida_results: Optional IDA dict — either the multi-record
             :func:`~fea_toolkit.benchmarks.generic_frame_run.collapse_ida_curves`
-            (the IK-2005 collapse run).  Written under the ``ida/<record>/...``
-            block via :func:`collect_ida_arrays` and listed in
-            ``analysis_types``.
+            output (the IK-2005 collapse run, via :func:`collect_ida_arrays`) or
+            a single-record :func:`~fea_toolkit.analysis.ida.run_ida` result
+            (via :func:`collect_single_ida_arrays`).  Written under the
+            ``ida/<record>/...`` block and listed in ``analysis_types``.
 
     Returns:
         The archive's arrays, ready to be saved or served to a repository.
@@ -656,7 +657,10 @@ def results_arrays(
         arrays.update(collect_transient_arrays(transient_results))
     if ida_results:
         analysis_types.append("ida")
-        arrays.update(collect_ida_arrays(ida_results))
+        if "records" in ida_results:
+            arrays.update(collect_ida_arrays(ida_results))
+        else:
+            arrays.update(collect_single_ida_arrays(ida_results))
     # NOTE: Legacy flat aliases (shell_fx, shell_fy, ...) were previously
     # written here for backward compatibility.  As of 2026-07 all consumers
     # use the namespaced ``shell_forces/*`` keys or the geometry-native
@@ -715,10 +719,12 @@ def write_results_npz(
         transient_results: Optional ``{case: result}`` mapping of time-history
             runs — written under the ``transient/<case>/...`` block (see
             :func:`collect_transient_arrays`).
-        ida_results: Optional dict from
+        ida_results: Optional IDA dict — the multi-record
             :func:`~fea_toolkit.benchmarks.generic_frame_run.collapse_ida_curves`
-            — written under the ``ida/<record>/...`` block (see
-            :func:`collect_ida_arrays`).
+            output (see :func:`collect_ida_arrays`) or a single-record
+            :func:`~fea_toolkit.analysis.ida.run_ida` result (see
+            :func:`collect_single_ida_arrays`) — written under the
+            ``ida/<record>/...`` block.
 
     Returns:
         Absolute path to the saved file.
@@ -1308,6 +1314,89 @@ def collect_ida_arrays(ida_result: dict[str, Any]) -> dict[str, np.ndarray]:
         )
         arrays[make_ida_key(rid, "ida/{record}/Sa_T1_g")] = np.asarray(det["Sa_T1_g"], dtype=float)
         arrays[make_ida_key(rid, "ida/{record}/source")] = np.asarray(det["source"], dtype=str)
+
+    return arrays
+
+
+def collect_single_ida_arrays(
+    ida_result: dict[str, Any], record_id: Optional[str] = None
+) -> dict[str, np.ndarray]:
+    """Collect a single-record ``ida/<record>/...`` block from a generic ``run_ida`` result.
+
+    The generic :func:`~fea_toolkit.analysis.ida.run_ida` driver returns one
+    record's ladder (``intensities`` / ``drifts`` / ``converged`` /
+    ``collapse_intensity`` / ``collapse_criterion``), not the multi-record
+    :func:`~fea_toolkit.benchmarks.generic_frame_run.collapse_ida_curves` shape
+    :func:`collect_ida_arrays` consumes.  This wraps it into the same schema-v5
+    per-record arrays so a standalone IDA run can be persisted and read back by
+    :func:`~fea_toolkit.io.npz_reader.read_results_npz` / ``plot_ida_curve``.
+
+    The generic driver's intensity measure is the **raw record scale factor**
+    (not ``Sa(T1)/g``), so ``Sa_T1_g`` is written as ``1.0`` — documented
+    provenance, not a computed spectral ordinate — and ``source`` carries the
+    record path.  The per-record ``drift_measure`` provenance records whether
+    ``drift`` is the interstorey ``d_max`` or the roof-drift proxy.
+
+    Args:
+        ida_result: The :func:`~fea_toolkit.analysis.ida.run_ida` result dict.
+        record_id: The record id (its flat-NPZ key segment).  Defaults to the
+            record file's stem, sanitised of path separators.
+
+    Returns:
+        ``{array_name: np.ndarray}`` keyed per the ``IDA_*_ARRAYS`` schema
+        (empty when *ida_result* is empty).
+    """
+    arrays: dict[str, np.ndarray] = {}
+    if not ida_result:
+        return arrays
+
+    if record_id is None:
+        record_id = Path(str(ida_result.get("record", "record"))).stem
+    record_id = record_id.replace("/", "_").replace("\\", "_")
+
+    arrays["ida/record_id"] = np.array([record_id], dtype=str)
+    ci = ida_result.get("collapse_intensity")
+    # The single record's collapse IM (``collapse_intensity``) is also its
+    # collapse capacity in `Sa(T1)/g` units, because `Sa_T1_g = 1.0` (scale-as-IM).
+    arrays["ida/collapse_Sa_T1_g"] = np.array([ci if ci is not None else np.nan], dtype=float)
+    arrays["ida/collapse_Sa_T1_gamma"] = np.array([ci if ci is not None else np.nan], dtype=float)
+    arrays[make_ida_key(record_id, "ida/{record}/scale")] = np.asarray(
+        ida_result.get("intensities", []), dtype=float
+    )
+    arrays[make_ida_key(record_id, "ida/{record}/drift")] = np.asarray(
+        ida_result.get("drifts", []), dtype=float
+    )
+    arrays[make_ida_key(record_id, "ida/{record}/converged")] = np.asarray(
+        ida_result.get("converged", []), dtype=bool
+    )
+    arrays[make_ida_key(record_id, "ida/{record}/collapse_scale")] = np.asarray(
+        ci if ci is not None else np.nan, dtype=float
+    )
+    arrays[make_ida_key(record_id, "ida/{record}/collapse_criterion")] = np.asarray(
+        str(ida_result.get("collapse_criterion") or "none"), dtype=str
+    )
+    # Scale-as-IM: the generic driver's intensity is the raw scale factor, so
+    # the physical IM ``Sa(T1)/g`` is recorded as 1.0 (documented provenance).
+    arrays[make_ida_key(record_id, "ida/{record}/Sa_T1_g")] = np.asarray(1.0, dtype=float)
+    arrays[make_ida_key(record_id, "ida/{record}/source")] = np.asarray(
+        str(ida_result.get("record", "")), dtype=str
+    )
+    measure = ida_result.get("drift_measure")
+    if measure:
+        arrays[make_ida_key(record_id, "ida/{record}/drift_measure")] = np.asarray(
+            str(measure), dtype=str
+        )
+
+    scalar_specs: dict[str, tuple[str, str]] = {
+        "collapse_drift": ("collapse_drift", "float"),
+        "tolerance": ("tolerance", "float"),
+        "max_scale": ("max_scale", "float"),
+    }
+    for field, (key_name, dtype) in scalar_specs.items():
+        value = ida_result.get(field)
+        if value is None:
+            continue
+        arrays[f"ida/{key_name}"] = np.asarray(value, dtype=dtype)
 
     return arrays
 

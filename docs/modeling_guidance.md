@@ -260,6 +260,32 @@ nonlinear verification paper.
 |---|---|
 | English | `openseesdigital.com` (M. Scott's blog); `opensees.berkeley.edu` wiki/manuals/examples; NIST GCR 17-917-46v2; UWO STR-833 |
 | Chinese | `hanlindong.com` (SmartAnalyze); `jdcui.com` (崔济东's Q&A notes) |
+
+## 9. Storey levels and multi-tower ETABS models
+
+Storey detection (`fea_toolkit.model.stories.identify_stories`) resolves levels
+in priority order — the ETABS `STORY DATA` table, Z-axis diaphragm constraints,
+nearly-horizontal area elements, then node Z-clustering.  SAP2000 and SAFE
+models do **not** guarantee storey definitions (ETABS does), so the IDA drift
+measure degrades along the same chain: with **≥ 2 levels** it is the peak
+**interstorey-drift ratio** (`d_max`); with fewer it is the **roof-drift proxy**
+(max horizontal nodal displacement ÷ structure height), and the result records
+which was used (`drift_measure`) so a proxy value is never misread.
+
+**Multi-tower ETABS models are the known gap.**  ETABS lets one file hold
+several "towers", each with its own grid system and its own set of story
+levels (CSI: *Edit > Towers, Stories and Grid Systems*).  Story drift and shear
+are reported per tower only when the multiple-tower option is enabled, and CSI
+notes that a tower cannot be analysed separately — a separate model per tower
+is needed for independent results.  `identify_stories` reads one flat
+`STORY DATA` table and cannot associate a level with its tower, so levels from
+different towers are merged by elevation; the detector warns when duplicate
+story names or elevations are present.  **Do not trust interstorey drift on a
+multi-tower model — split the towers into separate models first.**
+
+Sources (cited, not reproduced): CSI ETABS help — *Edit > Towers, Stories and
+Grid Systems*; the CSI ETABS Modelling FAQ (multiple towers); the ETABS API
+`GetStories` (per-tower story information).
 | Turkish | METU theses; DergiPark "Fiber Based Modeling Strategies of RC Columns" (Caglar & Tatar) |
 | Portuguese | NOVA Lisboa / FEUP / Porto theses; UNICAMP |
 | Spanish | CEINCI-LAB (Ecuador); `jpi-ingenieria.com`; `github.com/odarroyo/openseespy_starting_tutorials`; UniAndes wall guide |

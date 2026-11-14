@@ -52,8 +52,13 @@ SCHEMA_VERSION_LEGACY = 1
 #:   collapse scalars (``collapse_scale`` / ``collapse_criterion``) and the
 #:   ``Sa_T1_g`` / ``source`` provenance, alongside the ``ida/record_id`` +
 #:   ``ida/collapse_Sa_T1_g`` summaries and the ``ida/median_collapse_Sa_T1_gamma``
-#:   / ``ida/sigma_ln`` scalars.  A ``4`` archive still reads — it simply has no
-#:   ``ida`` block, so ``"ida"`` is absent from its ``analysis_types``.
+#:   / ``ida/sigma_ln`` scalars.  The block also accepts a single-record generic
+#:   :func:`~fea_toolkit.analysis.ida.run_ida` result (via
+#:   ``collect_single_ida_arrays``): its intensity measure is the raw record
+#:   scale factor, so ``Sa_T1_g`` is written ``1.0``, and an optional per-record
+#:   ``ida/{record}/drift_measure`` records whether ``drift`` is the interstorey
+#:   ``d_max`` or the roof-drift proxy.  A ``4`` archive still reads — it simply
+#:   has no ``ida`` block, so ``"ida"`` is absent from its ``analysis_types``.
 SCHEMA_VERSION = 5
 
 # ── Required array names per result type ──────────────────────────────────
@@ -411,6 +416,14 @@ IDA_SCALAR_ARRAYS: dict[str, tuple] = {
     "ida/collapse_drift": ("", "float"),
     "ida/median_collapse_Sa_T1_gamma": ("", "float"),
     "ida/sigma_ln": ("", "float"),
+}
+
+#: Optional per-record provenance arrays — written by the generic
+#: :func:`~fea_toolkit.io.npz_writer.collect_single_ida_arrays` producer and
+#: absent from the benchmark's multi-record block.  Checked only when present,
+#: never required (unlike :data:`IDA_PER_RECORD_ARRAYS`).
+IDA_OPTIONAL_PER_RECORD_ARRAYS: dict[str, tuple] = {
+    "ida/{record}/drift_measure": ("", "str"),
 }
 
 META_ARRAYS: dict[str, tuple] = {
@@ -1020,6 +1033,11 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
                         if arr is None:
                             messages.append(f"Missing ida array: {key}")
                         else:
+                            _check_shape(key, arr, shape_desc, dtype_str)
+                    for template, (shape_desc, dtype_str) in IDA_OPTIONAL_PER_RECORD_ARRAYS.items():
+                        key = make_ida_key(record, template)
+                        arr = data.get(key)
+                        if arr is not None:
                             _check_shape(key, arr, shape_desc, dtype_str)
 
     return messages

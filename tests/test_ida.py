@@ -31,12 +31,17 @@ def _fake_runner(threshold: float = 1.8):
         num_steps = kwargs["num_steps"]
         n_steps = num_steps if im < threshold else num_steps - 1
         drift = 0.02 * im
-        disp = np.zeros((n_steps, 3))
-        disp[:, 0] = drift * 10.0 * np.linspace(0.0, 1.0, n_steps)
+        roof = np.zeros((n_steps, 3))
+        roof[:, 0] = drift * 10.0 * np.linspace(0.0, 1.0, n_steps)
+        base = np.zeros((n_steps, 3))
         return AnalysisResult(
             name="NLD",
             analysis_type="NonlinearDynamicAnalysis",
-            data={"displacements": {1: disp}, "converged_steps": n_steps, "direction": "X"},
+            data={
+                "displacements": {1: base, 2: roof},
+                "converged_steps": n_steps,
+                "direction": "X",
+            },
         )
 
     return fake
@@ -132,3 +137,69 @@ def test_run_ida_missing_record_file():
     """An unreadable record path raises a clear error."""
     with pytest.raises(ValueError, match="Cannot read ground motion file"):
         run_ida(make_sample_model(), _modal(), "/no/such/record.txt", [1.0], num_steps=10)
+
+
+def test_run_ida_records_interstorey_drift_measure(monkeypatch):
+    """The sample model has two levels, so drift is interstorey d_max, recorded."""
+    import fea_toolkit.analysis.nonlinear_dynamic as nld_module
+
+    monkeypatch.setattr(nld_module, "run_nonlinear_dynamic_analysis", _fake_runner(threshold=1.8))
+    result = run_ida(
+        make_sample_model(),
+        _modal(),
+        "record.txt",
+        [0.5, 1.0],
+        accel_base=np.ones(20),
+        num_steps=10,
+        tolerance=None,
+    )
+    assert result["drift_measure"] == "interstorey_d_max"
+    assert result["n_storeys"] == 2
+    assert result["storey_method"] == "node_clustering"
+
+
+def test_run_ida_falls_back_to_roof_proxy_for_a_single_level(monkeypatch):
+    """A single-level storey list leaves drift as the roof proxy, labelled."""
+    import fea_toolkit.analysis.nonlinear_dynamic as nld_module
+    from fea_toolkit.model.stories import StoryLevel
+
+    monkeypatch.setattr(nld_module, "run_nonlinear_dynamic_analysis", _fake_runner(threshold=1.8))
+    result = run_ida(
+        make_sample_model(),
+        _modal(),
+        "record.txt",
+        [0.5, 1.0],
+        accel_base=np.ones(20),
+        num_steps=10,
+        tolerance=None,
+        stories=[StoryLevel(name="Storey 1", elevation=0.0, method="manual", confidence="high")],
+    )
+    assert result["drift_measure"] == "roof_proxy"
+    assert result["storey_method"] == "manual"
+    assert result["drifts"] == pytest.approx([0.01, 0.02])
+
+
+def test_run_ida_provenance_comes_from_the_supplied_stories(monkeypatch):
+    """The supplied StoryLevel list carries its own method/confidence provenance."""
+    import fea_toolkit.analysis.nonlinear_dynamic as nld_module
+    from fea_toolkit.model.stories import StoryLevel
+
+    monkeypatch.setattr(nld_module, "run_nonlinear_dynamic_analysis", _fake_runner(threshold=99.0))
+    stories = [
+        StoryLevel(name="Base", elevation=0.0, method="diaphragm", confidence="medium"),
+        StoryLevel(name="Roof", elevation=10.0, method="diaphragm", confidence="medium"),
+    ]
+    result = run_ida(
+        make_sample_model(),
+        _modal(),
+        "record.txt",
+        [1.0],
+        accel_base=np.ones(20),
+        num_steps=10,
+        tolerance=None,
+        stories=stories,
+    )
+    assert result["drift_measure"] == "interstorey_d_max"
+    assert result["storey_method"] == "diaphragm"
+    assert result["storey_confidence"] == "medium"
+    assert result["n_storeys"] == 2

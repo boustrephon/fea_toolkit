@@ -483,6 +483,7 @@ def write_results(
     forces_coordinate_system: str = "local",
     case_meta: Optional[dict[str, dict[str, str]]] = None,
     transient_results: Optional[dict[str, Any]] = None,
+    ida_results: Optional[dict[str, Any]] = None,
 ) -> str:
     """Write model geometry + analysis results to a unified output file.
 
@@ -527,6 +528,13 @@ def write_results(
             runs — written under the ``transient/<case>/...`` block via
             :func:`fea_toolkit.io.npz_writer.collect_transient_arrays` and
             listed in ``analysis_types`` as ``"transient"``.
+        ida_results: Optional IDA dict — the multi-record
+            :func:`~fea_toolkit.benchmarks.generic_frame_run.collapse_ida_curves`
+            output (via :func:`fea_toolkit.io.npz_writer.collect_ida_arrays`) or
+            a single-record :func:`~fea_toolkit.analysis.ida.run_ida` result
+            (via :func:`fea_toolkit.io.npz_writer.collect_single_ida_arrays`) —
+            written under the ``ida/<record>/...`` block and listed in
+            ``analysis_types`` as ``"ida"``.
 
     Returns:
         Absolute path to the written file.
@@ -616,6 +624,16 @@ def write_results(
 
         arrays.update(collect_transient_arrays(transient_results))
 
+    # IDA collapse results — a multi-record ``collapse_ida_curves`` dict or a
+    # single-record generic ``run_ida`` dict (dispatched on the ``records`` key).
+    if ida_results:
+        from .npz_writer import collect_ida_arrays, collect_single_ida_arrays
+
+        if "records" in ida_results:
+            arrays.update(collect_ida_arrays(ida_results))
+        else:
+            arrays.update(collect_single_ida_arrays(ida_results))
+
     if static_results:
         analysis_types.append("static")
     if modal_result:
@@ -626,6 +644,8 @@ def write_results(
         analysis_types.append("pushover")
     if transient_results:
         analysis_types.append("transient")
+    if ida_results:
+        analysis_types.append("ida")
     # Always written — an empty array for a geometry-only file, matching the
     # legacy ``write_results_npz`` manifest so ``describe_results_npz`` and
     # the review's archive summary read identically from either writer.

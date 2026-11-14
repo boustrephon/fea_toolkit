@@ -15,6 +15,7 @@ import pytest
 
 from fea_toolkit.model.storey_response import (
     group_shell_forces_by_section,
+    peak_interstorey_drift,
     storey_levels_from_z,
     sum_storey_forces,
 )
@@ -563,3 +564,37 @@ class TestSumStoreyForces:
 
     def test_empty_nodes_returns_empty(self):
         assert sum_storey_forces({}, []) == []
+
+
+class TestPeakInterstoreyDrift:
+    """The lightweight transient per-storey drift helper."""
+
+    def test_two_levels_equal_interval_drift(self):
+        node_z = {1: 0.0, 2: 10.0}
+        # Base fixed, roof ramps to 0.2 in X over 5 steps → drift 0.2/10 = 0.02.
+        n = 5
+        base = np.zeros((n, 3))
+        roof = np.zeros((n, 3))
+        roof[:, 0] = 0.2 * np.linspace(0.0, 1.0, n)
+        assert peak_interstorey_drift(node_z, {1: base, 2: roof}, [0.0, 10.0]) == pytest.approx(
+            0.02
+        )
+
+    def test_three_levels_take_the_max_interval(self):
+        node_z = {1: 0.0, 2: 5.0, 3: 10.0}
+        n = 4
+        d = {1: np.zeros((n, 3)), 2: np.zeros((n, 3)), 3: np.zeros((n, 3))}
+        # Interval 0→5: relative drift 0.5/5 = 0.1; interval 5→10: 0.1/5 = 0.02.
+        d[2][:, 0] = 0.5
+        d[3][:, 0] = 0.6
+        assert peak_interstorey_drift(node_z, d, [0.0, 5.0, 10.0]) == pytest.approx(0.1)
+
+    def test_fewer_than_two_levels_returns_zero(self):
+        assert peak_interstorey_drift({1: 0.0}, {1: np.zeros((3, 3))}, [0.0]) == 0.0
+
+    def test_a_node_outside_the_matching_band_is_ignored(self):
+        node_z = {1: 0.0, 2: 50.0}  # node 2 far from both levels
+        assert (
+            peak_interstorey_drift(node_z, {1: np.zeros((3, 3)), 2: np.ones((3, 3))}, [0.0, 10.0])
+            == 0.0
+        )

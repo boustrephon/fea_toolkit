@@ -301,3 +301,37 @@ def test_rs_shell_forces_write_and_validate(tmp_path):
         messages = validate_arrays(dict(data))
     errors = [m for m in messages if not m.startswith("[WARN]")]
     assert not errors, f"validation errors: {errors}"
+
+
+def test_single_record_ida_round_trips(tmp_path):
+    """A generic ``run_ida`` result persists and re-reads under the v5 ida block."""
+    from fea_toolkit.io.npz_reader import read_results_npz
+    from fea_toolkit.io.npz_writer import collect_single_ida_arrays, write_results_npz
+    from fea_toolkit.io.results_schema import ida_record_names, validate_arrays
+
+    result = {
+        "record": "gm/record.txt",
+        "intensities": [0.5, 1.0, 2.0],
+        "drifts": [0.01, 0.02, 0.05],
+        "converged": [True, True, False],
+        "collapse_intensity": 2.0,
+        "collapse_criterion": "nonconvergence",
+        "collapse_drift": 0.10,
+        "drift_measure": "interstorey_d_max",
+    }
+    arrays = collect_single_ida_arrays(result)
+    # The record id is the file stem, sanitised of the path.
+    assert arrays["ida/record_id"].tolist() == ["record"]
+    assert arrays["ida/record/scale"].tolist() == [0.5, 1.0, 2.0]
+    assert arrays["ida/record/drift_measure"].item() == "interstorey_d_max"
+    assert arrays["ida/record/Sa_T1_g"].item() == 1.0
+    assert arrays["ida/record/source"].item() == "gm/record.txt"
+    assert arrays["ida/collapse_Sa_T1_g"].tolist() == [2.0]
+
+    md = make_sample_model()
+    path = write_results_npz(str(tmp_path / "ida.npz"), md, ida_results=result)
+    data = read_results_npz(path)
+    assert ida_record_names(data) == ["record"]
+    messages = validate_arrays(data)
+    errors = [m for m in messages if not m.startswith("[WARN]")]
+    assert not errors, f"validation errors: {errors}"

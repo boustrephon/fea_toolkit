@@ -16,6 +16,7 @@ confidence level, and the method used to determine it.
 from __future__ import annotations
 
 import math
+import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -160,6 +161,22 @@ def _try_s2k_table(md, raw_tables) -> list[StoryLevel]:
                 method="s2k_table",
                 confidence="high",
             )
+        )
+
+    # Multiple-tower ETABS models share one STORY DATA table across towers,
+    # whose levels sit at independent (and possibly coincident) elevations.
+    # Duplicate story names or elevations are the tell-tale signature — the
+    # flat sorted list this returns cannot separate the towers, so warn rather
+    # than silently merging levels from different towers.
+    names = [s.name for s in stories]
+    elevations = [s.elevation for s in stories]
+    if len(names) != len(set(names)) or len(elevations) != len(set(elevations)):
+        warnings.warn(
+            "The STORY DATA table contains duplicate story names or elevations, "
+            "which suggests a multi-tower ETABS model.  Storey levels from "
+            "different towers are merged by elevation and drift is not computed "
+            "per tower — model each tower separately for per-tower results.",
+            stacklevel=2,
         )
     return stories
 

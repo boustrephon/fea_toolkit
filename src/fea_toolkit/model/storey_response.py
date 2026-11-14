@@ -560,6 +560,80 @@ def storey_drifts(
     return pd.DataFrame(rows)
 
 
+def peak_interstorey_drift(
+    node_z: dict,
+    displacements: dict,
+    storey_elevations: Sequence[float],
+    z_tolerance: float = 0.5,
+) -> float:
+    """Peak interstorey-drift ratio from per-node displacement histories.
+
+    Lightweight, pandas-free analogue of :func:`storey_drifts` for transient
+    (time-history) results.  Each node's history is ``(n_steps, >=2)`` (columns
+    X, Y, …) or ``(n_steps,)``; the X/Y components are the first two columns.
+    Nodes are assigned to their nearest storey elevation within the
+    ``z_tolerance / 2`` half-band, each storey's horizontal displacement
+    magnitude is taken at every time step, consecutive storeys are differenced
+    and divided by their height interval, and the peak ratio over all intervals
+    and time steps is returned.
+
+    Args:
+        node_z: ``{node_key: z}`` in model length units.
+        displacements: ``{node_key: (n_steps, >=2) or (n_steps,) ndarray}``.
+        storey_elevations: Storey elevations (at least two for a meaningful
+            interstorey drift).
+        z_tolerance: Node→storey matching band (see
+            :func:`assign_nodes_to_storeys`).
+
+    Returns:
+        The peak interstorey-drift ratio, or ``0.0`` when fewer than two
+        storeys resolve or no node carries a usable history.
+    """
+    elevations = np.asarray(sorted(float(e) for e in storey_elevations), dtype=float)
+    if elevations.size < 2:
+        return 0.0
+
+    per_level: dict[int, list] = {i: [] for i in range(elevations.size)}
+    for key, z in node_z.items():
+        hist = displacements.get(key)
+        if hist is None:
+            continue
+        arr = np.asarray(hist, dtype=float)
+        if arr.ndim == 2 and arr.shape[1] >= 2:
+            ux, uy = arr[:, 0], arr[:, 1]
+        elif arr.ndim == 1:
+            ux, uy = arr, np.zeros_like(arr)
+        else:
+            continue
+        if ux.size == 0:
+            continue
+        zi = float(z)
+        level = int(np.argmin(np.abs(elevations - zi)))
+        if abs(elevations[level] - zi) <= z_tolerance / 2:
+            per_level[level].append(np.sqrt(ux**2 + uy**2))
+
+    level_peaks: list = [None] * elevations.size
+    for i in range(elevations.size):
+        mags = per_level[i]
+        if not mags:
+            continue
+        level_peaks[i] = np.max(np.vstack(mags), axis=0)
+
+    peak = 0.0
+    for j in range(1, elevations.size):
+        lo, hi = level_peaks[j - 1], level_peaks[j]
+        if lo is None or hi is None:
+            continue
+        h = float(elevations[j] - elevations[j - 1])
+        if h < 1e-12:
+            continue
+        n = min(lo.size, hi.size)
+        if n == 0:
+            continue
+        peak = max(peak, float(np.max(np.abs(hi[:n] - lo[:n])) / h))
+    return peak
+
+
 # ========================================================================
 # CQC combination coefficient
 # ========================================================================

@@ -1086,6 +1086,7 @@ class StaticRunnerMixin:
         combinations=None,
         envelope_mode: str = "maxmin",
         transient_results: Optional[dict[str, Any]] = None,
+        ida_results: Optional[dict[str, Any]] = None,
     ) -> str:
         """Export model geometry and analysis results to a unified file.
 
@@ -1124,6 +1125,11 @@ class StaticRunnerMixin:
                 time-history runs (see
                 :meth:`run_transient_analysis`), written under the
                 ``transient/<case>/...`` block.
+            ida_results: Optional IDA dict — the multi-record
+                :func:`~fea_toolkit.benchmarks.generic_frame_run.collapse_ida_curves`
+                output or a single-record
+                :func:`~fea_toolkit.analysis.ida.run_ida` result — written under
+                the ``ida/<record>/...`` block.
 
         Returns:
             Absolute path to the written file.
@@ -1163,6 +1169,7 @@ class StaticRunnerMixin:
             rs_element_forces=rs_element_forces,
             rs_nodal_displacements=rs_nodal_displacements,
             transient_results=transient_results,
+            ida_results=ida_results,
             fmt=fmt,
             config=self.config,
             case_meta=case_meta,

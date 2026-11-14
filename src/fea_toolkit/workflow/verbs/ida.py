@@ -56,7 +56,7 @@ IDA_PARAMS: dict[str, ParamSpec] = {
     "collapse_drift": ParamSpec(
         default=0.10,
         type=float,
-        help="Peak roof-drift ratio above which the structure is deemed collapsed.",
+        help="Peak interstorey-drift ratio above which the structure is deemed collapsed.",
     ),
     "tolerance": ParamSpec(
         default=0.01,
@@ -86,6 +86,11 @@ IDA_PARAMS: dict[str, ParamSpec] = {
         default="IDA",
         type=str,
         help="Result label.",
+    ),
+    "export_path": ParamSpec(
+        default="",
+        type=str,
+        help="Optional NPZ path to persist the IDA result for standalone plotting.",
     ),
     "config": ParamSpec(
         default={},
@@ -142,6 +147,13 @@ def run_ida(context: StepContext, step: Step) -> list[StepResult]:
         )
 
     from ...analysis.ida import run_ida as run_ida_analysis
+    from ...model.stories import identify_stories
+
+    # Resolve storey levels from the parsed model (ETABS's STORY DATA table is
+    # only available at parse time; the diaphragm → area → node-clustering
+    # fallback chain covers SAP2000 and SAFE).  The driver falls back to
+    # roof-drift when fewer than two levels resolve.
+    stories = identify_stories(context.model_data)
 
     result = run_ida_analysis(
         context.model,
@@ -158,7 +170,13 @@ def run_ida(context: StepContext, step: Step) -> list[StepResult]:
         config=params["config"] or None,
         gravity_patterns=params["gravity_patterns"] or None,
         name=params["name"],
+        stories=stories,
     )
     context.results["ida"] = result
+    if params["export_path"]:
+        from ...io.npz_writer import write_results_npz
+
+        write_results_npz(params["export_path"], context.model_data, ida_results=result)
+        context.log(f"IDA results written to {params['export_path']}")
     context.log(f"IDA ({params['direction']}): complete")
     return [StepResult(kind=IDA, label="IDA", payload=result)]
