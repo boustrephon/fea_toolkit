@@ -415,6 +415,53 @@ class TestResultViews:
         window._on_animate_toggled(False)
         assert not window._anim_timer.isActive()
 
+    def test_a_nonlinear_dynamic_result_steps_through_its_history(self, window):
+        """An NLD result animates per recorded step, not as a single field."""
+        import numpy as np
+
+        from fea_toolkit.analysis.base import AnalysisResult
+
+        node_ids = list(window._model.nodes)
+        node_tags = [window._model.nodes[nid].node_tag for nid in node_ids]
+        n_steps = 5
+        history = {
+            tag: np.column_stack(
+                (
+                    np.linspace(0.0, 0.004, n_steps),
+                    np.zeros(n_steps),
+                    np.zeros(n_steps),
+                )
+            )
+            for tag in node_tags
+        }
+        payload = AnalysisResult(
+            name="NonlinearDynamic",
+            analysis_type="NonlinearDynamicAnalysis",
+            data={
+                "times": np.arange(n_steps) * 0.005,
+                "displacements": history,
+                "peak_displacement": 0.004,
+                "converged_steps": n_steps,
+                "direction": "X",
+                "gm_file": "record.txt",
+            },
+        )
+        window._show_nonlinear_dynamic_result("Nonlinear dynamic", payload)
+
+        key = "table:nonlinear-dynamic"
+        assert len(window._nld_frames[key]) == n_steps
+        assert set(window._nld_frames[key][0]) == set(node_ids)
+        assert window._nld_times[key] == [0.0, 0.005, 0.01, 0.015, 0.02]
+
+        window._on_animate_toggled(True)
+        assert window._anim_timer is not None and window._anim_timer.isActive()
+        assert window._anim_step_mode is True
+        assert len(window._anim_frames) == n_steps
+        assert window._anim_times == window._nld_times[key]
+
+        window._on_animate_toggled(False)
+        assert not window._anim_timer.isActive()
+
 
 class TestTableAndFigureViews:
     """P30 phase C: a check's table and a chart's figure reach the viewport."""

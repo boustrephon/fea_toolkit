@@ -151,7 +151,9 @@ single displacement field — a mode shape, a static case, a response-spectrum
 direction — it oscillates the shape through zero at the chosen scale, so a mode
 visibly vibrates.  For a pushover view it instead **steps through the recorded
 push history**: each increment's deformed shape is drawn in turn, so the
-progression to the fully-pushed shape is visible.  The action is enabled exactly
+progression to the fully-pushed shape is visible.  A **nonlinear time-history**
+view steps through the ground-motion record the same way, with the current
+time shown in the status bar.  The action is enabled exactly
 when **Deformed shape** is; unchecking either leaves the shape at rest.
 
 **Results ▸ Force diagrams** draws the active case's **member end forces** as
@@ -596,7 +598,7 @@ drives a *separately installed* OpenSees is the recorded route
 | Missing | Effect today |
 |---|---|
 | Modal / spectrum / pushover analyses (milestone 5, the rest) | The three menu entries are wired as recipe presets and run, but the underlying analyses are not yet reliable — modal analysis starts and then fails to complete |
-| Nonlinear time-history result visualisation | **Analysis ▸ Nonlinear time-history** runs and its peak quantities are summarised as a table view, but the transient history is not yet animated in the viewport |
+| Nonlinear time-history result visualisation | **Analysis ▸ Nonlinear time-history** runs; its peak quantities are summarised as a table view and its transient history is animated in the viewport (**Results ▸ Animate** steps through the record) |
 | Loads, storey and pushover plots (milestones 6–7) | A case's deformed shape *and* its member end forces **are** drawn in the GUI; load glyphs, storey plots and pushover curves still need the [Visualisation Toolkit](viewer.md) and the `plot_*` functions |
 | Element labels, the Property Tree tab, explicit interaction modes ([P23](_pending_work.md)) | The corresponding menu item and tab are greyed |
 | Window-layout persistence (milestone 8) | The mouse policy and the display-quality knobs **are** remembered (see the settings file above); dock positions and window geometry are not |

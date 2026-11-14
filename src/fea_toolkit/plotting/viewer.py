@@ -709,6 +709,24 @@ class ModelViewer:
         self._extract_geometry()
         return self._auto_amplification(displacements, fraction)
 
+    def node_ids_by_tag(self) -> dict:
+        """``{OpenSees node tag: node id}`` for the displayed model.
+
+        The drawn geometry and the deformed overlay are keyed by node id, while
+        transient results (nonlinear-dynamic histories) are keyed by the OpenSees
+        node tag the solver assigned.  This mapping re-keys a per-step
+        displacement field so it matches the frame endpoints.
+
+        Returns:
+            ``{node_tag: node_id}``; nodes without a tag are omitted.
+        """
+        nodes = getattr(self._model, "nodes", {}) or {}
+        return {
+            node.node_tag: node_id
+            for node_id, node in nodes.items()
+            if getattr(node, "node_tag", None) is not None
+        }
+
     def overlay_forces(
         self,
         elem_forces: Optional[dict[str, dict]] = None,

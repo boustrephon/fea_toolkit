@@ -234,6 +234,9 @@ class MainWindow(QMainWindow):
         self._anim_frames: list = []
         self._anim_frame_index: int = 0
         self._anim_step_mode: bool = False
+        self._anim_times: list = []
+        self._nld_frames: dict = {}
+        self._nld_times: dict = {}
 
         self._create_viewport()
         self._create_actions()
@@ -2190,12 +2193,73 @@ class MainWindow(QMainWindow):
             frames.append(field)
         return frames
 
+    def _active_step_frames(self) -> tuple[list, list]:
+        """Per-step frames and time labels for the active view, else ``([], [])``.
+
+        Pushover histories are read from the results archive; nonlinear-dynamic
+        histories from the transient payload stored when its result was shown.
+        A view with no recorded history animates as a single oscillating field
+        instead (see :meth:`_on_animate_toggled`).
+        """
+        repository, case = self._active_results_source()
+        if repository is not None:
+            frames = self._pushover_step_frames(repository, case)
+            if frames:
+                return frames, []
+        view = self._views.active
+        key = view.key if view is not None else None
+        if key:
+            frames = self._nld_frames.get(key)
+            if frames:
+                return frames, self._nld_times.get(key, [])
+        return [], []
+
+    def _nld_step_frames(self, payload: Any) -> tuple[list, list]:
+        """Per-step displacement fields for a nonlinear-dynamic result.
+
+        The ``nonlinear_dynamic`` verb's payload carries the transient
+        ``data["displacements"]`` — ``{node_tag: ndarray(shape=(n_steps, 3))}``
+        — keyed by the OpenSees node tag the solver assigned.  Each record step
+        becomes ``{node_id: (dx, dy, dz)}`` so the deformed-shape overlay can
+        step through the history.  Returns ``([], [])`` when the payload holds
+        no transient.
+        """
+        import numpy as np
+
+        data = getattr(payload, "data", None) or {}
+        if not isinstance(data, dict):
+            return [], []
+        history = data.get("displacements") or {}
+        if not isinstance(history, dict) or not history:
+            return [], []
+        tag_to_id = self._viewer.node_ids_by_tag() if self._viewer is not None else {}
+        first = next(iter(history.values()))
+        n_step = len(first) if first is not None else 0
+        frames = []
+        for k in range(n_step):
+            field: dict = {}
+            for tag, hist in history.items():
+                row = np.asarray(hist, dtype=float)
+                if k >= row.shape[0]:
+                    continue
+                node_id = tag_to_id.get(tag, str(tag))
+                field[node_id] = np.array(
+                    [float(row[k, 0]), float(row[k, 1]), float(row[k, 2])],
+                    dtype=float,
+                )
+            frames.append(field)
+        times = data.get("times")
+        time_labels = (
+            [float(t) for t in np.asarray(times, dtype=float)] if times is not None else []
+        )
+        return frames, time_labels
+
     def _on_animate_toggled(self, checked: bool) -> None:
         """**Results ▸ Animate deformed shape**: animate the active shape.
 
-        A single displacement field (a mode shape, a static/RS field) oscillates at
-        a sinusoidally varying scale; a pushover view steps through its recorded
-        push history instead.
+        A single displacement field (a mode shape, a static/RS field) oscillates
+        at a sinusoidally varying scale; a pushover or nonlinear-dynamic view
+        steps through its recorded history instead.
 
         Args:
             checked: Whether the animation should run.
@@ -2221,25 +2285,23 @@ class MainWindow(QMainWindow):
                 self._viewer.show()
             return
 
-        displacements = self._active_displacements()
-        if not displacements:
-            self.log("No displacement data in this view — nothing to animate.", "error")
-            self._set_toggle_checked("results.animate", False)
-            return
-
-        repository, case = self._active_results_source()
-        frames = (
-            self._pushover_step_frames(repository, case) if repository is not None and case else []
-        )
         fraction = self._deformed_scale.value() / 100.0
+        frames, times = self._active_step_frames()
         if frames:
             self._anim_step_mode = True
             self._anim_frames = frames
             self._anim_frame_index = 0
+            self._anim_times = times
             self._anim_base_scale = self._viewer.deformed_amplification(frames[-1], fraction)
         else:
+            displacements = self._active_displacements()
+            if not displacements:
+                self.log("No displacement data in this view — nothing to animate.", "error")
+                self._set_toggle_checked("results.animate", False)
+                return
             self._anim_step_mode = False
             self._anim_frames = []
+            self._anim_times = []
             self._viewer.overlay_deformed(displacements, scale=None, auto_fraction=fraction)
             self._viewer.show()
             self._anim_displacements = displacements
@@ -2255,6 +2317,10 @@ class MainWindow(QMainWindow):
         """Redraw the animated shape at the next phase (oscillate) or step."""
         if self._anim_step_mode and self._anim_frames:
             frame = self._anim_frames[self._anim_frame_index]
+            if self._anim_times:
+                self.statusBar().showMessage(
+                    f"t = {self._anim_times[self._anim_frame_index]:.3f} s"
+                )
             self._anim_frame_index = (self._anim_frame_index + 1) % len(self._anim_frames)
             self._viewer.overlay_deformed(frame, scale=self._anim_base_scale)
             self._viewer.show()
@@ -2270,6 +2336,8 @@ class MainWindow(QMainWindow):
         """Stop the deformed-shape animation timer without re-drawing."""
         if self._anim_timer is not None:
             self._anim_timer.stop()
+        if self._anim_times:
+            self.statusBar().showMessage("Ready")
 
     def _sync_force_toggles(self, checked: bool) -> None:
         """Keep the two force-diagram toggles in lockstep.
@@ -3056,8 +3124,8 @@ class MainWindow(QMainWindow):
         :class:`~fea_toolkit.analysis.base.AnalysisResult` whose ``data`` holds
         the full transient (``times`` and the per-node displacement / velocity /
         acceleration arrays) plus the peak reductions.  The peaks and the run's
-        convergence are distilled into a one-row table; the transient arrays
-        stay on the result for a future animation view.
+        convergence are distilled into a one-row table; the per-step
+        displacement history is stored for :meth:`_on_animate_toggled`.
         """
         from ..workflow.steps import Table
 
@@ -3088,7 +3156,13 @@ class MainWindow(QMainWindow):
             label,
             Table(title=label, columns=("Quantity", "Value"), rows=rows),
         )
-        self.log(f"{label}: transient history stored for animation.")
+        frames, times = self._nld_step_frames(payload)
+        if frames:
+            self._nld_frames[_table_key(label)] = frames
+            self._nld_times[_table_key(label)] = times
+            self.log(f"{label}: transient history stored for animation ({len(frames)} steps).")
+        else:
+            self.log(f"{label}: no transient displacement history to animate.", "warn")
 
     def _show_modal_result(self, label: str, payload: Any) -> None:
         """Summarise a modal result as a table and one results view per mode.
