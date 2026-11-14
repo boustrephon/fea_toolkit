@@ -13,6 +13,34 @@ from .selection import Selection
 
 __all__ = ["NamedSelection", "resolve_named_selections"]
 
+#: Every criterion field of :class:`Selection` — used to tell an *unrestricted*
+#: (match-everything) selection from one that scopes to something.
+_CRITERIA_FIELDS = (
+    "element_types",
+    "sections",
+    "materials",
+    "groups",
+    "constraints",
+    "element_ids",
+    "node_ids",
+    "elevation_range",
+    "story",
+    "exclude_element_types",
+    "exclude_sections",
+    "exclude_materials",
+    "exclude_groups",
+    "exclude_constraints",
+    "exclude_element_ids",
+    "exclude_node_ids",
+    "exclude_elevation_range",
+    "exclude_story",
+)
+
+
+def _is_unrestricted(selection: "Selection") -> bool:
+    """Whether *selection* carries no criteria at all (matches everything)."""
+    return all(getattr(selection, field) is None for field in _CRITERIA_FIELDS)
+
 
 @dataclass
 class NamedSelection:
@@ -77,7 +105,11 @@ def resolve_named_selections(
     Returns:
         A new :class:`Selection` with ``selections`` / ``exclude_selections``
         cleared and the named selections' ids merged in.  References to unknown
-        names are ignored.
+        names are ignored, except that a *positive* reference resolving to
+        nothing (with no other criterion) becomes an explicit empty scope —
+        ``element_ids=[]`` / ``node_ids=[]`` — so a consumer like
+        ``scale_sections`` never reads it as an unrestricted (match-everything)
+        selection.
     """
     if not selection.selections and not selection.exclude_selections:
         return selection
@@ -112,7 +144,7 @@ def resolve_named_selections(
         extra_exclude_elements.extend(elements)
         extra_exclude_nodes.extend(nodes)
 
-    return replace(
+    resolved = replace(
         selection,
         selections=None,
         exclude_selections=None,
@@ -122,3 +154,13 @@ def resolve_named_selections(
         or None,
         exclude_node_ids=((selection.exclude_node_ids or []) + extra_exclude_nodes) or None,
     )
+    # A positive reference that resolves to nothing must not degrade into an
+    # unrestricted (match-everything) scope — a consumer like ``scale_sections``
+    # reads "no criteria" as "every section".  Only positive references are
+    # guarded: an exclusion-only selection resolving to nothing is legitimately
+    # everything.
+    if selection.selections and _is_unrestricted(resolved):
+        return replace(
+            selection, selections=None, exclude_selections=None, element_ids=[], node_ids=[]
+        )
+    return resolved

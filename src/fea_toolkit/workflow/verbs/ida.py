@@ -176,7 +176,12 @@ def run_ida(context: StepContext, step: Step) -> list[StepResult]:
     if params["export_path"]:
         from ...io.npz_writer import write_results_npz
 
-        write_results_npz(params["export_path"], context.model_data, ida_results=result)
+        write_results_npz(
+            params["export_path"],
+            context.model_data,
+            mesh_model=context.model,
+            ida_results=result,
+        )
         context.log(f"IDA results written to {params['export_path']}")
     context.log(f"IDA ({params['direction']}): complete")
     return [StepResult(kind=IDA, label="IDA", payload=result)]

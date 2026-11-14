@@ -96,8 +96,9 @@ def run_nonlinear_dynamic(context: StepContext, step: Step) -> list[StepResult]:
     Raises:
         ValueError: If a parameter is not declared, or no ground-motion file is
             supplied.
-        RuntimeError: If the solve fails, or the process cannot import
-            ``openseespy`` (there is no out-of-process delegate for this verb yet).
+        RuntimeError: If the solve fails, the run does not converge to the end
+            of the requested steps, or the process cannot import ``openseespy``
+            (there is no out-of-process delegate for this verb yet).
     """
     from ...opensees.runtime import opensees_available
 
@@ -132,6 +133,16 @@ def run_nonlinear_dynamic(context: StepContext, step: Step) -> list[StepResult]:
         config=params["config"] or None,
         gravity_patterns=params["gravity_patterns"] or None,
     )
+    # The runner returns a partial result on non-convergence rather than
+    # raising, so signal the failure here before storing it — the completion log
+    # below must describe only a fully converged solve.
+    data = getattr(result, "data", {}) or {}
+    converged = data.get("converged_steps")
+    requested = params["num_steps"]
+    if converged is not None and int(converged) < int(requested):
+        raise RuntimeError(
+            f"nonlinear_dynamic: non-convergence — converged {converged} of {requested} steps"
+        )
     context.results["nonlinear_dynamic"] = result
     context.log(f"Nonlinear dynamic ({params['direction']}): complete")
     return [
