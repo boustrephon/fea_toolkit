@@ -24,6 +24,7 @@ peak ground acceleration.  ``ResponseSpectrum.from_iec62271`` builds a
 canonical :class:`ResponseSpectrum` from it.
 """
 
+import math
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -69,6 +70,63 @@ def _resolve_g(g: Optional[float], units: Optional[dict]) -> float:
     if units is not None:
         return g_from_units(units)
     return DEFAULT_GRAVITY_MS2
+
+
+# ========================================================================
+# Spectral acceleration of a single record
+# ========================================================================
+
+
+def sdof_spectral_acceleration(accel: np.ndarray, dt: float, T: float, zeta: float = 0.05) -> float:
+    """Peak absolute acceleration of a damped linear SDOF oscillator (``Sa(T)``).
+
+    Newmark average-acceleration integration (γ=0.5, β=0.25 — unconditionally
+    stable) of the relative-displacement SDOF ``ü + 2ζω u̇ + ω² u = −üg``, then
+    ``Sa = max |ü_total| = max |ü + üg|`` — the 5 %-damped spectral
+    acceleration of the record at one period.  This is the canonical record
+    intensity-measure primitive: the IK-2005/FEMA P-695 IDA intensity measure
+    ``Sa(T1, 5 %)/g`` is this value evaluated at the structure's fundamental
+    period and divided by gravity (Ibarra–Krawinkler 2005 footnote 4:
+    ``{[Sa(T1)/g]/γ}c`` for MDOF systems).
+
+    Because the oscillator is linear, ``Sa`` scales linearly with the record
+    amplitude — ``Sa(s·record) = s·Sa(record)`` — so one value per record at
+    scale 1 suffices to reconstruct the spectral ordinate at any scale factor.
+
+    This is the canonical home for the routine (moved here 2026-11-14 from
+    :mod:`fea_toolkit.benchmarks.sac_run`, which re-exports it for backward
+    compatibility).  It is used by the benchmark collapse drivers and by the
+    generic :func:`fea_toolkit.analysis.ida.run_ida` driver.
+
+    Args:
+        accel: Ground acceleration samples (length/s²), one per time step.
+        dt: Time step (s).
+        T: Oscillator period (s).
+        zeta: Damping ratio (default ``0.05``).
+
+    Returns:
+        ``Sa(T)`` (length/s²).
+    """
+    accel = np.asarray(accel, dtype=float)
+    if accel.size == 0:
+        return 0.0
+    w = 2.0 * math.pi / T
+    c = 2.0 * zeta * w
+    k = w * w
+    u = 0.0
+    v = 0.0
+    a = -accel[0]  # relative acceleration at t=0 (quiescent start: ü = -üg)
+    sa = abs(a + accel[0])
+    denom = 1.0 + 0.5 * dt * c + 0.25 * dt * dt * k
+    for i in range(1, len(accel)):
+        ag = accel[i]
+        u_pred = u + dt * v + 0.25 * dt * dt * a
+        v_pred = v + 0.5 * dt * a
+        a = (-ag - c * v_pred - k * u_pred) / denom
+        u = u_pred + 0.25 * dt * dt * a
+        v = v_pred + 0.5 * dt * a
+        sa = max(sa, abs(a + ag))
+    return float(sa)
 
 
 @dataclass

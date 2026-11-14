@@ -9,6 +9,10 @@ at each rung, so it works on any prepared ``MeshModel``; the benchmark-specific
 drivers in :mod:`fea_toolkit.benchmarks` remain the rigorous per-storey versions
 and share the collapse criteria below.
 
+The intensity measure is ``Sa(T1, 5 %)/g`` (the record's 5 %-damped spectral
+acceleration at the first-mode period, normalised by gravity), computed once
+per run by :func:`fea_toolkit.spectrum.sdof_spectral_acceleration`.
+
 The heavy OpenSees import lives inside :func:`run_ida` (through the
 nonlinear-dynamic runner), so importing this module does not load OpenSees.
 """
@@ -130,6 +134,22 @@ def _cluster_elevations(node_z: dict) -> list[float]:
     return [float(elev) for elev, _ in storey_levels_from_z(list(node_z.values()))]
 
 
+def _fundamental_period(modal_result: Any) -> Optional[float]:
+    """First-mode period (s) from a modal result, or ``None`` when unavailable.
+
+    The modal result's ``periods`` list is in ascending order, so the first
+    entry is the fundamental period — the ``T1`` the record's ``Sa(T1)`` is
+    evaluated at.
+    """
+    try:
+        periods = modal_result.data["modal"]["periods"]
+        if periods and float(periods[0]) > 0.0:
+            return float(periods[0])
+    except (KeyError, TypeError, IndexError, ValueError):
+        pass
+    return None
+
+
 def _peak_drift(
     data: Any, height: float, node_z: dict, storey_elevations: Sequence[float]
 ) -> tuple[float, str]:
@@ -197,6 +217,16 @@ def run_ida(
     :attr:`drift_measure` field records which was used, so a proxy value is
     never misread as interstorey drift.
 
+    The intensity measure is the record's **``Sa(T1, 5 %)/g``** — its 5 %-damped
+    spectral acceleration at the first-mode period, normalised by gravity,
+    computed once from the unscaled record via
+    :func:`~fea_toolkit.spectrum.sdof_spectral_acceleration` and reported as
+    :attr:`Sa_T1_g`.  Because the SDOF oscillator is linear, the physical IM at
+    any rung is ``scale × Sa_T1_g`` and the collapse capacity is
+    ``collapse_scale × Sa_T1_g`` (:attr:`collapse_Sa_T1_g`).  When the modal
+    result carries no period, the driver falls back to scale-as-IM
+    (``Sa_T1_g = 1.0``, :attr:`sa_method` = ``"scale_as_im"``).
+
     Args:
         mesh_model: Pre-processed topology (needs ``nodes`` with ``z`` and
             ``node_tag``).
@@ -227,9 +257,10 @@ def run_ida(
     Returns:
         The IDA result dict — ``intensities``, ``drifts``, ``converged``,
         ``collapse_intensity``, ``collapse_criterion``, ``collapse_drift``,
-        ``bisection``, ``record``, ``structure_height`` and the drift
-        provenance (``drift_measure``, ``storey_method``,
-        ``storey_confidence``, ``n_storeys``).
+        ``bisection``, ``record``, ``structure_height``, the drift provenance
+        (``drift_measure``, ``storey_method``, ``storey_confidence``,
+        ``n_storeys``) and the intensity-measure provenance (``T1``,
+        ``Sa_T1``, ``Sa_T1_g``, ``sa_method``, ``collapse_Sa_T1_g``).
     """
     from .nonlinear_dynamic import run_nonlinear_dynamic_analysis
 
@@ -256,6 +287,27 @@ def run_ida(
         storey_method = "node_clustering" if len(storey_elevations) >= 2 else "roof_proxy"
         storey_confidence = "low" if len(storey_elevations) >= 2 else None
     drift_measure = "interstorey_d_max" if len(storey_elevations) >= 2 else "roof_proxy"
+
+    # ── Record intensity measure — Sa(T1, 5 %)/g ─────────────────────
+    # The record's 5 %-damped spectral acceleration at the first-mode period,
+    # normalised by gravity, is the IK-2005 intensity measure.  It is computed
+    # once from the unscaled record; because the SDOF oscillator is linear, the
+    # physical IM at any rung is ``scale × Sa_T1_g``.  When a period cannot be
+    # resolved the driver falls back to scale-as-IM (``Sa_T1_g = 1.0``).
+    from .._unit_scaling import g_from_units
+    from ..spectrum import sdof_spectral_acceleration
+
+    t1 = _fundamental_period(modal_result)
+    units = getattr(mesh_model, "units", None)
+    g = g_from_units(units) if units else None
+    if t1 is not None and g and g > 0.0 and dt > 0.0 and accel_base.size:
+        sa_t1 = sdof_spectral_acceleration(accel_base, dt, t1, zeta=0.05)
+        sa_t1_g = float(sa_t1 / g)
+        sa_method = "sdof_newmark"
+    else:
+        sa_t1 = None
+        sa_t1_g = 1.0
+        sa_method = "scale_as_im"
 
     def _run(im: float) -> tuple[float, bool]:
         accel = accel_base * im
@@ -339,4 +391,9 @@ def run_ida(
         "storey_method": storey_method,
         "storey_confidence": storey_confidence,
         "n_storeys": len(storey_elevations),
+        "T1": t1,
+        "Sa_T1": sa_t1,
+        "Sa_T1_g": sa_t1_g,
+        "sa_method": sa_method,
+        "collapse_Sa_T1_g": (im_collapse * sa_t1_g) if im_collapse is not None else None,
     }

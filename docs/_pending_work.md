@@ -79,10 +79,17 @@ The generic `analysis/ida.py` driver (promoted from `benchmarks/`, the
    `storey_method` / `storey_confidence` / `n_storeys`.
 2. ~~**NPZ serialisation of the generic IDA result.**~~ ✅ **Landed** —
    `npz_writer.collect_single_ida_arrays` writes a single-record result under
-   the schema-v5 `ida/<record>/…` block (`Sa_T1_g = 1.0`, scale-as-IM, with a
-   `drift_measure` provenance scalar), dispatched from `write_results_npz` /
+   the schema-v5 `ida/<record>/…` block, dispatched from `write_results_npz` /
    `write_results` / `AnalysisBuilder.export_results`, and the `ida` verb gains
    an `export_path` param.
+3. ~~**Record ``Sa(T1)/g`` intensity measure.**~~ ✅ **Landed (2026-11-14)** —
+   `run_ida` now computes the record's 5 %-damped ``Sa(T1)/g`` once from the
+   unscaled record at the modal ``T1`` (the SDOF integrator promoted from the
+   benchmark to ``fea_toolkit.spectrum.sdof_spectral_acceleration``), reports
+   ``T1`` / ``Sa_T1`` / ``Sa_T1_g`` / ``collapse_Sa_T1_g`` / ``sa_method``
+   (scale-as-IM fallback when no period), and ``plot_ida_curve`` / the
+   ``chart`` verb's ``ida`` choice draw the curve on the physical ``Sa(T1)/g``
+   axis — the GUI displays it through the existing figure view.
 
 **Known limitation (multi-tower ETABS).**  A multi-tower ETABS model shares one
 flat `STORY DATA` table whose levels sit at independent per-tower elevations;

@@ -22,6 +22,7 @@ from fea_toolkit.spectrum import (
     _iec_spectrum,
     _interp_sa,
     _resolve_g,
+    sdof_spectral_acceleration,
 )
 from fea_toolkit.utils import DEFAULT_GRAVITY_MS2, g_from_units
 
@@ -617,3 +618,24 @@ class TestEurocode8:
     def test_displacement_factory_vertical(self):
         s = ResponseSpectrum.from_eurocode8_displacement(ag_r=0.14, vertical=True)
         assert s.code == "EC8-Vertical-Displacement"
+
+
+# ── sdof_spectral_acceleration tests ──────────────────────────────────
+
+
+def test_sdof_spectral_acceleration_is_linear_in_amplitude():
+    """Sa scales exactly with the record amplitude (linear SDOF)."""
+    t = np.linspace(0.0, 4.0, 4001)
+    accel = np.sin(2.0 * math.pi * 1.0 * t)
+    sa1 = sdof_spectral_acceleration(accel, dt=0.001, T=0.5, zeta=0.05)
+    sa2 = sdof_spectral_acceleration(2.0 * accel, dt=0.001, T=0.5, zeta=0.05)
+    assert sa2 == pytest.approx(2.0 * sa1, rel=1e-9)
+
+
+def test_sdof_spectral_acceleration_stiff_oscillator_tracks_pga():
+    """A very stiff oscillator (T → 0) reports the peak ground acceleration."""
+    dt = 0.001
+    t = np.arange(4000) * dt
+    accel = 0.5 * np.sin(2.0 * math.pi * 2.0 * t)  # 2 Hz, PGA = 0.5
+    sa = sdof_spectral_acceleration(accel, dt, T=0.01, zeta=0.05)
+    assert sa == pytest.approx(0.5, rel=0.05)

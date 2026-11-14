@@ -542,9 +542,11 @@ and wired through `write_results_npz()` via the `ida_results` argument.
 
 The block also accepts a **single-record generic** result from
 `fea_toolkit.analysis.ida.run_ida()`, written by
-`collect_single_ida_arrays()`.  For that producer the intensity measure is the
-raw record **scale factor** (not `Sa(T1)/g`), so `ida/<record>/Sa_T1_g` is
-written `1.0`, `source` is the record path, and an optional per-record
+`collect_single_ida_arrays()`.  The generic driver computes the record's
+5 %-damped `Sa(T1)/g` once from the unscaled record at the first-mode period
+(via `fea_toolkit.spectrum.sdof_spectral_acceleration`), so
+`ida/<record>/Sa_T1_g` is a real spectral ordinate and the physical IM at each
+rung is `scale × Sa_T1_g`; `source` is the record path.  An optional per-record
 `drift_measure` records whether `drift` is the interstorey `d_max` or the
 roof-drift proxy:
 

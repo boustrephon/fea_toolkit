@@ -274,7 +274,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         help=(
             "Plot a figure — 'storey_displacements' / 'storey_forces' profile a "
             "solved case; 'response_spectra' plots the model's parsed spectra; "
-            "'pushover' / 'modal' / 'csm' plot the analysis results."
+            "'pushover' / 'modal' / 'csm' / 'ida' plot the analysis results."
         ),
     ),
 }

@@ -11,6 +11,7 @@ import pytest
 from fea_toolkit.io.npz_writer import collect_ida_arrays
 from fea_toolkit.plotting.viz_ida import (
     plot_collapse_fragility,
+    plot_ida_curve,
     plot_ida_curves,
     plot_ida_summary,
 )
@@ -36,6 +37,42 @@ def test_plot_collapse_fragility_returns_figure(ida_arrays):
     assert fig is not None
     import matplotlib.pyplot as plt
 
+    plt.close(fig)
+
+
+def test_plot_ida_curve_uses_sa_t1_g_axis():
+    import matplotlib.pyplot as plt
+
+    result = {
+        "intensities": [0.5, 1.0, 2.0],
+        "drifts": [0.01, 0.02, 0.05],
+        "converged": [True, True, True],
+        "collapse_intensity": 2.0,
+        "Sa_T1_g": 0.4,
+        "drift_measure": "interstorey_d_max",
+    }
+    fig = plot_ida_curve(result)
+    assert fig is not None
+    ax = fig.axes[0]
+    assert ax.get_xlabel() == "Sa(T1, 5 %) / g"
+    assert ax.get_ylabel() == "peak interstorey-drift ratio"
+    assert list(ax.get_lines()[0].get_xdata()) == pytest.approx([0.2, 0.4, 0.8])
+    plt.close(fig)
+
+
+def test_plot_ida_curve_falls_back_to_the_scale_factor_axis():
+    import matplotlib.pyplot as plt
+
+    result = {
+        "intensities": [0.5, 1.0],
+        "drifts": [0.01, 0.02],
+        "converged": [True, True],
+        "collapse_intensity": None,
+    }
+    fig = plot_ida_curve(result)
+    assert fig is not None
+    ax = fig.axes[0]
+    assert ax.get_xlabel() == "record scale factor (IM)"
     plt.close(fig)
 
 

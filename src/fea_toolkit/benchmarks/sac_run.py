@@ -20,7 +20,6 @@ from __future__ import annotations
 import hashlib
 import importlib.metadata
 import json
-import math
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Optional
@@ -805,39 +804,12 @@ def run_ida(
 def sdof_spectral_acceleration(accel: np.ndarray, dt: float, T: float, zeta: float = 0.05) -> float:
     """Peak absolute acceleration of a damped linear SDOF oscillator (``Sa(T)``).
 
-    Newmark average-acceleration integration (γ=0.5, β=0.25 — unconditionally
-    stable) of the relative-displacement SDOF ``ü + 2ζω u̇ + ω² u = −üg``, then
-    ``Sa = max |ü_total| = max |ü + üg|`` — the 5 %-damped spectral
-    acceleration used as the MDOF collapse intensity measure (Ibarra–Krawinkler
-    2005 footnote 4: ``{[Sa(T1)/g]/γ}c`` for MDOF systems).
-
-    Args:
-        accel: Ground acceleration samples (length/s²), one per time step.
-        dt: Time step (s).
-        T: Oscillator period (s).
-        zeta: Damping ratio (default ``0.05``).
-
-    Returns:
-        ``Sa(T)`` (length/s²).
+    Moved to :mod:`fea_toolkit.spectrum` (2026-11-14); kept here as a thin
+    re-export so the benchmark's public API and ``__all__`` are unchanged.
     """
-    accel = np.asarray(accel, dtype=float)
-    w = 2.0 * math.pi / T
-    c = 2.0 * zeta * w
-    k = w * w
-    u = 0.0
-    v = 0.0
-    a = -accel[0]  # relative acceleration at t=0 (quiescent start: ü = -üg)
-    sa = abs(a + accel[0])
-    denom = 1.0 + 0.5 * dt * c + 0.25 * dt * dt * k
-    for i in range(1, len(accel)):
-        ag = accel[i]
-        u_pred = u + dt * v + 0.25 * dt * dt * a
-        v_pred = v + 0.5 * dt * a
-        a = (-ag - c * v_pred - k * u_pred) / denom
-        u = u_pred + 0.25 * dt * dt * a
-        v = v_pred + 0.5 * dt * a
-        sa = max(sa, abs(a + ag))
-    return float(sa)
+    from ..spectrum import sdof_spectral_acceleration as _sdof
+
+    return _sdof(accel, dt, T, zeta)
 
 
 def collapse_capacity_sa(

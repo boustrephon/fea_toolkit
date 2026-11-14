@@ -1437,12 +1437,36 @@ class TestEndToEnd:
         figure = run.results[-1].payload
         assert isinstance(figure, Figure)
 
-    @pytest.mark.parametrize("kind", ["modal", "pushover", "csm"])
+    @pytest.mark.parametrize("kind", ["modal", "pushover", "csm", "ida"])
     def test_a_chart_step_analysis_kinds_require_their_preceding_verb(self, kind):
         """The analysis-result charts read a preceding verb's result, never re-solve."""
         with pytest.raises(StepError) as info:
             run_recipe(Recipe(steps=[Step("chart", params={"chart": kind})]), _slab_model())
         assert "preceding" in str(info.value.cause)
+
+    def test_a_chart_step_plots_the_ida_curve(self):
+        """A chart step with 'ida' renders the IDA result the ida verb stored."""
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.workflow.steps import FIGURE, StepContext
+        from fea_toolkit.workflow.verbs.chart import run_chart
+
+        context = StepContext(
+            model_data=make_sample_model(),
+            results={
+                "ida": {
+                    "record": "record.txt",
+                    "intensities": [0.5, 1.0, 2.0],
+                    "drifts": [0.01, 0.02, 0.05],
+                    "converged": [True, True, False],
+                    "collapse_intensity": 2.0,
+                    "Sa_T1_g": 0.4,
+                    "drift_measure": "interstorey_d_max",
+                }
+            },
+        )
+        results = run_chart(context, Step(verb="chart", params={"chart": "ida"}))
+        assert [r.kind for r in results] == [FIGURE]
+        assert results[0].payload is not None
 
     def test_load_verification_reports_applied_vs_reactions(self):
         """A mesh + load_verification compares each pattern against its reactions."""

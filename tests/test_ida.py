@@ -203,3 +203,43 @@ def test_run_ida_provenance_comes_from_the_supplied_stories(monkeypatch):
     assert result["storey_method"] == "diaphragm"
     assert result["storey_confidence"] == "medium"
     assert result["n_storeys"] == 2
+
+
+def test_run_ida_computes_the_sa_t1_g_intensity_measure(monkeypatch):
+    """The driver computes Sa(T1, 5 %)/g from the record and the modal T1."""
+    import fea_toolkit.analysis.nonlinear_dynamic as nld_module
+
+    monkeypatch.setattr(nld_module, "run_nonlinear_dynamic_analysis", _fake_runner(threshold=1.8))
+    result = run_ida(
+        make_sample_model(),
+        _modal(),
+        "record.txt",
+        [0.5, 1.0, 2.0],
+        accel_base=np.ones(20),
+        num_steps=10,
+        tolerance=None,
+    )
+    assert result["T1"] == 1.0
+    assert result["sa_method"] == "sdof_newmark"
+    assert result["Sa_T1"] > 0.0
+    assert result["Sa_T1_g"] == pytest.approx(result["Sa_T1"] / 9.80665)
+    assert result["collapse_Sa_T1_g"] == pytest.approx(2.0 * result["Sa_T1_g"])
+
+
+def test_run_ida_falls_back_to_scale_as_im_without_a_period(monkeypatch):
+    """No modal period → the IM stays the raw scale factor, flagged."""
+    import fea_toolkit.analysis.nonlinear_dynamic as nld_module
+
+    monkeypatch.setattr(nld_module, "run_nonlinear_dynamic_analysis", _fake_runner(threshold=1.8))
+    result = run_ida(
+        make_sample_model(),
+        AnalysisResult(name="Modal", analysis_type="ModalAnalysis", data={}),
+        "record.txt",
+        [0.5, 1.0],
+        accel_base=np.ones(20),
+        num_steps=10,
+        tolerance=None,
+    )
+    assert result["sa_method"] == "scale_as_im"
+    assert result["Sa_T1_g"] == 1.0
+    assert result["T1"] is None

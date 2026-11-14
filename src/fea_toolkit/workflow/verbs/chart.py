@@ -27,12 +27,13 @@ CHART_PARAMS: dict[str, ParamSpec] = {
             "pushover",
             "modal",
             "csm",
+            "ida",
         ),
         help=(
             "Which chart to draw — 'storey_displacements' / 'storey_forces' "
             "profile a solved case; 'response_spectra' plots the model's parsed "
             "spectra; 'pushover' / 'modal' / 'csm' plot the corresponding "
-            "analysis results."
+            "analysis results; 'ida' plots the incremental-dynamic-analysis curve."
         ),
     ),
     "case": ParamSpec(
@@ -109,6 +110,21 @@ def _run_csm_chart(context: StepContext) -> list[StepResult]:
     figure = plot_csm_4panel(pushover.data, modal.data, units=context.model_data.units)
     context.log("Chart: capacity spectrum method (4 directions)")
     return [StepResult(kind=FIGURE, label="CSM", payload=figure)]
+
+
+def _run_ida_chart(context: StepContext) -> list[StepResult]:
+    """Plot the IDA step's single-record curve — drift vs ``Sa(T1, 5 %)/g``."""
+    from ...plotting.viz_ida import plot_ida_curve
+
+    ida = context.results.get("ida")
+    if ida is None:
+        raise ValueError("chart: 'ida' needs a preceding ida step")
+    figure = plot_ida_curve(ida)
+    if figure is None:
+        context.log("chart: the IDA run has no rungs to plot")
+        return [StepResult(kind=FIGURE, label="IDA curve", payload=None)]
+    context.log("Chart: IDA curve")
+    return [StepResult(kind=FIGURE, label="IDA curve", payload=figure)]
 
 
 def _run_storey_forces_chart(
@@ -277,6 +293,8 @@ def run_chart(context: StepContext, step: Step) -> list[StepResult]:
         return _run_pushover_chart(context)
     if params["chart"] == "csm":
         return _run_csm_chart(context)
+    if params["chart"] == "ida":
+        return _run_ida_chart(context)
 
     # Rebuild the archive from the raw results, exactly as ``combine`` does, so
     # the chart reads the same object a results view would.

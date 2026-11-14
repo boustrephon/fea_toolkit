@@ -1331,11 +1331,16 @@ def collect_single_ida_arrays(
     per-record arrays so a standalone IDA run can be persisted and read back by
     :func:`~fea_toolkit.io.npz_reader.read_results_npz` / ``plot_ida_curve``.
 
-    The generic driver's intensity measure is the **raw record scale factor**
-    (not ``Sa(T1)/g``), so ``Sa_T1_g`` is written as ``1.0`` — documented
-    provenance, not a computed spectral ordinate — and ``source`` carries the
-    record path.  The per-record ``drift_measure`` provenance records whether
-    ``drift`` is the interstorey ``d_max`` or the roof-drift proxy.
+    The generic driver's intensity measure is the record's **``Sa(T1, 5 %)/g``**
+    (computed by :func:`~fea_toolkit.spectrum.sdof_spectral_acceleration` at the
+    first-mode period and reported as ``Sa_T1_g``), so the per-record
+    ``Sa_T1_g`` is a real spectral ordinate; the ladder's physical IM at any
+    rung is ``scale × Sa_T1_g`` and the collapse capacity is
+    ``collapse_scale × Sa_T1_g``.  When the result predates the computation
+    (or its modal run carried no period), ``Sa_T1_g`` defaults to ``1.0``
+    (scale-as-IM).  ``source`` carries the record path, and the per-record
+    ``drift_measure`` provenance records whether ``drift`` is the interstorey
+    ``d_max`` or the roof-drift proxy.
 
     Args:
         ida_result: The :func:`~fea_toolkit.analysis.ida.run_ida` result dict.
@@ -1356,10 +1361,14 @@ def collect_single_ida_arrays(
 
     arrays["ida/record_id"] = np.array([record_id], dtype=str)
     ci = ida_result.get("collapse_intensity")
-    # The single record's collapse IM (``collapse_intensity``) is also its
-    # collapse capacity in `Sa(T1)/g` units, because `Sa_T1_g = 1.0` (scale-as-IM).
-    arrays["ida/collapse_Sa_T1_g"] = np.array([ci if ci is not None else np.nan], dtype=float)
-    arrays["ida/collapse_Sa_T1_gamma"] = np.array([ci if ci is not None else np.nan], dtype=float)
+    sa_t1_g = float(ida_result.get("Sa_T1_g", 1.0))
+    gamma = float(ida_result.get("gamma", 1.0)) or 1.0
+    collapse_sa_g = (ci * sa_t1_g) if ci is not None else np.nan
+    # The collapse IM in physical units: ``collapse_scale × Sa(T1)/g``, and its
+    # strength-normalised form ``(Sa,c/g)/γ`` (γ = Vy/W, unavailable for the
+    # generic driver — 1.0).
+    arrays["ida/collapse_Sa_T1_g"] = np.array([collapse_sa_g], dtype=float)
+    arrays["ida/collapse_Sa_T1_gamma"] = np.array([collapse_sa_g / gamma], dtype=float)
     arrays[make_ida_key(record_id, "ida/{record}/scale")] = np.asarray(
         ida_result.get("intensities", []), dtype=float
     )
@@ -1375,9 +1384,7 @@ def collect_single_ida_arrays(
     arrays[make_ida_key(record_id, "ida/{record}/collapse_criterion")] = np.asarray(
         str(ida_result.get("collapse_criterion") or "none"), dtype=str
     )
-    # Scale-as-IM: the generic driver's intensity is the raw scale factor, so
-    # the physical IM ``Sa(T1)/g`` is recorded as 1.0 (documented provenance).
-    arrays[make_ida_key(record_id, "ida/{record}/Sa_T1_g")] = np.asarray(1.0, dtype=float)
+    arrays[make_ida_key(record_id, "ida/{record}/Sa_T1_g")] = np.asarray(sa_t1_g, dtype=float)
     arrays[make_ida_key(record_id, "ida/{record}/source")] = np.asarray(
         str(ida_result.get("record", "")), dtype=str
     )
@@ -1391,6 +1398,7 @@ def collect_single_ida_arrays(
         "collapse_drift": ("collapse_drift", "float"),
         "tolerance": ("tolerance", "float"),
         "max_scale": ("max_scale", "float"),
+        "T1": ("T1", "float"),
     }
     for field, (key_name, dtype) in scalar_specs.items():
         value = ida_result.get(field)

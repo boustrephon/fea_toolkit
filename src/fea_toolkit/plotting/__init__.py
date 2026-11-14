@@ -45,7 +45,12 @@ from .viz import (
     plot_pushover_envelope,
     plot_shell_damage_map,
 )
-from .viz_ida import plot_collapse_fragility, plot_ida_curves, plot_ida_summary
+from .viz_ida import (
+    plot_collapse_fragility,
+    plot_ida_curve,
+    plot_ida_curves,
+    plot_ida_summary,
+)
 
 __all__ = [
     # Viewer
@@ -63,6 +68,7 @@ __all__ = [
     "plot_disconnected_nodes",
     "plot_force_diagram",
     "plot_frame_force_evolution",
+    "plot_ida_curve",
     "plot_ida_curves",
     "plot_ida_summary",
     # Interactive

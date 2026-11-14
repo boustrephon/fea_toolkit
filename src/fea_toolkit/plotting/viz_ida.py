@@ -389,15 +389,19 @@ def plot_ida_curve(
     figsize: tuple[float, float] = (7, 5),
     title: Optional[str] = None,
 ) -> Optional[Any]:
-    """Plot a single IDA run's curve — peak drift ratio vs record scale factor.
+    """Plot a single IDA run's curve — peak drift ratio vs ``Sa(T1, 5 %)/g``.
 
-    Non-converged rungs are marked separately from the converged response, and
-    the collapse intensity (when found) is drawn as a vertical line.
+    The x-axis is the physical intensity measure ``scale × Sa_T1_g`` — the
+    record's 5 %-damped spectral acceleration at the first-mode period,
+    normalised by gravity — when the result carries ``Sa_T1_g``; it falls back
+    to the raw record scale factor otherwise.  Non-converged rungs are marked
+    separately from the converged response, and the collapse intensity (when
+    found) is drawn as a vertical line.
 
     Args:
         result: The :func:`~fea_toolkit.analysis.ida.run_ida` result dict
             (``intensities`` / ``drifts`` / ``converged`` /
-            ``collapse_intensity``).
+            ``collapse_intensity``, and optionally ``Sa_T1_g`` / ``drift_measure``).
         ax: Optional axes to draw into.
         figsize: Figure size when *ax* is ``None``.
         title: Optional figure title.
@@ -419,21 +423,18 @@ def plot_ida_curve(
     if converged.shape != drifts.shape:
         converged = np.ones(drifts.shape, dtype=bool)
 
+    sa_t1_g = float(result.get("Sa_T1_g", 1.0) or 1.0)
+    im = intensities * sa_t1_g
+
     if ax is None:
         fig, ax = plt.subplots(figsize=figsize)
     else:
         fig = ax.figure
 
-    ax.plot(
-        intensities[converged],
-        drifts[converged],
-        marker="o",
-        color="#1f77b4",
-        label="converged",
-    )
+    ax.plot(im[converged], drifts[converged], marker="o", color="#1f77b4", label="converged")
     if np.any(~converged):
         ax.plot(
-            intensities[~converged],
+            im[~converged],
             drifts[~converged],
             marker="x",
             linestyle="None",
@@ -443,14 +444,20 @@ def plot_ida_curve(
     collapse = result.get("collapse_intensity")
     if collapse is not None and np.isfinite(float(collapse)):
         ax.axvline(
-            float(collapse),
+            float(collapse) * sa_t1_g,
             color="#d62728",
             linestyle="--",
             linewidth=1.2,
-            label=f"collapse = {float(collapse):.3g}",
+            label=f"collapse = {float(collapse) * sa_t1_g:.3g}",
         )
-    ax.set_xlabel("record scale factor (IM)")
-    ax.set_ylabel("peak roof drift ratio")
+    if "Sa_T1_g" in result:
+        ax.set_xlabel("Sa(T1, 5 %) / g")
+    else:
+        ax.set_xlabel("record scale factor (IM)")
+    if result.get("drift_measure") == "roof_proxy":
+        ax.set_ylabel("peak roof-drift ratio")
+    else:
+        ax.set_ylabel("peak interstorey-drift ratio")
     ax.set_title(title if title is not None else "IDA curve")
     ax.grid(True, alpha=0.3)
     ax.legend(loc="upper left", fontsize=8)

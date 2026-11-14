@@ -318,15 +318,20 @@ def test_single_record_ida_round_trips(tmp_path):
         "collapse_criterion": "nonconvergence",
         "collapse_drift": 0.10,
         "drift_measure": "interstorey_d_max",
+        "T1": 1.0,
+        "Sa_T1_g": 0.4,
     }
     arrays = collect_single_ida_arrays(result)
     # The record id is the file stem, sanitised of the path.
     assert arrays["ida/record_id"].tolist() == ["record"]
     assert arrays["ida/record/scale"].tolist() == [0.5, 1.0, 2.0]
     assert arrays["ida/record/drift_measure"].item() == "interstorey_d_max"
-    assert arrays["ida/record/Sa_T1_g"].item() == 1.0
+    assert arrays["ida/record/Sa_T1_g"].item() == 0.4
     assert arrays["ida/record/source"].item() == "gm/record.txt"
-    assert arrays["ida/collapse_Sa_T1_g"].tolist() == [2.0]
+    # collapse capacity = collapse_scale × Sa_T1_g = 2.0 × 0.4.
+    assert arrays["ida/collapse_Sa_T1_g"].tolist() == [0.8]
+    assert arrays["ida/collapse_Sa_T1_gamma"].tolist() == [0.8]
+    assert arrays["ida/T1"].item() == 1.0
 
     md = make_sample_model()
     path = write_results_npz(str(tmp_path / "ida.npz"), md, ida_results=result)
