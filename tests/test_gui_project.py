@@ -20,6 +20,7 @@ from fea_toolkit.gui.project import (
     detect_model_format,
     figure_identity,
     figures_payload,
+    ida_figure_payload,
     is_project,
     mode_shape_arrays,
     pushover_displacement_arrays,
@@ -363,6 +364,7 @@ def test_collect_project_results_empty_run():
         "pushover": {},
         "pushover_results": {},
         "pushover_step_results": {},
+        "ida": None,
     }
 
 
@@ -381,6 +383,23 @@ def test_figures_payload_is_json_native():
     assert entry["kind"] == "capacity_spectrum"
     assert entry["adrs"] == {"S_a": [0.0], "S_d": [0.0]}
     json.dumps(entry)  # no numpy scalars may leak through
+
+
+def test_ida_figure_payload_is_json_native_and_omits_transient():
+    ida = {
+        "intensities": [0.5, 1.0],
+        "drifts": [0.01, 0.12],
+        "converged": [True, True],
+        "collapse_intensity": 1.0,
+        "Sa_T1_g": 2.0,
+        "transient": {"times": [0.0], "displacements": {1: [[0.0, 0.0, 0.0]]}},
+    }
+    entry = ida_figure_payload(ida)["figure:ida-curve"]
+    assert entry["kind"] == "ida_curve"
+    assert entry["title"] == "IDA curve"
+    assert entry["result"]["intensities"] == [0.5, 1.0]
+    assert "transient" not in entry["result"]
+    json.dumps(entry)  # the retained collapse-rung history must not leak in
 
 
 def test_tables_payload_round_trips():

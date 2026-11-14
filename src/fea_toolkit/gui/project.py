@@ -9,7 +9,8 @@ A project is a single ``.zip`` file holding five canonical members:
     results.npz    static + modal + response-spectrum arrays (the unified
                    results schema)
     figures.json   pushover ADRS figure data (``adrs`` / ``pp`` / ``spectrum``
-                   per direction), regenerated to matplotlib figures on load
+                   per direction) and the single-run IDA curve, regenerated to
+                   matplotlib figures on load
     tables.json    table-view payloads (modal, response-spectrum)
 
 The loader accepts the ``.zip`` archive or a legacy directory / ``.fea``.
@@ -29,7 +30,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Optional
 
-from ..workflow.steps import CASES, MODAL, PUSHOVER, RS
+from ..workflow.steps import CASES, IDA, MODAL, PUSHOVER, RS
 from .controllers._atomic import atomic_write_text
 
 __all__ = [
@@ -43,6 +44,7 @@ __all__ = [
     "detect_model_format",
     "figure_identity",
     "figures_payload",
+    "ida_figure_payload",
     "is_project",
     "mode_shape_arrays",
     "read_project",
@@ -185,7 +187,7 @@ def collect_project_results(results: list) -> dict:
         (``{(direction, load_type): entry}``), plus ``pushover_results``
         (``{(direction, load_type): result dict}``) and ``pushover_step_results``
         (``{(direction, load_type): [per-step dicts]}``) when the run recorded
-        per-step data.
+        per-step data, and ``ida`` (the single ``IDA`` result dict, or ``None``).
     """
     static_arrays: dict = {}
     modal: Optional[dict] = None
@@ -197,6 +199,7 @@ def collect_project_results(results: list) -> dict:
     pushover: dict = {}
     pushover_results: dict = {}
     pushover_step_results: dict = {}
+    ida: Optional[dict] = None
 
     for result in results:
         kind = getattr(result, "kind", None)
@@ -243,6 +246,8 @@ def collect_project_results(results: list) -> dict:
                             step_results = results.get("step_results")
                             if step_results:
                                 pushover_step_results[key] = step_results
+        elif kind == IDA and isinstance(payload, dict):
+            ida = payload
 
     return {
         "static_arrays": static_arrays,
@@ -255,6 +260,7 @@ def collect_project_results(results: list) -> dict:
         "pushover": pushover,
         "pushover_results": pushover_results,
         "pushover_step_results": pushover_step_results,
+        "ida": ida,
     }
 
 
@@ -388,6 +394,40 @@ def figures_payload(pushover: dict, label: str = "Pushover") -> dict:
             "spectrum": entry.get("spectrum") or {"T": [], "Sa": []},
         }
     return figures
+
+
+def ida_figure_payload(ida_result: dict, label: str = "IDA") -> dict:
+    """Build the ``figures.json`` entry for a single-run IDA curve.
+
+    Only the fields :func:`~fea_toolkit.plotting.viz_ida.plot_ida_curve` reads
+    are kept — not the retained collapse-rung transient history, which would
+    bloat the figure payload with a full time-history.
+
+    Args:
+        ida_result: The :func:`~fea_toolkit.analysis.ida.run_ida` result dict.
+        label: The IDA result label used to name the figure.
+
+    Returns:
+        ``{figure_key: {"kind": "ida_curve", "title": …, "result": …}}``.
+    """
+    fields = (
+        "intensities",
+        "drifts",
+        "converged",
+        "collapse_intensity",
+        "collapse_criterion",
+        "Sa_T1_g",
+        "drift_measure",
+    )
+    result = {key: ida_result.get(key) for key in fields}
+    key = f"figure:{label.lower().replace(' ', '-')}-curve"
+    return {
+        key: {
+            "kind": "ida_curve",
+            "title": f"{label} curve",
+            "result": _json_safe(result),
+        }
+    }
 
 
 def tables_payload(tables: dict) -> dict:
@@ -835,9 +875,9 @@ def _zip_selective(bundle_dir: Path, zip_path: Path) -> str:
 def regenerate_figure(figure_data: dict) -> Any:
     """Rebuild a matplotlib figure from its serialized payload.
 
-    Only the ``capacity_spectrum`` kind is understood today (the pushover ADRS
-    figures); an unknown or empty payload yields ``None`` so a loader skips it
-    rather than crashing.
+    Two kinds are understood today — the pushover ADRS ``capacity_spectrum``
+    figures and the single-run ``ida_curve`` figure; an unknown or empty payload
+    yields ``None`` so a loader skips it rather than crashing.
 
     Args:
         figure_data: One ``figures.json`` entry.
@@ -846,6 +886,10 @@ def regenerate_figure(figure_data: dict) -> Any:
         A ``matplotlib.figure.Figure``, or ``None``.
     """
     if figure_data.get("kind") != "capacity_spectrum":
+        if figure_data.get("kind") == "ida_curve":
+            from ..plotting.viz_ida import plot_ida_curve
+
+            return plot_ida_curve(figure_data.get("result") or {}, title=figure_data.get("title"))
         return None
     from ..plotting.viz_pushover import plot_capacity_spectrum
 

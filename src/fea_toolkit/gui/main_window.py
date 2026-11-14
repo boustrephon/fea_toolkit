@@ -1806,6 +1806,10 @@ class MainWindow(QMainWindow):
         # clear them so a stale nonlinear-dynamic result can never animate.
         self._nld_frames.clear()
         self._nld_times.clear()
+        # Named selections are authored against the model being replaced, so a
+        # stale store would resolve against the new document's elements — clear
+        # it, mirroring the ``open`` verb's replacement of the selection store.
+        self._named_selections.clear()
         self._set_toggle_checked("results.animate", False)
         self._set_toggle_checked("results.deformed", False)
         self._sync_force_toggles(False)
@@ -2327,6 +2331,28 @@ class MainWindow(QMainWindow):
                 return frames, self._nld_times.get(key, [])
         return [], []
 
+    def _analysis_tag_map(self) -> dict:
+        """``{node_tag: node_id}`` for the analysis mesh, not the displayed model.
+
+        Transient histories are keyed by the OpenSees node tag the solver
+        assigned, while the deformed overlay is keyed by node id.  The mapping
+        must come from the mesh the analysis ran on — whose generated (split /
+        meshed) nodes carry the tags in the history — not whichever model the
+        viewport happens to display, so an animation started from an unprocessed
+        or external-results view still re-keys generated-node tags correctly.
+        Falls back to the displayed model's mapping when no store holds a mesh.
+        """
+        mesh = self._store.preprocessed() if self._store is not None else None
+        nodes = getattr(mesh, "nodes", None) or {}
+        tag_to_id = {
+            getattr(node, "node_tag", None): node_id
+            for node_id, node in nodes.items()
+            if getattr(node, "node_tag", None) is not None
+        }
+        if not tag_to_id and self._viewer is not None:
+            tag_to_id = self._viewer.node_ids_by_tag()
+        return tag_to_id
+
     def _nld_step_frames(self, payload: Any) -> tuple[Any, list]:
         """Per-step displacement frames for a nonlinear-dynamic result.
 
@@ -2345,7 +2371,7 @@ class MainWindow(QMainWindow):
         history = data.get("displacements") or {}
         if not isinstance(history, dict) or not history:
             return _NldStepHistory({}), []
-        tag_to_id = self._viewer.node_ids_by_tag() if self._viewer is not None else {}
+        tag_to_id = self._analysis_tag_map()
         arrays: dict = {}
         for tag, hist in history.items():
             arr = np.asarray(hist, dtype=float)
@@ -3188,6 +3214,10 @@ class MainWindow(QMainWindow):
         # the Status column updates live without the worker touching widgets.
         self._recipe_panel.reset_statuses()
         reporter: list = [None]
+        # Snapshot the window's named selections on the GUI thread, so a recipe
+        # step referencing a GUI-authored selection resolves it without the
+        # worker touching the live store.
+        named_snapshot = dict(self._named_selections)
 
         def task(should_cancel):
             def on_step(index, verb, status):
@@ -3202,6 +3232,7 @@ class MainWindow(QMainWindow):
                 pipeline_log=pipeline_log,
                 on_step=on_step,
                 opensees_python=opensees_python,
+                named_selections=named_snapshot,
             )
             return run, messages
 
@@ -3357,7 +3388,13 @@ class MainWindow(QMainWindow):
             # (it was greyed for a view with no displacement field).
             self._set_view_actions_enabled()
         else:
+            key = _table_key(label)
+            self._nld_frames.pop(key, None)
+            self._nld_times.pop(key, None)
             self.log(f"{label}: no transient displacement history to animate.", "warn")
+            # A previous run of this label may have stored frames; refresh the
+            # Results menu so the now-unanimatable table is greyed correctly.
+            self._set_view_actions_enabled()
 
     def _show_ida_result(self, label: str, payload: Any) -> None:
         """Summarise an IDA run as a collapse table and an IDA-curve figure.
@@ -4434,6 +4471,8 @@ class MainWindow(QMainWindow):
             self._merge_results_view_arrays(collected["static_arrays"])
 
         figures = project_mod.figures_payload(collected["pushover"])
+        if collected.get("ida"):
+            figures.update(project_mod.ida_figure_payload(collected["ida"]))
         tables = project_mod.tables_payload(self._project_tables())
         active = self._views.active
         active_key = active.key if active is not None else None
