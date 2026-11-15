@@ -677,3 +677,31 @@ class TestPeakInterstoreyDrift:
         d = {1: base, 2: base, 3: squish_left, 4: squish_right}
         drift = peak_interstorey_drift(node_z, d, [0.0, 10.0], node_xy=node_xy)
         assert drift == pytest.approx(0.01)  # 0.1 residual / 10 m height
+
+    def test_single_node_level_keeps_its_lever_arm_in_rotational_drift(self):
+        """A single-node upper level contributes its lever arm to rotational drift.
+
+        The roof has one recorded node at plan (5, 0); the base (two nodes at
+        (0, 0) and (2, 0)) rotates by Rz about the shared plan reference.  A
+        single node cannot constrain rotation, so the single-node fit reports
+        Rz = 0 and the interstorey rotation is the base's -Rz; its contribution
+        is |ΔRz| · r_max, where r_max is the roof node's distance from the
+        shared reference.  Before the fix r_max was 0 and this drift collapsed
+        to zero.
+        """
+        n = 2
+        node_z = {1: 0.0, 2: 0.0, 3: 10.0}
+        node_xy = {1: (0.0, 0.0), 2: (2.0, 0.0), 3: (5.0, 0.0)}
+        rz = 0.03
+        # Shared reference = mean plan position = ((0 + 2 + 5) / 3, 0) = (7/3, 0).
+        ref_x = 7.0 / 3.0
+        base1 = np.zeros((n, 3))
+        base1[:, 1] = rz * (0.0 - ref_x)
+        base2 = np.zeros((n, 3))
+        base2[:, 1] = rz * (2.0 - ref_x)
+        roof = np.zeros((n, 3))  # static single node
+        d = {1: base1, 2: base2, 3: roof}
+        # |ΔRz| · r_max / h = rz · (5 - 7/3) / 10 = 0.03 · (8/3) / 10 = 0.008.
+        assert peak_interstorey_drift(node_z, d, [0.0, 10.0], node_xy=node_xy) == pytest.approx(
+            0.008
+        )
