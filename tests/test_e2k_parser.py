@@ -171,6 +171,17 @@ def test_storey_elevations(model):
     assert model.nodes["1@ROOF"].z == pytest.approx(3.0)
 
 
+def test_stories_parsed_onto_model(model):
+    # The ``$ STORIES - IN SEQUENCE FROM TOP`` table is retained on the model as
+    # ``StoryDefinition`` records — imported names, absolute elevations, and the
+    # tower / master-similar flags.
+    assert [(s.name, s.elevation) for s in model.stories] == [
+        ("ROOF", 3.0),
+        ("BASE", 0.0),
+    ]
+    assert all(s.tower is None and not s.is_master and s.similar_to is None for s in model.stories)
+
+
 def test_nodes_materialised(model):
     # 2 assigned base points + 4 roof-level points (via elements) = 6 nodes.
     assert len(model.nodes) == 6

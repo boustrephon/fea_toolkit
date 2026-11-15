@@ -137,19 +137,14 @@ def test_a_node_only_selection_stays_valid_with_an_element_only_exclusion():
     assert resolved.exclude_node_ids is None
 
 
-def test_a_story_scoped_named_selection_resolves_against_storey_elevations(monkeypatch):
+def test_a_story_scoped_named_selection_resolves_against_storey_elevations():
     """A named selection carrying a ``story`` criterion keeps its story scope."""
-    import fea_toolkit.model.stories as stories_mod
+    from fea_toolkit.model.sap_data import StoryDefinition
 
     model = make_sample_model()
-    # The sample model's single frame spans z=0..10 (mid-height 5.0); pin the
-    # storey detection so a level at 5.0 matches it, then resolve a named
-    # selection scoped to that story.
-    monkeypatch.setattr(
-        stories_mod,
-        "identify_stories",
-        lambda md: [type("Story", (), {"name": "Level5", "elevation": 5.0})()],
-    )
+    # The sample model's single frame spans z=0..10 (mid-height 5.0); declare an
+    # ETABS-style story at 5.0 so the criterion matches the imported name.
+    model.stories = [StoryDefinition(name="Level5", elevation=5.0)]
     store = {
         "core": NamedSelection(name="core", selection=Selection(story=["Level5"])),
     }
