@@ -10,7 +10,7 @@ category: [planning]
 ## Strategy — the next steps
 
 > This log is the single source of truth for pending work; this section is the
-> *sequencing layer* over it (maintained 2026-11-15).  The standalone plan
+> *sequencing layer* over it (maintained 2026-11-16).  The standalone plan
 > documents are historical records — `analysis_builder_migration_plan.md`,
 > `csm_test_model_plan.md`, `deprecation_plan.md` and `linting_fix_plan.md`
 > are ✅ complete and tagged `category: [archive]` (P9's Phase 3 triage resolved 2026-10-11 — baseline renewed,
@@ -50,8 +50,12 @@ category: [planning]
    the `Ctrl+K` palette, the command echo and `Recipe.from_python` (see the P31
    entry below).
 
-**Then — physics / feature gaps.**  P6b, P7 (fibre patches, Python-native NLD),
-then P19 / P23 / P25.
+**Next — GUI/workflow follow-ups, then physics.**  A six-item GUI follow-up
+batch precedes the physics tranche: **P46** (benchmark library panel, below),
+the P35 `SESSION`-result follow-up, per-verb doc/DOI links, drag-and-drop
+NPZ/H5 results, the quad-view milestone, and the mission-statement /
+`llm_guide` GUI docs.  **Then — physics / feature gaps:** P6b, P7 (fibre
+patches, Python-native NLD), then P19 / P23 / P25.
 
 **Opportunistic — Tier 4.**  ~~P9 (linting Phase 3 triage)~~ ✅ **resolved
 2026-10-11** — fresh `npx pyright src/` baseline recorded, no new real bugs,
@@ -825,6 +829,59 @@ subsequent mesh / analysis results then apply to a document the window is not
 showing.  Handle the `SESSION` result (transfer the opened / closed document to
 the window's `_store`, or establish a supported worker → GUI transfer
 mechanism) so a recipe beginning with `open` actually drives the window.
+
+#### P46 — Benchmark library panel (validated example models)
+
+Source: `docs/benchmark_register.md` (index/status) and
+`docs/benchmark_roadmap.md` (plan); the existing
+`gui/views/benchmark_dialog.py` / `generic_frame_dialog.py` entry points
+(`MainWindow._on_open_benchmark` / `_on_open_generic_frame`).
+
+**What.**  The benchmark models in `fea_toolkit.benchmarks` (SAC / FEMA 355C,
+the 12 Medina generic frames) are validated in headless scripts
+(`scripts/run_*.py` → `run_matrix` / `collapse_capacity_sa`); that harness
+stays **outside the GUI**.  This item gives the GUI a **library of example
+models**: a dock/tab listing the benchmark studies (tier, coverage, status)
+that lets a user open one to *follow* the documented research process, compare
+against the paper if they want, or just use it as a trusted reference model.
+
+**Two decisions (settled 2026-11-16).**
+
+1. **Benchmarks enter as recipes, not a harness.**  "Open a benchmark" presets
+   a `Recipe` into the Recipe dock — a new `build_model` verb (delegating to
+   `build_fema355c` / `generic_frame.build_model` / `sac.load_model`, which
+   already return `SAPModelData`) followed by the existing single-run verbs
+   (`run_static` / `modal` / `pushover` / `ida`) and `chart`.  One spelling
+   (anti-pattern 17: the panel *presets* a recipe and runs it); follow /
+   modify / discard comes free from the Recipe dock.  The batch validation
+   sweep is **out of scope** and stays in `scripts/`.
+2. **Structured catalogue + hand-edited register, guarded by a sync test.**  A
+   thin `BenchmarkEntry` dataclass catalogue (`benchmarks/catalogue.py`,
+   OpenSees-free so the panel renders before any model is open) holds
+   `id / title / type / tier / status / doc / test / recipe` plus optional
+   `paper_reference` + `expected` scalars.  The register's §3 table stays
+   **hand-authored** and gains a Status + Notes column; a sync test parses §3
+   and fails CI when `title / tier / status` disagree with the catalogue.  One
+   owner per fact (§7.4): the register owns the documentation facts, the
+   catalogue owns the code facts (the recipe reference, which no Markdown
+   table can hold).
+
+**Status is a badge, not a filter.**  Every benchmark is listed, validated or
+not: in-progress studies (e.g. the IK-2005 generic-frame collapse, P42b, whose
+33-record IDA still overshoots the paper) appear with a ⚠️/🚧 badge and a
+Notes pointer to the per-benchmark doc, never hidden.
+
+**Deferred (future consideration).**  A ground-motion *suite* / repeated NLTHA
+step is not in the recipe now, but it is the natural extension — seismic
+validation of a design runs one model over a suite of records — so record it
+as a future *analysis* step, not a sweep verb today.
+
+**Where.**  `benchmarks/catalogue.py` (new, OpenSees-free), a `build_model`
+verb in `workflow/verbs/`, per-benchmark recipes, a
+`gui/views/benchmark_library_panel.py` replacing the two dialogs (their
+region/stories/design and frame-code pickers fold into the `build_model`
+step's parameters), a sync test, and the register §3 Status/Notes columns.
+`benchmark_register.md` §3 stays hand-edited.
 
 ### Tier 4 — Deferred / low-priority
 
