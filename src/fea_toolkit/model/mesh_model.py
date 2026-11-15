@@ -39,6 +39,10 @@ from .sap_data import (
     StoryDefinition,
     apply_material_defaults,
 )
+
+# StoryLevel stays a module-level import (not ``TYPE_CHECKING``): the stage-file
+# codec resolves ``typing.get_type_hints(MeshModel)`` to serialise the
+# ``story_levels`` field, so the name must exist in the runtime namespace.
 from .stories import StoryLevel
 
 
