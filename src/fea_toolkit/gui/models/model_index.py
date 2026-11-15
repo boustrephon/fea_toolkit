@@ -16,6 +16,7 @@ __all__ = [
     "element_label",
     "load_label",
     "shell_uniform_load_sets_group",
+    "stories_group",
     "views_group",
 ]
 
@@ -212,6 +213,32 @@ def selections_group(named: Optional[dict]) -> Optional[TreeGroup]:
     )
 
 
+def stories_group(source: Any) -> Optional[TreeGroup]:
+    """Describe the **Stories** group, or ``None`` when the model has none.
+
+    The imported ETABS story levels (``SAPModelData.stories`` — carried through
+    unchanged onto :class:`~fea_toolkit.model.mesh_model.MeshModel`, like the
+    shell uniform load sets) are listed lowest-first, one row per story.  Each
+    row's entity is the :class:`~fea_toolkit.model.sap_data.StoryDefinition`, so
+    the inspector shows its name, absolute elevation, tower and
+    master/similar flags.  SAP2000 / SAFE models carry no story table, so the
+    group is omitted for them.
+    """
+    stories = getattr(source, "stories", None) or []
+    if not stories:
+        return None
+
+    def load_items() -> list:
+        return [(s.name, s) for s in sorted(stories, key=lambda s: (s.elevation, s.name))]
+
+    return TreeGroup(
+        key="stories",
+        label="Stories",
+        count=len(stories),
+        load_items=load_items,
+    )
+
+
 def build_groups(
     model: Any, views: Optional[list] = None, selections: Optional[dict] = None
 ) -> list:
@@ -236,6 +263,10 @@ def build_groups(
     selections_group_ = selections_group(selections or {})
     if selections_group_ is not None:
         groups.append(selections_group_)
+
+    stories_group_ = stories_group(source)
+    if stories_group_ is not None:
+        groups.append(stories_group_)
 
     for attr, label in _DICT_GROUPS:
         bag = getattr(source, attr, None)

@@ -36,6 +36,7 @@ from .sap_data import (
     Restraint,
     Section,
     ShellUniformLoadSet,
+    StoryDefinition,
     apply_material_defaults,
 )
 
@@ -273,6 +274,10 @@ class MeshModel:
     # model at hand.
     shell_uniform_load_sets: dict[str, ShellUniformLoadSet] = field(default_factory=dict)
     shell_uniform_load_set_assignments: dict[str, str] = field(default_factory=dict)
+    # ETABS story levels — carried through unchanged so the Model Tree can
+    # present the imported ``$ STORIES - IN SEQUENCE FROM TOP`` names and
+    # elevations without the raw model at hand.
+    stories: list[StoryDefinition] = field(default_factory=list)
 
     # ── Constraints (detected, not yet applied to OpenSees) ───────
     # ── Detected coarse‑fine node pairs (for visualisation only) ──

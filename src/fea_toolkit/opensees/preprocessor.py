@@ -1041,6 +1041,7 @@ class Preprocessor:
             shell_uniform_load_set_assignments=getattr(
                 md, "shell_uniform_load_set_assignments", {}
             ),
+            stories=getattr(md, "stories", []),
         )
         # Resolve against the mutated md so derived-element IDs
         # (from splitting/meshing) can be matched by selections.

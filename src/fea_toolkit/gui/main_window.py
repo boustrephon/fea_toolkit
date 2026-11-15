@@ -1875,6 +1875,7 @@ class MainWindow(QMainWindow):
             "response_spectrum_functions",
             "shell_uniform_load_sets",
             "shell_uniform_load_set_assignments",
+            "stories",
         ):
             source = getattr(sap, attr, None)
             if source and not getattr(mesh, attr, None):
