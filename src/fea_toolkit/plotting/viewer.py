@@ -411,8 +411,6 @@ class ModelViewer:
         show_frames: bool = True,
         show_shells: bool = True,
         color_by_section: bool = True,
-        frame_colors: Optional[dict[str, tuple[float, float, float]]] = None,
-        shell_colors: Optional[dict[str, tuple[float, float, float]]] = None,
         opacity: float = 1.0,
         node_size: float = 0.02,
         shrink: float = 1.0,
@@ -427,6 +425,9 @@ class ModelViewer:
         show_load_colours: bool = False,
         show_extruded: bool = False,
         extruded_detail: str = "plates",
+        *,
+        frame_colors: Optional[dict[str, tuple[float, float, float]]] = None,
+        shell_colors: Optional[dict[str, tuple[float, float, float]]] = None,
     ) -> "ModelViewer":
         """Display the structural model.
 
@@ -435,12 +436,6 @@ class ModelViewer:
             show_frames: If True, draw the frame line skeleton.
             show_shells: If True, draw shell elements.
             color_by_section: If True, colour elements by section name.
-            frame_colors: Optional ``{frame_elem_id: (r, g, b)}`` recolouring
-                each frame by its own id instead of by section — the GUI's
-                colour-by-material / -story path.  ``None`` uses the section
-                palette.
-            shell_colors: Optional ``{area_elem_id: (r, g, b)}``, the shell
-                counterpart of *frame_colors*.
             opacity: Element opacity.
             node_size: Node marker size.
             shrink: Draw every element at this fraction of its true size,
@@ -484,6 +479,12 @@ class ModelViewer:
                 line skeleton, which remains the pickable layer.
             extruded_detail: ``"plates"`` (the efficient open-surface
                 representation) or ``"solid"`` (the closed perimeter with caps).
+            frame_colors: Optional ``{frame_elem_id: (r, g, b)}`` recolouring
+                each frame by its own id instead of by section — the GUI's
+                colour-by-material / -story path.  ``None`` uses the section
+                palette.  Keyword-only.
+            shell_colors: Optional ``{area_elem_id: (r, g, b)}``, the shell
+                counterpart of *frame_colors*.  Keyword-only.
 
         Returns:
             ``self`` for chaining.
@@ -1016,8 +1017,10 @@ class ModelViewer:
     ) -> "ModelViewer":
         """Highlight specific nodes.
 
-        The node cue is a sphere of **twice** the node marker's radius, so a
-        selected node reads distinctly against the node cloud it sits in.
+        The node cue is a sphere of **twice** the node marker's *displayed*
+        size — the doubling is applied by the render backend after the pixel
+        minimum, so a selected node stays visibly larger than the markers it
+        sits among even when the marker size is floored.
 
         Args:
             node_ids: Node IDs to highlight.
@@ -1035,7 +1038,7 @@ class ModelViewer:
             node_ids=node_ids,
             color=color,
             label=label,
-            node_radius=2.0 * self._node_size,
+            node_radius=self._node_size,
             nodes=matched_nodes,
         )
         self._backend.render_highlights([h], shrink=self._shrink)
@@ -1072,6 +1075,10 @@ class ModelViewer:
         sections, _, units = self._section_lookup()
         halves: list[float] = []
         for shell in shells:
+            # ``shell_display_thickness`` accepts a missing section (``None`` →
+            # the 200 mm default), so no explicit None-guard is needed here —
+            # unlike ``_frame_highlight_radii``, where ``selection_tube_diameter``
+            # requires a real section and the guard selects the fallback radius.
             section = sections.get(shell.section)
             thickness = shell_display_thickness(section, units)
             halves.append(0.75 * thickness)

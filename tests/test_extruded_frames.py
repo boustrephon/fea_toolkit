@@ -158,6 +158,21 @@ def test_face_colors_are_per_face_and_match_section():
     assert np.all(mesh.face_colors[-1] == [0.0, 0.0, 1.0])
 
 
+def test_element_colors_missing_id_falls_back_to_grey():
+    """A frame omitted from the per-element map renders grey, not its section colour.
+
+    The extruded solid must agree with ``PyVistaRenderer.render_frames``, whose
+    missing-id fallback is grey (0.5, 0.5, 0.5), not the section palette.
+    """
+    frames = [_frame("1", "R", (0, 0, 0), (1, 0, 0))]
+    element_colors = {"other": (1.0, 0.0, 0.0)}  # frame "1" is missing
+    mesh = build_extruded_frame_mesh(
+        frames, _SECTIONS, {"R": (0.0, 0.0, 1.0)}, element_colors=element_colors
+    )
+    assert len(mesh.face_colors) > 0
+    assert np.all(mesh.face_colors[0] == [0.5, 0.5, 0.5])
+
+
 def test_sweep_mesh_caps_reference_appended_vertices():
     """Cap indices offset past the side vertices, for grouped members."""
     from fea_toolkit.plotting.extruded_frames import _sweep_mesh

@@ -256,6 +256,20 @@ def test_node_markers_are_visible_enough_to_click():
     assert node_point_size(0.0001) >= 6.0  # floored for tiny models
 
 
+def test_selection_node_cue_is_twice_the_displayed_size():
+    """The 2× selection factor applies after the pixel floor, not to the radius."""
+    from fea_toolkit.plotting.renderers.pyvista import (
+        node_point_size,
+        selection_node_point_size,
+    )
+
+    # Above the floor the two routes agree; below it the cue must still double
+    # the *displayed* size rather than collapsing onto the same 6 px floor.
+    assert selection_node_point_size(0.02) == 2.0 * node_point_size(0.02)
+    assert selection_node_point_size(0.0001) == 2.0 * node_point_size(0.0001)
+    assert selection_node_point_size(0.0001) > node_point_size(0.0001)
+
+
 def test_marquee_predicates_select_the_projected_geometry(viewer):
     """The rubber-band geometry tests select what a click would, in screen space."""
     from fea_toolkit.gui.controllers.marquee import point_in_rect, segment_hits_rect

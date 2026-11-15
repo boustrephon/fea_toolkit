@@ -94,7 +94,8 @@ class HighlightDef:
     # Per-entity cue sizes (optional, aligned with ``frames`` / ``shells``);
     # when ``None`` the backend falls back to ``radius``.  ``frame_radii`` are
     # tube radii, ``shell_halves`` are slab half-thicknesses, ``node_radius`` is
-    # a node-marker radius.
+    # a node-marker radius (the backend renders the selection cue at twice the
+    # marker's displayed size).
     frame_radii: Optional[list[float]] = None
     shell_halves: Optional[list[float]] = None
     node_radius: Optional[float] = None

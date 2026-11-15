@@ -433,15 +433,23 @@ def build_extruded_frame_mesh(
 
     groups: dict[tuple, list[int]] = {}
     for i, f in enumerate(frames):
-        rgb_key = element_colors.get(f.elem_id) if element_colors is not None else None
-        groups.setdefault((f.section, rgb_key), []).append(i)
+        if element_colors is not None and f.elem_id in element_colors:
+            rgb = element_colors[f.elem_id]
+        elif element_colors is not None:
+            # A frame omitted from the per-element map falls back to grey — the
+            # same fallback PyVistaRenderer.render_frames uses — so the line
+            # skeleton and the extruded solid agree on uncoloured members.
+            rgb = (0.5, 0.5, 0.5)
+        else:
+            rgb = colors.get(f.section, (0.5, 0.5, 0.5))
+        groups.setdefault((f.section, rgb), []).append(i)
 
     points_parts: list[np.ndarray] = []
     faces_parts: list[np.ndarray] = []
     color_parts: list[np.ndarray] = []
     vertex_offset = 0
 
-    for (sec_name, rgb_key), member_idx in groups.items():
+    for (sec_name, rgb), member_idx in groups.items():
         idxs = np.asarray(member_idx, dtype=int)
         section = sections.get(sec_name)
         if section is None:
@@ -451,7 +459,6 @@ def build_extruded_frame_mesh(
         sweeps = _sweeps(section, detail, circle_segments, materials)
         if not sweeps:
             continue
-        rgb = rgb_key if rgb_key is not None else colors.get(sec_name, (0.5, 0.5, 0.5))
         for pts2d, closed, caps, inners in sweeps:
             points, quads, caps_arr = _sweep_mesh(
                 pts2d, closed, caps, s0[idxs], s1[idxs], vy[idxs], vz[idxs], inners=inners

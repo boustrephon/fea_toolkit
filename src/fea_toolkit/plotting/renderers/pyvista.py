@@ -213,6 +213,16 @@ def node_point_size(radius: float) -> float:
     return max(_MIN_NODE_POINT_SIZE, float(radius) * _NODE_POINT_SCALE)
 
 
+def selection_node_point_size(radius: float) -> float:
+    """Pixel size of a selection node cue — twice the normal marker's size.
+
+    The 2× factor is applied to the **displayed** size (after the pixel
+    minimum), not to the radius, so a selected node stays visibly larger than
+    the marker it sits in even when :func:`node_point_size` is floored.
+    """
+    return 2.0 * node_point_size(radius)
+
+
 def _flag_rgb(col_val: float, max_abs: float) -> tuple[float, float, float]:
     """Map a signed flag value to a diverging RGB colour in ``0..1``.
 
@@ -815,7 +825,7 @@ class PyVistaRenderer(RenderBackend):
                 actor = p.add_mesh(
                     cloud,
                     color=h.color,
-                    point_size=node_point_size(radius),
+                    point_size=selection_node_point_size(radius),
                     style="points",
                     render_points_as_spheres=True,
                     opacity=_HIGHLIGHT_OPACITY,
