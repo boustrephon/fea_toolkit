@@ -1816,6 +1816,10 @@ class MainWindow(QMainWindow):
         # stale store would resolve against the new document's elements — clear
         # it, mirroring the ``open`` verb's replacement of the selection store.
         self._named_selections.clear()
+        # The last recipe run belongs to the model being replaced; clear it so
+        # ``File ▸ Save project`` cannot persist that run's IDA ladder / transient
+        # history against the newly opened model.
+        self._last_run = None
         self._set_toggle_checked("results.animate", False)
         self._set_toggle_checked("results.deformed", False)
         self._sync_force_toggles(False)
@@ -2400,16 +2404,22 @@ class MainWindow(QMainWindow):
         return _NldStepHistory(arrays), time_labels
 
     def _ensure_analysis_mesh_displayed(self) -> None:
-        """Render the analysis mesh when a different model is currently shown.
+        """Render the geometry the active step history is keyed to.
 
-        A nonlinear-dynamic / pushover history is re-keyed by the analysis mesh's
-        node ids (via :meth:`_analysis_tag_map`), so animating it must draw the
-        overlay onto the mesh the run produced — not a previously displayed
-        unprocessed or external-results model whose node ids differ.
+        A nonlinear-dynamic history is re-keyed by the store mesh's node ids
+        (via :meth:`_analysis_tag_map`), so animating it must draw that mesh.  A
+        pushover history is keyed to its archive's own geometry — the results
+        view's source model — so it must draw that, never the preprocessed store
+        mesh (which may be a different model).
         """
-        mesh = self._store.preprocessed() if self._store is not None else None
-        if mesh is not None and self._model is not mesh:
-            self.show_model(mesh, reset_view=False, rebuild_tree=False)
+        repository, _ = self._active_results_source()
+        if repository is not None:
+            view = self._views.active
+            target = self._views.source(view.key) if view is not None else None
+        else:
+            target = self._store.preprocessed() if self._store is not None else None
+        if target is not None and self._model is not target:
+            self.show_model(target, reset_view=False, rebuild_tree=False)
 
     def _on_animate_toggled(self, checked: bool) -> None:
         """**Results ▸ Animate deformed shape**: animate the active shape.
@@ -2449,10 +2459,11 @@ class MainWindow(QMainWindow):
             self._anim_frames = frames
             self._anim_frame_index = 0
             self._anim_times = times
-            # A nonlinear-dynamic result is a table view, so bring the viewport
-            # forward before the history is drawn into it — and make sure the
-            # analysis mesh (which the history is keyed to) is what is drawn, not
-            # a previously displayed unprocessed / external-results model.
+            # Bring the viewport forward before the history is drawn into it, and
+            # make sure the geometry the history is keyed to is what is drawn —
+            # the store mesh for a nonlinear-dynamic history, the archive's own
+            # geometry for a pushover one — not a previously displayed
+            # unprocessed / external-results model.
             self._stack.setCurrentWidget(self._viewport_container)
             self._ensure_analysis_mesh_displayed()
             # Base the scale on the peak frame, not the last one, so a decaying
