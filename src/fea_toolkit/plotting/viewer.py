@@ -34,6 +34,7 @@ from ..model.geometry import frame_end_offsets_global
 from ..model.load_glyphs import area_load_values, extract_load_glyphs
 from .renderers import AnnotationDef, FrameGeom, HighlightDef, NodeGeom, RenderBackend, ShellGeom
 from .renderers.base import RestraintGeom
+from .viz_common import categorical_palette
 
 logger = logging.getLogger(__name__)
 
@@ -67,21 +68,12 @@ def _section_names(model: Any) -> set[str]:
 def _section_palette(
     names: Iterable[str],
 ) -> dict[str, tuple[float, float, float]]:
-    """Build a deterministic colour map from section names."""
-    palette = [
-        (0.122, 0.467, 0.706),
-        (0.839, 0.153, 0.157),
-        (0.173, 0.627, 0.173),
-        (0.580, 0.404, 0.741),
-        (0.549, 0.337, 0.294),
-        (0.890, 0.467, 0.122),
-        (0.737, 0.741, 0.133),
-        (0.094, 0.745, 0.765),
-        (0.314, 0.314, 0.314),
-        (0.859, 0.373, 0.522),
-    ]
-    ordered = sorted(set(names))
-    return {n: palette[i % len(palette)] for i, n in enumerate(ordered)}
+    """Build a deterministic colour map from section names.
+
+    Thin wrapper over :func:`fea_toolkit.plotting.viz_common.categorical_palette`
+    — one spelling of the palette, shared with the GUI's colour-by resolver.
+    """
+    return categorical_palette(names)
 
 
 def _end_force_values(entry: dict, quantity: str, use_local: bool) -> Optional[tuple[float, float]]:
@@ -419,6 +411,8 @@ class ModelViewer:
         show_frames: bool = True,
         show_shells: bool = True,
         color_by_section: bool = True,
+        frame_colors: Optional[dict[str, tuple[float, float, float]]] = None,
+        shell_colors: Optional[dict[str, tuple[float, float, float]]] = None,
         opacity: float = 1.0,
         node_size: float = 0.02,
         shrink: float = 1.0,
@@ -441,6 +435,12 @@ class ModelViewer:
             show_frames: If True, draw the frame line skeleton.
             show_shells: If True, draw shell elements.
             color_by_section: If True, colour elements by section name.
+            frame_colors: Optional ``{frame_elem_id: (r, g, b)}`` recolouring
+                each frame by its own id instead of by section — the GUI's
+                colour-by-material / -story path.  ``None`` uses the section
+                palette.
+            shell_colors: Optional ``{area_elem_id: (r, g, b)}``, the shell
+                counterpart of *frame_colors*.
             opacity: Element opacity.
             node_size: Node marker size.
             shrink: Draw every element at this fraction of its true size,
@@ -513,9 +513,12 @@ class ModelViewer:
                 shrink=shrink,
                 detail=extruded_detail,
                 materials=getattr(self._model, "materials", {}) or {},
+                element_colors=frame_colors,
             )
         if show_frames:
-            self._backend.render_frames(self._frames, colors, opacity=opacity, shrink=shrink)
+            self._backend.render_frames(
+                self._frames, colors, opacity=opacity, shrink=shrink, element_colors=frame_colors
+            )
 
         # Applied-load colour-fill recolours the shells themselves — no separate
         # overlay — so it is a colouring mode of the shell elements: it only
@@ -533,6 +536,7 @@ class ModelViewer:
                 shrink=shrink,
                 scalar_field=load_values or None,
                 scalar_bar_title="Area load (pressure)" if load_values else None,
+                element_colors=shell_colors,
             )
 
         if show_nodes:

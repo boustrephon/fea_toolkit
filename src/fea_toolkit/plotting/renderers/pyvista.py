@@ -562,6 +562,7 @@ class PyVistaRenderer(RenderBackend):
         colors: dict[str, tuple[float, float, float]],
         opacity: float = 1.0,
         shrink: float = 1.0,
+        element_colors: Optional[dict[str, tuple[float, float, float]]] = None,
     ) -> None:
         if not frames:
             return
@@ -575,7 +576,10 @@ class PyVistaRenderer(RenderBackend):
         for idx, f in enumerate(frames):
             points[idx * 2], points[idx * 2 + 1] = _shrunk_segment(f.start, f.end, shrink)
             lines[idx] = [2, idx * 2, idx * 2 + 1]
-            per_line_color[idx] = colors.get(f.section, (0.5, 0.5, 0.5))
+            if element_colors is not None:
+                per_line_color[idx] = element_colors.get(f.elem_id, (0.5, 0.5, 0.5))
+            else:
+                per_line_color[idx] = colors.get(f.section, (0.5, 0.5, 0.5))
 
         import pyvista as pv
 
@@ -600,6 +604,7 @@ class PyVistaRenderer(RenderBackend):
         shrink: float = 1.0,
         detail: str = "plates",
         materials: Optional[dict] = None,
+        element_colors: Optional[dict[str, tuple[float, float, float]]] = None,
     ) -> None:
         """Draw frames as extruded solids — one batched, **non-pickable** actor.
 
@@ -612,7 +617,13 @@ class PyVistaRenderer(RenderBackend):
         from ..extruded_frames import build_extruded_frame_mesh
 
         mesh = build_extruded_frame_mesh(
-            frames, sections, colors, detail=detail, shrink=shrink, materials=materials
+            frames,
+            sections,
+            colors,
+            detail=detail,
+            shrink=shrink,
+            materials=materials,
+            element_colors=element_colors,
         )
         if mesh.points.size == 0:
             return
@@ -642,6 +653,7 @@ class PyVistaRenderer(RenderBackend):
         shrink: float = 1.0,
         scalar_field: Optional[dict[str, float]] = None,
         scalar_bar_title: Optional[str] = None,
+        element_colors: Optional[dict[str, tuple[float, float, float]]] = None,
     ) -> None:
         if not shells:
             return
@@ -665,6 +677,8 @@ class PyVistaRenderer(RenderBackend):
             if scalar_field is not None:
                 value = scalar_field.get(s.area_id)
                 color = _flag_rgb(value, max_abs) if value is not None else (0.7, 0.7, 0.7)
+            elif element_colors is not None:
+                color = element_colors.get(s.area_id, (0.7, 0.7, 0.7))
             else:
                 color = colors.get(s.section, (0.7, 0.7, 0.7))
             cell_colors.extend([color] * n_faces)

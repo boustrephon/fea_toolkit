@@ -11,6 +11,41 @@ import numpy as np
 _NPZ_TYPES = (dict, np.lib.npyio.NpzFile)
 
 
+#: The categorical palette shared by the model viewer's section colouring and
+#: the GUI's colour-by resolver.  Ordered so adjacent hues read as distinct
+#: neighbours; cycled when there are more labels than entries.
+_CATEGORICAL_PALETTE = [
+    (0.122, 0.467, 0.706),
+    (0.839, 0.153, 0.157),
+    (0.173, 0.627, 0.173),
+    (0.580, 0.404, 0.741),
+    (0.549, 0.337, 0.294),
+    (0.890, 0.467, 0.122),
+    (0.737, 0.741, 0.133),
+    (0.094, 0.745, 0.765),
+    (0.314, 0.314, 0.314),
+    (0.859, 0.373, 0.522),
+]
+
+
+def categorical_palette(names) -> dict[str, tuple[float, float, float]]:
+    """A deterministic colour map over a set of *names*.
+
+    Sorts the names so the same set always maps to the same colours, then
+    assigns each a palette entry in turn (cycling when there are more names
+    than entries).  One spelling of the palette, shared by the model viewer's
+    section colouring and the GUI's colour-by-material / -section / -story.
+
+    Args:
+        names: Any iterable of label strings.
+
+    Returns:
+        ``{label: (r, g, b)}`` with each channel in 0..1.
+    """
+    ordered = sorted(set(names))
+    return {n: _CATEGORICAL_PALETTE[i % len(_CATEGORICAL_PALETTE)] for i, n in enumerate(ordered)}
+
+
 def _set_isometric_view(plotter) -> None:
     """Set an isometric view that works for any model (including 1D columns).
 

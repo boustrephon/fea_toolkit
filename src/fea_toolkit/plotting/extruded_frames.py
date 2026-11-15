@@ -395,6 +395,7 @@ def build_extruded_frame_mesh(
     circle_segments: int = 8,
     shrink: float = 1.0,
     materials: Optional[dict] = None,
+    element_colors: Optional[dict[str, tuple[float, float, float]]] = None,
 ) -> ExtrudedMesh:
     """Build one combined mesh for every member's extruded section.
 
@@ -408,6 +409,9 @@ def build_extruded_frame_mesh(
         shrink: Display shrink toward each member's midpoint (``1.0`` = true).
         materials: Optional ``{name: Material}`` mapping, used to back-calculate
             a zero-dimension section's outline.
+        element_colors: Optional ``{frame_elem_id: (r, g, b)}`` recolouring each
+            member by its own id instead of its section colour.  Members of one
+            section that carry different colours are swept separately.
 
     Returns:
         An :class:`ExtrudedMesh`, or an empty mesh when nothing can be swept.
@@ -427,16 +431,17 @@ def build_extruded_frame_mesh(
     s0, s1 = _shrunk_segment_batch(starts, ends, shrink)
     _vx, vy, vz = local_axes_batch(s1 - s0, angles)
 
-    groups: dict[str, list[int]] = {}
+    groups: dict[tuple, list[int]] = {}
     for i, f in enumerate(frames):
-        groups.setdefault(f.section, []).append(i)
+        rgb_key = element_colors.get(f.elem_id) if element_colors is not None else None
+        groups.setdefault((f.section, rgb_key), []).append(i)
 
     points_parts: list[np.ndarray] = []
     faces_parts: list[np.ndarray] = []
     color_parts: list[np.ndarray] = []
     vertex_offset = 0
 
-    for sec_name, member_idx in groups.items():
+    for (sec_name, rgb_key), member_idx in groups.items():
         idxs = np.asarray(member_idx, dtype=int)
         section = sections.get(sec_name)
         if section is None:
@@ -446,7 +451,7 @@ def build_extruded_frame_mesh(
         sweeps = _sweeps(section, detail, circle_segments, materials)
         if not sweeps:
             continue
-        rgb = colors.get(sec_name, (0.5, 0.5, 0.5))
+        rgb = rgb_key if rgb_key is not None else colors.get(sec_name, (0.5, 0.5, 0.5))
         for pts2d, closed, caps, inners in sweeps:
             points, quads, caps_arr = _sweep_mesh(
                 pts2d, closed, caps, s0[idxs], s1[idxs], vy[idxs], vz[idxs], inners=inners

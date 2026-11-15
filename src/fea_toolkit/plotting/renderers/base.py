@@ -131,6 +131,7 @@ class RenderBackend(ABC):
         colors: dict[str, tuple[float, float, float]],
         opacity: float = 1.0,
         shrink: float = 1.0,
+        element_colors: Optional[dict[str, tuple[float, float, float]]] = None,
     ) -> None:
         """Draw frame elements as lines or tubes.
 
@@ -142,6 +143,8 @@ class RenderBackend(ABC):
                 ``1.0`` draws true length, ``0.9`` leaves a gap at every joint
                 (SAP2000's *shrink elements*).  Purely a display transform: the
                 geometry passed in is never modified.
+            element_colors: Optional ``{frame_elem_id: (r, g, b)}`` recolouring
+                each frame by its own id instead of its section colour.
         """
         ...
 
@@ -155,6 +158,7 @@ class RenderBackend(ABC):
         shrink: float = 1.0,
         detail: str = "plates",
         materials: Optional[dict] = None,
+        element_colors: Optional[dict[str, tuple[float, float, float]]] = None,
     ) -> None:
         """Draw frame elements as extruded solids (their cross-section swept
         along each member axis).
@@ -169,6 +173,8 @@ class RenderBackend(ABC):
                 ``"solid"`` (the closed perimeter, with end caps).
             materials: Optional ``{name: Material}`` mapping, passed through for
                 back-calculating zero-dimension section outlines.
+            element_colors: Optional ``{frame_elem_id: (r, g, b)}`` recolouring
+                each extruded solid by its own id instead of its section colour.
         """
         ...
 
@@ -181,6 +187,7 @@ class RenderBackend(ABC):
         shrink: float = 1.0,
         scalar_field: Optional[dict[str, float]] = None,
         scalar_bar_title: Optional[str] = None,
+        element_colors: Optional[dict[str, tuple[float, float, float]]] = None,
     ) -> None:
         """Draw shell elements as planar surfaces.
 
@@ -202,6 +209,8 @@ class RenderBackend(ABC):
             scalar_bar_title: When set (and *scalar_field* has a non-zero
                 value), add a scalar bar mapping the colour scale back to the
                 value — used by the applied-load colour-fill.
+            element_colors: Optional ``{area_elem_id: (r, g, b)}`` recolouring
+                each shell by its own id instead of its section colour.
         """
         ...
 
