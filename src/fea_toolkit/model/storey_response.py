@@ -601,10 +601,11 @@ def _rigid_body_steps(
         # underdetermined, and ``lstsq`` would infer a spurious twist that moves
         # the reported reference-point translation away from the node's actual
         # motion.  Preserve the node's translation and report no rotation, so a
-        # single-node level under uniform translation reads as zero drift — but
-        # keep the node's lever arm from the common reference as ``r_max``, so a
-        # rotational drift against an adjacent level still registers the node's
-        # distance instead of reading as zero.
+        # single-node level under uniform translation reads as zero drift.
+        # ``r_max`` is still the node's distance from the common reference (kept
+        # for the return contract), but the caller compares a single-node upper
+        # level against the lower level's field *evaluated at that node*, so it
+        # no longer multiplies this lever arm by a separate rotational term.
         return (
             np.asarray(ux_stack[0], dtype=float).copy(),
             np.asarray(uy_stack[0], dtype=float).copy(),
@@ -658,9 +659,14 @@ def peak_interstorey_drift(
     (``|ΔRz| · r_max``) plus the upper level's non-rigid residual — the peak
     magnitude of the nodal motion the rigid-body fit cannot represent — so a
     level distorting away from rigid motion still registers against the drift
-    threshold instead of reading as zero.  Without *node_xy* each level is
-    reduced to the mean of its nodes' X / Y histories (identical for a single
-    node per level).  Consecutive levels are differenced, the magnitude
+    threshold instead of reading as zero.  A single-node upper level carries no
+    rigid-body rotation of its own, so its drift compares the node's
+    displacement with the lower level's rigid-body field *evaluated at that
+    node* — not a translation difference plus a separate ``|ΔRz| · r_max`` term,
+    which would double-count the lever-arm rotation the node's displacement
+    already contains.  Without *node_xy* each level is reduced to the mean of
+    its nodes' X / Y histories (identical for a single node per level).
+    Consecutive levels are differenced, the magnitude
     normalised by their height interval, and the peak ratio over all intervals
     and time steps is returned.
 
@@ -764,6 +770,19 @@ def peak_interstorey_drift(
             continue
         n = min(lo[0].size, hi[0].size)
         if n == 0:
+            continue
+        if node_xy is not None and len(per_level[j]) == 1:
+            # A single-node upper level carries no rigid-body rotation of its
+            # own, so its translation is the node's own motion.  Compare that
+            # motion against the lower level's rigid-body field *evaluated at
+            # the node* — not against the lower translation plus a separate
+            # ``|ΔRz| · r_max`` term, which would double-count the lever-arm
+            # rotation the node's displacement already contains.  Two levels
+            # sharing one rigid-body motion therefore read as zero drift.
+            x_node, y_node, _ux, _uy = per_level[j][0]
+            lo_ux = (lo[0] - lo[2] * (y_node - ref_y))[:n]
+            lo_uy = (lo[1] + lo[2] * (x_node - ref_x))[:n]
+            peak = max(peak, float(np.max(np.hypot(hi[0][:n] - lo_ux, hi[1][:n] - lo_uy)) / h))
             continue
         dux = hi[0][:n] - lo[0][:n]
         duy = hi[1][:n] - lo[1][:n]

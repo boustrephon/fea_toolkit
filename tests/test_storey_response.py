@@ -679,15 +679,14 @@ class TestPeakInterstoreyDrift:
         assert drift == pytest.approx(0.01)  # 0.1 residual / 10 m height
 
     def test_single_node_level_keeps_its_lever_arm_in_rotational_drift(self):
-        """A single-node upper level contributes its lever arm to rotational drift.
+        """A static single-node roof still registers the base's rotational motion.
 
-        The roof has one recorded node at plan (5, 0); the base (two nodes at
-        (0, 0) and (2, 0)) rotates by Rz about the shared plan reference.  A
-        single node cannot constrain rotation, so the single-node fit reports
-        Rz = 0 and the interstorey rotation is the base's -Rz; its contribution
-        is |ΔRz| · r_max, where r_max is the roof node's distance from the
-        shared reference.  Before the fix r_max was 0 and this drift collapsed
-        to zero.
+        The roof has one recorded node at plan (5, 0) that does not move; the
+        base (two nodes at (0, 0) and (2, 0)) rotates by Rz about the shared plan
+        reference.  A single node cannot constrain rotation, so the single-node
+        fit reports Rz = 0.  The drift is the base's rigid-body field *evaluated
+        at the roof node* — rz · (5 − 7/3) — divided by the height, not a
+        separate |ΔRz| · r_max term.
         """
         n = 2
         node_z = {1: 0.0, 2: 0.0, 3: 10.0}
@@ -701,7 +700,31 @@ class TestPeakInterstoreyDrift:
         base2[:, 1] = rz * (2.0 - ref_x)
         roof = np.zeros((n, 3))  # static single node
         d = {1: base1, 2: base2, 3: roof}
-        # |ΔRz| · r_max / h = rz · (5 - 7/3) / 10 = 0.03 · (8/3) / 10 = 0.008.
+        # base motion at the roof node / h = rz · (5 - 7/3) / 10 = 0.03 · (8/3) / 10 = 0.008.
         assert peak_interstorey_drift(node_z, d, [0.0, 10.0], node_xy=node_xy) == pytest.approx(
             0.008
         )
+
+    def test_single_node_upper_sharing_lower_rigid_body_is_zero_drift(self):
+        """A single-node upper level moving with the lower rigid body is zero drift.
+
+        The roof has one recorded node; the base has two.  Both levels undergo
+        the same rotation about the shared plan reference, so the roof node's
+        displacement already contains the lever-arm term.  Comparing it with the
+        lower level's field *at that node* — rather than adding a separate
+        ``|ΔRz| · r_max`` term — must cancel to zero (the old double-count read
+        ``2 · rz · (5 − 7/3) / 10``).
+        """
+        n = 2
+        node_z = {1: 0.0, 2: 0.0, 3: 10.0}
+        node_xy = {1: (0.0, 0.0), 2: (2.0, 0.0), 3: (5.0, 0.0)}
+        rz = 0.03
+        ref_x = 7.0 / 3.0
+
+        def field(x: float) -> np.ndarray:
+            arr = np.zeros((n, 3))
+            arr[:, 1] = rz * (x - ref_x)
+            return arr
+
+        d = {1: field(0.0), 2: field(2.0), 3: field(5.0)}
+        assert peak_interstorey_drift(node_z, d, [0.0, 10.0], node_xy=node_xy) == pytest.approx(0.0)
