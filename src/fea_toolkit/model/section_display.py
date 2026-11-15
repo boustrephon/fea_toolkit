@@ -23,8 +23,6 @@ it is unit-tested on its own.
 
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass
 from typing import Any, Optional
 
 from .sap_data import (
@@ -36,6 +34,7 @@ from .sap_data import (
     ISection,
     PipeSection,
     RectangularSection,
+    SectionDisplayBox,
     ShellSection,
 )
 
@@ -61,28 +60,6 @@ _DEFAULT_SHELL_THICKNESS_M = 0.2
 _SELECTION_TUBE_CLEARANCE = 1.05
 
 
-@dataclass(frozen=True)
-class SectionDisplayBox:
-    """A rectangular envelope for a frame section, in model length units.
-
-    Attributes:
-        breadth: Overall breadth ``B`` (the local-z extent).
-        depth: Overall depth ``D`` (the local-y extent).
-        wall: Wall thickness for a hollow box (``0.0`` for a solid envelope).
-        source: Where the dimensions came from — ``"explicit"``,
-            ``"back_calc_solid"`` or ``"back_calc_hollow"``.
-    """
-
-    breadth: float
-    depth: float
-    wall: float = 0.0
-    source: str = "explicit"
-
-    def diagonal(self) -> float:
-        """The envelope's corner-to-corner diagonal ``sqrt(B² + D²)``."""
-        return math.hypot(self.breadth, self.depth)
-
-
 def is_steel_section(section: Any, materials: Optional[dict] = None) -> bool:
     """Whether *section* should display as a steel (hollow) section.
 
@@ -104,8 +81,10 @@ def is_steel_section(section: Any, materials: Optional[dict] = None) -> bool:
     if materials:
         material = materials.get(getattr(section, "material", None))
         mtype = getattr(material, "type", "") or ""
-        if "steel" in str(mtype).lower():
-            return True
+        if mtype:
+            # A resolved material type is authoritative — a resolved non-steel
+            # material must return False, not fall through to the shape fallback.
+            return "steel" in str(mtype).lower()
     shape_id = getattr(section, "shape_id", "")
     return shape_id in _STEEL_SHAPE_IDS
 
@@ -222,22 +201,36 @@ def back_calc_display_box(
     return SectionDisplayBox(breadth, depth, wall=0.0, source="back_calc_solid")
 
 
+def _display_depth(section: Any) -> float:
+    """The section depth to display: the display-only dim when present, else ``depth``.
+
+    Mirrors ``fea_toolkit.model.section_profiles._display_depth`` so the
+    selection envelope encloses the same depth ``section_profile_outline``
+    draws (an ISection / BoxSection may carry a ``depth_disp`` override).
+    """
+    depth = getattr(section, "depth_disp", None)
+    if depth is None or depth <= 0:
+        depth = getattr(section, "depth", None)
+    return float(depth) if depth is not None and depth > 0 else 0.0
+
+
 def _explicit_box(section: Any) -> Optional[SectionDisplayBox]:
     """The ``B × D`` envelope for a section whose dimensions are explicit."""
-    if isinstance(
+    if isinstance(section, (ISection, BoxSection)):
+        # These shapes support a ``depth_disp`` display override; honour it so
+        # the envelope matches ``section_profile_outline``.
+        breadth = float(getattr(section, "bf", 0.0) or 0.0)
+        depth = _display_depth(section)
+    elif isinstance(
         section,
-        (
-            RectangularSection,
-            ConcreteRectangularSection,
-            ISection,
-            BoxSection,
-            ChannelSection,
-        ),
+        (RectangularSection, ConcreteRectangularSection, ChannelSection),
     ):
         breadth = float(getattr(section, "bf", 0.0) or 0.0)
         depth = float(getattr(section, "depth", 0.0) or 0.0)
-        if breadth > 0.0 and depth > 0.0:
-            return SectionDisplayBox(breadth, depth)
+    else:
+        return None
+    if breadth > 0.0 and depth > 0.0:
+        return SectionDisplayBox(breadth, depth)
     return None
 
 

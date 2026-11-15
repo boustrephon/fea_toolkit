@@ -423,6 +423,28 @@ SHAPE_NAMES = {
 }
 
 
+@dataclass(frozen=True)
+class SectionDisplayBox:
+    """A rectangular envelope for a frame section, in model length units.
+
+    Attributes:
+        breadth: Overall breadth ``B`` (the local-z extent).
+        depth: Overall depth ``D`` (the local-y extent).
+        wall: Wall thickness for a hollow box (``0.0`` for a solid envelope).
+        source: Where the dimensions came from — ``"explicit"``,
+            ``"back_calc_solid"`` or ``"back_calc_hollow"``.
+    """
+
+    breadth: float
+    depth: float
+    wall: float = 0.0
+    source: str = "explicit"
+
+    def diagonal(self) -> float:
+        """The envelope's corner-to-corner diagonal ``sqrt(B² + D²)``."""
+        return math.hypot(self.breadth, self.depth)
+
+
 @dataclass
 class Section:
     """Base class for all frame section types.

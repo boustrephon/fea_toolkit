@@ -94,6 +94,13 @@ class TestSteelDetection:
         sec = ISection(name="I", shape="I/Wide Flange", material="S", depth=0.3, bf=0.15)
         assert is_steel_section(sec)
 
+    def test_resolved_non_steel_material_overrides_steel_shape(self):
+        # A steel-looking shape with a resolved concrete material is not steel:
+        # the material type is authoritative, so it must not fall through to the
+        # shape fallback.
+        sec = ISection(name="I", shape="I/Wide Flange", material="Conc", depth=0.3, bf=0.15)
+        assert not is_steel_section(sec, _CONC)
+
     def test_none(self):
         assert not is_steel_section(None)
 
@@ -141,6 +148,16 @@ class TestSelectionTubeDiameter:
         sec = GeneralSection(name="G", shape="General", material="Conc", I33=8e-6, I22=4e-6)
         box = resolve_section_display_box(sec, _CONC)
         assert selection_tube_diameter(sec, _CONC) == pytest.approx(box.diagonal() * 1.05)
+
+    def test_isection_depth_disp_override_is_honoured(self):
+        # A ``depth_disp`` override changes the drawn section (and so the cue),
+        # matching ``section_profile_outline``'s display depth.
+        sec = ISection(
+            name="I", shape="I/Wide Flange", material="S", depth=0.3, bf=0.15, depth_disp=0.5
+        )
+        box = resolve_section_display_box(sec)
+        assert box.depth == pytest.approx(0.5)
+        assert selection_tube_diameter(sec) == pytest.approx(math.hypot(0.15, 0.5) * 1.05)
 
     def test_none(self):
         assert selection_tube_diameter(None) is None
