@@ -150,8 +150,9 @@ _LOAD_SIZE_MIN = 0.05
 
 #: Node markers.  A restrained node is drawn a little larger, in green, so a
 #: model's supports read at a glance.  Both values stay **under** the selection
-#: overlay (a blue sphere of a fixed, larger size) and use a colour it never
-#: uses, so "restrained" and "selected" can never be mistaken for each other.
+#: overlay (a translucent yellow sphere at twice the marker size) and use a
+#: colour it never uses, so "restrained" and "selected" can never be mistaken
+#: for each other.
 _NODE_COLOR = (0.3, 0.3, 0.3)
 _CONSTRAINED_NODE_COLOR = (0.15, 0.65, 0.25)
 _CONSTRAINED_NODE_SIZE_FACTOR = 1.2
@@ -273,6 +274,7 @@ class ModelViewer:
         self._load_scale_fraction: float = _LOAD_SIZE_FRACTION
         self._geom_extracted = False
         self._model_diag: Optional[float] = None
+        self._node_size: float = 0.02
 
     # ── Geometry extraction ──────────────────────────────────────────
 
@@ -497,6 +499,7 @@ class ModelViewer:
         self._shell_opacity = opacity if shell_opacity is None else shell_opacity
         self._restraint_style = restraint_style
         self._load_scale_fraction = load_scale
+        self._node_size = node_size
 
         if show_extruded:
             # The extruded solids are pure decoration (non-pickable); the line
@@ -509,6 +512,7 @@ class ModelViewer:
                 opacity=opacity,
                 shrink=shrink,
                 detail=extruded_detail,
+                materials=getattr(self._model, "materials", {}) or {},
             )
         if show_frames:
             self._backend.render_frames(self._frames, colors, opacity=opacity, shrink=shrink)
@@ -962,13 +966,17 @@ class ModelViewer:
     ) -> "ModelViewer":
         """Highlight specific elements.
 
+        Each member's selection tube is sized from its own section (the section
+        envelope's diagonal, or the section's outer diameter); a member whose
+        section has no display dimensions falls back to *radius*.
+
         Args:
             frame_ids: Frame element IDs to highlight.
             area_ids: Area element IDs to highlight.
             color: Highlight colour (RGB 0..1).
             label: Optional text label near the highlighted group.
-            radius: Tube radius for frame highlights.  Defaults to
-                :meth:`highlight_radius` -- a model-scaled width.
+            radius: Fallback tube radius.  Defaults to :meth:`highlight_radius`
+                — a model-scaled width.
 
         Returns:
             ``self`` for chaining.
@@ -987,6 +995,8 @@ class ModelViewer:
             color=color,
             label=label,
             radius=radius,
+            frame_radii=self._frame_highlight_radii(matched_frames, radius),
+            shell_halves=self._shell_highlight_halves(matched_shells),
             frames=matched_frames,
             shells=matched_shells,
         )
@@ -1001,6 +1011,9 @@ class ModelViewer:
         label: Optional[str] = None,
     ) -> "ModelViewer":
         """Highlight specific nodes.
+
+        The node cue is a sphere of **twice** the node marker's radius, so a
+        selected node reads distinctly against the node cloud it sits in.
 
         Args:
             node_ids: Node IDs to highlight.
@@ -1018,10 +1031,47 @@ class ModelViewer:
             node_ids=node_ids,
             color=color,
             label=label,
+            node_radius=2.0 * self._node_size,
             nodes=matched_nodes,
         )
         self._backend.render_highlights([h], shrink=self._shrink)
         return self
+
+    # ── Selection-cue sizing ──────────────────────────────────────────
+
+    def _section_lookup(self) -> "tuple[dict, dict, dict]":
+        """The model's ``(sections, materials, units)`` for cue sizing."""
+        model = self._model
+        sections = getattr(model, "sections", {}) or {}
+        materials = getattr(model, "materials", {}) or {}
+        units = getattr(model, "units", None) or {}
+        return sections, materials, units
+
+    def _frame_highlight_radii(
+        self, frames: list["FrameGeom"], fallback: float
+    ) -> Optional[list[float]]:
+        """Per-frame selection-tube radii (half the section envelope diagonal)."""
+        from ..model.section_display import selection_tube_diameter
+
+        sections, materials, _ = self._section_lookup()
+        radii: list[float] = []
+        for frame in frames:
+            section = sections.get(frame.section)
+            diameter = selection_tube_diameter(section, materials) if section is not None else None
+            radii.append(diameter / 2.0 if diameter else fallback)
+        return radii
+
+    def _shell_highlight_halves(self, shells: list["ShellGeom"]) -> Optional[list[float]]:
+        """Per-shell slab half-thicknesses (150 % of the shell's display thickness)."""
+        from ..model.section_display import shell_display_thickness
+
+        sections, _, units = self._section_lookup()
+        halves: list[float] = []
+        for shell in shells:
+            section = sections.get(shell.section)
+            thickness = shell_display_thickness(section, units)
+            halves.append(0.75 * thickness)
+        return halves
 
     def clear_highlights(self) -> "ModelViewer":
         """Remove highlights added by :meth:`highlight_elements` / :meth:`highlight_nodes`.

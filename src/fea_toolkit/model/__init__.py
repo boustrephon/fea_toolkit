@@ -221,6 +221,15 @@ def __dir__():
     return sorted(set(globals()) | set(_STOREY_RESPONSE_NAMES) | set(_REVIEW_NAMES))
 
 
+from .section_display import (
+    SectionDisplayBox,
+    back_calc_display_box,
+    is_steel_section,
+    resolve_section_display_box,
+    selection_tube_diameter,
+    shell_display_thickness,
+)
+
 __all__ = [
     "BILINEARIZE_METHODS",
     "KIP_IN_UNITS",
@@ -281,6 +290,7 @@ __all__ = [
     "SDSection",
     # Section types
     "Section",
+    "SectionDisplayBox",
     # Section library
     "SectionLibrary",
     # Selection
@@ -297,6 +307,7 @@ __all__ = [
     "apply_frame_end_offsets",
     "area_load_values",
     "as_combination_mapping",
+    "back_calc_display_box",
     "beam_load_to_nodal_loads",
     "bilinearize_composite",
     "bilinearize_equal_energy",
@@ -342,6 +353,7 @@ __all__ = [
     "group_shell_forces_by_section",
     # Stories
     "identify_stories",
+    "is_steel_section",
     "list_load_sources",
     "load_rows",
     # Confinement
@@ -360,10 +372,13 @@ __all__ = [
     "remove_floating_nodes",
     # Source resolution
     "resolve_model_source",
+    "resolve_section_display_box",
     "review_model",
     "review_s2k_file",
     "rigid_body_fit",
+    "selection_tube_diameter",
     "selection_weight",
+    "shell_display_thickness",
     "split_areas_at_frame_edges",
     # Geometry
     "split_elements",

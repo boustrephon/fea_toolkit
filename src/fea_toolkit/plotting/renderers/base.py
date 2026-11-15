@@ -90,7 +90,14 @@ class HighlightDef:
     node_ids: list[str] = field(default_factory=list)
     color: tuple[float, float, float] = (1.0, 0.0, 0.0)  # RGB 0..1
     label: Optional[str] = None
-    radius: Optional[float] = None  # tube radius for frames
+    radius: Optional[float] = None  # fallback tube radius for frames
+    # Per-entity cue sizes (optional, aligned with ``frames`` / ``shells``);
+    # when ``None`` the backend falls back to ``radius``.  ``frame_radii`` are
+    # tube radii, ``shell_halves`` are slab half-thicknesses, ``node_radius`` is
+    # a node-marker radius.
+    frame_radii: Optional[list[float]] = None
+    shell_halves: Optional[list[float]] = None
+    node_radius: Optional[float] = None
     # Resolved geometry payloads (populated by ModelViewer)
     frames: list["FrameGeom"] = field(default_factory=list)
     shells: list["ShellGeom"] = field(default_factory=list)
@@ -147,6 +154,7 @@ class RenderBackend(ABC):
         opacity: float = 1.0,
         shrink: float = 1.0,
         detail: str = "plates",
+        materials: Optional[dict] = None,
     ) -> None:
         """Draw frame elements as extruded solids (their cross-section swept
         along each member axis).
@@ -159,6 +167,8 @@ class RenderBackend(ABC):
             shrink: Display shrink factor toward each element's midpoint.
             detail: ``"plates"`` (the efficient open-surface representation) or
                 ``"solid"`` (the closed perimeter, with end caps).
+            materials: Optional ``{name: Material}`` mapping, passed through for
+                back-calculating zero-dimension section outlines.
         """
         ...
 

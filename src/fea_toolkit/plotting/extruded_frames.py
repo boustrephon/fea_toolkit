@@ -145,7 +145,10 @@ def _swap_profile_columns(pts: np.ndarray) -> np.ndarray:
 
 
 def _sweeps(
-    section: Any, detail: str, circle_segments: int
+    section: Any,
+    detail: str,
+    circle_segments: int,
+    materials: Optional[dict] = None,
 ) -> list[tuple[np.ndarray, bool, bool, list[np.ndarray]]]:
     """The ``(points, closed, caps, inners)`` sweeps for one section.
 
@@ -167,7 +170,7 @@ def _sweeps(
         A list of ``(points, closed, caps, inners)`` tuples, one per sweep.
     """
     if detail == "plates":
-        polylines = section_plates(section, circle_segments=circle_segments)
+        polylines = section_plates(section, circle_segments=circle_segments, materials=materials)
         sweeps: list[tuple[np.ndarray, bool, bool, list[np.ndarray]]] = []
         for poly in polylines:
             pts = _swap_profile_columns(np.asarray(poly, dtype=float))
@@ -179,7 +182,7 @@ def _sweeps(
                 sweeps.append((pts, False, False, []))
         return sweeps
 
-    outline = section_profile_outline(section)
+    outline = section_profile_outline(section, materials)
     if outline is None:
         return []
     kind, value = outline
@@ -391,6 +394,7 @@ def build_extruded_frame_mesh(
     detail: str = "plates",
     circle_segments: int = 8,
     shrink: float = 1.0,
+    materials: Optional[dict] = None,
 ) -> ExtrudedMesh:
     """Build one combined mesh for every member's extruded section.
 
@@ -402,6 +406,8 @@ def build_extruded_frame_mesh(
         detail: ``"plates"`` (efficient, no caps) or ``"solid"`` (closed, caps).
         circle_segments: Sides used to approximate a circular section.
         shrink: Display shrink toward each member's midpoint (``1.0`` = true).
+        materials: Optional ``{name: Material}`` mapping, used to back-calculate
+            a zero-dimension section's outline.
 
     Returns:
         An :class:`ExtrudedMesh`, or an empty mesh when nothing can be swept.
@@ -437,7 +443,7 @@ def build_extruded_frame_mesh(
             # A section referenced by a frame but absent from the model's section
             # dict has nothing to sweep — skip it so rendering continues.
             continue
-        sweeps = _sweeps(section, detail, circle_segments)
+        sweeps = _sweeps(section, detail, circle_segments, materials)
         if not sweeps:
             continue
         rgb = colors.get(sec_name, (0.5, 0.5, 0.5))

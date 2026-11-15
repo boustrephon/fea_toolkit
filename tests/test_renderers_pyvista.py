@@ -1312,9 +1312,9 @@ class TestNodeMarkersAndSelection:
             mesh = slab.mapper.dataset
             assert mesh.n_points == 8
             assert mesh.bounds[4] < 0.0 < mesh.bounds[5]
-            # 85 %: reads as a cue over any section colour, still shows what it
-            # covers.  The slab is volume, so translucency costs it no clarity.
-            assert slab.GetProperty().GetOpacity() == pytest.approx(0.85)
+            # 50 %: the unified translucent selection cue — reads as "selected"
+            # over any section colour while still showing what it covers.
+            assert slab.GetProperty().GetOpacity() == pytest.approx(0.5)
             assert slab.GetProperty().GetColor() == pytest.approx((1.0, 0.45, 0.0), abs=0.01)
         finally:
             renderer.clear()

@@ -32,6 +32,7 @@ from .sap_data import (
     SDSection,
     Section,
 )
+from .section_display import back_calc_display_box
 from .section_properties import polygon_props
 
 __all__ = [
@@ -351,7 +352,9 @@ def _display_tw(section: Any) -> float:
     return float(t) if t is not None and t > 0 else 0.0
 
 
-def section_profile_outline(section: Union[Section, Any]) -> Optional[ProfileOutline]:
+def section_profile_outline(
+    section: Union[Section, Any], materials: Optional[dict] = None
+) -> Optional[ProfileOutline]:
     """The closed cross-section outline of *section*.
 
     Returns ``("polygon", [(x, y), ...])`` for polygonal sections, or
@@ -359,8 +362,10 @@ def section_profile_outline(section: Union[Section, Any]) -> Optional[ProfileOut
     *outer* and *inner* are the two closed loops), or ``("circle", radius)``
     for circular ones — the same shape
     :mod:`fea_toolkit.rhino.geometry` consumes for ``Extrusion.Create``.  A
-    catalogue section with zero dimensions falls back to a square of side
-    ``sqrt(A)`` (or 0.1), so a section with no geometry still has an outline.
+    catalogue section with zero dimensions is back-calculated to a
+    representative box (a solid rectangle, or a hollow one for steel); only when
+    no inertia is usable does it fall back to a ``sqrt(A)`` square (or 0.1), so a
+    section with no geometry still has an outline.
     A :class:`~fea_toolkit.model.sap_data.SDSection` returns its polygon
     perimeter (centred on the composite centroid); a multi-polygon composite
     becomes ``("regions", [(outer, [holes...]), ...])`` — one outer boundary
@@ -368,6 +373,9 @@ def section_profile_outline(section: Union[Section, Any]) -> Optional[ProfileOut
 
     Args:
         section: Any :class:`~fea_toolkit.model.sap_data.Section` (or a subtype).
+        materials: Optional ``{name: Material}`` mapping, used to decide whether
+            a zero-dimension section is steel (and so back-calculated as a hollow
+            box).
 
     Returns:
         A ``("polygon", points)`` / ``("polygon", (outer, inner))`` /
@@ -411,8 +419,14 @@ def section_profile_outline(section: Union[Section, Any]) -> Optional[ProfileOut
 
     # Fallback for catalogue sections with zero dimensions.
     if pts_2d is None and not is_circle:
-        side = (section.A**0.5) if section.A > 0 else 0.1
-        pts_2d = profile_rect(side, side)
+        box = back_calc_display_box(section, materials)
+        if box is not None and box.wall > 0.0:
+            return ("polygon", profile_box(box.depth, box.breadth, box.wall, box.wall))
+        if box is not None:
+            pts_2d = profile_rect(box.depth, box.breadth)
+        else:
+            side = (section.A**0.5) if section.A > 0 else 0.1
+            pts_2d = profile_rect(side, side)
 
     if is_circle:
         if radius <= 0:
@@ -450,8 +464,18 @@ def _rect_sides(h: float, w: float) -> list[list[tuple[float, float]]]:
     ]
 
 
-def _zero_dimension_plates(section: Section) -> list[list[tuple[float, float]]]:
-    """Fallback plates for a catalogue section with no real dimensions."""
+def _zero_dimension_plates(
+    section: Section, materials: Optional[dict] = None
+) -> list[list[tuple[float, float]]]:
+    """Fallback plates for a catalogue section with no real dimensions.
+
+    A section with inertias but no dimensions is back-calculated to a
+    representative box (a solid rectangle, or a hollow one for steel); the
+    legacy ``sqrt(A)`` square is kept only when no inertia is usable.
+    """
+    box = back_calc_display_box(section, materials)
+    if box is not None:
+        return _rect_sides(box.depth / 2.0, box.breadth / 2.0)
     side = (section.A**0.5) if section.A > 0 else 0.1
     return _rect_sides(side / 2.0, side / 2.0)
 
@@ -460,6 +484,7 @@ def section_plates(
     section: Union[Section, Any],
     *,
     circle_segments: int = 8,
+    materials: Optional[dict] = None,
 ) -> list[list[tuple[float, float]]]:
     """The open plate/surface decomposition of *section*.
 
@@ -470,18 +495,23 @@ def section_plates(
     SD (Section Designer) section becomes the perimeter edges of all its
     polygon loops (every outer and hole boundary), and a
     circular section becomes an open tube of *circle_segments* sides.  A
-    catalogue section with zero dimensions falls back to a square.
+    catalogue section with zero dimensions is back-calculated to a
+    representative box (a solid rectangle, or a hollow one for steel); only when
+    no inertia is usable does it fall back to a ``sqrt(A)`` square.
 
     Args:
         section: Any :class:`~fea_toolkit.model.sap_data.Section` (or a subtype).
         circle_segments: Number of sides used for a circular section's tube.
+        materials: Optional ``{name: Material}`` mapping, used to decide whether
+            a zero-dimension section is steel (and so back-calculated as a hollow
+            box).
 
     Returns:
         A list of open polylines, each a list of ``(x, y)`` points.
     """
     if isinstance(section, (RectangularSection, ConcreteRectangularSection)):
         if section.depth <= 0 or section.bf <= 0:
-            return _zero_dimension_plates(section)
+            return _zero_dimension_plates(section, materials)
         return _rect_sides(section.depth / 2.0, section.bf / 2.0)
 
     if isinstance(section, (CircularSection, ConcreteCircularSection, PipeSection)):
@@ -496,7 +526,7 @@ def section_plates(
     if isinstance(section, ISection):
         depth = _display_depth(section)
         if depth <= 0 or section.bf <= 0:
-            return _zero_dimension_plates(section)
+            return _zero_dimension_plates(section, materials)
         h, w = depth / 2.0, section.bf / 2.0
         tf = section.tf
         return [
@@ -507,7 +537,7 @@ def section_plates(
 
     if isinstance(section, ChannelSection):
         if section.depth <= 0 or section.bf <= 0:
-            return _zero_dimension_plates(section)
+            return _zero_dimension_plates(section, materials)
         h, w = section.depth / 2.0, section.bf / 2.0
         tf = section.tf
         web_x = -(w - section.tw / 2.0)  # the left wall's midline
@@ -520,7 +550,7 @@ def section_plates(
     if isinstance(section, BoxSection):
         depth = _display_depth(section)
         if depth <= 0 or section.bf <= 0:
-            return _zero_dimension_plates(section)
+            return _zero_dimension_plates(section, materials)
         h, w = depth / 2.0, section.bf / 2.0
         tf, tw = section.tf, _display_tw(section)
         y = h - tf / 2.0
@@ -535,10 +565,10 @@ def section_plates(
     if isinstance(section, SDSection):
         loops = _sd_loops(section)
         if not loops:
-            return _zero_dimension_plates(section)
+            return _zero_dimension_plates(section, materials)
         sides: list[list[tuple[float, float]]] = []
         for loop in loops:
             sides.extend(_loop_sides(loop))
         return sides
 
-    return _zero_dimension_plates(section)
+    return _zero_dimension_plates(section, materials)

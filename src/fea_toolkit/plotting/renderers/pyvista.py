@@ -193,6 +193,12 @@ def _flag_direction(
 _NODE_POINT_SCALE = 600.0
 _MIN_NODE_POINT_SIZE = 6.0
 
+#: Opacity of a selection cue (a highlighted frame / node / shell).  A single
+#: translucent yellow is the project's selection convention: translucent enough
+#: to read the member it covers, opaque enough to read as "selected" over any
+#: section colour.
+_HIGHLIGHT_OPACITY = 0.5
+
 
 def node_point_size(radius: float) -> float:
     """Marker size in pixels for a model-relative *radius*.
@@ -593,6 +599,7 @@ class PyVistaRenderer(RenderBackend):
         opacity: float = 1.0,
         shrink: float = 1.0,
         detail: str = "plates",
+        materials: Optional[dict] = None,
     ) -> None:
         """Draw frames as extruded solids — one batched, **non-pickable** actor.
 
@@ -604,7 +611,9 @@ class PyVistaRenderer(RenderBackend):
             return
         from ..extruded_frames import build_extruded_frame_mesh
 
-        mesh = build_extruded_frame_mesh(frames, sections, colors, detail=detail, shrink=shrink)
+        mesh = build_extruded_frame_mesh(
+            frames, sections, colors, detail=detail, shrink=shrink, materials=materials
+        )
         if mesh.points.size == 0:
             return
 
@@ -757,33 +766,45 @@ class PyVistaRenderer(RenderBackend):
         for h in highlights:
             # ── Highlighted frames ──
             if h.frames:
-                n = len(h.frames)
-                pts = np.zeros((n * 2, 3))
-                lines = np.zeros((n, 3), dtype=int)
-                for idx, f in enumerate(h.frames):
-                    pts[idx * 2], pts[idx * 2 + 1] = _shrunk_segment(f.start, f.end, shrink)
-                    lines[idx] = [2, idx * 2, idx * 2 + 1]
-                r = h.radius or 0.03
-                mesh = pv.PolyData(pts, lines=lines)
-                tube = mesh.tube(radius=r)
-                actor = p.add_mesh(
-                    tube,
-                    color=h.color,
-                    opacity=1.0,  # a selection cue must read over any section colour
-                    show_scalar_bar=False,
+                radii = (
+                    h.frame_radii
+                    if h.frame_radii is not None
+                    else [h.radius or 0.03] * len(h.frames)
                 )
-                self._add_overlay(actor, "highlights")
+                # A tube has one radius for the whole polyline, so group members
+                # by their cue radius and build one tube per distinct radius.
+                groups: dict[float, list] = {}
+                for f, r in zip(h.frames, radii):
+                    groups.setdefault(round(float(r), 9), []).append(f)
+                for r, members in groups.items():
+                    n = len(members)
+                    pts = np.zeros((n * 2, 3))
+                    lines = np.zeros((n, 3), dtype=int)
+                    for idx, f in enumerate(members):
+                        pts[idx * 2], pts[idx * 2 + 1] = _shrunk_segment(f.start, f.end, shrink)
+                        lines[idx] = [2, idx * 2, idx * 2 + 1]
+                    mesh = pv.PolyData(pts, lines=lines)
+                    tube = mesh.tube(radius=r)
+                    actor = p.add_mesh(
+                        tube,
+                        color=h.color,
+                        opacity=_HIGHLIGHT_OPACITY,
+                        show_scalar_bar=False,
+                    )
+                    self._add_overlay(actor, "highlights")
 
             # ── Highlighted nodes ──
             if h.nodes:
                 pts = np.array([n.position for n in h.nodes])
                 cloud = pv.PolyData(pts)
+                radius = h.node_radius if h.node_radius is not None else 0.02
                 actor = p.add_mesh(
                     cloud,
                     color=h.color,
-                    point_size=15,
+                    point_size=node_point_size(radius),
                     style="points",
                     render_points_as_spheres=True,
+                    opacity=_HIGHLIGHT_OPACITY,
                     show_scalar_bar=False,
                 )
                 self._add_overlay(actor, "highlights")
@@ -791,12 +812,17 @@ class PyVistaRenderer(RenderBackend):
             # ── Highlighted shells ──
             if h.shells:
                 # A slab straddling each element, so the cue is volume rather than
-                # a coincident surface — see _selection_slab.  Its half-thickness is
-                # the same model-scaled radius the frame tube uses, so the two
-                # selection cues look like the same gesture.
-                half = h.radius or 0.02
+                # a coincident surface — see _selection_slab.  Its half-thickness
+                # is 150 % of the shell's display thickness (so the slab's total
+                # thickness is 1.5 × the shell thickness).
+                halves = (
+                    h.shell_halves
+                    if h.shell_halves is not None
+                    else [h.radius or 0.02] * len(h.shells)
+                )
                 slabs = [
-                    _selection_slab(_shrunk_polygon(s.vertices, shrink), half) for s in h.shells
+                    _selection_slab(_shrunk_polygon(s.vertices, shrink), float(half))
+                    for s, half in zip(h.shells, halves)
                 ]
                 slabs = [slab for slab in slabs if slab.n_cells]
                 if slabs:
@@ -806,11 +832,7 @@ class PyVistaRenderer(RenderBackend):
                     actor = p.add_mesh(
                         mesh,
                         color=h.color,
-                        # Opaque enough to read as a cue over any section colour (the
-                        # frame tube stays fully opaque), translucent enough to see
-                        # what it covers.  The slab is volume rather than a coincident
-                        # surface, so translucency costs it no clarity.
-                        opacity=0.85,
+                        opacity=_HIGHLIGHT_OPACITY,
                         show_scalar_bar=False,
                     )
                     self._add_overlay(actor, "highlights")
