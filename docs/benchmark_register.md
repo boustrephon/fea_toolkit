@@ -44,20 +44,24 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
 
 ## 3. Implemented benchmarks
 
-| Benchmark | Type | Tier | Doc | Test |
-|---|---|---|---|---|
-| Euler cantilever `PL³/(3EI)` | vertical cantilever · static | T1 | [cantilever_benchmark.md](cantilever_benchmark.md) | `test_benchmark_cantilever.py` |
-| Przemieniecki/Paz shear building + CQC | shear building · modal/RS | T1 | [shear_building_benchmark.md](shear_building_benchmark.md) | `test_benchmark_shear_building.py` |
-| SAC 3/9/20-story frame — modal | steel moment frame · modal | T2 | [sac_benchmark.md](sac_benchmark.md) | `test_benchmark_sac3.py`, `test_benchmark_sac920.py` |
-| SAC 3/9/20-story frame — NLTHA | steel moment frame · NLTHA | T4 | [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md) | `test_benchmark_sac3_nltha.py`, `test_benchmark_sac920.py` |
-| SAC 3-story frame — IMK collapse (IDA) | steel moment frame · IDA | T4 | [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md) | `test_benchmark_sac_ida.py` |
-| IK-2005 generic-frame collapse (IDA) | steel moment frame · IDA | T4 | [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md) | `test_generic_frame*.py` |
-| Vecchio & Emara (1992) frame | RC moment frame · pushover | T3 | [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md) | `test_rc_benchmark.py` |
-| Duong et al. (2007) shear-critical frame | RC moment frame · pushover | T3 | [duong_benchmark.md](duong_benchmark.md) | `test_duong_benchmark.py` |
-| RC wall pushover (LayeredShell + MVLEM) | shear wall · pushover | — | [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [shell_support.md](shell_support.md) | `test_wall_pushover.py` |
+| Benchmark | Type | Tier | Status | Doc | Test |
+|---|---|---|---|---|---|
+| Euler cantilever `PL³/(3EI)` | vertical cantilever · static | T1 | ✅ | [cantilever_benchmark.md](cantilever_benchmark.md) | `test_benchmark_cantilever.py` |
+| Przemieniecki/Paz shear building + CQC | shear building · modal/RS | T1 | ✅ | [shear_building_benchmark.md](shear_building_benchmark.md) | `test_benchmark_shear_building.py` |
+| SAC 3/9/20-story frame — modal | steel moment frame · modal | T2 | ✅ | [sac_benchmark.md](sac_benchmark.md) | `test_benchmark_sac3.py`, `test_benchmark_sac920.py` |
+| SAC 3/9/20-story frame — NLTHA | steel moment frame · NLTHA | T4 | ✅ | [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md) | `test_benchmark_sac3_nltha.py`, `test_benchmark_sac920.py` |
+| SAC 3-story frame — IMK collapse (IDA) | steel moment frame · IDA | T4 | ⚠️ | [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md) | `test_benchmark_sac_ida.py` |
+| IK-2005 generic-frame collapse (IDA) | steel moment frame · IDA | T4 | 🚧 | [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md) | `test_generic_frame*.py` |
+| Vecchio & Emara (1992) frame | RC moment frame · pushover | T3 | ✅ | [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md) | `test_rc_benchmark.py` |
+| Duong et al. (2007) shear-critical frame | RC moment frame · pushover | T3 | ✅ | [duong_benchmark.md](duong_benchmark.md) | `test_duong_benchmark.py` |
+| RC wall pushover (LayeredShell + MVLEM) | shear wall · pushover | — | ✅ | [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [shell_support.md](shell_support.md) | `test_wall_pushover.py` |
 
 > `—` = a synthetic exercise, not a T-tier benchmark (matrix cell ◐); its docs
 > are the feature pages rather than a `_benchmark.md`.
+>
+> **Status** — ✅ validated, ⚠️ partial (runs, but its reference comparison is
+> not fully closed), 🚧 in progress (a known gap under investigation).  Detail
+> lives in each benchmark's own doc.
 
 Supporting code, not separate benchmarks:
 
