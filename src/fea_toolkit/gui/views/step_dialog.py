@@ -95,6 +95,9 @@ class StepDialog(QDialog):
         #: The value each float spin box actually holds after seeding (rounded to
         #: its display precision), used to tell an untouched field from an edit.
         self._seeded: dict[str, float] = {}
+        #: Param names that must be emitted even when their value equals the
+        #: declared default (the SAP2000 story-detection default-on).
+        self._force_emit: set[str] = set()
         self.setWindowTitle(f"Step — {self._verb}")
 
         layout = QVBoxLayout(self)
@@ -191,8 +194,10 @@ class StepDialog(QDialog):
                     editor.setToolTip(
                         "Storey levels are already imported from the ETABS story table."
                     )
-                elif program == "SAP2000" and name not in step.params:
-                    editor.setChecked(True)
+                elif program == "SAP2000":
+                    if name not in step.params:
+                        editor.setChecked(True)
+                    self._force_emit.add(name)
             if spec.type is float and not spec.choices:
                 self._seeded[name] = float(editor.value())
             if spec.manifest is not None:
@@ -351,7 +356,7 @@ class StepDialog(QDialog):
         params: dict[str, Any] = {}
         for name, spec in self._spec.params.items():
             value = self._param_value(name)
-            if value != spec.default:
+            if value != spec.default or name in self._force_emit:
                 params[name] = value
         return Step(
             verb=self._verb,

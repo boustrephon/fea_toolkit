@@ -72,8 +72,10 @@ class ViewportInteraction:
         policy: The resolved interaction policy.
         on_pick: Called with a :class:`PickResult` for every clean click --
             including a miss, so the caller can clear the selection.
-        on_marquee: Optional; called with ``(start, end)`` VTK device pixels
-            when a drag should be a rubber-band selection rather than an orbit.
+        on_marquee: Optional; called with ``(start, end, modifiers)`` — the
+            marquee anchor and release as VTK device pixels, plus the canonical
+            modifier names held during the drag — when a drag should be a
+            rubber-band selection rather than an orbit.
         node_actors: Callable returning the current node-cloud actors.  A
             callable, because a new model means new actors and a stale pick list
             would pin the old ones.

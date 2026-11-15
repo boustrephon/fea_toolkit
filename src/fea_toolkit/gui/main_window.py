@@ -3406,6 +3406,7 @@ class MainWindow(QMainWindow):
         from ..workflow import Step, satisfied_kinds, step_to_command
         from ..workflow.verbs.modal import resolve_default_modal_case
         from .views.analysis_wizard import AnalysisWizard
+        from .views.step_dialog import StepDialog
 
         produced = satisfied_kinds(list(self._recipe_panel.recipe), initial={"geometry"})
         verbs = AnalysisWizard.get_request(produced, self)
@@ -3413,12 +3414,31 @@ class MainWindow(QMainWindow):
             return
 
         default_modal = resolve_default_modal_case(store.raw())
+        # Dependent verbs must reference the modal step that will actually
+        # produce their modal result.  When the wizard adds a fresh modal step
+        # that is *default_modal*; when it does not (an existing recipe modal
+        # step is the precursor), resolve that step's actual name — a CUSTOM
+        # precursor must not be silently replaced by the source default —
+        # matching _analysis_preset()/_ensure_modal_precursor().
+        modal_case = (
+            default_modal if "modal" in verbs else self._ensure_modal_precursor(default_modal)
+        )
         for verb in verbs:
             if verb == "modal":
                 params = {"name": default_modal} if default_modal else {}
+                step = Step(verb=verb, params=params)
+            elif verb in ("nonlinear_dynamic", "ida"):
+                # These verbs need a ground-motion record (and the IDA ladder)
+                # before the step can run — collect them in a dialog, exactly as
+                # _analysis_preset() does, instead of adding a step that will
+                # fail validation for a missing ground_motion_file.
+                prefill = {"modal_case": modal_case} if modal_case else {}
+                step = StepDialog.edit(Step(verb=verb, params=prefill), self, store.raw())
+                if step is None:
+                    continue  # cancelled — skip this step
             else:
-                params = {"modal_case": default_modal} if default_modal else {}
-            step = Step(verb=verb, params=params)
+                params = {"modal_case": modal_case} if modal_case else {}
+                step = Step(verb=verb, params=params)
             self._recipe_panel.add_step(
                 step.verb, step.selection, step.params, optional=step.optional
             )

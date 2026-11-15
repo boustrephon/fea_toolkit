@@ -969,6 +969,24 @@ class TestDetectStoriesDialog:
         assert widget.isEnabled() is True
         assert dialog.edited_step().params.get("detect_stories") is True
 
+    def test_reopening_keeps_an_explicit_uncheck_for_sap(self, window):
+        from fea_toolkit.gui.views.step_dialog import StepDialog
+        from fea_toolkit.workflow import Step
+
+        model = _model()
+        model.program = "SAP2000"
+
+        # Unchecking an otherwise-untouched SAP2000 step must persist as False
+        # (not be re-checked on reopen), even though False equals the declared
+        # default and would otherwise be dropped from the emitted params.
+        dialog = StepDialog(Step(verb="mesh"), model_data=model)
+        dialog._widgets["detect_stories"].setChecked(False)
+        assert dialog.edited_step().params.get("detect_stories") is False
+
+        reopened = StepDialog(Step(verb="mesh", params={"detect_stories": False}), model_data=model)
+        assert reopened._widgets["detect_stories"].isChecked() is False
+        assert reopened.edited_step().params.get("detect_stories") is False
+
     def test_defaults_off_for_safe(self, window):
         dialog = self._dialog_for("SAFE")
         widget = dialog._widgets["detect_stories"]
