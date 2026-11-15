@@ -6,10 +6,15 @@ import pytest
 
 from fea_toolkit.gui.controllers.settings import (
     DISPLAY_DEFAULTS,
+    THEME_DEFAULTS,
+    ThemeSettings,
     load_gui_settings,
     load_opensees_setting,
+    load_theme_settings,
     resolve_display,
+    resolve_theme,
     save_display_settings,
+    theme_stylesheet,
 )
 
 
@@ -56,6 +61,41 @@ def test_opensees_setting_is_none_when_absent_or_malformed(tmp_path):
 
     path.write_text(json.dumps({"opensees": "not-an-object"}))
     assert load_opensees_setting(path) is None
+
+
+def test_theme_defaults_when_missing(tmp_path):
+    theme, notes = load_theme_settings(tmp_path / "none.json")
+    assert theme == THEME_DEFAULTS
+    assert theme.panel_colour == ""
+    assert notes == []
+
+
+def test_theme_section_is_read_and_does_not_leak_into_interaction_notes(tmp_path):
+    path = tmp_path / "gui.json"
+    path.write_text(json.dumps({"preset": "click_drag", "theme": {"panel_colour": "#3a3f44"}}))
+    theme, notes = load_theme_settings(path)
+    assert theme.panel_colour == "#3a3f44"
+    assert notes == []
+    # The ``theme`` key must not surface as "unknown interaction setting".
+    _policy, _display, interaction_notes = load_gui_settings(path)
+    assert interaction_notes == []
+
+
+def test_resolve_theme_rejects_unknown_key_and_non_string_colour():
+    theme, notes = resolve_theme({"panel_colour": "grey", "wibble": 1})
+    assert theme.panel_colour == "grey"
+    assert any("wibble" in note for note in notes)
+
+    theme, notes = resolve_theme({"panel_colour": 42})
+    assert theme == THEME_DEFAULTS
+    assert any("not a string" in note for note in notes)
+
+
+def test_theme_stylesheet_is_empty_by_default_and_embeds_the_colour():
+    assert theme_stylesheet(ThemeSettings()) == ""
+    qss = theme_stylesheet(ThemeSettings(panel_colour="#3a3f44"))
+    assert "QDockWidget::title" in qss
+    assert "background: #3a3f44" in qss
 
 
 def test_unknown_display_key_is_reported():

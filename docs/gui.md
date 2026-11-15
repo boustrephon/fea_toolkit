@@ -48,7 +48,7 @@ runs the Preprocessor and replaces the display with the prepared topology (see
 | Area | What it is |
 |---|---|
 | Central viewport | Embedded PyVista view; the model is coloured by section |
-| **Model** dock (left, top) | Tabs: **Model Tree** (live — a **Views** group, then the model's own groups) and **Property Tree** (not yet implemented) |
+| **Model** dock (left, top) | Tabs: **Model Tree** (live — a **Views** group, then the model's own groups; a **Collapse all** header button) and **Property Tree** (not yet implemented) |
 | **Inspector** dock (left, bottom) | Every field of the selected object, read-only — plus a node's supports, an element's section/material/groups and its applied loads |
 | **Messages** dock (bottom) | Log of what the application did, including any settings-file problems |
 | Status bar | Unit system, cursor coordinates, a busy indicator while preprocessing runs, and read-outs reserved for the analysis milestone |
@@ -346,6 +346,21 @@ The file is read at start-up; the Message Log states which policy is in force
 ("Left-click an element to select it; drag to orbit") and **reports anything it
 did not understand** — an unknown key, an out-of-range value or unreadable JSON
 leaves the defaults in place and says so, rather than failing silently.
+
+### Theme
+
+A `theme` section sets the dock panels' title-bar colour — one style-sheet
+string applied once at start-up:
+
+```json
+{
+  "theme": { "panel_colour": "#3a3f44" }
+}
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `panel_colour` | `""` (platform default) | Any Qt-recognised colour name or `#rrggbb` string, used to tint the dock panels' title bars.  An invalid colour is reported in the Message Log and ignored |
 
 ### OpenSees runtime (the "separate" build)
 

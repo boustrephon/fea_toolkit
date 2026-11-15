@@ -27,6 +27,7 @@ from qtpy.QtWidgets import (
     QDockWidget,
     QDoubleSpinBox,
     QFileDialog,
+    QHBoxLayout,
     QLabel,
     QMainWindow,
     QMenu,
@@ -35,6 +36,7 @@ from qtpy.QtWidgets import (
     QStackedWidget,
     QTabWidget,
     QToolBar,
+    QToolButton,
     QTreeView,
     QVBoxLayout,
     QWidget,
@@ -58,7 +60,13 @@ from .controllers.marquee import (
     segment_inside_rect,
 )
 from .controllers.selection import CATEGORY_GROUPS, CATEGORY_NOUNS, SelectionIndex, selection_set_op
-from .controllers.settings import load_gui_settings, load_opensees_setting, save_display_settings
+from .controllers.settings import (
+    load_gui_settings,
+    load_opensees_setting,
+    load_theme_settings,
+    save_display_settings,
+    theme_stylesheet,
+)
 from .controllers.view_registry import FIGURE, GEOMETRY, RESULTS, TABLE, View, ViewRegistry
 from .controllers.view_state import clear_view_state, load_view_state, save_view_state
 from .controllers.worker import TaskWorker
@@ -316,6 +324,7 @@ class MainWindow(QMainWindow):
         #: retained so ``File ▸ Save project`` can serialise its results.
         self._last_run: Any = None
         self._policy, self._display, self._policy_notes = load_gui_settings()
+        self._theme, self._theme_notes = load_theme_settings()
         self._cursor_timer: Optional[QTimer] = None
         self._interaction_enabled = False
         self._actions: dict = {}
@@ -346,7 +355,8 @@ class MainWindow(QMainWindow):
         self._set_analysis_actions_enabled()
         self._set_view_actions_enabled()
         self._decorate_view()
-        for note in self._policy_notes:
+        self._apply_theme()
+        for note in [*self._policy_notes, *self._theme_notes]:
             self.log(note, "warn")
         self._log_opensees_runtime()
         button = "Left-click" if self._policy.pick_button == "left" else "Right-click"
@@ -361,6 +371,23 @@ class MainWindow(QMainWindow):
         if model is not None:
             self._remember_source(model)
             self.show_model(model)
+
+    def _apply_theme(self) -> None:
+        """Apply the ``theme`` settings as one style-sheet string, if any.
+
+        The panel colour is resolved here (not in ``settings.py``) because only
+        Qt can decide whether a colour name is valid; an invalid value is
+        reported rather than silently ignored by the style engine.
+        """
+        colour = self._theme.panel_colour
+        if not colour:
+            return
+        from qtpy.QtGui import QColor
+
+        if not QColor(colour).isValid():
+            self.log(f"Theme panel colour {colour!r} is not a valid colour; ignored.", "warn")
+            return
+        self.setStyleSheet(theme_stylesheet(self._theme))
 
     def _remember_source(self, model: Any, source: str = "") -> None:
         """Wrap the loaded model in a store and start a fresh list of views.
@@ -1637,7 +1664,31 @@ class MainWindow(QMainWindow):
 
         trees = QTabWidget(self)
         trees.setObjectName("tabs_trees")
-        trees.addTab(self._tree_view, "Model Tree")
+
+        # A one-row header above the tree holds the collapse-all action.  The
+        # tree is lazy — a group lists its entities only when expanded — so
+        # collapsing is always cheap, while an "expand all" would materialise
+        # every group of a large model and is deliberately not offered.
+        tree_panel = QWidget(self)
+        tree_layout = QVBoxLayout(tree_panel)
+        tree_layout.setContentsMargins(0, 0, 0, 0)
+        tree_layout.setSpacing(0)
+        header = QWidget(tree_panel)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(4, 2, 4, 2)
+        header_layout.setSpacing(4)
+        collapse_btn = QToolButton(header)
+        collapse_btn.setText("Collapse all")
+        collapse_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        collapse_btn.setAutoRaise(True)
+        collapse_btn.setToolTip("Collapse every group in the Model Tree")
+        collapse_btn.clicked.connect(self._tree_view.collapseAll)
+        header_layout.addWidget(collapse_btn)
+        header_layout.addStretch(1)
+        tree_layout.addWidget(header)
+        tree_layout.addWidget(self._tree_view, 1)
+
+        trees.addTab(tree_panel, "Model Tree")
         trees.addTab(self._placeholder_panel("Property tree", "a future release"), "Property Tree")
         self._tree_dock = QDockWidget("Model", self)
         self._tree_dock.setObjectName("dock_trees")

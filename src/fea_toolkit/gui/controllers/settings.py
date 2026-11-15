@@ -37,11 +37,17 @@ __all__ = [
     "DISPLAY_DEFAULTS",
     "DISPLAY_FIELDS",
     "RESTRAINT_STYLES",
+    "THEME_DEFAULTS",
+    "THEME_FIELDS",
     "DisplaySettings",
+    "ThemeSettings",
     "load_gui_settings",
     "load_opensees_setting",
+    "load_theme_settings",
     "resolve_display",
+    "resolve_theme",
     "save_display_settings",
+    "theme_stylesheet",
 ]
 
 #: JSON keys a ``display`` section may carry, mirroring the toolbar knobs.
@@ -66,6 +72,9 @@ EXTRUDED_DETAILS = ("plates", "solid")
 
 #: Area-load glyph styles ``load_area_style`` may name.
 AREA_LOAD_STYLES = ("arrows", "extrusion")
+
+#: Every field a ``theme`` section may name.
+THEME_FIELDS = frozenset({"panel_colour"})
 
 #: Every field a ``display`` section may name (the numeric knobs plus the
 #: force-diagram quantity label, the restraint style, the extruded-frame
@@ -158,6 +167,24 @@ class DisplaySettings:
 
 #: The defaults, as a reusable constant (callers may ``replace`` over it).
 DISPLAY_DEFAULTS = DisplaySettings()
+
+
+@dataclass(frozen=True)
+class ThemeSettings:
+    """The resolved window-theme knobs (the ``theme`` section).
+
+    Attributes:
+        panel_colour: A Qt-recognisable colour name or ``#rrggbb`` string used
+            to tint the dock panels' title bars, or ``""`` for the platform
+            default.  Not a colour whitelist here: Qt resolves the string, and
+            an invalid colour is reported and ignored at apply time.
+    """
+
+    panel_colour: str = ""
+
+
+#: The theme defaults, as a reusable constant.
+THEME_DEFAULTS = ThemeSettings()
 
 
 def resolve_display(config: Any = None) -> "tuple[DisplaySettings, list[str]]":
@@ -318,10 +345,10 @@ def load_gui_settings(
     # The ``display`` section is stripped before the interaction resolver sees
     # the file, so a display key never surfaces as "ignoring unknown interaction
     # setting 'display'" — the two readers each own their own keys.  ``opensees``
-    # is likewise owned by :func:`load_opensees_setting`, not the interaction
-    # policy.
+    # is likewise owned by :func:`load_opensees_setting` and ``theme`` by
+    # :func:`load_theme_settings`, not the interaction policy.
     interaction_data = {
-        key: value for key, value in data.items() if key not in ("display", "opensees")
+        key: value for key, value in data.items() if key not in ("display", "opensees", "theme")
     }
     policy, policy_notes = resolve_policy(interaction_data)
     policy_notes = [f"{target}: {note}" for note in policy_notes]
@@ -362,6 +389,70 @@ def load_opensees_setting(path: Optional[Union[str, Path]] = None) -> Optional[s
         return None
     value = section.get("python")
     return value if isinstance(value, str) and value else None
+
+
+def resolve_theme(config: Any = None) -> "tuple[ThemeSettings, list[str]]":
+    """Resolve a ``theme`` mapping into a :class:`ThemeSettings`.
+
+    Args:
+        config: The ``theme`` section of the settings file, e.g.
+            ``{"panel_colour": "#3a3f44"}``.
+
+    Returns:
+        ``(settings, notes)``.  *notes* explains anything ignored or rejected,
+        for the message log; empty when the section was fully understood.
+    """
+    if config is not None and not isinstance(config, dict):
+        return THEME_DEFAULTS, [f"theme section must be a JSON object, not {type(config).__name__}"]
+    settings = dict(config or {})
+    notes: list[str] = []
+    for key in sorted(set(settings) - THEME_FIELDS):
+        notes.append(f"ignoring unknown theme setting {key!r}")
+
+    colour = settings.get("panel_colour", "")
+    if not isinstance(colour, str):
+        notes.append(f"theme setting 'panel_colour' {colour!r} is not a string; using default")
+        colour = ""
+    else:
+        colour = colour.strip()
+
+    return ThemeSettings(panel_colour=colour), notes
+
+
+def theme_stylesheet(theme: ThemeSettings) -> str:
+    """Return the QSS applied for *theme*, or ``""`` for the platform default.
+
+    One style-sheet string, so the panel colour is a single setting with a
+    single application point.  The colour is emitted verbatim: Qt resolves it,
+    and an invalid value (rejected at apply time) yields no styling.
+    """
+    if not theme.panel_colour:
+        return ""
+    return f"QDockWidget::title {{ background: {theme.panel_colour}; padding: 3px 6px;}}"
+
+
+def load_theme_settings(
+    path: Optional[Union[str, Path]] = None,
+) -> "tuple[ThemeSettings, list[str]]":
+    """Read the ``theme`` section from the settings file.
+
+    Args:
+        path: Settings file to read; defaults to :func:`default_config_path`.
+
+    Returns:
+        ``(theme, notes)``; defaults when the file is missing or malformed.
+    """
+    target = Path(path).expanduser() if path is not None else default_config_path()
+    if not target.is_file():
+        return THEME_DEFAULTS, []
+    try:
+        data: Any = json.loads(target.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        return THEME_DEFAULTS, [f"could not read {target}: {exc}"]
+    if not isinstance(data, dict):
+        return THEME_DEFAULTS, [f"{target} must contain a JSON object"]
+    theme, notes = resolve_theme(data.get("theme"))
+    return theme, [f"{target}: {note}" for note in notes]
 
 
 def save_display_settings(
