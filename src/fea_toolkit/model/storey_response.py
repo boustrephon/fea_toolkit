@@ -575,9 +575,10 @@ def _rigid_body_steps(
     design matrix built once from the node positions.  The translational
     components are reported at ``(x_ref, y_ref)`` — defaulting to the level's own
     centroid — so a caller that fits several levels against one common reference
-    gets translations that are directly comparable.  ``Rz`` and ``r_max`` are
-    reference-independent (``r_max`` is the farthest node from the level's own
-    centroid, the lever arm multiplying the rotational drift).
+    gets translations that are directly comparable.  ``Rz`` is
+    reference-independent; ``r_max`` is the farthest node from the fit's
+    reference point (the same point the translations are reported at), the lever
+    arm multiplying the rotational drift.
 
     Returns:
         ``(Ux, Uy, Rz, r_max, resid_max)`` — the first three are
@@ -594,6 +595,19 @@ def _rigid_body_steps(
     x_t = x - x_ref
     y_t = y - y_ref
     n = x.size
+    if n == 1:
+        # A single node cannot constrain the rotation — the fit is
+        # underdetermined, and ``lstsq`` would infer a spurious twist that moves
+        # the reported reference-point translation away from the node's actual
+        # motion.  Preserve the node's translation and report no rotation, so a
+        # single-node level under uniform translation reads as zero drift.
+        return (
+            np.asarray(ux_stack[0], dtype=float).copy(),
+            np.asarray(uy_stack[0], dtype=float).copy(),
+            np.zeros(ux_stack.shape[1], dtype=float),
+            0.0,
+            0.0,
+        )
     a_mat = np.zeros((2 * n, 3))
     a_mat[0::2, 0] = 1.0
     a_mat[0::2, 2] = -y_t
@@ -603,7 +617,7 @@ def _rigid_body_steps(
     b_mat[0::2, :] = ux_stack
     b_mat[1::2, :] = uy_stack
     theta, _, _, _ = np.linalg.lstsq(a_mat, b_mat, rcond=None)
-    r_max = float(np.max(np.hypot(x - x_cm, y - y_cm))) if n else 0.0
+    r_max = float(np.max(np.hypot(x - x_ref, y - y_ref))) if n else 0.0
     # Residual = the part of the nodal motion outside the rigid-body modes.  A
     # level whose motion is not rigid (slab distortion, local modes) has a large
     # residual even when its rigid-body projection is near zero; report it so a
@@ -708,12 +722,14 @@ def peak_interstorey_drift(
     # between levels whose centroids differ.  Fit every level about the same
     # reference so the (Ux, Uy) components are directly comparable.
     if node_xy is not None:
-        all_x = np.concatenate(
-            [np.array([c[0] for c in comps]) for comps in per_level.values() if comps]
-        )
-        all_y = np.concatenate(
-            [np.array([c[1] for c in comps]) for comps in per_level.values() if comps]
-        )
+        xs_by_level = [np.array([c[0] for c in comps]) for comps in per_level.values() if comps]
+        if not xs_by_level:
+            # No level carries a usable recorded history — return the documented
+            # zero rather than concatenating an empty sequence.
+            return 0.0
+        ys_by_level = [np.array([c[1] for c in comps]) for comps in per_level.values() if comps]
+        all_x = np.concatenate(xs_by_level)
+        all_y = np.concatenate(ys_by_level)
         ref_x = float(np.mean(all_x)) if all_x.size else 0.0
         ref_y = float(np.mean(all_y)) if all_y.size else 0.0
     else:
@@ -755,6 +771,10 @@ def peak_interstorey_drift(
             # Deformation the rigid-body fit cannot represent must not read as
             # zero drift: add the upper level's peak non-rigid residual so a
             # distorting level still registers against the collapse threshold.
+            # ``hi[4]`` is a scalar (the peak over nodes *and* steps), so adding
+            # it to every step and then taking the max is an *independent-peak
+            # envelope* — a conservative upper bound for the collapse threshold,
+            # not a step-simultaneous combination of translation and residual.
             drift = drift + hi[4] / h
             peak = max(peak, float(np.max(drift)))
     return peak
