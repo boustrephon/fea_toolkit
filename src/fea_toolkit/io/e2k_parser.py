@@ -538,6 +538,24 @@ def _as_float(value: Any) -> float:
         return 0.0
 
 
+def _story_groups(sections: dict[str, list[GroupedLine]]) -> list[GroupedLine]:
+    """Story lines from either the single-tower or per-tower story section.
+
+    Real v19 ``.$et`` exports name the section ``$ STORIES - IN SEQUENCE FROM
+    TOP - FOR EACH TOWER`` (stories grouped per tower); the synthetic fixtures
+    and older exports use ``$ STORIES - IN SEQUENCE FROM TOP``.  ``_parse_sections``
+    stores section names verbatim, so both spellings are read here.
+    """
+    for name in (
+        "STORIES - IN SEQUENCE FROM TOP - FOR EACH TOWER",
+        "STORIES - IN SEQUENCE FROM TOP",
+    ):
+        groups = sections.get(name)
+        if groups:
+            return groups
+    return []
+
+
 def _compute_story_elevations(
     sections: dict[str, list[GroupedLine]],
 ) -> tuple[list[tuple[str, dict[str, Any]]], dict[str, float]]:
@@ -547,9 +565,11 @@ def _compute_story_elevations(
     ``ELEV`` (usually the lowest story's), and ``HEIGHT`` is accumulated
     bottom-up so the top story lands at ``base + total height``.
 
-    A ``TOWER`` keyword is carried forward onto subsequent stories.  A
-    multi-tower model carries an independent elevation ladder per tower, which
-    is not resolved here; such input is rejected rather than published as
+    A ``TOWER`` keyword is carried forward onto subsequent stories.  A story
+    that omits ``TOWER`` (before any is seen) carries ``None`` — the implicit /
+    default tower, which coexists with a single named tower.  A multi-tower
+    model carries an independent elevation ladder per tower, which is not
+    resolved here; such input is rejected rather than published as
     tower-specific absolute elevations.
 
     Raises:
@@ -557,7 +577,7 @@ def _compute_story_elevations(
     """
     stories: list[tuple[str, dict[str, Any]]] = []
     tower: Optional[str] = None
-    for groups in sections.get("STORIES - IN SEQUENCE FROM TOP", []):
+    for groups in _story_groups(sections):
         name: Optional[str] = None
         attrs: dict[str, Any] = {}
         for kw, vals in groups:
@@ -574,11 +594,15 @@ def _compute_story_elevations(
             attrs["TOWER"] = tower
         stories.append((name, attrs))
 
-    towers = {attrs.get("TOWER") for _, attrs in stories}
-    if len(towers) > 1:
+    # An omitted TOWER is the implicit/default tower: it coexists with a single
+    # named tower (e.g. a per-tower table whose leading story omits its tower).
+    # Only two or more *named* towers signal a multi-tower model, which the
+    # parser does not resolve.
+    named_towers = {attrs.get("TOWER") for _, attrs in stories} - {None}
+    if len(named_towers) > 1:
         raise ValueError(
             "multi-tower ETABS models are not supported — the story table names "
-            f"towers {sorted(t for t in towers if t)!r}, but per-tower elevation "
+            f"towers {sorted(named_towers)!r}, but per-tower elevation "
             "ladders are not resolved.  Model each tower separately."
         )
 

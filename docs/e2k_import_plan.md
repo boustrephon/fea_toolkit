@@ -429,16 +429,18 @@ resolution).
   LOADS`` (the synthetic fixtures' ``$ LINE`` / ``$ AREA OBJECT LOADS`` are
   still accepted).
 
-* **Real-export section-name gaps (not yet fixed)** — a v19 `.$et` export
+* **Real-export section-name gaps (partially fixed)** — a v19 `.$et` export
   revealed section-name mismatches the synthetic fixtures do not cover, in the
-  geometry/property (not load) path: the storey section is exported as
+  geometry/property (not load) path.  The storey section is exported as
   ``$ STORIES - IN SEQUENCE FROM TOP - FOR EACH TOWER`` (with ``$ TOWERS`` and
   per-``STORY`` ``TOWER`` / ``SIMILARTO`` tokens) rather than the fixture's
-  ``$ STORIES - IN SEQUENCE FROM TOP``, and shell properties are split into
-  ``$ SLAB PROPERTIES`` / ``$ DECK PROPERTIES`` / ``$ WALL PROPERTIES`` rather
-  than ``$ WALL/SLAB/DECK PROPERTIES``.  Until these are matched, geometry is
-  empty on real exports — the loads parse, but nodes/elements do not
-  materialise (and a story table naming multiple towers is rejected outright).
+  ``$ STORIES - IN SEQUENCE FROM TOP``; the parser now reads both spellings
+  (``_story_groups``) and treats an omitted ``TOWER`` as the implicit/default
+  tower, so geometry materialises and a story table naming multiple towers is
+  still rejected.  Shell properties are still split into ``$ SLAB PROPERTIES``
+  / ``$ DECK PROPERTIES`` / ``$ WALL PROPERTIES`` rather than
+  ``$ WALL/SLAB/DECK PROPERTIES``, so those remain unmatched until they are
+  added.
 * **Section Designer sections are elastic-only.**  `SHAPE "SD Section"` frames
   resolve to `SDSection` with gross `A`/`I33`/`I22` computed from the polygon
   loop (`polygon_props`); the three open fidelity items below are tracked in

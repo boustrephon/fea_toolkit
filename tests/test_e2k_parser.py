@@ -206,6 +206,62 @@ def test_multi_tower_stories_are_rejected():
         _compute_story_elevations(sections)
 
 
+def test_per_tower_story_section_is_recognised():
+    # Real v19 ``.$et`` exports name the story table
+    # ``$ STORIES - IN SEQUENCE FROM TOP - FOR EACH TOWER``; the parser must read
+    # that spelling (not just the bare section) so stories populate instead of
+    # returning empty geometry.
+    from fea_toolkit.io.e2k_parser import _compute_story_elevations
+
+    content = (
+        "$ STORIES - IN SEQUENCE FROM TOP - FOR EACH TOWER\n"
+        '  STORY "ROOF" HEIGHT 3 TOWER "T1"\n'
+        '  STORY "BASE" ELEV 0 TOWER "T1"\n'
+        "$ END OF MODEL FILE\n"
+    )
+    sections = _parse_sections(content)
+    stories, abs_elev = _compute_story_elevations(sections)
+    assert [(name, round(z, 6)) for name, z in abs_elev.items()] == [
+        ("ROOF", 3.0),
+        ("BASE", 0.0),
+    ]
+    assert [attrs.get("TOWER") for _, attrs in stories] == ["T1", "T1"]
+
+
+def test_per_tower_multi_tower_stories_are_rejected():
+    # The ``- FOR EACH TOWER`` spelling must still reject multiple towers with a
+    # ValueError rather than silently returning an empty story table.
+    from fea_toolkit.io.e2k_parser import _compute_story_elevations
+
+    content = (
+        "$ STORIES - IN SEQUENCE FROM TOP - FOR EACH TOWER\n"
+        '  STORY "ROOF" HEIGHT 3 TOWER "T1"\n'
+        '  STORY "BASE" ELEV 0\n'
+        '  STORY "ROOF" HEIGHT 3.5 TOWER "T2"\n'
+        '  STORY "BASE" ELEV 0\n'
+        "$ END OF MODEL FILE\n"
+    )
+    sections = _parse_sections(content)
+    with pytest.raises(ValueError, match="multi-tower"):
+        _compute_story_elevations(sections)
+
+
+def test_an_omitted_tower_is_the_implicit_default_tower():
+    # A story that omits TOWER before any named tower is the implicit/default
+    # tower — compatible with a single named T1, not a second tower.
+    from fea_toolkit.io.e2k_parser import _compute_story_elevations
+
+    content = (
+        "$ STORIES - IN SEQUENCE FROM TOP - FOR EACH TOWER\n"
+        '  STORY "ROOF" HEIGHT 3\n'
+        '  STORY "BASE" ELEV 0 TOWER "T1"\n'
+        "$ END OF MODEL FILE\n"
+    )
+    sections = _parse_sections(content)
+    stories, _abs_elev = _compute_story_elevations(sections)
+    assert [attrs.get("TOWER") for _, attrs in stories] == [None, "T1"]
+
+
 def test_nodes_materialised(model):
     # 2 assigned base points + 4 roof-level points (via elements) = 6 nodes.
     assert len(model.nodes) == 6
