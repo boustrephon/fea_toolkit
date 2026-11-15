@@ -155,20 +155,16 @@ def resolve_named_selections(
     def _story_elevations() -> dict[str, float]:
         """The model's ``{story name: elevation}`` map, computed lazily.
 
-        When the model carries the parser's raw tables they are passed through
-        so ``identify_stories`` preserves the imported STORY DATA names the
-        ``story`` / ``exclude_story`` criteria were authored against; without
-        them it falls back to the generated names (``Storey N`` / ``Roof``).
+        ``identify_stories`` reads the imported ETABS story levels from
+        ``SAPModelData.stories`` (parsed from ``$ STORIES - IN SEQUENCE FROM
+        TOP``), so authored ``story`` / ``exclude_story`` criteria match the
+        imported names; for a SAP2000 / SAFE model it falls back to the
+        generated names (``Storey N`` / ``Roof``).
         """
         if "elevations" not in story_cache:
             from .stories import identify_stories
 
-            raw_tables = getattr(model, "_raw_tables", None)
-            if raw_tables is not None:
-                stories = identify_stories(model, raw_tables)
-            else:
-                stories = identify_stories(model)
-            story_cache["elevations"] = {s.name: s.elevation for s in stories}
+            story_cache["elevations"] = {s.name: s.elevation for s in identify_stories(model)}
         return story_cache["elevations"]
 
     def _expand(ns: "NamedSelection", seen: tuple) -> tuple[list[str], list[str]]:

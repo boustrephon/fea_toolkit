@@ -37,13 +37,14 @@ class StoryLevel:
     Attributes:
         name: Human-readable label (e.g. ``"Storey 1"``, ``"Roof"``).
         elevation: Z-coordinate of the storey in model units.
-        method: Identification method: ``"s2k_table"`` | ``"diaphragm"``
-            | ``"area_elements"`` | ``"node_clustering"``.
+        method: Identification method: ``"story_table"`` | ``"s2k_table"``
+            | ``"diaphragm"`` | ``"area_elements"`` | ``"node_clustering"``.
         confidence: ``"high"`` | ``"medium"`` | ``"low"``.
         bbox: Estimated horizontal extent ``(x_min, x_max, y_min, y_max)``
             of elements belonging to this storey, or ``None`` if unknown.
         node_ids: Node IDs belonging to this storey, as determined during
-            detection.  ``None`` if not available (e.g. s2k_table method).
+            detection.  ``None`` if not available (e.g. the ``story_table`` /
+            ``s2k_table`` methods, which only declare names and elevations).
     """
 
     name: str
@@ -78,14 +79,21 @@ def identify_stories(
     method: str = "auto",
     z_tolerance: float = _DEFAULT_Z_TOL,
 ) -> list[StoryLevel]:
-    """Identify likely storey levels from a parsed SAP2000 model.
+    """Identify likely storey levels from a parsed model.
+
+    Strategies run in priority order: the ETABS story table (parsed into
+    ``SAPModelData.stories`` as ``StoryDefinition`` records), the legacy
+    raw-tables ``STORY DATA`` path, Z-axis diaphragm constraints,
+    nearly-horizontal area elements, and finally node Z clustering.  The first
+    strategy that resolves any level wins.
 
     Args:
         md: Parsed model data.
-        raw_tables: The parser's ``_raw_tables`` dict (enables STORY-table
-            lookup).
-        method: ``"auto"`` (try all strategies in priority order,
-            default), ``"s2k_table"``, ``"diaphragm"``,
+        raw_tables: The parser's ``_raw_tables`` dict — the legacy path enabling
+            the ETABS ``STORY DATA`` / ``STORY`` table lookup.  The canonical
+            source of imported story names is now ``SAPModelData.stories``.
+        method: ``"auto"`` (try all strategies in priority order, default),
+            ``"story_table"``, ``"s2k_table"``, ``"diaphragm"``,
             ``"area_elements"``, or ``"node_clustering"``.
         z_tolerance: Tolerance (in model length units) for grouping Z
             coordinates into the same storey.
@@ -96,6 +104,10 @@ def identify_stories(
     """
     if method == "auto":
         # Try strategies in priority order
+        stories = _try_model_stories(md)
+        if stories:
+            return _sort_and_name(stories)
+
         stories = _try_s2k_table(md, raw_tables)
         if stories:
             return _sort_and_name(stories)
@@ -113,6 +125,7 @@ def identify_stories(
 
     # Explicit method
     dispatch = {
+        "story_table": _try_model_stories,
         "s2k_table": _try_s2k_table,
         "diaphragm": _try_diaphragms,
         "area_elements": _try_area_elements,
@@ -121,11 +134,11 @@ def identify_stories(
     fn = dispatch.get(method)
     if fn is None:
         raise ValueError(f"Unknown method: {method}")
-    # Only the s2k_table strategy needs raw_tables; the diaphragm strategy
-    # reads constraint data from the structured SAPModelData attributes.
+    # Only the s2k_table strategy needs raw_tables; the story-table and
+    # diaphragm strategies read the structured SAPModelData attributes.
     if method == "s2k_table":
         result = fn(md, raw_tables)
-    elif method == "diaphragm":
+    elif method in ("story_table", "diaphragm"):
         result = fn(md)
     else:
         result = fn(md, z_tolerance)
@@ -133,12 +146,61 @@ def identify_stories(
 
 
 # ========================================================================
-# Strategy 1 — S2K table
+# Strategy 1 — Model story table (ETABS structured data)
+# ========================================================================
+
+
+def _try_model_stories(md) -> list[StoryLevel]:
+    """Read story levels declared on the model (``SAPModelData.stories``).
+
+    ETABS's ``$ STORIES - IN SEQUENCE FROM TOP`` table is parsed into
+    ``SAPModelData.stories`` (a list of ``StoryDefinition`` records); this
+    strategy promotes those parse-time facts into detection-time
+    :class:`StoryLevel` objects, preserving the imported story names.  The
+    story table carries only name → elevation (plus tower / master-similar
+    flags), so the levels have no node membership (``node_ids`` stays
+    ``None``).
+    """
+    story_defs = getattr(md, "stories", None) or []
+    if not story_defs:
+        return []
+    stories = [
+        StoryLevel(
+            name=str(s.name),
+            elevation=float(s.elevation),
+            method="story_table",
+            confidence="high",
+        )
+        for s in story_defs
+    ]
+    # Multiple-tower ETABS models repeat story names / elevations across
+    # towers.  The flat sorted list this returns cannot separate them, so warn
+    # rather than silently merging levels from different towers.
+    names = [s.name for s in stories]
+    elevations = [s.elevation for s in stories]
+    if len(names) != len(set(names)) or len(elevations) != len(set(elevations)):
+        warnings.warn(
+            "The ETABS story table contains duplicate story names or elevations, "
+            "which suggests a multi-tower model.  Storey levels from different "
+            "towers are merged by elevation and drift is not computed per tower — "
+            "model each tower separately for per-tower results.",
+            stacklevel=2,
+        )
+    return stories
+
+
+# ========================================================================
+# Strategy 2 — S2K story table (legacy raw tables)
 # ========================================================================
 
 
 def _try_s2k_table(md, raw_tables) -> list[StoryLevel]:
-    """Read STORY DATA from the .s2k file if available."""
+    """Read the ETABS ``STORY DATA`` / ``STORY`` table from raw tables (legacy).
+
+    Kept for callers that still pass the parser's ``_raw_tables`` dict; the
+    canonical source of imported story names is now ``SAPModelData.stories``
+    (see :func:`_try_model_stories`).
+    """
     if raw_tables is None:
         return []
     # ETABS exports storey information in the "STORY DATA" table
@@ -182,7 +244,7 @@ def _try_s2k_table(md, raw_tables) -> list[StoryLevel]:
 
 
 # ========================================================================
-# Strategy 2 — Diaphragm constraints
+# Strategy 3 — Diaphragm constraints
 # ========================================================================
 
 
@@ -251,7 +313,7 @@ def _try_diaphragms(md) -> list[StoryLevel]:
 
 
 # ========================================================================
-# Strategy 3 — Horizontal area elements (floor/roof slabs)
+# Strategy 4 — Horizontal area elements (floor/roof slabs)
 # ========================================================================
 
 
@@ -312,7 +374,7 @@ def _try_area_elements(md, z_tolerance: float) -> list[StoryLevel]:
 
 
 # ========================================================================
-# Strategy 4 — Node Z clustering
+# Strategy 5 — Node Z clustering
 # ========================================================================
 
 

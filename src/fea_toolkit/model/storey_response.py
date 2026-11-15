@@ -165,8 +165,9 @@ def assign_nodes_to_storeys(md, stories, z_tolerance: float = 0.5):
 
     If a :class:`StoryLevel` has ``node_ids`` populated (from area-element
     or node-clustering detection), those IDs are used directly for that
-    storey.  Otherwise (e.g. ``s2k_table``-derived stories), distance-based
-    matching is used as a fallback.
+    storey.  Otherwise (e.g. ``story_table`` / ``s2k_table``-derived stories,
+    which declare only names and elevations), distance-based matching is used
+    as a fallback.
 
     Each node is assigned to the **nearest** storey whose elevation is
     within ``z_tolerance/2``.  A node is never assigned to more than
