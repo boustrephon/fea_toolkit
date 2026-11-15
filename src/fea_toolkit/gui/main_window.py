@@ -41,6 +41,14 @@ from qtpy.QtWidgets import (
 )
 
 from .app import APP_NAME
+from .controllers.colour_by import (
+    COLOUR_FIELDS,
+    FIELD_LABELS,
+    colour_by_field,
+    frame_labels,
+    shell_labels,
+    story_levels,
+)
 from .controllers.interaction import default_config_path, marquee_mode
 from .controllers.marquee import (
     point_in_rect,
@@ -49,7 +57,7 @@ from .controllers.marquee import (
     segment_hits_rect,
     segment_inside_rect,
 )
-from .controllers.selection import CATEGORY_GROUPS, CATEGORY_NOUNS, SelectionIndex
+from .controllers.selection import CATEGORY_GROUPS, CATEGORY_NOUNS, SelectionIndex, selection_set_op
 from .controllers.settings import load_gui_settings, load_opensees_setting, save_display_settings
 from .controllers.view_registry import FIGURE, GEOMETRY, RESULTS, TABLE, View, ViewRegistry
 from .controllers.view_state import clear_view_state, load_view_state, save_view_state
@@ -80,6 +88,11 @@ _SELECT_NODE_COLOR = (1.0, 1.0, 0.0)  # selected node — the same yellow cue
 #: group key).  Used to turn selected tree rows back into a highlight / a
 #: ``Selection``.
 _GROUP_CATEGORY = {group: category for category, group in CATEGORY_GROUPS.items()}
+
+#: Model-tree group keys whose right-click menu offers "Colour by …".
+_COLOURABLE_GROUPS = frozenset(
+    {"materials", "sections", "stories", "frame_elements", "area_elements"}
+)
 
 #: Once-only guard for :func:`_freeze_gc_once`.  A one-element list rather than a
 #: bool, so marking it does not need a ``global`` rebind (ruff PLW0603).
@@ -292,6 +305,8 @@ class MainWindow(QMainWindow):
         self._interaction: Any = None
         self._mouse_filter: Any = None
         self._hidden_elem_ids: set[str] = set()
+        #: The active colour-by field (``None`` = default section colouring).
+        self._color_field: Optional[str] = None
         #: The camera and hidden set right after ``View ▸ Reset view``, so
         #: ``closeEvent`` can tell an unchanged view from one the user has moved.
         self._reset_view_baseline: Optional[tuple] = None
@@ -672,6 +687,134 @@ class MainWindow(QMainWindow):
             element_ids=sorted(frames | areas) or None,
             node_ids=sorted(nodes) or None,
         )
+
+    # ── Tree context menu (colour-by + entity set arithmetic) ─────────
+
+    def _on_tree_context_menu(self, pos) -> None:
+        """Open a context menu for the tree row under *pos*.
+
+        A **group** row (Materials, Sections, Stories, Frame Elements, Area
+        Elements) offers *Colour by …*; an **entity** row offers Hide / Isolate
+        and Add / Remove / Invert in selection, scoped to what that entity names.
+        """
+        index = self._tree_view.indexAt(pos)
+        if not index.isValid():
+            return
+        if self._tree_model._is_group(index):
+            self._group_context_menu(index, pos)
+        else:
+            self._entity_context_menu(index, pos)
+
+    def _available_colour_fields(self) -> set:
+        """The colour-by fields the displayed model can actually resolve."""
+        model = self._model
+        if model is None:
+            return set()
+        fields = {"section"}
+        if getattr(model, "sections", {}) or {}:
+            fields.add("material")
+        if story_levels(model):
+            fields.add("story")
+        return fields
+
+    def _group_context_menu(self, index, pos) -> None:
+        """Colour-by menu for a group row (see :meth:`_on_tree_context_menu`)."""
+        group = self._tree_model._group_of(index)
+        if group is None or group.key not in _COLOURABLE_GROUPS:
+            return
+        menu = QMenu(self)
+        available = self._available_colour_fields()
+        for field in COLOUR_FIELDS:
+            if field not in available:
+                continue
+            action = menu.addAction(f"Colour by {FIELD_LABELS[field]}")
+            action.setCheckable(True)
+            action.setChecked(self._color_field == field)
+            action.triggered.connect(lambda _checked=False, f=field: self._set_colour_field(f))
+        if not available:
+            menu.addAction("Colour by (nothing to colour by)").setEnabled(False)
+        menu.exec(self._tree_view.viewport().mapToGlobal(pos))
+
+    def _set_colour_field(self, field: str) -> None:
+        """Recolour the display by *field* (``"material"`` / ``"section"`` / ``"story"``)."""
+        self._color_field = field
+        self._refresh_display()
+        self.log(f"Coloured elements by {FIELD_LABELS[field].lower()}.")
+
+    def _entity_context_menu(self, index, pos) -> None:
+        """Hide / Isolate / selection arithmetic for an entity row."""
+        group = self._tree_model._group_of(index)
+        entity = index.data(Qt.ItemDataRole.UserRole)
+        if group is None or entity is None:
+            return
+        scope = self._entity_scope(group, entity)
+        if scope is None:
+            return
+        frames, areas, nodes = scope
+        refs = {f"Frame:{fid}" for fid in frames} | {f"Area:{aid}" for aid in areas}
+
+        menu = QMenu(self)
+        hide = menu.addAction("Hide")
+        hide.setEnabled(bool(refs))
+        hide.triggered.connect(lambda: self._hide_scope(refs))
+        isolate = menu.addAction("Isolate")
+        isolate.setEnabled(bool(refs))
+        isolate.triggered.connect(lambda: self._isolate_scope(refs))
+        menu.addSeparator()
+        add = menu.addAction("Add to selection")
+        add.setEnabled(bool(frames or areas or nodes))
+        add.triggered.connect(lambda: self._tree_selection_op("union", frames, areas, nodes))
+        remove = menu.addAction("Remove from selection")
+        remove.setEnabled(bool(frames or areas or nodes))
+        remove.triggered.connect(
+            lambda: self._tree_selection_op("difference", frames, areas, nodes)
+        )
+        invert = menu.addAction("Invert in selection")
+        invert.setEnabled(bool(frames or areas or nodes))
+        invert.triggered.connect(lambda: self._tree_selection_op("toggle", frames, areas, nodes))
+        menu.addSeparator()
+        show_all = menu.addAction("Show all")
+        show_all.triggered.connect(self._on_show_all)
+        menu.exec(self._tree_view.viewport().mapToGlobal(pos))
+
+    def _entity_scope(self, group, entity) -> Optional[tuple[set, set, set]]:
+        """``(frame_ids, area_ids, node_ids)`` the *entity* names, or ``None``.
+
+        A frame / area / node row names a single element; a material, section
+        or story row names every drawable element carrying that attribute.
+        """
+        key = group.key
+        if key in ("frame_elements", "area_elements", "nodes"):
+            attr, value = _entity_identity(entity)
+            if attr is None or value is None:
+                return None
+            if attr == "elem_id":
+                return {str(value)}, set(), set()
+            if attr == "area_id":
+                return set(), {str(value)}, set()
+            return set(), set(), {str(value)}
+        field = {"materials": "material", "sections": "section", "stories": "story"}.get(key)
+        if field is None:
+            return None
+        name = getattr(entity, "name", None)
+        if not name:
+            return None
+        name = str(name)
+        frames = {eid for eid, label in frame_labels(self._model, field).items() if label == name}
+        areas = {aid for aid, label in shell_labels(self._model, field).items() if label == name}
+        return frames, areas, set()
+
+    def _tree_selection_op(self, op: str, frames: set, areas: set, nodes: set) -> None:
+        """Apply a set operation between the selection and the named entities."""
+        current = self._selected_entities()
+        self._select_many(*selection_set_op(current, (frames, areas, nodes), op))
+        verbs = {
+            "union": "Added",
+            "difference": "Removed",
+            "toggle": "Toggled",
+            "replace": "Selected",
+        }
+        self.log(f"{verbs[op]} selection.")
 
     # ── Selection read-outs and the context menu ──────────────────────
 
@@ -1486,6 +1629,10 @@ class MainWindow(QMainWindow):
         self._tree_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._tree_view.selectionModel().currentChanged.connect(self._on_tree_selection)
         self._tree_view.selectionModel().selectionChanged.connect(self._on_selection_changed)
+        # Right-click menus: colour-by on a group row, hide/isolate/selection
+        # arithmetic on an entity row (see _on_tree_context_menu).
+        self._tree_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._tree_view.customContextMenuRequested.connect(self._on_tree_context_menu)
 
         trees = QTabWidget(self)
         trees.setObjectName("tabs_trees")
@@ -1736,6 +1883,9 @@ class MainWindow(QMainWindow):
 
         show_loads = self._actions["view.show_loads"].isChecked()
         show_load_colours = self._actions["view.show_load_colours"].isChecked()
+        frame_colors = shell_colors = None
+        if self._color_field is not None:
+            frame_colors, shell_colors = colour_by_field(model, self._color_field)
         viewer.show_model(
             show_nodes=self._actions["view.show_nodes"].isChecked(),
             show_frames=self._actions["view.show_frames"].isChecked(),
@@ -1754,6 +1904,8 @@ class MainWindow(QMainWindow):
             show_load_colours=show_load_colours,
             show_extruded=self._actions["view.show_extruded"].isChecked(),
             extruded_detail=self._display.extruded_detail,
+            frame_colors=frame_colors,
+            shell_colors=shell_colors,
         )
         self._viewer = viewer
         self._model = model
@@ -2806,7 +2958,10 @@ class MainWindow(QMainWindow):
         no surface to hide, and ``Selection.resolve_connected`` drops its nodes
         automatically once their elements are hidden.
         """
-        refs = self._selected_element_refs()
+        self._hide_scope(self._selected_element_refs())
+
+    def _hide_scope(self, refs: set[str]) -> None:
+        """Hide the type-qualified *refs* (``"Frame:1"`` / ``"Area:2"``)."""
         if not refs:
             self.log("Nothing selected to hide.", "warn")
             return
@@ -2906,7 +3061,10 @@ class MainWindow(QMainWindow):
         drawable element id minus the selected ones, so only the selection (and
         its shared joints) remains.  ``Show all`` restores the full model.
         """
-        keep = self._selected_element_refs()
+        self._isolate_scope(self._selected_element_refs())
+
+    def _isolate_scope(self, keep: set[str]) -> None:
+        """Hide everything but the type-qualified *keep* refs."""
         if not keep:
             self.log("Nothing selected to isolate.", "warn")
             return

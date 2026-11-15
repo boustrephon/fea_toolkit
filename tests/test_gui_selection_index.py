@@ -12,6 +12,7 @@ from fea_toolkit.gui.controllers.selection import (
     CATEGORY_GROUPS,
     CATEGORY_NOUNS,
     SelectionIndex,
+    selection_set_op,
 )
 from fea_toolkit.plotting.renderers.base import (
     FrameGeom,
@@ -110,3 +111,31 @@ def test_group_keys_are_the_model_tree_group_names():
     assert index.group_key("nodes") == "nodes"
     assert index.group_key("force_flags") is None
     assert set(CATEGORY_GROUPS.values()) == {"frame_elements", "area_elements", "nodes"}
+
+
+def _triple(frames="", areas="", nodes=""):
+    return set(frames), set(areas), set(nodes)
+
+
+def test_selection_set_op_replace():
+    current = _triple("1", "2", "3")
+    incoming = _triple("4", "5", "6")
+    assert selection_set_op(current, incoming, "replace") == _triple("4", "5", "6")
+
+
+def test_selection_set_op_union():
+    current = _triple("1", "2", "3")
+    incoming = _triple("1", "4", "3")
+    assert selection_set_op(current, incoming, "union") == _triple("1", "24", "3")
+
+
+def test_selection_set_op_difference():
+    current = _triple("12", "23", "34")
+    incoming = _triple("2", "3", "4")
+    assert selection_set_op(current, incoming, "difference") == _triple("1", "2", "3")
+
+
+def test_selection_set_op_toggle_is_symmetric_difference():
+    current = _triple("12", "23", "34")
+    incoming = _triple("2", "3", "4")
+    assert selection_set_op(current, incoming, "toggle") == _triple("1", "2", "3")

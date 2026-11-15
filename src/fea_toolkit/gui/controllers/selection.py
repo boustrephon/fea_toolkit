@@ -27,7 +27,7 @@ from typing import Any, Optional
 # invisible until a click selects the wrong element.
 from ...plotting.renderers.base import polygon_face_count
 
-__all__ = ["CATEGORY_GROUPS", "CATEGORY_NOUNS", "SelectionIndex"]
+__all__ = ["CATEGORY_GROUPS", "CATEGORY_NOUNS", "SelectionIndex", "selection_set_op"]
 
 #: Render category -> the model tree group key holding its entities
 #: (keys as defined by ``models/model_index.py``).
@@ -138,3 +138,34 @@ class SelectionIndex:
                 return self._identify(shell, "shells")
             offset += faces
         return None
+
+
+def selection_set_op(
+    current: tuple[set, set, set],
+    incoming: tuple[set, set, set],
+    op: str,
+) -> tuple[set, set, set]:
+    """Combine ``(frames, areas, nodes)`` set triples under *op*.
+
+    The set-arithmetic core shared by the marquee modifiers and the tree's
+    right-click **Add / Remove / Invert in selection** — one spelling, so the
+    viewport and the tree can never disagree on what "add" means.
+
+    Args:
+        current: ``(frame_ids, area_ids, node_ids)`` already selected.
+        incoming: ``(frame_ids, area_ids, node_ids)`` the operation names.
+        op: ``"replace"``, ``"union"``, ``"difference"`` or ``"toggle"``
+            (toggle = symmetric difference, i.e. invert membership).
+
+    Returns:
+        The new ``(frame_ids, area_ids, node_ids)`` triple.
+    """
+    cf, ca, cn = current
+    nf, na, nn = incoming
+    if op == "union":
+        return cf | nf, ca | na, cn | nn
+    if op == "difference":
+        return cf - nf, ca - na, cn - nn
+    if op == "toggle":
+        return cf ^ nf, ca ^ na, cn ^ nn
+    return nf, na, nn  # replace

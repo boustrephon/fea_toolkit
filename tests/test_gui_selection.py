@@ -141,3 +141,46 @@ def test_displaying_a_second_model_replaces_the_scene(window):
     assert n_before > 0
     window.show_model(make_sample_model())
     assert len(window._backend._actors) == n_before
+
+
+def test_colour_by_fields_available(window):
+    """The sample model has sections and materials, but no stories."""
+    fields = window._available_colour_fields()
+    assert "section" in fields
+    assert "material" in fields
+    assert "story" not in fields
+
+
+def test_entity_scope_resolves_material_and_section(window):
+    """A material / section row names every element carrying that attribute."""
+    from fea_toolkit.gui.models.model_index import TreeGroup
+
+    def group(key):
+        return TreeGroup(key=key, label=key, count=1, load_items=list)
+
+    material = window._model.materials["Steel"]
+    frames, areas, nodes = window._entity_scope(group("materials"), material)
+    assert frames == {"1"}
+    assert not areas and not nodes
+
+    section = window._model.sections["UB300"]
+    frames, areas, nodes = window._entity_scope(group("sections"), section)
+    assert frames == {"1"}
+    assert not areas and not nodes
+
+
+def test_entity_scope_resolves_a_single_frame(window):
+    from fea_toolkit.gui.models.model_index import TreeGroup
+
+    group = TreeGroup(key="frame_elements", label="Frames", count=1, load_items=list)
+    frame = window._model.frame_elements["1"]
+    frames, areas, nodes = window._entity_scope(group, frame)
+    assert frames == {"1"}
+    assert not areas and not nodes
+
+
+def test_colour_by_field_recolours_without_error(window):
+    window._set_colour_field("material")
+    assert window._color_field == "material"
+    window._set_colour_field("section")
+    assert window._color_field == "section"
