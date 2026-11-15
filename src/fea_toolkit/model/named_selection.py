@@ -153,11 +153,22 @@ def resolve_named_selections(
     story_cache: dict[str, dict[str, float]] = {}
 
     def _story_elevations() -> dict[str, float]:
-        """The model's ``{story name: elevation}`` map, computed lazily."""
+        """The model's ``{story name: elevation}`` map, computed lazily.
+
+        When the model carries the parser's raw tables they are passed through
+        so ``identify_stories`` preserves the imported STORY DATA names the
+        ``story`` / ``exclude_story`` criteria were authored against; without
+        them it falls back to the generated names (``Storey N`` / ``Roof``).
+        """
         if "elevations" not in story_cache:
             from .stories import identify_stories
 
-            story_cache["elevations"] = {s.name: s.elevation for s in identify_stories(model)}
+            raw_tables = getattr(model, "_raw_tables", None)
+            if raw_tables is not None:
+                stories = identify_stories(model, raw_tables)
+            else:
+                stories = identify_stories(model)
+            story_cache["elevations"] = {s.name: s.elevation for s in stories}
         return story_cache["elevations"]
 
     def _expand(ns: "NamedSelection", seen: tuple) -> tuple[list[str], list[str]]:
@@ -231,9 +242,25 @@ def resolve_named_selections(
         # ``exclude_element_ids`` without the matching node field (its validation
         # invariant).  ``exclude_element_ids`` names frames/areas only, so when a
         # named exclusion contributes element ids but the caller's selection is
-        # node-scoped, drop them — they cannot scope a node selection — rather
-        # than setting an exclusion field that violates the invariant.
+        # node-*only*, drop them — they cannot scope a node selection — rather
+        # than setting an exclusion field that violates the invariant.  A mixed
+        # Node/Frame (or Node/Area) selection still has frames/areas eligible,
+        # so the element exclusions are kept — and the node field is forced to an
+        # empty list when needed so the invariant holds.
         node_scoped = sel.element_types is not None and "Node" in sel.element_types
+        node_only = node_scoped and not (
+            "Frame" in sel.element_types or "Area" in sel.element_types
+        )
+        merged_exclude_elements = (sel.exclude_element_ids or []) + extra_exclude_elements
+        merged_exclude_nodes = (sel.exclude_node_ids or []) + extra_exclude_nodes
+        if node_only:
+            exclude_element_ids = sel.exclude_element_ids
+            exclude_node_ids = merged_exclude_nodes or None
+        else:
+            exclude_element_ids = merged_exclude_elements or None
+            exclude_node_ids = merged_exclude_nodes or None
+            if node_scoped and exclude_element_ids is not None and exclude_node_ids is None:
+                exclude_node_ids = []
         return replace(
             sel,
             selections=None,
@@ -247,12 +274,8 @@ def resolve_named_selections(
                 (sel.element_ids or []) + extra_elements if sel.selections else sel.element_ids
             ),
             node_ids=(sel.node_ids or []) + extra_nodes if sel.selections else sel.node_ids,
-            exclude_element_ids=(
-                ((sel.exclude_element_ids or []) + extra_exclude_elements) or None
-                if not node_scoped
-                else sel.exclude_element_ids
-            ),
-            exclude_node_ids=((sel.exclude_node_ids or []) + extra_exclude_nodes) or None,
+            exclude_element_ids=exclude_element_ids,
+            exclude_node_ids=exclude_node_ids,
         )
 
     return _resolve(selection, ())
