@@ -186,6 +186,26 @@ def test_stories_parsed_onto_model(model):
     assert all(s.tower is None and not s.is_master and s.similar_to is None for s in model.stories)
 
 
+def test_multi_tower_stories_are_rejected():
+    # A multi-tower model carries one elevation ladder per tower, which the
+    # parser does not resolve — publishing a single shared ladder under each
+    # tower's story names would mislabel tower-specific elevations, so it is
+    # rejected rather than silently published.
+    from fea_toolkit.io.e2k_parser import _compute_story_elevations
+
+    content = (
+        "$ STORIES - IN SEQUENCE FROM TOP\n"
+        '  STORY "ROOF" HEIGHT 3 TOWER "T1"\n'
+        '  STORY "BASE" ELEV 0\n'
+        '  STORY "ROOF" HEIGHT 3.5 TOWER "T2"\n'
+        '  STORY "BASE" ELEV 0\n'
+        "$ END OF MODEL FILE\n"
+    )
+    sections = _parse_sections(content)
+    with pytest.raises(ValueError, match="multi-tower"):
+        _compute_story_elevations(sections)
+
+
 def test_nodes_materialised(model):
     # 2 assigned base points + 4 roof-level points (via elements) = 6 nodes.
     assert len(model.nodes) == 6

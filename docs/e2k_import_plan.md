@@ -382,8 +382,10 @@ resolution).
 
 ## 6. Known limitations (M0–M5)
 
-* **Multi-tower** — `TOWER` is carried forward but all stories share one
-  elevation ladder; per-tower elevation stacks are not yet implemented.
+* **Multi-tower** — a story table naming more than one tower is **rejected**
+  at parse time (per-tower elevation stacks are not resolved, and publishing
+  tower-specific absolute elevations on one shared ladder would be wrong);
+  model each tower separately.
 * **Auto-select (`AUTOSECTION`) frame-section lists** are deferred, so the
   corresponding `Auto Select List` sections are skipped (they reference the
   list, not a concrete section).
@@ -434,9 +436,9 @@ resolution).
   per-``STORY`` ``TOWER`` / ``SIMILARTO`` tokens) rather than the fixture's
   ``$ STORIES - IN SEQUENCE FROM TOP``, and shell properties are split into
   ``$ SLAB PROPERTIES`` / ``$ DECK PROPERTIES`` / ``$ WALL PROPERTIES`` rather
-  than ``$ WALL/SLAB/DECK PROPERTIES``.  Until these are matched (and
-  multi-tower elevation stacks are computed), geometry is empty on real
-  exports — the loads parse, but nodes/elements do not materialise.
+  than ``$ WALL/SLAB/DECK PROPERTIES``.  Until these are matched, geometry is
+  empty on real exports — the loads parse, but nodes/elements do not
+  materialise (and a story table naming multiple towers is rejected outright).
 * **Section Designer sections are elastic-only.**  `SHAPE "SD Section"` frames
   resolve to `SDSection` with gross `A`/`I33`/`I22` computed from the polygon
   loop (`polygon_props`); the three open fidelity items below are tracked in

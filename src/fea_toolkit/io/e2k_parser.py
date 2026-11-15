@@ -547,10 +547,13 @@ def _compute_story_elevations(
     ``ELEV`` (usually the lowest story's), and ``HEIGHT`` is accumulated
     bottom-up so the top story lands at ``base + total height``.
 
-    Note: multi-tower models are not yet separated into per-tower stacks; a
-    ``TOWER`` keyword is carried forward onto subsequent stories but all
-    stories share one elevation ladder (matching the reference parser for the
-    single-tower case).
+    A ``TOWER`` keyword is carried forward onto subsequent stories.  A
+    multi-tower model carries an independent elevation ladder per tower, which
+    is not resolved here; such input is rejected rather than published as
+    tower-specific absolute elevations.
+
+    Raises:
+        ValueError: If the story table names more than one tower.
     """
     stories: list[tuple[str, dict[str, Any]]] = []
     tower: Optional[str] = None
@@ -570,6 +573,14 @@ def _compute_story_elevations(
         if tower is not None and "TOWER" not in attrs:
             attrs["TOWER"] = tower
         stories.append((name, attrs))
+
+    towers = {attrs.get("TOWER") for _, attrs in stories}
+    if len(towers) > 1:
+        raise ValueError(
+            "multi-tower ETABS models are not supported — the story table names "
+            f"towers {sorted(t for t in towers if t)!r}, but per-tower elevation "
+            "ladders are not resolved.  Model each tower separately."
+        )
 
     base = sum(_as_float(attrs.get("ELEV", 0.0)) for _, attrs in stories)
     heights = [_as_float(attrs.get("HEIGHT", 0.0)) for _, attrs in stories]
