@@ -405,6 +405,12 @@ class Selection:
                               :meth:`resolve_to_mesh_sets`
     ========================  ==============================================
 
+    The two Z-based criteria are deliberately asymmetric: ``elevation_range``
+    is a *geometric* filter on an element's **mid-height** Z, while ``story``
+    is a storey-*designation* filter on its **top** Z (the ETABS rule).  They
+    answer different questions — "where is it, vertically" versus "what storey
+    is it called" — and must not be made to share one rule.
+
     *Failure policy*
 
     The query methods here are **permissive**: a criterion the source cannot
@@ -448,16 +454,21 @@ class Selection:
             element is included if its **mid-height Z** coordinate falls
             within ``[z_min, z_max]``.  For frame elements, mid-height =
             ``(z_i + z_j) / 2``.  For area elements, mid-height = centroid Z
-            of all vertex nodes.  ``None`` (default) means no elevation
-            filter.
+            of all vertex nodes.  Mid-height (not top) is deliberate: this is
+            a *geometric position* filter — "where is the element, vertically"
+            — whereas :attr:`story` is the storey-*designation* filter and
+            uses **top** Z under the ETABS rule.  ``None`` (default) means no
+            elevation filter.
         story: Filter by storey name(s) — e.g. ``["Roof", "Level 2"]``.  An
             element is assigned to the storey at its **top** (the ETABS
             convention: a column belongs to the storey above it, a beam or
             slab to its own level) and included when that storey is named.
-            Requires ``storey_data`` to be passed to
-            :meth:`resolve_to_mesh_sets` (or ``story_elevations`` to
-            :meth:`get_frame_ids` / :meth:`get_area_ids`).  ``None`` (default)
-            means no storey filter.
+            Top Z is deliberate: a storey is a *designation* — one name per
+            element, never split — unlike :attr:`elevation_range`, which is a
+            *geometric* filter on mid-height Z.  Requires ``storey_data`` to
+            be passed to :meth:`resolve_to_mesh_sets` (or ``story_elevations``
+            to :meth:`get_frame_ids` / :meth:`get_area_ids`).  ``None``
+            (default) means no storey filter.
 
     Examples:
         Select all frame members in a lateral-resisting group:
