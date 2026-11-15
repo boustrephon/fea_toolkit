@@ -316,6 +316,8 @@ Settings file — `$FEA_TOOLKIT_GUI_CONFIG` if set, else
 | `add_modifier` | `"shift"` | Modifier key held to add a pick to the current selection |
 | `toggle_modifier` | `"control"` | Modifier key held to toggle a pick |
 | `marquee_modifier` | `"alt"` | Modifier key that turns a drag into a rubber-band selection |
+| `marquee_add_modifier` | `"shift"` | Held **with** the marquee modifier to *union* the rubber-band set with the current selection |
+| `marquee_remove_modifier` | `"control"` | Held **with** the marquee modifier to *subtract* the rubber-band set from the current selection |
 | `select_mode` | `false` | Explicit Select / Orbit mode — a drag marquee-selects instead of orbiting |
 
 The **display-quality knobs** (Shells opacity, Shrink, Deform %, Flags % and the
@@ -383,12 +385,15 @@ adding an icon, and setting up the OpenSeesPy environment).
 
 Selecting supports **multiple** entities: a clean click replaces, Shift-click
 adds, Ctrl/Cmd-click toggles, and a drag with the marquee modifier (Alt/Opt, or
-any drag in Select mode) rubber-band-selects.  A left-to-right marquee is a
-*window* (only elements fully inside the box); a right-to-left marquee is a
-*crossing* (everything the box touches).  **View ▸ Select mode** toggles the
-explicit Select / Orbit arrangement, in which a drag marquee-selects instead of
-orbiting.  The viewport selection can be read back as
-a ``Selection`` (``MainWindow.current_selection()``) for a workflow step.
+any drag in Select mode) rubber-band-selects.  Hold **Shift** with the marquee
+modifier to *union* the box with the current selection, and **Ctrl** (⌘) with
+it to *subtract* the box from the current selection; a marquee with neither
+replaces.  A left-to-right marquee is a *window* (only elements fully inside
+the box); a right-to-left marquee is a *crossing* (everything the box touches).
+**View ▸ Select mode** toggles the explicit Select / Orbit arrangement, in
+which a drag marquee-selects instead of orbiting.  The viewport selection can
+be read back as a ``Selection`` (``MainWindow.current_selection()``) for a
+workflow step.
 
 **Right-clicking** the viewport opens a context menu: **Copy selection** puts the
 selection on the clipboard as a selection expression (`type=Frame …`), **Mass /
