@@ -22,9 +22,9 @@ results…** writes one out.  **Modal analysis** / **Response spectrum** /
 **Pushover** / **Nonlinear time-history** / **IDA** are wired up as recipe
 presets;
 modal analysis still fails to complete (see
-[What is still missing](#what-is-still-missing)).  Load
-glyphs, storey and pushover plots, persistence and the quad view are still
-ahead; see [What is still missing](#what-is-still-missing).
+[What is still missing](#what-is-still-missing)).  Element labels, the
+Property Tree, window-layout persistence and the quad view are still ahead;
+see [What is still missing](#what-is-still-missing).
 
 ## Installing and launching
 
@@ -402,6 +402,22 @@ selected** / **Isolate selected** / **Show all** dig into a crowded model.  The
 menu appears only when the right button is *not* the selecting button — under the
 `right_click` preset the right button still selects, and the menu is not shown.
 
+**Right-clicking a Model Tree row** opens a second context menu.  On a **group
+row** (Materials, Sections, Stories, Frame Elements, Area Elements) it offers a
+checkable **Colour by …** menu — Material, Section, Story and Nearest Story
+(only the fields the displayed model can resolve are listed) — which recolours
+every drawn element by that attribute in place of the default section colouring.
+On an **entity row** it offers **Hide** / **Isolate** / **Show all** (the same
+digging actions as the viewport menu, scoped to what that row names) and
+selection arithmetic — **Add to selection**, **Remove from selection**,
+**Invert in selection** — against the current viewport selection.
+
+**Colour by Story** follows the ETABS convention: an element belongs to the
+storey at its **top**, so a column is named for the storey above it (its own
+top level).  **Colour by Nearest Story** instead assigns the storey nearest the
+element's mid-height Z.  An element whose field cannot be resolved is drawn
+grey.
+
 ## Display toggles
 
 | Control | State |
@@ -547,6 +563,16 @@ choices / help, and its `needs` prerequisite — all rendered from the Qt-free
 **Configuration (optional)** group appears at the foot of the **Analysis ▸ Run static…**
 dialog.
 
+The **Add** menu lists every verb the registry declares — beyond the four in the
+table above, the three model checks, the `capacity.*` checks, `mesh_checks` and
+`chart`.  A recipe's solved cases and combinations **are** registered as result
+views, its checks as a check-table view, and its `chart` step as an embedded
+figure.  The `chart` kinds — storey displacements/forces, response spectra,
+pushover, modal, CSM and **IDA** (peak drift vs `Sa(T1, 5 %)/g`) — each render
+as an embedded figure.  **Recipe ▸ Command…** (`Ctrl+K`) opens the command
+palette: a command string compiles into a step and is inserted into the recipe
+(see [Workflow Command Palette](workflow_palette.md)).
+
 **Recipe ▸ Run recipe** (`Ctrl+Shift+R`) runs the steps in order on a worker
 thread, registering a prepared model as a geometry view, reporting each step in
 the Message Log, and registering each solved case — a static case or a load
@@ -589,8 +615,8 @@ jarring than a greyed-out one.
 | **View** | Zoom to fit, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show beams, Show shells, Show restraints, Show loads, Colour area loads, Show force diagrams, Clear highlights) | Show element labels, Reset layout |
 | **Model** | Mesh… (composes a `mesh` step in a dialog and runs it on OK), Combinations (Edit… / Open… / Save…), Name selection… | Units |
 | **Analysis** | Run static… (`Ctrl+R`), Stop, Modal analysis, Response spectrum, Pushover, Nonlinear time-history, IDA | — |
-| **Recipe** | Run recipe (`Ctrl+Shift+R`), Open recipe…, Save recipe…, Export as Python…, Clear recipe | — |
-| **Results** | Deformed shape (+ Deform %), Force diagrams (+ Force selector + Flags %), Clear results | Storey response, Pushover curve |
+| **Recipe** | Run recipe (`Ctrl+Shift+R`), Open recipe…, Save recipe…, Export as Python…, Import script…, Command… (`Ctrl+K`), Clear recipe | — |
+| **Results** | Deformed shape (+ Deform %), Force diagrams (+ Force selector + Flags %), Shell results (+ Shell selector), Animate deformed shape, Clear results | Storey response, Pushover curve |
 | **Help** | Documentation, Modeling guidance, Benchmark register, LLM guide, Source repository, About | — |
 | Toolbars | Open; Save results; Run static / Stop; Mesh | Save results (until a result is shown), Export Tcl |
 | View toolbar | Zoom/camera; display toggles (nodes, beams, shells, restraints, force diagrams); **Show loads** + the **Load** source selector + **Loads %** + the **Area** style selector + **Colour area loads**; Deformed shape + Deform %; Force diagrams + Force selector + Flags %; **Shells** opacity and **Shrink** | Show labels |
@@ -610,16 +636,20 @@ drives a *separately installed* OpenSees is the recorded route
 
 ## What is still missing
 
+*(Verified against commit `8083ce10`, 2026-11-15: the rows that listed load
+glyphs, shell (area) results and the `check` / `chart` verbs as missing have
+been removed — those features are documented above under [Display
+toggles](#display-toggles), [Menus at a glance](#menus-at-a-glance) and
+[Workflows (recipes)](#workflows-recipes).)*
+
 | Missing | Effect today |
 |---|---|
 | Modal / spectrum / pushover analyses (milestone 5, the rest) | The three menu entries are wired as recipe presets and run, but the underlying analyses are not yet reliable — modal analysis starts and then fails to complete |
 | Nonlinear time-history result visualisation | **Analysis ▸ Nonlinear time-history** runs **only with OpenSeesPy in-process** (the out-of-process runner does not support this verb); its peak quantities are summarised as a table view and its transient history is animated in the viewport (**Results ▸ Animate** steps through the record) |
-| Loads, storey and pushover plots (milestones 6–7) | A case's deformed shape *and* its member end forces **are** drawn in the GUI; load glyphs, storey plots and pushover curves still need the [Visualisation Toolkit](viewer.md) and the `plot_*` functions |
-| Element labels, the Property Tree tab, explicit interaction modes ([P23](_pending_work.md)) | The corresponding menu item and tab are greyed |
+| Storey-response / pushover-curve menu plots (milestone 7) | The **Results ▸ Storey response** / **Pushover curve** menu items are still greyed; the same plots render as embedded figures from a recipe's `chart` step |
+| Element labels ([P23](_pending_work.md)), the Property Tree tab | Element labels and the Property Tree are still greyed; the explicit interaction modes (Select / Orbit + marquee) landed with milestone 4 |
 | Window-layout persistence (milestone 8) | The mouse policy and the display-quality knobs **are** remembered (see the settings file above); dock positions and window geometry are not |
-| Shell (area) result display ([P36](_pending_work.md)) | Shell force resultants are extracted and stored in NPZ archives, but the GUI draws no per-shell scalar field |
 | Quad view (milestone 10) | A single viewport; use the Camera menu and the view cube |
-| `check` and `chart` verbs ([P30](_pending_work.md) phase C) | The Recipe panel runs the verbs that exist (`scale_sections`, `mesh`, `run_static`, `combine`, the three model checks, the `capacity.*` checks and `mesh_checks`, and `chart`).  A recipe's solved cases and combinations **are** registered as result views, its checks as a check-table view, and its `chart` step as an embedded figure.  The `chart` kinds — storey displacements/forces, response spectra, pushover, modal, CSM and **IDA** (peak drift vs `Sa(T1, 5 %)/g`) — each render as an embedded figure.  The **command palette** (`Recipe ▸ Command…`, `Ctrl+K`) is implemented: a command string compiles into a step and is inserted into the recipe (see [Workflow Command Palette](workflow_palette.md)) |
 
 ## Troubleshooting
 
