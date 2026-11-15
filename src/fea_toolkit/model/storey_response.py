@@ -561,23 +561,38 @@ def storey_drifts(
 
 
 def _rigid_body_steps(
-    x: np.ndarray, y: np.ndarray, ux_stack: np.ndarray, uy_stack: np.ndarray
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    x: np.ndarray,
+    y: np.ndarray,
+    ux_stack: np.ndarray,
+    uy_stack: np.ndarray,
+    x_ref: Optional[float] = None,
+    y_ref: Optional[float] = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, float, float]:
     """Fit a rigid body (``Ux, Uy, Rz``) at every step for one level.
 
     Solves the same least-squares system as :func:`rigid_body_fit` (two
-    translations plus a rotation about the centroid) but vectorised over all
-    time steps, with the design matrix built once from the node positions.
+    translations plus a rotation) but vectorised over all time steps, with the
+    design matrix built once from the node positions.  The translational
+    components are reported at ``(x_ref, y_ref)`` — defaulting to the level's own
+    centroid — so a caller that fits several levels against one common reference
+    gets translations that are directly comparable.  ``Rz`` and ``r_max`` are
+    reference-independent (``r_max`` is the farthest node from the level's own
+    centroid, the lever arm multiplying the rotational drift).
 
     Returns:
-        ``(Ux, Uy, Rz, r_max)`` — the first three are length-``n_steps`` arrays
-        and ``r_max`` is the farthest node-to-centroid distance (the lever arm
-        multiplying the rotational drift).
+        ``(Ux, Uy, Rz, r_max, resid_max)`` — the first three are
+        length-``n_steps`` arrays, ``r_max`` is the lever arm, and ``resid_max``
+        is the peak (over nodes and steps) residual magnitude — the deformation
+        the rigid-body fit cannot represent.
     """
     x_cm = float(np.mean(x))
     y_cm = float(np.mean(y))
-    x_t = x - x_cm
-    y_t = y - y_cm
+    if x_ref is None:
+        x_ref = x_cm
+    if y_ref is None:
+        y_ref = y_cm
+    x_t = x - x_ref
+    y_t = y - y_ref
     n = x.size
     a_mat = np.zeros((2 * n, 3))
     a_mat[0::2, 0] = 1.0
@@ -588,8 +603,15 @@ def _rigid_body_steps(
     b_mat[0::2, :] = ux_stack
     b_mat[1::2, :] = uy_stack
     theta, _, _, _ = np.linalg.lstsq(a_mat, b_mat, rcond=None)
-    r_max = float(np.max(np.hypot(x_t, y_t))) if n else 0.0
-    return theta[0], theta[1], theta[2], r_max
+    r_max = float(np.max(np.hypot(x - x_cm, y - y_cm))) if n else 0.0
+    # Residual = the part of the nodal motion outside the rigid-body modes.  A
+    # level whose motion is not rigid (slab distortion, local modes) has a large
+    # residual even when its rigid-body projection is near zero; report it so a
+    # zero projection cannot read as "no drift".
+    resid = b_mat - a_mat @ theta
+    resid_mag = np.hypot(resid[0::2], resid[1::2])
+    resid_max = float(np.max(resid_mag)) if resid_mag.size else 0.0
+    return theta[0], theta[1], theta[2], r_max, resid_max
 
 
 def peak_interstorey_drift(
@@ -610,14 +632,19 @@ def peak_interstorey_drift(
     Nodes are assigned to their nearest storey elevation within the
     ``z_tolerance / 2`` half-band.  When *node_xy* (``{node_key: (x, y)}``) is
     supplied, each level's motion is reduced by a rigid-body fit — two
-    translations plus a rotation — so opposite displacements at spatially
-    separated nodes do **not** cancel before the drift is computed, and the peak
-    interstorey drift is the translational drift plus the rotational
-    contribution (``|ΔRz| · r_max``), exactly as :func:`storey_drifts` computes
-    it.  Without *node_xy* each level is reduced to the mean of its nodes' X / Y
-    histories (identical for a single node per level).  Consecutive levels are
-    differenced, the magnitude normalised by their height interval, and the peak
-    ratio over all intervals and time steps is returned.
+    translations plus a rotation, all fit about one common plan reference so a
+    pure rigid-body rotation between levels whose centroids differ is not
+    misread as translation — so opposite displacements at spatially separated
+    nodes do **not** cancel before the drift is computed.  The peak interstorey
+    drift is then the translational drift plus the rotational contribution
+    (``|ΔRz| · r_max``) plus the upper level's non-rigid residual — the peak
+    magnitude of the nodal motion the rigid-body fit cannot represent — so a
+    level distorting away from rigid motion still registers against the drift
+    threshold instead of reading as zero.  Without *node_xy* each level is
+    reduced to the mean of its nodes' X / Y histories (identical for a single
+    node per level).  Consecutive levels are differenced, the magnitude
+    normalised by their height interval, and the peak ratio over all intervals
+    and time steps is returned.
 
     Args:
         node_z: ``{node_key: z}`` in model length units.
@@ -674,6 +701,23 @@ def peak_interstorey_drift(
     # Reduce each level to one rigid-body motion history.  With *node_xy* the
     # (Ux, Uy, Rz) triple is fit per step (vectorised); without it the level is
     # its nodes' mean history (exact for a single node per level).
+    #
+    # A single plan reference across levels: the per-level fit reports its
+    # translations at the level's own centroid, so a pure rigid-body rotation
+    # about a common point would otherwise read as a spurious translation
+    # between levels whose centroids differ.  Fit every level about the same
+    # reference so the (Ux, Uy) components are directly comparable.
+    if node_xy is not None:
+        all_x = np.concatenate(
+            [np.array([c[0] for c in comps]) for comps in per_level.values() if comps]
+        )
+        all_y = np.concatenate(
+            [np.array([c[1] for c in comps]) for comps in per_level.values() if comps]
+        )
+        ref_x = float(np.mean(all_x)) if all_x.size else 0.0
+        ref_y = float(np.mean(all_y)) if all_y.size else 0.0
+    else:
+        ref_x = ref_y = 0.0
     level_ref: list = [None] * elevations.size
     for i in range(elevations.size):
         comps = per_level[i]
@@ -688,7 +732,7 @@ def peak_interstorey_drift(
         ys = np.array([c[1] for c in comps])
         ux_stack = np.vstack([c[2] for c in comps])
         uy_stack = np.vstack([c[3] for c in comps])
-        level_ref[i] = _rigid_body_steps(xs, ys, ux_stack, uy_stack)
+        level_ref[i] = _rigid_body_steps(xs, ys, ux_stack, uy_stack, ref_x, ref_y)
 
     peak = 0.0
     for j in range(1, elevations.size):
@@ -708,6 +752,10 @@ def peak_interstorey_drift(
         else:
             drz = hi[2][:n] - lo[2][:n]
             drift = np.hypot(dux, duy) / h + np.abs(drz) / h * hi[3]
+            # Deformation the rigid-body fit cannot represent must not read as
+            # zero drift: add the upper level's peak non-rigid residual so a
+            # distorting level still registers against the collapse threshold.
+            drift = drift + hi[4] / h
             peak = max(peak, float(np.max(drift)))
     return peak
 

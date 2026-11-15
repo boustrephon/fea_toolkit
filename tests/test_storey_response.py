@@ -629,3 +629,51 @@ class TestPeakInterstoreyDrift:
         assert peak_interstorey_drift(node_z, d, [0.0, 10.0], node_xy=node_xy) == pytest.approx(
             0.01
         )
+
+    def test_identical_rigid_body_motion_with_different_centroids_is_zero_drift(self):
+        """A shared rigid-body motion is zero drift even when level centroids differ.
+
+        Both levels undergo the same rotation about the origin, but their plan
+        centroids differ (level 0 centred at x=1, level 1 at (1, 5)).  Fitting
+        each level about its *own* centroid would report the rotation's lever-arm
+        difference as a spurious translation; fitting both about one common
+        reference makes the translations cancel.
+        """
+        n = 2
+        node_z = {1: 0.0, 2: 0.0, 3: 10.0, 4: 10.0}
+        node_xy = {1: (0.0, 0.0), 2: (2.0, 0.0), 3: (0.0, 5.0), 4: (2.0, 5.0)}
+        rz = 0.01
+
+        def field(x: float, y: float) -> np.ndarray:
+            arr = np.zeros((n, 3))
+            arr[:, 0] = -rz * y
+            arr[:, 1] = rz * x
+            return arr
+
+        d = {
+            1: field(0.0, 0.0),
+            2: field(2.0, 0.0),
+            3: field(0.0, 5.0),
+            4: field(2.0, 5.0),
+        }
+        assert peak_interstorey_drift(node_z, d, [0.0, 10.0], node_xy=node_xy) == pytest.approx(0.0)
+
+    def test_non_rigid_level_deformation_is_not_reported_as_zero(self):
+        """A level whose motion is not a rigid body must not read as zero drift.
+
+        The roof's two nodes move in opposite X directions (a "squish", not a
+        rotation or translation), so the rigid-body projection is zero but the
+        residual is 0.1 — the drift must carry that deformation rather than
+        bypassing the collapse threshold as zero.
+        """
+        n = 2
+        node_z = {1: 0.0, 2: 0.0, 3: 10.0, 4: 10.0}
+        node_xy = {1: (0.0, 0.0), 2: (2.0, 0.0), 3: (0.0, 0.0), 4: (2.0, 0.0)}
+        base = np.zeros((n, 3))
+        squish_left = np.zeros((n, 3))
+        squish_left[:, 0] = 0.1
+        squish_right = np.zeros((n, 3))
+        squish_right[:, 0] = -0.1
+        d = {1: base, 2: base, 3: squish_left, 4: squish_right}
+        drift = peak_interstorey_drift(node_z, d, [0.0, 10.0], node_xy=node_xy)
+        assert drift == pytest.approx(0.01)  # 0.1 residual / 10 m height
