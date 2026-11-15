@@ -160,7 +160,7 @@ affected by the integration-rule softening length.)
 | gravity `Norm = NaN` | single-step load shock | add `gravity_num_substeps` |
 | `BandGen` stall / NaN on large models | banded factorisation | `solver_system: "UmfPack"` |
 | `analyze … returned: -2` + "matrix singular" | **singular stiffness (a model problem)** — rigid-body mode / unconnected DOF | check boundary conditions & connectivity; run modal to find the free mode.  A non-singular `-2` is **not** solver-only: inspect both the model (connectivity) and the integrator inputs (the load/control pairing, e.g. a zero displacement at an uncoupled control DOF) before choosing a remedy |
-| `analyze … returned: -3` | a failed convergence test — **or** a singular linear solve inside `solveCurrentStep()`, so read the messages | a singular-matrix message → fix the model (do not tune convergence); otherwise adjust algorithm / shrink the time step / relax tolerance (see §8) |
+| `analyze … returned: -3` | a failed convergence test — **or** a singular linear solve inside `solveCurrentStep()`, so read the messages | a singular matrix at build/gravity → fix the model (do not tune convergence); a singular matrix **only during a nonlinear step** → check for yielding, capacity exhaustion and collapse (physical instability) before touching the model; otherwise adjust algorithm / shrink the time step / relax tolerance (see §8) |
 | `ForceBeamColumn3d::update() -- failed to get compatible …` | section constitutive response: bad material, near-singular section stiffness, fibres oriented wrong for 2D bending, or not discretised in both directions in 3D | inspect the tagged element's sections; swap materials to their elastic equivalents one at a time |
 
 (Full solver tables: `llm_guide.md` §5.)
@@ -220,9 +220,15 @@ nonlinear verification paper.
 ### 8.2 Element combinations
 
 - Force-based (`forceBeamColumn`, `nonlinearBeamColumn`) when axial–moment
-  interaction matters (RC moment frames), with **3–5 integration points** —
-  community consensus is "not more than 5".  Displacement-based
-  (`dispBeamColumn`) for several short elements (e.g. piles with p-y springs).
+  interaction matters (RC moment frames).  For **distributed-plasticity
+  Gauss–Lobatto integration** the community consensus is **3–5 integration
+  points** — "not more than 5" applies to that scheme only, not to every
+  element.  Fixed-layout **hinge integration** is the exception: it places its
+  points at the plastic-hinge layout rather than a Gauss–Lobatto spacing, so it
+  is not subject to the 3–5 guidance — the toolkit's ``beam_with_hinges`` path
+  emits a six-point ``forceBeamColumn`` under ``HingeRadauTwo`` (see §1.1) and
+  is preserved as documented.  Displacement-based (`dispBeamColumn`) for
+  several short elements (e.g. piles with p-y springs).
 - `beamWithHinges` when yielding is confined to member ends and strain softening
   is expected.  Berkeley Example 7 is the canonical case: a distributed-fibre
   `nonlinearBeamColumn` RC 3D frame failed to converge at large drift where
@@ -236,8 +242,13 @@ nonlinear verification paper.
   ~18 Newton iterations and the system size balloons; the mitigation is
   `KrylovNewton` or `E_SFI_MVLEM_3D` (no internal nodes).  The toolkit reached
   the same conclusion independently — see `mvlem_wall_analysis.md`.
-- Panel zones (rigid offsets vs a rotational-spring box) change little at design
-  level; refine only for collapse assessment (UWO STR-833).
+- Panel zones (rigid offsets vs a rotational-spring box) change little while the
+  panel-zone shear demand stays below the expected yield strength at the assessed
+  loading level — so refinement is a **demand- and deformation-sensitivity**
+  decision, not a collapse-assessment-only one.  When the panel-zone shear demand
+  exceeds the expected yield strength, the model must capture that yielding and
+  its inelastic deformation rather than leaving the joint rigid.  (UWO STR-833,
+  for the steel moment frames it studied — generalise with care.)
 
 ### 8.3 Analysis settings
 
@@ -255,7 +266,13 @@ nonlinear verification paper.
   stiffness matrix (a model problem) but can appear without one, and `-3`
   usually means a failed convergence test but can also come from a singular
   linear solve inside `solveCurrentStep()` — diagnose by the failure stage and
-  the accompanying solver message, not the code alone — see §6.
+  the accompanying solver message, not the code alone — see §6.  Distinguish an
+  *initially* singular model (a singular matrix at build or the gravity step) from
+  singularity reached *during* the nonlinear response: the former is a modelling
+  defect (boundary conditions / connectivity), while the latter usually signals
+  physical instability — yielding, strength/ductility capacity exhaustion or
+  incipient collapse — which is a result to be interpreted, not a model error to
+  be corrected.
 
 ### 8.4 Source register
 
@@ -272,8 +289,11 @@ nearly-horizontal area elements, then node Z-clustering.  SAP2000 and SAFE
 models do **not** guarantee storey definitions (ETABS does), so the IDA drift
 measure degrades along the same chain: with **≥ 2 levels** it is the peak
 **interstorey-drift ratio** (`d_max`); with fewer it is the **roof-drift proxy**
-(max horizontal nodal displacement ÷ structure height), and the result records
-which was used (`drift_measure`) so a proxy value is never misread.
+(max horizontal nodal displacement ÷ structure height); and when storey levels
+exist but the recording is restricted to a single level, the drift is reported
+as **unavailable** (`drift_measure = "unavailable"`, drift `NaN`) rather than a
+false zero.  The result records which was used (`drift_measure`) so a proxy or
+unavailable value is never misread as interstorey drift.
 
 **Multi-tower ETABS models are the known gap.**  ETABS lets one file hold
 several "towers", each with its own grid system and its own set of story
