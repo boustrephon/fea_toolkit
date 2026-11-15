@@ -601,12 +601,15 @@ def _rigid_body_steps(
         # underdetermined, and ``lstsq`` would infer a spurious twist that moves
         # the reported reference-point translation away from the node's actual
         # motion.  Preserve the node's translation and report no rotation, so a
-        # single-node level under uniform translation reads as zero drift.
+        # single-node level under uniform translation reads as zero drift — but
+        # keep the node's lever arm from the common reference as ``r_max``, so a
+        # rotational drift against an adjacent level still registers the node's
+        # distance instead of reading as zero.
         return (
             np.asarray(ux_stack[0], dtype=float).copy(),
             np.asarray(uy_stack[0], dtype=float).copy(),
             np.zeros(ux_stack.shape[1], dtype=float),
-            0.0,
+            float(np.hypot(x[0] - x_ref, y[0] - y_ref)),
             0.0,
         )
     a_mat = np.zeros((2 * n, 3))

@@ -142,17 +142,44 @@ def test_a_story_scoped_named_selection_resolves_against_storey_elevations():
     from fea_toolkit.model.sap_data import StoryDefinition
 
     model = make_sample_model()
-    # The sample model's single frame spans z=0..10 (mid-height 5.0); declare an
-    # ETABS-style story at 5.0 so the criterion matches the imported name.
-    model.stories = [StoryDefinition(name="Level5", elevation=5.0)]
+    # The sample model's single frame spans z=0..10.  Declare an ETABS-style
+    # story at the frame's top Z (10.0) so the story criterion matches the
+    # frame's own level (``story_name_at_or_above`` assigns a frame to the
+    # lowest storey at or above its top Z).
+    model.stories = [StoryDefinition(name="Top", elevation=10.0)]
     store = {
-        "core": NamedSelection(name="core", selection=Selection(story=["Level5"])),
+        "core": NamedSelection(name="core", selection=Selection(story=["Top"])),
     }
     resolved = resolve_named_selections(
         Selection(selections=["core"], element_types=["Frame"]), store, model
     )
     assert resolved.selections is None
     assert "Frame:1" in resolved.element_ids  # the story-matched frame, type-qualified
+
+
+def test_a_node_only_selection_keeps_an_existing_element_exclusion_valid():
+    """A node-only selection that already carries element exclusions stays valid.
+
+    ``exclude_element_ids`` is retained on a node-only selection, which requires
+    the ``exclude_node_ids`` field to stay a list (``[]``) rather than being
+    collapsed to ``None`` by the merge.
+    """
+    model = make_sample_model()
+    store = {
+        "core": NamedSelection(name="core", element_ids=["Frame:9"]),
+    }
+    resolved = resolve_named_selections(
+        Selection(
+            element_types=["Node"],
+            exclude_element_ids=["Frame:1"],
+            exclude_node_ids=[],
+            exclude_selections=["core"],
+        ),
+        store,
+        model,
+    )
+    assert resolved.exclude_element_ids == ["Frame:1"]
+    assert resolved.exclude_node_ids == []
 
 
 def test_a_type_qualified_pick_resolves_only_that_type():

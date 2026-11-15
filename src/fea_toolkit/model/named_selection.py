@@ -252,6 +252,11 @@ def resolve_named_selections(
         if node_only:
             exclude_element_ids = sel.exclude_element_ids
             exclude_node_ids = merged_exclude_nodes or None
+            # A retained element exclusion (the caller's own) still requires the
+            # node-exclusion field on a node-scoped selection — keep ``[]``, not
+            # ``None``, so the invariant holds.
+            if exclude_element_ids is not None and exclude_node_ids is None:
+                exclude_node_ids = []
         else:
             exclude_element_ids = merged_exclude_elements or None
             exclude_node_ids = merged_exclude_nodes or None
