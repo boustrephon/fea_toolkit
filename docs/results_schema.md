@@ -493,6 +493,7 @@ argument (`{case: result}`).  `analysis_types` carries `"transient"`.
 | `transient/<case>/converged_steps` | `()` | `int` | Number of converged steps (`N_t`) |
 | `transient/<case>/period_1` | `()` | `float` | First Rayleigh period (s) |
 | `transient/<case>/period_2` | `()` | `float` | Second Rayleigh period (s) |
+| `transient/<case>/transient_scale` | `()` | `float` | The IM scale that produced this retained history (IDA collapse-rung blocks only; distinct from `ida/<record>/collapse_scale`) |
 
 `N_t` and `N_rec` are resolved **per case** (like the pushover block's
 per-direction `N_step` / `N_recorded_*`): `N_t` from `time` and `N_rec` from
@@ -554,11 +555,11 @@ Because both cases can read `1.0`, the per-record `ida/<record>/sa_method`
 provenance (`"sdof_newmark"` vs `"scale_as_im"`) is the discriminator — it must
 be consulted, never the `Sa_T1_g` value alone.  An
 optional per-record `drift_measure` records whether `drift` is the interstorey
-`d_max` or the roof-drift proxy:
+`d_max`, the roof-drift proxy, or unavailable:
 
 | Array | Shape | dtype | Description |
 |---|---|---|---|
-| `ida/<record>/drift_measure` | `()` | `str` | **Optional** provenance — `"interstorey_d_max"` or `"roof_proxy"` (generic producer only) |
+| `ida/<record>/drift_measure` | `()` | `str` | **Optional** provenance — `"interstorey_d_max"`, `"roof_proxy"`, or `"unavailable"` (generic producer only) |
 | `ida/<record>/sa_method` | `()` | `str` | **Optional** intensity-measure provenance — `"sdof_newmark"` (a real spectral ordinate) or `"scale_as_im"` (the `1.0` fallback) |
 
 `N_level` is resolved **per record** (ragged across records) from the `scale`

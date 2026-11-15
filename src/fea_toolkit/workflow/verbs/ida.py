@@ -184,4 +184,4 @@ def run_ida(context: StepContext, step: Step) -> list[StepResult]:
         )
         context.log(f"IDA results written to {params['export_path']}")
     context.log(f"IDA ({params['direction']}): complete")
-    return [StepResult(kind=IDA, label="IDA", payload=result)]
+    return [StepResult(kind=IDA, label=params["name"], payload=result)]

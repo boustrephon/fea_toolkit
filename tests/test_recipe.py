@@ -367,13 +367,18 @@ class TestAnalysisVerbs:
     def test_nonlinear_dynamic_passes_the_record_through(self, monkeypatch):
         """Every declared parameter reaches ``run_nonlinear_dynamic_analysis``."""
         import fea_toolkit.analysis.nonlinear_dynamic as nld_module
+        from fea_toolkit.analysis.base import AnalysisResult
         from fea_toolkit.workflow.steps import StepContext
 
         captured: dict = {}
 
         def fake_run_nonlinear_dynamic_analysis(_mesh, _modal, **kwargs):
             captured.update(kwargs)
-            return object()
+            return AnalysisResult(
+                name="NonlinearDynamic",
+                analysis_type="NonlinearDynamicAnalysis",
+                data={"converged_steps": kwargs["num_steps"], "direction": kwargs["direction"]},
+            )
 
         monkeypatch.setattr(
             nld_module, "run_nonlinear_dynamic_analysis", fake_run_nonlinear_dynamic_analysis

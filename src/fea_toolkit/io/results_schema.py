@@ -372,6 +372,7 @@ TRANSIENT_SCALAR_ARRAYS: dict[str, tuple] = {
     "transient/{case}/converged_steps": ("", "int"),
     "transient/{case}/period_1": ("", "float"),
     "transient/{case}/period_2": ("", "float"),
+    "transient/{case}/transient_scale": ("", "float"),
 }
 
 TRANSIENT_NODE_ARRAYS: dict[str, tuple] = {

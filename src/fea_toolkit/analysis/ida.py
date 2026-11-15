@@ -183,6 +183,36 @@ def _fundamental_period(modal_result: Any) -> Optional[float]:
     return None
 
 
+def _recorded_level_coverage(
+    node_z: dict,
+    displacements: dict,
+    storey_elevations: Sequence[float],
+    z_tolerance: float = 0.5,
+) -> int:
+    """Count of storey elevations that carry at least one usable recorded history.
+
+    The interstorey path needs histories spanning at least two levels.  A
+    transient whose recording was restricted (``transient_record_node_tags``) to
+    a single level — e.g. only the roof node — cannot produce an interstorey
+    drift, so this count lets :func:`_peak_drift` report the drift as unavailable
+    instead of reading the skipped base-to-roof interval as zero.
+    """
+    elevations = np.unique(np.asarray([float(e) for e in storey_elevations], dtype=float))
+    covered: set = set()
+    for key, z in node_z.items():
+        hist = displacements.get(key)
+        if hist is None:
+            continue
+        arr = np.asarray(hist, dtype=float)
+        usable = (arr.ndim == 1 or (arr.ndim == 2 and arr.shape[1] >= 2)) and arr.size > 0
+        if not usable:
+            continue
+        level = int(np.argmin(np.abs(elevations - float(z))))
+        if abs(elevations[level] - float(z)) <= z_tolerance / 2:
+            covered.add(level)
+    return len(covered)
+
+
 def _peak_drift(
     data: Any,
     height: float,
@@ -196,11 +226,16 @@ def _peak_drift(
     ratio (:func:`~fea_toolkit.model.storey_response.peak_interstorey_drift`,
     passed *node_xy* so the torsional contribution is preserved);
     otherwise the roof-drift proxy (max horizontal nodal displacement / height),
-    which for a single-interval structure is the same quantity.
+    which for a single-interval structure is the same quantity.  When storey
+    levels exist but the recorded histories do not span at least two of them —
+    a recording restricted to one level, e.g. only the roof via
+    ``transient_record_node_tags`` — the drift cannot be evaluated and is
+    reported as ``(NaN, "unavailable")`` rather than a zero that would read as
+    "no drift".
 
     Returns:
-        ``(drift_ratio, measure)`` where *measure* is ``"interstorey_d_max"``
-        or ``"roof_proxy"``.
+        ``(drift_ratio, measure)`` where *measure* is ``"interstorey_d_max"``,
+        ``"roof_proxy"`` or ``"unavailable"``.
     """
     if not isinstance(data, dict):
         return 0.0, "roof_proxy"
@@ -210,6 +245,8 @@ def _peak_drift(
     if len(storey_elevations) >= 2:
         from ..model.storey_response import peak_interstorey_drift
 
+        if _recorded_level_coverage(node_z, displacements, storey_elevations) < 2:
+            return float("nan"), "unavailable"
         return (
             peak_interstorey_drift(node_z, displacements, storey_elevations, node_xy=node_xy),
             "interstorey_d_max",
@@ -251,9 +288,13 @@ def run_ida(
 
     The drift measure is the **peak interstorey-drift ratio** when storey
     levels are available (at least two), and the **roof-drift proxy** (max
-    horizontal nodal displacement / structure height) otherwise — the
-    :attr:`drift_measure` field records which was used, so a proxy value is
-    never misread as interstorey drift.
+    horizontal nodal displacement / structure height) otherwise.  When storey
+    levels exist but the recorded histories do not span at least two of them —
+    a recording restricted to one level, e.g. only the roof via
+    ``transient_record_node_tags`` — the drift cannot be evaluated and is
+    reported as ``NaN`` with :attr:`drift_measure` = ``"unavailable"``.  The
+    :attr:`drift_measure` field records which of the three was used, so a proxy
+    or unavailable value is never misread as interstorey drift.
 
     The intensity measure is the record's **``Sa(T1, 5 %)/g``** — its 5 %-damped
     spectral acceleration at the first-mode period, normalised by gravity,
@@ -376,7 +417,7 @@ def run_ida(
         sa_t1_g = 1.0
         sa_method = "scale_as_im"
 
-    def _run(im: float) -> tuple[float, bool, dict]:
+    def _run(im: float) -> tuple[float, bool, dict, str]:
         accel = accel_base * im
         result = run_nonlinear_dynamic_analysis(
             mesh_model,
@@ -391,9 +432,9 @@ def run_ida(
             gravity_patterns=gravity_patterns,
             accel=accel,
         )
-        drift, _ = _peak_drift(result.data, height, node_z, node_xy, storey_elevations)
+        drift, measure = _peak_drift(result.data, height, node_z, node_xy, storey_elevations)
         converged = bool(result.data.get("converged_steps") == num_steps)
-        return drift, converged, result.data
+        return drift, converged, result.data, measure
 
     # ── Collapse-rung transient retention ─────────────────────────────
     # The full time-history response of the first rung that trips the collapse
@@ -420,10 +461,15 @@ def run_ida(
     drifts: list[float] = []
     converged: list[bool] = []
     for im in ladder:
-        drift, ok, data = _run(im)
+        drift, ok, data, measure = _run(im)
         _note(im, ok, drift, data)
         drifts.append(drift)
         converged.append(ok)
+        # A rung whose recorded histories cannot span two levels makes the whole
+        # run's drift measure "unavailable" — the recording restriction is fixed
+        # across rungs, so a single such report applies to the whole ladder.
+        if measure == "unavailable":
+            drift_measure = "unavailable"
 
     im_collapse = collapse_intensity(ladder, drifts, converged, collapse_drift)
 
@@ -434,7 +480,7 @@ def run_ida(
         top = ladder[-1]
         while 0 < top < max_scale:
             top = min(2.0 * top, max_scale)
-            drift, ok, data = _run(top)
+            drift, ok, data, _measure = _run(top)
             _note(top, ok, drift, data)
             ladder.append(top)
             drifts.append(drift)
@@ -461,7 +507,7 @@ def run_ida(
                     # The bracket can no longer be narrowed in floating point;
                     # stop rather than re-running the same transient forever.
                     break
-                drift, ok, data = _run(mid)
+                drift, ok, data, _measure = _run(mid)
                 _note(mid, ok, drift, data)
                 evaluations.append({"intensity": mid, "drift": drift, "converged": ok})
                 if (not ok) or (collapse_drift is not None and drift > collapse_drift):

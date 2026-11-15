@@ -1204,6 +1204,7 @@ def collect_transient_arrays(transient_results: dict[str, Any]) -> dict[str, np.
             "converged_steps": "int",
             "period_1": "float",
             "period_2": "float",
+            "transient_scale": "float",
         }
         for field, dtype in scalar_dtypes.items():
             if field in res:
@@ -1460,7 +1461,14 @@ def collect_ida_transient_arrays(ida_result: dict[str, Any]) -> dict[str, np.nda
         return {}
     record_id = Path(str(ida_result.get("record", "record"))).stem
     record_id = record_id.replace("/", "_").replace("\\", "_")
-    return collect_transient_arrays({f"ida_{record_id}": transient})
+    case = dict(transient)
+    # The scale that produced the retained history is distinct from the reported
+    # collapse intensity (``ida/{record}/collapse_scale``): persist it alongside
+    # the block so a reader can tell the two apart.
+    transient_scale = ida_result.get("transient_scale")
+    if transient_scale is not None:
+        case["transient_scale"] = float(transient_scale)
+    return collect_transient_arrays({f"ida_{record_id}": case})
 
 
 def write_pushover_results_npz(

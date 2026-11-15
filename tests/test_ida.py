@@ -310,3 +310,42 @@ def test_run_ida_retains_the_top_rung_transient_without_collapse(monkeypatch):
     assert result["transient_scale"] == 1.0
     # num_steps is reconciled to len(accel_base) - 1 — the full excitation extent.
     assert result["transient"]["converged_steps"] == 19
+
+
+def test_run_ida_reports_unavailable_drift_when_only_the_roof_is_recorded(monkeypatch):
+    """Recording only the roof node cannot produce an interstorey drift.
+
+    With ``transient_record_node_tags`` restricted to the roof, the recorded
+    histories span a single storey level; the drift must be reported as
+    unavailable (NaN) rather than a zero that would read as "no drift".
+    """
+    import fea_toolkit.analysis.nonlinear_dynamic as nld_module
+
+    def roof_only(_mesh, _modal, _file, **kwargs):
+        accel = np.asarray(kwargs["accel"], dtype=float)
+        im = float(np.max(accel))
+        n_steps = kwargs["num_steps"]
+        roof = np.zeros((n_steps, 3))
+        roof[:, 0] = 0.02 * im * 10.0 * np.linspace(0.0, 1.0, n_steps)
+        return AnalysisResult(
+            name="NLD",
+            analysis_type="NonlinearDynamicAnalysis",
+            data={
+                "displacements": {2: roof},  # only the roof node (tag 2)
+                "converged_steps": n_steps,
+                "direction": "X",
+            },
+        )
+
+    monkeypatch.setattr(nld_module, "run_nonlinear_dynamic_analysis", roof_only)
+    result = run_ida(
+        make_sample_model(),
+        _modal(),
+        "record.txt",
+        [0.5, 1.0],
+        accel_base=np.ones(20),
+        num_steps=10,
+        tolerance=None,
+    )
+    assert result["drift_measure"] == "unavailable"
+    assert np.isnan(result["drifts"][0])
