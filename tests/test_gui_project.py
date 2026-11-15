@@ -520,7 +520,7 @@ def test_ida_transient_history_survives_a_bundle_round_trip(tmp_path):
         "Sa_T1_g": 2.0,
         "sa_method": "sdof_newmark",
         "drift_measure": "interstorey_d_max",
-        "transient_scale": 1.0,
+        "transient_scale": 0.5,
         "transient": {
             "times": np.array([0.0, 0.005]),
             "base_shear": np.array([0.0, 1.0]),
@@ -565,7 +565,7 @@ def test_ida_transient_history_survives_a_bundle_round_trip(tmp_path):
     raw = bundle["results"].raw()
     # The transient block survives, including the scale that produced it.
     assert "transient/ida_record/node_disp_x" in raw
-    assert float(raw["transient/ida_record/transient_scale"]) == 1.0
+    assert float(raw["transient/ida_record/transient_scale"]) == 0.5
     # ``collapse_scale`` is the reported collapse intensity — distinct from the
     # scale that produced the retained history.
     assert float(raw["ida/record/collapse_scale"]) == 1.0

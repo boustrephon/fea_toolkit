@@ -502,7 +502,11 @@ class TestResultViews:
         )
         window._show_nonlinear_dynamic_result("Nonlinear dynamic", payload)
 
-        window._on_animate_toggled(True)
+        # Trigger the toolbar toggle itself so the checked state is what a real
+        # user action produces; the later uncheck must then reflect a
+        # checked-to-unchecked transition, not a toggle that was never on.
+        window._actions["results.animate"].setChecked(True)
+        assert window._actions["results.animate"].isChecked() is True
         assert window._anim_timer is not None and window._anim_timer.isActive()
 
         # Switch to the unprocessed geometry view — the animation must stop and
