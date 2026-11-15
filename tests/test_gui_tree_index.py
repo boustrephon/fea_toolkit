@@ -129,3 +129,25 @@ def test_shell_uniform_load_sets_group_omitted_when_empty():
     md = make_sample_model()
     assert not md.shell_uniform_load_sets
     assert "Shell Uniform Load Sets" not in _by_label(md)
+
+
+def test_stories_group_lists_levels_lowest_first():
+    from fea_toolkit.model.sap_data import StoryDefinition
+
+    md = make_sample_model()
+    md.stories = [
+        StoryDefinition(name="ROOF", elevation=3.0),
+        StoryDefinition(name="BASE", elevation=0.0),
+    ]
+    group = _by_label(md)["Stories"]
+    assert group.count == 2
+    # Rows are sorted lowest-first; each row's entity is the StoryDefinition.
+    items = group.load_items()
+    assert [name for name, _ in items] == ["BASE", "ROOF"]
+    assert dict(items)["BASE"].elevation == 0.0
+
+
+def test_stories_group_omitted_when_empty():
+    md = make_sample_model()
+    assert not md.stories
+    assert "Stories" not in _by_label(md)

@@ -87,7 +87,12 @@ def test_preferred_open_view_falls_back_to_unprocessed(window):
 def test_backfill_mesh_load_metadata_restores_a_stale_mesh(window):
     """A project saved before the fields existed still shows the load groups."""
     from examples.sample_model import make_sample_model
-    from fea_toolkit.model.sap_data import LoadCase, LoadCombination, ResponseSpectrumFunction
+    from fea_toolkit.model.sap_data import (
+        LoadCase,
+        LoadCombination,
+        ResponseSpectrumFunction,
+        StoryDefinition,
+    )
     from fea_toolkit.opensees.preprocessor import preprocess_model
 
     sap = make_sample_model()
@@ -98,14 +103,21 @@ def test_backfill_mesh_load_metadata_restores_a_stale_mesh(window):
     sap.response_spectrum_functions = {
         "RS1": ResponseSpectrumFunction("RS1", [0.0, 1.0], [0.1, 0.2])
     }
+    sap.stories = [
+        StoryDefinition(name="ROOF", elevation=3.0),
+        StoryDefinition(name="BASE", elevation=0.0),
+    ]
 
     mesh = preprocess_model(sap)  # now carries them…
+    assert [(s.name, s.elevation) for s in mesh.stories] == [("ROOF", 3.0), ("BASE", 0.0)]
     mesh.load_cases = {}  # …so strip them to simulate an old save
     mesh.load_combinations = {}
     mesh.response_spectrum_functions = {}
+    mesh.stories = []
 
     window._backfill_mesh_load_metadata(mesh, sap)
 
     assert set(mesh.load_cases) == {"DEAD"}
     assert set(mesh.load_combinations) == {"COMB1"}
     assert set(mesh.response_spectrum_functions) == {"RS1"}
+    assert [(s.name, s.elevation) for s in mesh.stories] == [("ROOF", 3.0), ("BASE", 0.0)]
