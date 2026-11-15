@@ -3414,35 +3414,52 @@ class MainWindow(QMainWindow):
             return
 
         default_modal = resolve_default_modal_case(store.raw())
-        # Dependent verbs must reference the modal step that will actually
-        # produce their modal result.  When the wizard adds a fresh modal step
-        # that is *default_modal*; when it does not (an existing recipe modal
-        # step is the precursor), resolve that step's actual name — a CUSTOM
-        # precursor must not be silently replaced by the source default —
-        # matching _analysis_preset()/_ensure_modal_precursor().
-        modal_case = (
-            default_modal if "modal" in verbs else self._ensure_modal_precursor(default_modal)
-        )
+        # The modal precursor is resolved lazily, after the first *dependent*
+        # step is actually accepted — enabling/adding it upfront would mutate
+        # the recipe even when every dependent dialog is cancelled.  When the
+        # wizard itself adds the modal step, that step (named *default_modal*)
+        # is the precursor; otherwise an existing recipe modal step supplies the
+        # name (a CUSTOM precursor must not be silently replaced by the source
+        # default) — matching _analysis_preset()/_ensure_modal_precursor().
+        from dataclasses import replace
+
+        adds_modal = "modal" in verbs
+        modal_case: str = ""
+        accepted = 0
         for verb in verbs:
             if verb == "modal":
                 params = {"name": default_modal} if default_modal else {}
                 step = Step(verb=verb, params=params)
-            elif verb in ("nonlinear_dynamic", "ida"):
-                # These verbs need a ground-motion record (and the IDA ladder)
-                # before the step can run — collect them in a dialog, exactly as
-                # _analysis_preset() does, instead of adding a step that will
-                # fail validation for a missing ground_motion_file.
-                prefill = {"modal_case": modal_case} if modal_case else {}
-                step = StepDialog.edit(Step(verb=verb, params=prefill), self, store.raw())
-                if step is None:
-                    continue  # cancelled — skip this step
             else:
-                params = {"modal_case": modal_case} if modal_case else {}
-                step = Step(verb=verb, params=params)
+                if verb in ("nonlinear_dynamic", "ida"):
+                    # These verbs need a ground-motion record (and the IDA ladder)
+                    # before the step can run — collect them in a dialog, exactly as
+                    # _analysis_preset() does, instead of adding a step that will
+                    # fail validation for a missing ground_motion_file.
+                    prefill = {"modal_case": default_modal} if default_modal else {}
+                    step = StepDialog.edit(Step(verb=verb, params=prefill), self, store.raw())
+                    if step is None:
+                        continue  # cancelled — skip this step
+                else:
+                    params = {"modal_case": default_modal} if default_modal else {}
+                    step = Step(verb=verb, params=params)
+                # This dependent step is accepted: ensure its modal precursor now
+                # and realign an unchanged default prefill to the precursor that
+                # will actually run.
+                if not modal_case:
+                    modal_case = (
+                        default_modal if adds_modal else self._ensure_modal_precursor(default_modal)
+                    )
+                if modal_case and step.params.get("modal_case", "") == default_modal:
+                    step = replace(step, params={**step.params, "modal_case": modal_case})
             self._recipe_panel.add_step(
                 step.verb, step.selection, step.params, optional=step.optional
             )
+            accepted += 1
             self.log(f"command: {step_to_command(step)}")
+        if not accepted:
+            self.log("Analysis wizard: no steps were accepted.", "info")
+            return
         self._pending_label = "Analysis wizard"
         self._on_recipe_run()
 
