@@ -2511,6 +2511,38 @@ class DesignStrip:
 
 
 @dataclass
+class StoryDefinition:
+    """A storey parsed from ETABS's ``$ STORIES - IN SEQUENCE FROM TOP``.
+
+    The story table names each level, gives its absolute elevation (accumulated
+    bottom-up from ``HEIGHT``/``ELEV``) and, for multi-tower models, the tower
+    the level belongs to (``TOWER``).  ``MASTERSTORY`` / ``SIMILARTO`` record
+    the "similar stories" mirroring relationship.  SAP2000 and SAFE exports
+    carry no story table, so :attr:`SAPModelData.stories` is empty for them.
+
+    This is a parse-time fact, distinct from the detection-time
+    ``StoryLevel`` that :func:`fea_toolkit.model.stories.identify_stories`
+    derives from it.
+
+    Attributes:
+        name: The ETABS story label (e.g. ``"ROOF"``, ``"2F"``).
+        elevation: Absolute Z of the level in model length units.
+        tower: The tower this story belongs to, or ``None`` in a single-tower
+            model (``TOWER`` keyword).
+        is_master: ``MASTERSTORY "Yes"`` — other stories may be ``similar_to``
+            this one.
+        similar_to: The master story this story mirrors (``SIMILARTO``), or
+            ``None`` when it is not similar to another story.
+    """
+
+    name: str
+    elevation: float
+    tower: Optional[str] = None
+    is_master: bool = False
+    similar_to: Optional[str] = None
+
+
+@dataclass
 class SAPModelData:
     """Complete SAP2000 model data for export to OpenSees or Rhino."""
 
@@ -2534,6 +2566,12 @@ class SAPModelData:
     constraints: dict[str, Constraint] = field(default_factory=dict)
     # Joint constraint assignments: SAP joint ID -> constraint name.
     constraint_assignments: dict[str, str] = field(default_factory=dict)
+    # ETABS storey levels parsed from ``$ STORIES - IN SEQUENCE FROM TOP`` —
+    # name, absolute elevation, tower, and the master/similar flags.  ``[]``
+    # for SAP2000 / SAFE, which export no story table.  Read by
+    # :func:`fea_toolkit.model.stories.identify_stories` to preserve the
+    # imported story names.
+    stories: list[StoryDefinition] = field(default_factory=list)
     # Loads (to be expanded later)
     load_cases: dict[str, LoadCase] = field(default_factory=dict)
     load_patterns: dict[str, LoadPattern] = field(default_factory=dict)

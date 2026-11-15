@@ -83,6 +83,7 @@ from ..model.sap_data import (
     Section,
     ShellSection,
     ShellUniformLoadSet,
+    StoryDefinition,
     TeeSection,
     is_null_section,
     is_opening_section,
@@ -330,6 +331,16 @@ class ETABSParser:
         catalogues = self._section_db()
 
         stories, abs_elev = _compute_story_elevations(sections)
+        story_definitions = [
+            StoryDefinition(
+                name=name,
+                elevation=float(abs_elev[name]),
+                tower=attrs.get("TOWER"),
+                is_master=str(attrs.get("MASTERSTORY", "")).lower() == "yes",
+                similar_to=attrs.get("SIMILARTO"),
+            )
+            for name, attrs in stories
+        ]
         points = _get_points(sections)
         lines = _get_line_connectivity(sections)
         areas = _get_area_connectivity(sections)
@@ -441,6 +452,7 @@ class ETABSParser:
             restraints=restraints,
             constraints=constraints,
             constraint_assignments=constraint_assignments,
+            stories=story_definitions,
             materials=materials,
             sections=all_sections,
             frame_elements=frame_elements,
