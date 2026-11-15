@@ -1049,6 +1049,11 @@ class MainWindow(QMainWindow):
             lambda: QDesktopServices.openUrl(QUrl(_PROJECT_URL)),
             tip="Open the project repository on GitHub",
         )
+        a["help.copy_context"] = self._real_action(
+            "Copy model context\u2026",
+            self._on_copy_context,
+            tip="Copy a plain-text snapshot (model, selection, recipe, views) to the clipboard",
+        )
         a["help.about"] = self._real_action(f"About {APP_NAME}", self._on_about)
 
         # ── macOS application-menu roles ──
@@ -1439,6 +1444,7 @@ class MainWindow(QMainWindow):
         m.addAction(a["help.llm"])
         m.addSeparator()
         m.addAction(a["help.source"])
+        m.addAction(a["help.copy_context"])
         m.addSeparator()
         m.addAction(a["help.about"])
 
@@ -1738,6 +1744,7 @@ class MainWindow(QMainWindow):
 
         self._recipe_panel = RecipePanel(self)
         self._recipe_panel.changed.connect(self._set_recipe_actions_enabled)
+        self._recipe_panel.copied.connect(self.log)
         self._recipe_dock = QDockWidget("Recipe", self)
         self._recipe_dock.setObjectName("dock_recipe")
         self._recipe_dock.setWidget(self._recipe_panel)
@@ -5112,6 +5119,55 @@ class MainWindow(QMainWindow):
             page: A key in ``_DOC_PAGES`` naming the page to open.
         """
         QDesktopServices.openUrl(QUrl(_DOCS_URL + _DOC_PAGES[page]))
+
+    def _on_copy_context(self) -> None:
+        """**Help ▸ Copy model context…**: snapshot the session to the clipboard.
+
+        Assembles a paste-able plain-text summary — model provenance, unit
+        system, entity counts, the current selection, the recipe and the open
+        views — so a user can paste it into an LLM conversation or a bug report.
+        """
+        from ..io.model_store import model_header
+        from .controllers.context_snapshot import build_context_snapshot
+
+        model = self._model
+        source = self._source_label
+        units = ""
+        counts: dict = {}
+        if model is not None:
+            header = model_header(model)
+            units = header.units_label()
+            counts = {
+                "nodes": header.n_nodes,
+                "frames": header.n_frames,
+                "active frames": header.n_frames_active,
+                "areas": header.n_shells,
+                "materials": header.n_materials,
+                "sections": header.n_sections,
+            }
+
+        selection = ""
+        sel = self.current_selection()
+        if sel is not None:
+            selection = sel.to_string()
+
+        recipe_json = ""
+        recipe = self._recipe_panel.recipe
+        if len(recipe):
+            recipe_json = recipe.to_json()
+
+        views = [(view.name, view.kind) for view in self._views.views()]
+
+        snapshot = build_context_snapshot(
+            source=source,
+            units=units,
+            counts=counts,
+            selection=selection,
+            recipe_json=recipe_json,
+            views=views,
+        )
+        QGuiApplication.clipboard().setText(snapshot)
+        self.log(f"Copied model context ({len(snapshot)} characters) to the clipboard.")
 
     def _on_about(self) -> None:
         from .. import __version__ as version

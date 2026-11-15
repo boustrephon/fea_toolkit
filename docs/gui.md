@@ -574,7 +574,9 @@ of stopping.
 Right-click a step in the list and choose **Help** to open a read-only dialog for
 that step's verb: its `StepSpec.help`, every parameter's name / type / default /
 choices / help, and its `needs` prerequisite — all rendered from the Qt-free
-`STEP_SPECS`, so the dialog cannot drift from what the verb accepts.  The same
+`STEP_SPECS`, so the dialog cannot drift from what the verb accepts.  **Copy
+command** puts the step's command-string spelling (`mesh create_shells=true`) on
+the clipboard, and **Copy as Python** a one-step `RECIPE` literal.  The same
 **Configuration (optional)** group appears at the foot of the **Analysis ▸ Run static…**
 dialog.
 
@@ -621,6 +623,11 @@ must not enter the stiffness system at all.
 back, and **Export as Python…** writes it as a runnable script — so a workflow
 built by clicking can be kept, reviewed, diffed and re-run from a terminal.
 
+**Help ▸ Copy model context…** puts a plain-text snapshot of the session on the
+clipboard — model provenance, unit system, entity counts, the current selection,
+the recipe (as JSON) and the open views — sized to paste into an LLM
+conversation or a bug report.
+
 Design notes and the full verb reference:
 [`workflow_authoring.md`](workflow_authoring.md).
 
@@ -639,7 +646,7 @@ jarring than a greyed-out one.
 | **Analysis** | Run static… (`Ctrl+R`), Modal analysis, Response spectrum (*Linear*); Pushover, Nonlinear time-history…, IDA… (*Nonlinear*); Analysis wizard…, Stop | — |
 | **Recipe** | Run recipe (`Ctrl+Shift+R`), Open recipe…, Save recipe…, Export as Python…, Import script…, Command… (`Ctrl+K`), Clear recipe | — |
 | **Results** | Deformed shape (+ Deform %), Force diagrams (+ Force selector + Flags %), Shell results (+ Shell selector), Animate deformed shape, Clear results | Storey response, Pushover curve |
-| **Help** | Documentation, Modeling guidance, Benchmark register, LLM guide, Source repository, About | — |
+| **Help** | Documentation, Modeling guidance, Benchmark register, LLM guide, Source repository, Copy model context…, About | — |
 | Toolbars | Open; Save results; Run static / Stop; Mesh | Save results (until a result is shown), Export Tcl |
 | View toolbar | Zoom/camera; display toggles (nodes, beams, shells, restraints, force diagrams); **Show loads** + the **Load** source selector + **Loads %** + the **Area** style selector + **Colour area loads**; Deformed shape + Deform %; Force diagrams + Force selector + Flags %; **Shells** opacity and **Shrink** | Show labels |
 

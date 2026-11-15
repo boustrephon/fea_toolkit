@@ -13,10 +13,11 @@ so an edit *replaces* the step in the recipe rather than mutating in place; the
 recipe object is the single source of truth.
 """
 
+from pprint import pformat
 from typing import Any, Optional
 
 from qtpy.QtCore import Qt, Signal
-from qtpy.QtGui import QBrush, QColor
+from qtpy.QtGui import QBrush, QColor, QGuiApplication
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -33,7 +34,7 @@ from qtpy.QtWidgets import (
 )
 
 from ...model.selection import Selection
-from ...workflow import STEP_SPECS, Recipe, Step
+from ...workflow import STEP_SPECS, Recipe, Step, step_to_command
 from .step_dialog import StepDialog
 from .verb_help_dialog import VerbHelpDialog
 
@@ -59,6 +60,9 @@ class RecipePanel(QWidget):
 
     #: Emitted whenever the recipe's steps or their parameters change.
     changed = Signal()
+
+    #: Emitted with a human summary after something is copied to the clipboard.
+    copied = Signal(str)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -392,7 +396,7 @@ class RecipePanel(QWidget):
     # ── Help ─────────────────────────────────────────────────────────
 
     def _on_step_context_menu(self, pos) -> None:
-        """Right-click a step: offer per-verb help for the step under the cursor."""
+        """Right-click a step: per-verb help, or copy it as a command / Python."""
         item = self._table.itemAt(pos)
         if item is None:
             return
@@ -403,9 +407,33 @@ class RecipePanel(QWidget):
         self._selected = index
         menu = QMenu(self._table)
         help_action = menu.addAction("Help\u2026")
+        menu.addSeparator()
+        copy_command = menu.addAction("Copy command")
+        copy_python = menu.addAction("Copy as Python")
         chosen = menu.exec(self._table.viewport().mapToGlobal(pos))
         if chosen is help_action:
             self._show_verb_help(index)
+        elif chosen is copy_command:
+            self._copy_step_command(index)
+        elif chosen is copy_python:
+            self._copy_step_python(index)
+
+    def _copy_step_command(self, index: int) -> None:
+        """Copy the step's command-string spelling to the clipboard."""
+        step = self._recipe.steps[index]
+        command = step_to_command(step)
+        QGuiApplication.clipboard().setText(command)
+        self.copied.emit(f"Copied step command: {command}")
+
+    def _copy_step_python(self, index: int) -> None:
+        """Copy the step as a Python ``RECIPE`` literal to the clipboard."""
+        step = self._recipe.steps[index]
+        snippet = (
+            "from fea_toolkit.workflow import Recipe\n\n"
+            f"RECIPE = {pformat(Recipe(steps=[step]).to_dict(), width=88, sort_dicts=False)}\n"
+        )
+        QGuiApplication.clipboard().setText(snippet)
+        self.copied.emit("Copied the step as a Python RECIPE literal.")
 
     def _show_verb_help(self, index: int) -> None:
         """Open the read-only help dialog for the step's verb."""
