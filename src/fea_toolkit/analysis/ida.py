@@ -472,9 +472,16 @@ def run_ida(
         _note(im, ok, drift, data)
         drifts.append(drift)
         converged.append(ok)
-        # A rung whose recorded histories cannot span two levels makes the whole
-        # run's drift measure "unavailable" — the recording restriction is fixed
-        # across rungs, so a single such report applies to the whole ladder.
+        # A rung whose recorded histories cannot span two levels degrades the
+        # whole run's drift measure to "unavailable".  Two causes map here, and
+        # only the first is fixed across rungs:
+        #   * the recording restriction (``transient_record_node_tags``) omits
+        #     the nodes at some level — fixed for every rung; and
+        #   * a rung that fails to converge at its first step records
+        #     zero-length histories, so no level is usable — per-rung.
+        # Because the second cause can first appear in a ladder-extension or
+        # bisection rung, the check is repeated in those loops too rather than
+        # done once up front.
         if measure == "unavailable":
             drift_measure = "unavailable"
 
