@@ -41,7 +41,7 @@ from qtpy.QtWidgets import (
 )
 
 from .app import APP_NAME
-from .controllers.interaction import default_config_path
+from .controllers.interaction import default_config_path, marquee_mode
 from .controllers.marquee import (
     point_in_rect,
     polygon_hits_rect,
@@ -72,8 +72,8 @@ _DOC_PAGES = {
     "llm": "llm_guide/",
 }
 _CURSOR_POLL_MS = 60
-_SELECT_COLOR = (1.0, 0.45, 0.0)  # selected frame / area element
-_SELECT_NODE_COLOR = (0.15, 0.55, 1.0)  # selected node
+_SELECT_COLOR = (1.0, 1.0, 0.0)  # selected frame / area element — translucent yellow
+_SELECT_NODE_COLOR = (1.0, 1.0, 0.0)  # selected node — the same yellow cue
 
 #: Model-tree group key -> render category, the reverse of
 #: ``controllers.selection.CATEGORY_GROUPS`` (which maps render category ->
@@ -335,7 +335,13 @@ class MainWindow(QMainWindow):
             self.log(note, "warn")
         self._log_opensees_runtime()
         button = "Left-click" if self._policy.pick_button == "left" else "Right-click"
-        self.log(f"Ready.  {button} an element to select it; drag to orbit.")
+        marquee = self._policy.marquee_modifier.capitalize()
+        add = self._policy.marquee_add_modifier.capitalize()
+        remove = self._policy.marquee_remove_modifier.capitalize()
+        self.log(
+            f"Ready.  {button} an element to select it; drag to orbit.  "
+            f"{marquee}+drag marquee-selects ({add}: add, {remove}: remove)."
+        )
 
         if model is not None:
             self._remember_source(model)
@@ -497,15 +503,18 @@ class MainWindow(QMainWindow):
 
     # ── Multi-selection (viewport -> tree -> Selection) ───────────────
 
-    def _on_marquee(self, start: tuple, end: tuple) -> None:
+    def _on_marquee(self, start: tuple, end: tuple, modifiers: tuple = ()) -> None:
         """Rubber-band select what the drag rectangle encloses or touches.
 
         A left-to-right drag is a *window* marquee (only fully-enclosed entities);
         a right-to-left drag is a *crossing* marquee (whatever the box touches).
+        The modifiers held alongside the marquee decide replace / union /
+        difference (see :func:`fea_toolkit.gui.controllers.interaction.marquee_mode`).
 
         Args:
             start, end: Rectangle corners in VTK *device* pixels (bottom-left
                 origin), the drag's anchor and release.
+            modifiers: Canonical modifier names held at the press.
         """
         if self._viewer is None or self._selection_index is None:
             return
@@ -515,10 +524,23 @@ class MainWindow(QMainWindow):
             return  # a click-sized box is a pick, not a marquee
         window = x1 >= x0  # left-to-right -> window, right-to-left -> crossing
         frames, areas, nodes = self._marquee_entities(x0, y0, x1, y1, window)
+
+        mode = marquee_mode(self._policy, modifiers)
+        if mode in ("union", "difference"):
+            current_frames, current_areas, current_nodes = self._selected_entities()
+            if mode == "union":
+                frames = current_frames | frames
+                areas = current_areas | areas
+                nodes = current_nodes | nodes
+            else:
+                frames = current_frames - frames
+                areas = current_areas - areas
+                nodes = current_nodes - nodes
         self._select_many(frames, areas, nodes)
         total = len(frames) + len(areas) + len(nodes)
         kind = "window" if window else "crossing"
-        self.log(f"Marquee ({kind}) selected {total} entit{'y' if total == 1 else 'ies'}.")
+        verb = {"replace": "selected", "union": "added", "difference": "removed"}[mode]
+        self.log(f"Marquee ({kind}) {verb} {total} entit{'y' if total == 1 else 'ies'}.")
 
     def _marquee_entities(self, x0: float, y0: float, x1: float, y1: float, window: bool) -> tuple:
         """``(frame_ids, area_ids, node_ids)`` sets inside the drag rectangle.

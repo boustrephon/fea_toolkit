@@ -85,7 +85,7 @@ class ViewportInteraction:
         policy: InteractionPolicy,
         on_pick: Callable[[PickResult], None],
         node_actors: Optional[Callable[[], list]] = None,
-        on_marquee: Optional[Callable[[tuple, tuple], None]] = None,
+        on_marquee: Optional[Callable[[tuple, tuple, tuple], None]] = None,
     ) -> None:
         self._plotter = plotter
         self._policy = policy
@@ -175,7 +175,7 @@ class ViewportInteraction:
             and self._gesture.marquee_wanted
             and self._marquee_start is not None
         ):
-            self._on_marquee(self._marquee_start, device_xy)
+            self._on_marquee(self._marquee_start, device_xy, self._gesture.modifiers)
 
     def cancel_gesture(self) -> None:
         """Forget any in-flight gesture (after a model or policy change)."""

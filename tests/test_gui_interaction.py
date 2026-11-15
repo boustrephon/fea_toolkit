@@ -231,12 +231,49 @@ def test_a_drag_with_the_marquee_modifier_requests_a_marquee():
         None,
         policy=_gesture().policy,
         on_pick=lambda result: None,
-        on_marquee=lambda start, end: marquees.append((start, end)),
+        on_marquee=lambda start, end, mods: marquees.append((start, end)),
     )
     interaction.begin_gesture((0.0, 0.0), ("alt",), (10.0, 20.0))
     interaction.update_gesture((100.0, 100.0))
     interaction.end_gesture((100.0, 100.0), (110.0, 120.0))
     assert marquees == [((10.0, 20.0), (110.0, 120.0))]
+
+
+def test_a_marquee_forwards_its_modifiers():
+    from fea_toolkit.gui.views.interactor import ViewportInteraction
+
+    seen = []
+    interaction = ViewportInteraction(
+        None,
+        policy=_gesture().policy,
+        on_pick=lambda result: None,
+        on_marquee=lambda start, end, mods: seen.append(mods),
+    )
+    interaction.begin_gesture((0.0, 0.0), ("alt", "shift"), (10.0, 20.0))
+    interaction.update_gesture((100.0, 100.0))
+    interaction.end_gesture((100.0, 100.0), (110.0, 120.0))
+    assert seen == [("alt", "shift")]
+
+
+def test_marquee_mode_defaults():
+    from fea_toolkit.gui.controllers.interaction import InteractionPolicy, marquee_mode
+
+    policy = InteractionPolicy(preset="click_drag")
+    assert marquee_mode(policy, ()) == "replace"
+    assert marquee_mode(policy, ("alt",)) == "replace"
+    assert marquee_mode(policy, ("alt", "shift")) == "union"
+    assert marquee_mode(policy, ("alt", "control")) == "difference"
+    assert marquee_mode(policy, ("alt", "meta")) == "difference"  # macOS ⌘ alias
+
+
+def test_marquee_mode_honours_custom_modifiers():
+    from fea_toolkit.gui.controllers.interaction import InteractionPolicy, marquee_mode
+
+    policy = InteractionPolicy(
+        preset="click_drag", marquee_add_modifier="control", marquee_remove_modifier="shift"
+    )
+    assert marquee_mode(policy, ("alt", "control")) == "union"
+    assert marquee_mode(policy, ("alt", "shift")) == "difference"
 
 
 def test_a_plain_drag_does_not_marquee():

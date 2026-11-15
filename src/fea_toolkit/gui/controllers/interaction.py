@@ -42,6 +42,7 @@ __all__ = [
     "InteractionPolicy",
     "default_config_path",
     "load_policy",
+    "marquee_mode",
     "resolve_policy",
 ]
 
@@ -84,6 +85,12 @@ class InteractionPolicy:
         toggle_modifier: Modifier key held to *toggle* a pick (``"control"``).
         marquee_modifier: Modifier key that turns a drag into a rubber-band
             selection (``"alt"``).  Only consulted when ``select_mode`` is off.
+        marquee_add_modifier: Modifier held **with** the marquee modifier to
+            *union* the rubber-band set with the current selection
+            (``"shift"``) — the marquee counterpart of ``add_modifier``.
+        marquee_remove_modifier: Modifier held **with** the marquee modifier to
+            *subtract* the rubber-band set from the current selection
+            (``"control"``).  A marquee with neither is a replace.
         select_mode: When ``True`` (the explicit Select / Orbit arrangement), a
             plain drag is a rubber-band selection and orbiting is disabled; when
             ``False`` (modeless modifiers), a drag orbits unless the marquee
@@ -99,6 +106,8 @@ class InteractionPolicy:
     add_modifier: str = "shift"
     toggle_modifier: str = "control"
     marquee_modifier: str = "alt"
+    marquee_add_modifier: str = "shift"
+    marquee_remove_modifier: str = "control"
     select_mode: bool = False
 
     def __post_init__(self) -> None:
@@ -112,7 +121,13 @@ class InteractionPolicy:
             raise ValueError(
                 f"node_snap_tolerance must not be negative: {self.node_snap_tolerance}"
             )
-        for name in ("add_modifier", "toggle_modifier", "marquee_modifier"):
+        for name in (
+            "add_modifier",
+            "toggle_modifier",
+            "marquee_modifier",
+            "marquee_add_modifier",
+            "marquee_remove_modifier",
+        ):
             modifier = getattr(self, name)
             if modifier not in _MODIFIERS:
                 raise ValueError(f"{name} must be one of {_MODIFIERS}, got {modifier!r}")
@@ -226,6 +241,22 @@ class ClickGesture:
         dx = float(second[0]) - first[0]
         dy = float(second[1]) - first[1]
         return float((dx * dx + dy * dy) ** 0.5)
+
+
+def marquee_mode(policy: InteractionPolicy, modifiers: tuple) -> str:
+    """``"replace"``, ``"union"`` or ``"difference"`` — what a marquee drag does.
+
+    A marquee that carries the policy's ``marquee_remove_modifier`` (with
+    ``meta`` accepted as an alias for ``control``, so ⌘ works on macOS) is a
+    difference; one carrying ``marquee_add_modifier`` is a union; otherwise it
+    replaces the selection.
+    """
+    remove = policy.marquee_remove_modifier
+    if remove in modifiers or (remove == "control" and "meta" in modifiers):
+        return "difference"
+    if policy.marquee_add_modifier in modifiers:
+        return "union"
+    return "replace"
 
 
 def resolve_policy(config: Optional[dict] = None) -> "tuple[InteractionPolicy, list[str]]":
