@@ -69,6 +69,29 @@ def test_palette_hints_a_missing_precursor(qapp):
     assert "needs geometry" in dialog._hint.text()
 
 
+def test_palette_refuses_acceptance_when_a_precursor_is_missing(qapp):
+    """Enter cannot accept a command whose precursor is unsatisfied."""
+    from fea_toolkit.gui.views.command_palette import _PaletteDialog
+
+    dialog = _PaletteDialog(None, [], initial=())
+    dialog._edit.setText('run_static cases={"DEAD": {"DEAD": 1.0}}')
+    dialog._on_accept()
+    assert dialog.step() is None  # not accepted — geometry is missing
+    assert "needs geometry" in dialog._hint.text()
+
+
+def test_palette_accepts_when_precursors_are_satisfied(qapp):
+    """A command whose precursor is present is still accepted."""
+    from fea_toolkit.gui.views.command_palette import _PaletteDialog
+
+    dialog = _PaletteDialog(None, [], initial={"geometry"})
+    dialog._edit.setText('run_static cases={"DEAD": {"DEAD": 1.0}}')
+    dialog._on_accept()
+    step = dialog.step()
+    assert step is not None
+    assert step.verb == "run_static"
+
+
 def test_palette_reports_an_invalid_command(qapp):
     from fea_toolkit.gui.views.command_palette import _PaletteDialog
 

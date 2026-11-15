@@ -501,6 +501,76 @@ def test_write_read_roundtrip(tmp_path):
     assert bundle["figures"]["figure:pushover-plusx-uniform"]["adrs"]["S_a"] == [0.0, 1.0]
 
 
+def test_ida_transient_history_survives_a_bundle_round_trip(tmp_path):
+    """The retained collapse-rung transient survives save → reload, not just the curve."""
+    from fea_toolkit.io.npz_writer import (
+        _merge_ida_transient,
+        collect_ida_transient_arrays,
+        collect_single_ida_arrays,
+    )
+
+    ida = {
+        "record": "record.txt",
+        "intensities": [0.5, 1.0],
+        "drifts": [0.01, 0.12],
+        "converged": [True, True],
+        "collapse_intensity": 1.0,
+        "collapse_criterion": "drift",
+        "collapse_drift": 0.1,
+        "Sa_T1_g": 2.0,
+        "sa_method": "sdof_newmark",
+        "drift_measure": "interstorey_d_max",
+        "transient_scale": 1.0,
+        "transient": {
+            "times": np.array([0.0, 0.005]),
+            "base_shear": np.array([0.0, 1.0]),
+            "direction": "X",
+            "converged_steps": 2,
+            "displacements": {1: np.zeros((2, 3)), 2: np.ones((2, 3))},
+        },
+    }
+
+    arrays = collect_single_ida_arrays(ida)
+    arrays["analysis_types"] = np.array(["ida"], dtype=str)
+    ida_transient = collect_ida_transient_arrays(ida)
+    assert ida_transient, "the IDA transient must be collected"
+    _merge_ida_transient(arrays, ida_transient)
+    arrays["analysis_types"] = np.array(["ida", "transient"], dtype=str)
+
+    manifest = build_manifest(
+        name="IDA",
+        source_label="record.s2k",
+        model_file="model.npz",
+        units={"F": "N"},
+        recipe=None,
+        views=[],
+        active_view=None,
+        camera=None,
+        hidden_elem_ids=[],
+        display={},
+    )
+    notes = write_project(
+        tmp_path / "ida.fea",
+        manifest=manifest,
+        sap=None,
+        mesh=None,
+        results_arrays=arrays,
+        figures=ida_figure_payload(ida),
+        tables={},
+        model_fmt="npz",
+    )
+    assert notes == []
+
+    bundle = read_project(tmp_path / "ida.fea")
+    raw = bundle["results"].raw()
+    # The transient block survives, including the scale that produced it.
+    assert "transient/ida_record/node_disp_x" in raw
+    assert float(raw["transient/ida_record/transient_scale"]) == 1.0
+    # ``collapse_scale`` is the reported collapse intensity — distinct from the
+    # scale that produced the retained history.
+    assert float(raw["ida/record/collapse_scale"]) == 1.0
+
+
 def test_zip_project_roundtrip(tmp_path):
     _write_small_project(tmp_path)
     directory = tmp_path / "Admin.fea"

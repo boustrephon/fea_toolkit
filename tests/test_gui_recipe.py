@@ -476,6 +476,42 @@ class TestResultViews:
         window._on_animate_toggled(False)
         assert not window._anim_timer.isActive()
 
+    def test_switching_views_stops_the_animation(self, window):
+        """Switching to a different view stops a running animation and clears the toggle."""
+        import numpy as np
+
+        from fea_toolkit.analysis.base import AnalysisResult
+
+        node_ids = list(window._model.nodes)
+        node_tags = [window._model.nodes[nid].node_tag for nid in node_ids]
+        n_steps = 5
+        history = {
+            tag: np.column_stack((np.full(n_steps, 0.001), np.zeros(n_steps), np.zeros(n_steps)))
+            for tag in node_tags
+        }
+        payload = AnalysisResult(
+            name="NonlinearDynamic",
+            analysis_type="NonlinearDynamicAnalysis",
+            data={
+                "times": np.arange(n_steps) * 0.005,
+                "displacements": history,
+                "converged_steps": n_steps,
+                "direction": "X",
+                "gm_file": "record.txt",
+            },
+        )
+        window._show_nonlinear_dynamic_result("Nonlinear dynamic", payload)
+
+        window._on_animate_toggled(True)
+        assert window._anim_timer is not None and window._anim_timer.isActive()
+
+        # Switch to the unprocessed geometry view — the animation must stop and
+        # the toggle must clear rather than keep drawing the old view's history.
+        window._show_view(window._views.get("unprocessed"))
+
+        assert not window._anim_timer.isActive()
+        assert window._actions["results.animate"].isChecked() is False
+
 
 class TestTableAndFigureViews:
     """P30 phase C: a check's table and a chart's figure reach the viewport."""
@@ -557,6 +593,28 @@ class TestTableAndFigureViews:
         window._show_figure_result("Alpha", fig_a)
         assert window._figure_canvases["figure:alpha"] is canvas_a
         assert window._figure_layout.count() == 1
+
+    def test_replacing_a_figure_refreshes_its_canvas(self, window):
+        """Re-running a figure under an existing key invalidates the cached canvas.
+
+        The canvas caches the *figure object* it was built around; a rerun that
+        registers a new figure under the same key must draw the new figure, not
+        the stale cached one.
+        """
+        from matplotlib.figure import Figure
+
+        fig_a = Figure()
+        fig_a.gca().plot([0.0, 1.0], [0.0, 1.0])
+        window._show_figure_result("Alpha", fig_a)
+        canvas_a = window._figure_canvases["figure:alpha"]
+
+        fig_b = Figure()
+        fig_b.gca().plot([0.0, 1.0], [1.0, 0.0])
+        window._show_figure_result("Alpha", fig_b)
+
+        canvas_b = window._figure_canvases["figure:alpha"]
+        assert canvas_b is not canvas_a
+        assert getattr(canvas_b, "figure", None) is fig_b
 
     def test_a_pushover_result_registers_a_shape_view_per_direction(self, window):
         """Pushover directions become deformed-shape views nested under the first figure."""

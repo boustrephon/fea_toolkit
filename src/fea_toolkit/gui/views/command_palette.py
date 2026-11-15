@@ -81,10 +81,21 @@ class _PaletteDialog(QDialog):
     def _on_accept(self) -> None:
         text = self._edit.text().strip()
         try:
-            self._step = compile_command(text)
+            step = compile_command(text)
         except ValueError as exc:
             self._hint.setText(str(exc))
             return
+        # Enter must not accept a command whose precursor is still missing; the
+        # hint already names it, so refuse acceptance and let the user insert the
+        # precursor step first.  ``self._step`` is only set once the command is
+        # actually accepted, so :meth:`step` stays ``None`` on refusal.
+        missing = missing_needs(step.verb, self._produced)
+        if missing:
+            self._hint.setText(
+                f"needs {', '.join(missing)} \u2014 run a step that produces it first"
+            )
+            return
+        self._step = step
         self.accept()
 
     def step(self) -> Any:

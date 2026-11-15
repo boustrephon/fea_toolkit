@@ -69,6 +69,7 @@ def test_name_selection_uses_the_viewport_pick_when_chosen(window, monkeypatch):
 
     assert "core" in window._named_selections
     named = window._named_selections["core"]
-    assert named.element_ids == [frames[0].elem_id]
+    # The pick's element type qualifies the id so a same-id area cannot collide.
+    assert named.element_ids == [f"Frame:{frames[0].elem_id}"]
     assert named.node_ids == []
     assert named.selection.to_string() == ""  # a pick carries ids, not criteria

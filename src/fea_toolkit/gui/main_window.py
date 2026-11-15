@@ -1949,7 +1949,14 @@ class MainWindow(QMainWindow):
                 current index, so it is skipped for a plain switch — otherwise Qt
                 reports an empty selection and the Inspector is cleared again.
         """
+        previous = self._views.active
         self._views.set_active(view.key)
+        if previous is not None and previous.key != view.key:
+            # A view switch invalidates the animation that was drawing the old
+            # view's history: stop the timer and clear the toggle so animation
+            # can only restart from the newly active view's data.
+            self._stop_animation()
+            self._set_toggle_checked("results.animate", False)
         if view.kind in (GEOMETRY, RESULTS):
             # A node-scoped lens ignores the hidden-element exclusions, so the
             # hidden elements stay visible until a non-node-scoped view is shown.
@@ -2054,7 +2061,7 @@ class MainWindow(QMainWindow):
                 widget.hide()
 
         canvas = self._figure_canvases.get(view.key)
-        if canvas is None:
+        if canvas is None or getattr(canvas, "figure", None) is not figure:
             from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
             canvas = FigureCanvasQTAgg(figure)
@@ -2392,6 +2399,18 @@ class MainWindow(QMainWindow):
         )
         return _NldStepHistory(arrays), time_labels
 
+    def _ensure_analysis_mesh_displayed(self) -> None:
+        """Render the analysis mesh when a different model is currently shown.
+
+        A nonlinear-dynamic / pushover history is re-keyed by the analysis mesh's
+        node ids (via :meth:`_analysis_tag_map`), so animating it must draw the
+        overlay onto the mesh the run produced — not a previously displayed
+        unprocessed or external-results model whose node ids differ.
+        """
+        mesh = self._store.preprocessed() if self._store is not None else None
+        if mesh is not None and self._model is not mesh:
+            self.show_model(mesh, reset_view=False, rebuild_tree=False)
+
     def _on_animate_toggled(self, checked: bool) -> None:
         """**Results ▸ Animate deformed shape**: animate the active shape.
 
@@ -2431,8 +2450,11 @@ class MainWindow(QMainWindow):
             self._anim_frame_index = 0
             self._anim_times = times
             # A nonlinear-dynamic result is a table view, so bring the viewport
-            # forward before the history is drawn into it.
+            # forward before the history is drawn into it — and make sure the
+            # analysis mesh (which the history is keyed to) is what is drawn, not
+            # a previously displayed unprocessed / external-results model.
             self._stack.setCurrentWidget(self._viewport_container)
+            self._ensure_analysis_mesh_displayed()
             # Base the scale on the peak frame, not the last one, so a decaying
             # history whose peak is mid-record is never amplified by its
             # near-zero final frame.
@@ -2974,9 +2996,17 @@ class MainWindow(QMainWindow):
                 "instead of an expression?",
             )
             if use_pick == QMessageBox.StandardButton.Yes:
+                element_ids = list(pick.element_ids or [])
+                # A bare picked id collides across element types (a frame and an
+                # area can both be labelled "1"), so qualify the ids with the
+                # pick's single element type when it has one — the saved selection
+                # then resolves the same members the graphical pick showed.
+                types = list(pick.element_types or [])
+                if types in (["Frame"], ["Area"]):
+                    element_ids = [f"{types[0]}:{eid}" for eid in element_ids]
                 named = NamedSelection(
                     name=name,
-                    element_ids=list(pick.element_ids or []),
+                    element_ids=element_ids,
                     node_ids=list(pick.node_ids or []),
                 )
                 self._named_selections[name] = named
@@ -4330,13 +4360,18 @@ class MainWindow(QMainWindow):
     # ── Project bundle (File ▸ Save/Open project) ────────────────────
 
     def _project_results_arrays(self, collected: dict) -> dict:
-        """Merge the collected static archive arrays with modal + RS + pushover.
+        """Merge the collected static archive arrays with modal + RS + pushover
+        + IDA.
 
         RS displacement fields, modal mode shapes and pushover directions are
         persisted as static-shaped cases (``static/RS-<direction>/node_*``,
         ``static/Mode-<i>/node_*``, ``static/Pushover-<direction>/node_*``) so
         each deformed-shape view round-trips like a static load case (Option C).
         The pushover per-step history is persisted as ``pushover/<direction>/…``.
+        A single-record IDA contributes its scalar ladder / collapse provenance
+        (``ida/<record>/…``) plus the retained collapse-rung transient block
+        (``transient/ida_<record>/…``), so the IDA view and its history rebuild
+        on load without re-running the analysis.
         """
         from ..io.npz_writer import collect_pushover_arrays
         from ..io.unified_writer import (
@@ -4412,6 +4447,25 @@ class MainWindow(QMainWindow):
                     self._append_static_case_labels(arrays, po_arrays.pop("static_case_labels"))
                     arrays.update(po_arrays)
                 self._append_analysis_type(arrays, "pushover")
+
+        # ── IDA (single-record run) + its retained transient history ──
+        # The numerical ladder / collapse scalars and the collapse-rung transient
+        # block are persisted alongside the regenerable curve, so a reload can
+        # rebuild the IDA view and its history without re-running the analysis.
+        ida = collected.get("ida")
+        if ida:
+            from ..io.npz_writer import (
+                _merge_ida_transient,
+                collect_ida_transient_arrays,
+                collect_single_ida_arrays,
+            )
+
+            arrays.update(collect_single_ida_arrays(ida))
+            self._append_analysis_type(arrays, "ida")
+            ida_transient = collect_ida_transient_arrays(ida)
+            if ida_transient:
+                _merge_ida_transient(arrays, ida_transient)
+                self._append_analysis_type(arrays, "transient")
         return arrays
 
     def _append_analysis_type(self, arrays: dict, name: str) -> None:
@@ -4437,6 +4491,19 @@ class MainWindow(QMainWindow):
             )
         else:
             arrays["static_case_labels"] = labels
+
+    def _ida_result_label(self) -> str:
+        """The label the registered IDA figure used — the run's IDA result label.
+
+        The figure view and the saved ``figures.json`` payload must derive the
+        same key, so the label is read back from the completed run's IDA step
+        (``name`` parameter) rather than re-defaulting to ``"IDA"``.
+        """
+        if self._last_run is not None:
+            for result in self._last_run.results:
+                if getattr(result, "kind", None) == "ida":
+                    return getattr(result, "label", "IDA") or "IDA"
+        return "IDA"
 
     def _project_tables(self) -> dict:
         """Collect ``{key: Table}`` from every table view in the registry."""
@@ -4507,7 +4574,9 @@ class MainWindow(QMainWindow):
 
         figures = project_mod.figures_payload(collected["pushover"])
         if collected.get("ida"):
-            figures.update(project_mod.ida_figure_payload(collected["ida"]))
+            figures.update(
+                project_mod.ida_figure_payload(collected["ida"], label=self._ida_result_label())
+            )
         tables = project_mod.tables_payload(self._project_tables())
         active = self._views.active
         active_key = active.key if active is not None else None
