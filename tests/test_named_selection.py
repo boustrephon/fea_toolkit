@@ -97,6 +97,103 @@ def test_resolve_named_selections_expands_exclude_references():
     assert resolved.element_types == ["Frame"]
 
 
+def test_named_selection_round_trips_an_empty_criterion_list():
+    """An empty criterion list stays distinct from None (it means "no match").
+
+    ``Selection.to_string()`` omits empty lists, so serialising through it would
+    turn ``element_types=[]`` (match nothing) into ``element_types=None`` (match
+    everything).  The field-payload form must keep the two apart.
+    """
+    ns = NamedSelection(
+        name="core",
+        selection=Selection(element_types=[], sections=["COL"]),
+    )
+    again = NamedSelection.from_dict(ns.to_dict())
+    assert again.selection.element_types == []
+    assert again.selection.sections == ["COL"]
+    # The empty ``element_types`` criterion still means "no match" after reload.
+    assert again.selection.get_frame_ids(make_sample_model()) == []
+    assert again.selection.get_area_ids(make_sample_model()) == []
+
+
+def test_a_node_only_selection_stays_valid_with_an_element_only_exclusion():
+    """A node-only selection whose excluded selection has only element ids stays valid.
+
+    ``exclude_element_ids`` names frames/areas only, so merging element ids into a
+    node-scoped selection would violate its validation invariant (element ids
+    without node ids).  The resolver drops the element-only exclusion and leaves
+    the node selection unchanged.
+    """
+    model = make_sample_model()
+    store = {
+        "core": NamedSelection(name="core", selection=Selection(sections=["UB300"])),
+    }
+    resolved = resolve_named_selections(
+        Selection(element_types=["Node"], exclude_selections=["core"]), store, model
+    )
+    assert resolved.exclude_selections is None
+    assert resolved.element_types == ["Node"]
+    assert resolved.exclude_element_ids is None
+    assert resolved.exclude_node_ids is None
+
+
+def test_a_story_scoped_named_selection_resolves_against_storey_elevations(monkeypatch):
+    """A named selection carrying a ``story`` criterion keeps its story scope."""
+    import fea_toolkit.model.stories as stories_mod
+
+    model = make_sample_model()
+    # The sample model's single frame spans z=0..10 (mid-height 5.0); pin the
+    # storey detection so a level at 5.0 matches it, then resolve a named
+    # selection scoped to that story.
+    monkeypatch.setattr(
+        stories_mod,
+        "identify_stories",
+        lambda md: [type("Story", (), {"name": "Level5", "elevation": 5.0})()],
+    )
+    store = {
+        "core": NamedSelection(name="core", selection=Selection(story=["Level5"])),
+    }
+    resolved = resolve_named_selections(
+        Selection(selections=["core"], element_types=["Frame"]), store, model
+    )
+    assert resolved.selections is None
+    assert "Frame:1" in resolved.element_ids  # the story-matched frame, type-qualified
+
+
+def test_a_type_qualified_pick_resolves_only_that_type():
+    """A picked frame '1' resolves the frame, not a same-id area."""
+    from fea_toolkit.model.sap_data import AreaElement
+
+    model = make_sample_model()
+    # An area that shares the frame's label "1" (the collision finding 6 guards).
+    model.area_elements["1"] = AreaElement("1", 1, ["1", "2"])
+    model.area_assignments["1"] = "UB300"
+
+    store = {"core": NamedSelection(name="core", element_ids=["Frame:1"])}
+    resolved = resolve_named_selections(
+        Selection(selections=["core"], element_types=["Frame", "Area"]), store, model
+    )
+    assert resolved.element_ids == ["Frame:1"]
+    assert resolved.get_frame_ids(model) == ["1"]
+    assert resolved.get_area_ids(model) == []
+
+
+def test_an_empty_expression_does_not_broaden_explicit_picks():
+    """A named selection with only explicit picks and an empty criterion resolves
+    to just the picks — the empty expression must not broaden to the whole model."""
+    from fea_toolkit.model.sap_data import FrameElement
+
+    model = make_sample_model()
+    model.frame_elements["2"] = FrameElement("2", 2, "1", "2")
+
+    # The ``select`` verb stores an empty Selection with explicit picks.
+    store = {"core": NamedSelection(name="core", selection=Selection(), element_ids=["1"])}
+    resolved = resolve_named_selections(Selection(selections=["core"]), store, model)
+    assert resolved.element_ids == ["1"]
+    # The empty expression must not have pulled in frame "2" (or the whole model).
+    assert resolved.get_frame_ids(model) == ["1"]
+
+
 def test_a_recipe_step_referencing_a_named_selection_expands_it():
     """A ``scale_sections`` step expands its ``selection=core`` reference at run time."""
     from fea_toolkit.workflow import Recipe, Step, run_recipe

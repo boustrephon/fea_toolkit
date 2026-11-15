@@ -957,31 +957,53 @@ class Selection:
 
     # ── Public query methods ─────────────────────────────────────────────────
 
-    def get_frame_ids(self, model: Union["SAPModelData", "MeshModel"]) -> list[str]:
+    def get_frame_ids(
+        self,
+        model: Union["SAPModelData", "MeshModel"],
+        story_elevations: Optional[dict[str, float]] = None,
+        story_z_tolerance: float = 0.5,
+    ) -> list[str]:
         """Return frame element IDs matching this selection.
 
         Both :class:`SAPModelData` and :class:`MeshModel` expose the same
-        ``frame_elements`` mapping, so the same lookup serves both.
+        ``frame_elements`` mapping, so the same lookup serves both.  When
+        *story_elevations* (``{story name: elevation}``) is supplied, the
+        :attr:`story` / :attr:`exclude_story` filters are also applied.
 
         Raises:
             ValueError: If :attr:`selections` / :attr:`exclude_selections` are
                 still set (unresolved named-selection references).
         """
         self._require_resolved()
-        return [eid for eid in model.frame_elements if self._frame_matches(model, eid)]
+        return [
+            eid
+            for eid in model.frame_elements
+            if self._frame_matches(model, eid, story_elevations, story_z_tolerance)
+        ]
 
-    def get_area_ids(self, model: Union["SAPModelData", "MeshModel"]) -> list[str]:
+    def get_area_ids(
+        self,
+        model: Union["SAPModelData", "MeshModel"],
+        story_elevations: Optional[dict[str, float]] = None,
+        story_z_tolerance: float = 0.5,
+    ) -> list[str]:
         """Return area element IDs matching this selection.
 
         Both :class:`SAPModelData` and :class:`MeshModel` expose the same
-        ``area_elements`` mapping, so the same lookup serves both.
+        ``area_elements`` mapping, so the same lookup serves both.  When
+        *story_elevations* (``{story name: elevation}``) is supplied, the
+        :attr:`story` / :attr:`exclude_story` filters are also applied.
 
         Raises:
             ValueError: If :attr:`selections` / :attr:`exclude_selections` are
                 still set (unresolved named-selection references).
         """
         self._require_resolved()
-        return [eid for eid in model.area_elements if self._area_matches(model, eid)]
+        return [
+            eid
+            for eid in model.area_elements
+            if self._area_matches(model, eid, story_elevations, story_z_tolerance)
+        ]
 
     def get_node_ids(self, model: Union["SAPModelData", "MeshModel"]) -> list[str]:
         """Return node IDs matching this selection.

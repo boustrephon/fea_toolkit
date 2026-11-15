@@ -6,12 +6,57 @@ A named selection is a saved :class:`~fea_toolkit.model.selection.Selection`
 a step's ``Selection.selections`` field references by name.
 """
 
-from dataclasses import dataclass, field, replace
-from typing import Any
+from dataclasses import dataclass, field, fields, replace
+from typing import Any, Optional
 
 from .selection import Selection
 
 __all__ = ["NamedSelection", "resolve_named_selections"]
+
+#: The ``Selection`` dataclass fields a named selection round-trips, in
+#: declaration order.  Serialising field-by-field (not via ``to_string``) keeps
+#: an *empty* criterion list distinct from ``None``: ``None`` means "unrestricted"
+#: while ``[]`` means "matches nothing", and ``to_string`` erases that difference.
+_SELECTION_FIELDS: tuple[str, ...] = tuple(f.name for f in fields(Selection))
+
+
+def _selection_to_payload(selection: Selection) -> Optional[dict]:
+    """A JSON-native snapshot of *selection* that keeps empty lists.
+
+    ``elevation_range`` / ``exclude_elevation_range`` tuples become plain lists so
+    ``json.dumps`` can serialise them; every other set criterion is copied as a
+    list.  An empty selection (every field ``None``) serialises as ``None``.
+    """
+    payload: dict = {}
+    for name in _SELECTION_FIELDS:
+        value = getattr(selection, name)
+        if value is None:
+            continue
+        if name in ("elevation_range", "exclude_elevation_range"):
+            payload[name] = [float(v) for v in value]
+        else:
+            payload[name] = list(value)
+    return payload or None
+
+
+def _selection_from_payload(raw: Any) -> Selection:
+    """Rebuild a ``Selection`` from a field payload, an expression, or ``None``.
+
+    The field-payload form is what :meth:`NamedSelection.to_dict` writes; the
+    expression form (``str``) and ``None`` accept documents written before the
+    field-payload form existed.
+    """
+    if raw is None:
+        return Selection()
+    if isinstance(raw, str):
+        return Selection.from_string(raw) if raw else Selection()
+    kwargs: dict = {}
+    for name, value in raw.items():
+        if name in ("elevation_range", "exclude_elevation_range"):
+            kwargs[name] = tuple(float(v) for v in value)
+        else:
+            kwargs[name] = list(value)
+    return Selection(**kwargs)
 
 
 @dataclass
@@ -32,21 +77,30 @@ class NamedSelection:
     node_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        """A JSON-native mapping — the ``select`` verb's serialised form."""
+        """A JSON-native mapping — the ``select`` verb's serialised form.
+
+        The ``Selection`` is snapshotted field-by-field (not via ``to_string``)
+        so an empty criterion list stays distinct from ``None`` — see
+        :func:`_selection_to_payload`.
+        """
         return {
             "name": self.name,
-            "selection": self.selection.to_string() or None,
+            "selection": _selection_to_payload(self.selection),
             "element_ids": list(self.element_ids),
             "node_ids": list(self.node_ids),
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "NamedSelection":
-        """Rebuild a named selection from :meth:`to_dict` output."""
-        expression = data.get("selection")
+        """Rebuild a named selection from :meth:`to_dict` output.
+
+        Accepts the field-payload form written by :meth:`to_dict` and, for
+        documents written before that form existed, a bare expression string or
+        ``None``.
+        """
         return cls(
             name=str(data.get("name", "")),
-            selection=Selection.from_string(expression) if expression else Selection(),
+            selection=_selection_from_payload(data.get("selection")),
             element_ids=list(data.get("element_ids") or []),
             node_ids=list(data.get("node_ids") or []),
         )
@@ -96,6 +150,16 @@ def resolve_named_selections(
     if not selection.selections and not selection.exclude_selections:
         return selection
 
+    story_cache: dict[str, dict[str, float]] = {}
+
+    def _story_elevations() -> dict[str, float]:
+        """The model's ``{story name: elevation}`` map, computed lazily."""
+        if "elevations" not in story_cache:
+            from .stories import identify_stories
+
+            story_cache["elevations"] = {s.name: s.elevation for s in identify_stories(model)}
+        return story_cache["elevations"]
+
     def _expand(ns: "NamedSelection", seen: tuple) -> tuple[list[str], list[str]]:
         """A named selection's (elements, nodes) with its own references resolved.
 
@@ -113,12 +177,26 @@ def resolve_named_selections(
         sub = ns.selection
         if sub is not None and sub.to_string():
             resolved_sub = _resolve(sub, (*seen, ns.name))
+            # Story-aware matching: a named selection carrying a ``story`` /
+            # ``exclude_story`` criterion resolves against the model's storey
+            # elevations, so the saved story scope is honoured instead of being
+            # dropped (``get_frame_ids`` without elevations returns nothing for a
+            # story criterion).
+            story_elevations = (
+                _story_elevations()
+                if resolved_sub.story is not None or resolved_sub.exclude_story is not None
+                else None
+            )
             # Type-qualify the criteria-derived ids so a frame and an area that
             # share a SAP label stay distinct (``Selection`` matches both the
             # bare ``"1"`` and the ``"Frame:1"`` / ``"Area:2"`` forms); ids the
             # caller picked explicitly are kept as authored.
-            elements.extend(f"Frame:{eid}" for eid in resolved_sub.get_frame_ids(model))
-            elements.extend(f"Area:{aid}" for aid in resolved_sub.get_area_ids(model))
+            elements.extend(
+                f"Frame:{eid}" for eid in resolved_sub.get_frame_ids(model, story_elevations)
+            )
+            elements.extend(
+                f"Area:{aid}" for aid in resolved_sub.get_area_ids(model, story_elevations)
+            )
             # Node ids come only from an explicit node selection: a section /
             # material / elevation criterion matches every node trivially (nodes
             # ignore those criteria), so reading ``get_node_ids`` there would
@@ -149,6 +227,13 @@ def resolve_named_selections(
             elements, nodes = _expand(ns, seen)
             extra_exclude_elements.extend(elements)
             extra_exclude_nodes.extend(nodes)
+        # A node-inclusive selection cannot carry ``element_ids`` /
+        # ``exclude_element_ids`` without the matching node field (its validation
+        # invariant).  ``exclude_element_ids`` names frames/areas only, so when a
+        # named exclusion contributes element ids but the caller's selection is
+        # node-scoped, drop them — they cannot scope a node selection — rather
+        # than setting an exclusion field that violates the invariant.
+        node_scoped = sel.element_types is not None and "Node" in sel.element_types
         return replace(
             sel,
             selections=None,
@@ -162,7 +247,11 @@ def resolve_named_selections(
                 (sel.element_ids or []) + extra_elements if sel.selections else sel.element_ids
             ),
             node_ids=(sel.node_ids or []) + extra_nodes if sel.selections else sel.node_ids,
-            exclude_element_ids=((sel.exclude_element_ids or []) + extra_exclude_elements) or None,
+            exclude_element_ids=(
+                ((sel.exclude_element_ids or []) + extra_exclude_elements) or None
+                if not node_scoped
+                else sel.exclude_element_ids
+            ),
             exclude_node_ids=((sel.exclude_node_ids or []) + extra_exclude_nodes) or None,
         )
 
