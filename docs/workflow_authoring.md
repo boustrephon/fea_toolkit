@@ -162,9 +162,9 @@ vocabulary is used:
   parameter checking.
 * **The Recipe panel greys it.**  A step that cannot run yet is shown disabled,
   so authoring prevents the error the validator would otherwise raise.
-* **The command palette (P31) and the report (P32) will read it.**  The same
-  two fields are planned to drive palette validation and the report's analysis
-  order, so ordering knowledge will have one home and cannot drift.
+* **The command palette (P31) and the report (P32) read it.**  The same two
+  fields drive palette validation and the report's analysis order, so ordering
+  knowledge has one home and cannot drift.
 
 Validation is **order-based, not a graph**: the run scans the steps in order and
 tracks the set of satisfied kinds — initialised with `model` when a starting

@@ -8,7 +8,7 @@ related: [viewer.md, workflow.md, results_schema.md, rhino_export.md, report_gen
 ---
 # Desktop GUI Roadmap
 
-## Status: ⚠️ Partial — the application chrome and the workflow-modelling path are built.  For the current per-milestone / per-item status, see the [Done Log](history/_done_log.md) for completed workflow items (P29, P30, P32–P34, P36) and the [Pending Work Log](_pending_work.md) for the rest: **P22** for the GUI roadmap and **P31**/**P35** for the workflow layer.
+## Status: ⚠️ Partial — the application chrome and the workflow-modelling path are built.  For the current per-milestone / per-item status, see the [Done Log](history/_done_log.md) and the [Pending Work Log](_pending_work.md): the workflow items **P29–P36** are complete, and **P22** (the GUI roadmap) remains open.
 
 > **User-facing guide:** [`docs/gui.md`](gui.md) — what the application does
 > today, how to select, the camera and display controls, and the settings file.
@@ -18,10 +18,11 @@ related: [viewer.md, workflow.md, results_schema.md, rhino_export.md, report_gen
 This document records the **framework decision** and the **proposed
 architecture** for a native desktop GUI that wraps the workflow already
 implemented in the package.  Ten of its milestones have landed and an eleventh
-(**workflow authoring**, P29–P36) has begun; completed workflow items live in the
-[Done Log](history/_done_log.md) and the open ones (**P22**, **P31**, **P35**) in
-the [Pending Work Log](_pending_work.md), and the workflow
-layer itself is specified in [`workflow_authoring.md`](workflow_authoring.md).
+(**workflow authoring**, P29–P36) is complete; the completed workflow items live
+in the [Done Log](history/_done_log.md) and the [Pending Work
+Log](_pending_work.md), the one open GUI item (**P22**) is tracked in the
+[Pending Work Log](_pending_work.md), and the workflow layer itself is specified
+in [`workflow_authoring.md`](workflow_authoring.md).
 
 > **Where this sketch has diverged from the code.** The §6 tree below is the
 > original proposal; two entries no longer match.  `actions/` was never built
@@ -476,9 +477,8 @@ The GUI must respect the existing architectural contracts:
 11. **Workflow authoring (P29–P36, added 2026-09-29).**  The `workflow` package
     (verbs, steps, recipes as data), the **Recipe dock**, the `&Recipe` menu,
     and the Model-menu items re-cast as **presets over the recipe**.  Per-phase
-    status lives in the [Done Log](history/_done_log.md) (P29, P30, P32–P34,
-    P36) and the [Pending Work Log](_pending_work.md) (P31, P35); the
-    phase → item → content map is in
+    status lives in the [Done Log](history/_done_log.md) and the [Pending Work
+    Log](_pending_work.md) (P29–P36); the phase → item → content map is in
     [`workflow_authoring.md`](workflow_authoring.md#roadmap).
 
 ---
@@ -670,7 +670,7 @@ class QtRenderBackend(RenderBackend):
 | 8 | Persistence | geometry + dock state round-trip through `QSettings` |
 | 9 | Tests | headless `QT_QPA_PLATFORM=offscreen` suite green; `needs_gui` marker; `ops.wipe()` hygiene |
 | 10 | Quad-view + polish | central `QWidget` container hosts iso/front/top/side `QtInteractor`s with shared camera toggles |
-| 11 | ⚠️ Partial — workflow authoring (P29–P33) | ✅ **P29** (Phases A–B): the `workflow` package (verbs, steps, recipes as data), the **Recipe dock**, the `&Recipe` menu and the Model-menu presets.  **P30** (Phase C) — the three model-check verbs (`check_connectivity`, `check_self_weight`, `check_brace_buckling`) ✅ landed, a recipe's solved cases and combinations ✅ register as result views, and the `chart` verb plus the GUI's first figure view and a check-table view ✅ landed, and the capacity checks (`member_shear_capacity`, `wall_shear_check`, `hinge_length`) plus the `mesh_checks` verb ✅ landed; the four charts (`storey_forces`, pushover, modal, CSM) ✅ landed (2026-10-11) — **P33** (GUI ergonomics: the `StepDialog`, one `Model ▸ Mesh…` entry, the toolbar reorganisation and *Show beams*) ✅ landed (2026-09-30) — **P32** (Phase E, the modal/RS/pushover verbs and the `generate_report` reconciliation) ✅ landed (2026-10-02) — **P31** (Phase D, the command palette) remains — `docs/workflow_authoring.md` |
+| 11 | ✅ workflow authoring (P29–P33) | ✅ **P29** (Phases A–B): the `workflow` package (verbs, steps, recipes as data), the **Recipe dock**, the `&Recipe` menu and the Model-menu presets.  **P30** (Phase C) — the three model-check verbs (`check_connectivity`, `check_self_weight`, `check_brace_buckling`) ✅ landed, a recipe's solved cases and combinations ✅ register as result views, and the `chart` verb plus the GUI's first figure view and a check-table view ✅ landed, and the capacity checks (`member_shear_capacity`, `wall_shear_check`, `hinge_length`) plus the `mesh_checks` verb ✅ landed; the four charts (`storey_forces`, pushover, modal, CSM) ✅ landed (2026-10-11) — **P33** (GUI ergonomics: the `StepDialog`, one `Model ▸ Mesh…` entry, the toolbar reorganisation and *Show beams*) ✅ landed (2026-09-30) — **P32** (Phase E, the modal/RS/pushover verbs and the `generate_report` reconciliation) ✅ landed (2026-10-02) — **P31** (Phase D, the command palette) ✅ landed (2026-11-14) — `docs/workflow_authoring.md` |
 
 ### 9.7 Testing strategy
 
