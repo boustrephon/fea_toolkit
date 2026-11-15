@@ -949,3 +949,36 @@ def test_extruded_shapes_toggle_is_off_by_default_and_re_renders(window):
 
     action.setChecked(False)
     assert window._display.show_extruded is False
+
+
+class TestDetectStoriesDialog:
+    """The mesh dialog's storey-detection flag is format-aware."""
+
+    def _dialog_for(self, program):
+        from fea_toolkit.gui.views.step_dialog import StepDialog
+        from fea_toolkit.workflow import Step
+
+        model = _model()
+        model.program = program
+        return StepDialog(Step(verb="mesh"), model_data=model)
+
+    def test_defaults_on_for_sap(self, window):
+        dialog = self._dialog_for("SAP2000")
+        widget = dialog._widgets["detect_stories"]
+        assert widget.isChecked() is True
+        assert widget.isEnabled() is True
+        assert dialog.edited_step().params.get("detect_stories") is True
+
+    def test_defaults_off_for_safe(self, window):
+        dialog = self._dialog_for("SAFE")
+        widget = dialog._widgets["detect_stories"]
+        assert widget.isChecked() is False
+        assert widget.isEnabled() is True
+        assert "detect_stories" not in dialog.edited_step().params
+
+    def test_greyed_out_for_etabs(self, window):
+        dialog = self._dialog_for("ETABS")
+        widget = dialog._widgets["detect_stories"]
+        assert widget.isChecked() is False
+        assert widget.isEnabled() is False
+        assert "detect_stories" not in dialog.edited_step().params

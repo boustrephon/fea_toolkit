@@ -51,6 +51,7 @@ def test_get_model_data():
     parser.parse()
     model = parser.get_model_data()
     assert model.nodes is not None
+    assert model.program == "SAP2000"
     # Add more assertions based on your sample content
 
 

@@ -151,3 +151,18 @@ def test_stories_group_omitted_when_empty():
     md = make_sample_model()
     assert not md.stories
     assert "Stories" not in _by_label(md)
+
+
+def test_stories_group_falls_back_to_detected_levels():
+    """Detected ``story_levels`` surface when no imported story table exists."""
+    from fea_toolkit.model.stories import StoryLevel
+
+    md = make_sample_model()
+    md.story_levels = [
+        StoryLevel(name="Storey 1", elevation=0.0, method="node_clustering"),
+        StoryLevel(name="Roof", elevation=10.0, method="node_clustering"),
+    ]
+    group = _by_label(md)["Stories"]
+    items = group.load_items()
+    assert [name for name, _ in items] == ["Storey 1", "Roof"]
+    assert dict(items)["Roof"].method == "node_clustering"

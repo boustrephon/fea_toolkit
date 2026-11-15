@@ -29,6 +29,7 @@ def model():
 
 def test_program_units(model):
     assert model.units == {"F": "kN", "L": "m", "T": "C"}
+    assert model.program == "SAFE"
 
 
 def test_nodes_from_points(model):

@@ -151,6 +151,10 @@ def test_units(model):
     assert model.units == {"F": "kN", "L": "m", "T": "C"}
 
 
+def test_program(model):
+    assert model.program == "ETABS"
+
+
 def test_get_model_units_canonical(tmp_path):
     """ETABS ``UNITS`` tokens are canonicalised to downstream unit labels."""
     for force, length, expect_f, expect_l in [

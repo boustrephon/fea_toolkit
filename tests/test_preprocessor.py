@@ -325,6 +325,19 @@ class TestLoadDefinitionsCarryThrough:
         assert set(mesh.response_spectrum_functions) == {"RS1"}
         assert mesh.response_spectrum_functions["RS1"].accels == [0.1, 0.2]
 
+    def test_detect_stories_records_levels_on_the_mesh(self):
+        """``detect_stories`` runs storey detection; the default leaves it empty."""
+        from examples.sample_model import make_sample_model
+
+        model = make_sample_model()
+        assert Preprocessor({}).run(model).story_levels == []
+
+        mesh = Preprocessor({"detect_stories": True}).run(model)
+        assert [(s.name, s.elevation) for s in mesh.story_levels] == [
+            ("Storey 1", 0.0),
+            ("Roof", 10.0),
+        ]
+
 
 def test_point_loads_redistribute_onto_split_children():
     """A point load on a split frame lands on its child + retained source."""
