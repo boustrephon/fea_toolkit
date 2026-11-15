@@ -179,6 +179,20 @@ class StepDialog(QDialog):
             else:
                 editor = self._param_editor(spec, value)
             self._widgets[name] = editor
+            if name == "detect_stories" and self._model_data is not None:
+                # The storey-detection flag is format-aware: ETABS already
+                # imports its story table, so the option is pointless there
+                # (greyed out); SAP2000 has no table, so it defaults on; SAFE
+                # is a foundation model, so it defaults off.
+                program = getattr(self._model_data, "program", "SAP2000")
+                if program == "ETABS":
+                    editor.setChecked(False)
+                    editor.setEnabled(False)
+                    editor.setToolTip(
+                        "Storey levels are already imported from the ETABS story table."
+                    )
+                elif program == "SAP2000" and name not in step.params:
+                    editor.setChecked(True)
             if spec.type is float and not spec.choices:
                 self._seeded[name] = float(editor.value())
             if spec.manifest is not None:

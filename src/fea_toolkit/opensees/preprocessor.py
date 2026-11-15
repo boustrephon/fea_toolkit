@@ -526,6 +526,16 @@ class Preprocessor:
         # sap_data.apply_material_defaults.
         apply_material_defaults(md.materials, md.units)
 
+        # ── 0. Storey detection (opt-in) ──────────────────────────
+        # Reads the *raw* model before any topology mutation; the result is
+        # stored on the MeshModel so the Model Tree can present detected
+        # levels for SAP2000 / SAFE models that export no story table.
+        story_levels: list = []
+        if self.config.get("detect_stories", False):
+            from ..model.stories import identify_stories
+
+            story_levels = identify_stories(model_data)
+
         # ── 1. Frame element classification (pre-split) ──────────
         # Always-on geometric classification: every non-inactive frame gets
         # a role (beam/column/brace) regardless of whether stiffness_factors
@@ -1042,6 +1052,7 @@ class Preprocessor:
                 md, "shell_uniform_load_set_assignments", {}
             ),
             stories=getattr(md, "stories", []),
+            story_levels=story_levels,
         )
         # Resolve against the mutated md so derived-element IDs
         # (from splitting/meshing) can be matched by selections.

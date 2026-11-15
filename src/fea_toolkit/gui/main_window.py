@@ -3060,7 +3060,7 @@ class MainWindow(QMainWindow):
         if self._store is None:
             self.log("Open a SAP2000 model before preprocessing.", "warn")
             return
-        edited = StepDialog.edit(Step(verb="mesh"), self)
+        edited = StepDialog.edit(Step(verb="mesh"), self, model_data=self._store.raw())
         if edited is None:
             return
         if edited.params.get("create_shells", True):

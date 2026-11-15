@@ -40,6 +40,15 @@ MESH_PARAMS: dict[str, ParamSpec] = {
         type=bool,
         help="Report wall edges that pass through a slab without sharing a node.",
     ),
+    "detect_stories": ParamSpec(
+        default=False,
+        type=bool,
+        help=(
+            "Detect storey levels (diaphragms → horizontal slabs → node "
+            "clustering) and record them on the mesh, so the Model Tree can show "
+            "them for models without an imported story table."
+        ),
+    ),
     "split_slabs_at_walls": ParamSpec(
         default=False,
         type=bool,

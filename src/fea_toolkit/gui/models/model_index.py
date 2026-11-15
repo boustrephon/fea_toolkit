@@ -216,15 +216,22 @@ def selections_group(named: Optional[dict]) -> Optional[TreeGroup]:
 def stories_group(source: Any) -> Optional[TreeGroup]:
     """Describe the **Stories** group, or ``None`` when the model has none.
 
-    The imported ETABS story levels (``SAPModelData.stories`` — carried through
-    unchanged onto :class:`~fea_toolkit.model.mesh_model.MeshModel`, like the
-    shell uniform load sets) are listed lowest-first, one row per story.  Each
-    row's entity is the :class:`~fea_toolkit.model.sap_data.StoryDefinition`, so
-    the inspector shows its name, absolute elevation, tower and
-    master/similar flags.  SAP2000 / SAFE models carry no story table, so the
-    group is omitted for them.
+    Two sources feed the group, in preference order:
+
+    * ``stories`` — the imported ETABS story table (``StoryDefinition``
+      records), for models that export one.
+    * ``story_levels`` — levels detected by
+      :func:`~fea_toolkit.model.stories.identify_stories` (``StoryLevel``
+      records, recorded on the mesh when ``detect_stories`` is on), for
+      SAP2000 / SAFE models that export no story table.
+
+    Rows are listed lowest-first; each row's entity is the underlying record,
+    so the inspector shows its fields (name, elevation, tower / method,
+    confidence, …).  A model with neither source omits the group.
     """
     stories = getattr(source, "stories", None) or []
+    if not stories:
+        stories = getattr(source, "story_levels", None) or []
     if not stories:
         return None
 

@@ -39,6 +39,7 @@ from .sap_data import (
     StoryDefinition,
     apply_material_defaults,
 )
+from .stories import StoryLevel
 
 
 @dataclass
@@ -278,6 +279,12 @@ class MeshModel:
     # present the imported ``$ STORIES - IN SEQUENCE FROM TOP`` names and
     # elevations without the raw model at hand.
     stories: list[StoryDefinition] = field(default_factory=list)
+    # Detected storey levels (``fea_toolkit.model.stories.identify_stories``) —
+    # populated only when ``detect_stories: True``.  Distinct from ``stories``
+    # (the imported ETABS table): these are the *detection* result — a
+    # :class:`StoryLevel` with its method, confidence and node membership —
+    # for models with no story table (SAP2000 / SAFE).
+    story_levels: list[StoryLevel] = field(default_factory=list)
 
     # ── Constraints (detected, not yet applied to OpenSees) ───────
     # ── Detected coarse‑fine node pairs (for visualisation only) ──
