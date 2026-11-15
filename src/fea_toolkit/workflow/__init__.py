@@ -39,7 +39,7 @@ every verb delegates to the existing two-stage pipeline.  A recipe is a
 from .command import compile_command, missing_needs, step_to_command
 from .config_keys import BUILDER_CONFIG_KEYS
 from .recipe import Recipe, RecipeRun, run_recipe, satisfied_kinds
-from .registry import STEP_SPECS, list_verbs
+from .registry import ANALYSIS_CHAIN, STEP_SPECS, analysis_chain_rows, list_verbs
 from .steps import (
     CASES,
     FIGURE,
@@ -57,6 +57,7 @@ from .steps import (
 )
 
 __all__ = [
+    "ANALYSIS_CHAIN",
     "BUILDER_CONFIG_KEYS",
     "CASES",
     "FIGURE",
@@ -73,6 +74,7 @@ __all__ = [
     "StepResult",
     "StepSpec",
     "Table",
+    "analysis_chain_rows",
     "compile_command",
     "list_verbs",
     "missing_needs",

@@ -12,6 +12,8 @@ prepare properties, prepare topology, solve, reduce — and is the order a menu
 should offer them.
 """
 
+from typing import Any
+
 from .steps import (
     CASES,
     FIGURE,
@@ -77,7 +79,13 @@ from .verbs import (
     run_wall_shear_check,
 )
 
-__all__ = ["STEP_SPECS", "list_verbs"]
+__all__ = ["ANALYSIS_CHAIN", "STEP_SPECS", "analysis_chain_rows", "list_verbs"]
+
+#: The modal-dependent analysis verbs in dependency order — the chain the
+#: Analysis wizard offers.  ``run_static`` is deliberately not listed: it is a
+#: linear solve with no precursor beyond the geometry, and already has a
+#: first-class menu entry of its own.
+ANALYSIS_CHAIN = ("modal", "response_spectrum", "pushover", "nonlinear_dynamic", "ida")
 
 #: Every verb, keyed by name.  Each entry pairs an implementation with the
 #: parameters that implementation is allowed to read — a verb's parameter
@@ -289,3 +297,36 @@ def list_verbs() -> list[str]:
         The verb names, in the order a menu should offer them.
     """
     return list(STEP_SPECS)
+
+
+def analysis_chain_rows(
+    produced: Any = (),
+    wanted: Any = (),
+) -> list[tuple[str, str, bool]]:
+    """``(verb, help, runnable)`` rows for the Analysis wizard, in chain order.
+
+    A verb is *runnable* when its declared ``needs`` are satisfied by
+    *produced* (the kinds already available — e.g. ``{"geometry"}`` for a
+    preprocessed model) or by the kinds a *wanted* verb earlier in the chain
+    produces.  This is the same vocabulary
+    :func:`fea_toolkit.workflow.recipe.satisfied_kinds` uses, so the wizard
+    cannot drift from the recipe validator's idea of what may run.
+
+    Args:
+        produced: Kinds satisfied before the chain begins.
+        wanted: The verbs the user has selected (a subset of
+            :data:`ANALYSIS_CHAIN`).
+
+    Returns:
+        ``(verb, help, runnable)`` triples, in :data:`ANALYSIS_CHAIN` order.
+    """
+    rows: list[tuple[str, str, bool]] = []
+    have = set(produced)
+    wanted_set = set(wanted)
+    for verb in ANALYSIS_CHAIN:
+        spec = STEP_SPECS[verb]
+        missing = [kind for kind in spec.needs if kind not in have]
+        rows.append((verb, spec.help, not missing))
+        if verb in wanted_set:
+            have.add(spec.kind)
+    return rows

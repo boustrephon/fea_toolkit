@@ -102,6 +102,14 @@ _COLOURABLE_GROUPS = frozenset(
     {"materials", "sections", "stories", "frame_elements", "area_elements"}
 )
 
+
+def _menu_header(text: str) -> QAction:
+    """A disabled menu action used as a section heading in a menu."""
+    action = QAction(text)
+    action.setEnabled(False)
+    return action
+
+
 #: Once-only guard for :func:`_freeze_gc_once`.  A one-element list rather than a
 #: bool, so marking it does not need a ``global`` rebind (ruff PLW0603).
 _GC_FROZEN: list = []
@@ -1257,12 +1265,18 @@ class MainWindow(QMainWindow):
             self._on_ida_preset,
             tip="Incremental dynamic analysis \u2014 collapse intensity over a record ladder",
         )
+        a["analysis.wizard"] = self._real_action(
+            "Analysis wizard\u2026",
+            self._on_analysis_wizard,
+            tip="Pick the modal \u2192 spectrum \u2192 pushover \u2192 time-history chain in one guided dialog",
+        )
         for key in (
             "analysis.modal",
             "analysis.spectrum",
             "analysis.pushover",
             "analysis.nonlinear_dynamic",
             "analysis.ida",
+            "analysis.wizard",
         ):
             a[key].setEnabled(False)
         a["analysis.stop"] = self._real_action(
@@ -1379,14 +1393,17 @@ class MainWindow(QMainWindow):
             combos.addAction(a[key])
 
         m = bar.addMenu("&Analysis")
+        m.addAction(_menu_header("Linear"))
         m.addAction(a["analysis.run"])
-        m.addSeparator()
         m.addAction(a["analysis.modal"])
         m.addAction(a["analysis.spectrum"])
         m.addSeparator()
+        m.addAction(_menu_header("Nonlinear"))
         m.addAction(a["analysis.pushover"])
         m.addAction(a["analysis.nonlinear_dynamic"])
         m.addAction(a["analysis.ida"])
+        m.addSeparator()
+        m.addAction(a["analysis.wizard"])
         m.addSeparator()
         m.addAction(a["analysis.stop"])
 
@@ -3358,6 +3375,50 @@ class MainWindow(QMainWindow):
         """**Analysis ▸ IDA**: compose and run an ida step."""
         self._analysis_preset("ida", "IDA")
 
+    def _on_analysis_wizard(self) -> None:
+        """**Analysis ▸ Analysis wizard…**: guide the modal→…→IDA chain in one dialog.
+
+        Lists the analysis chain, greying each analysis until its precursors are
+        satisfied (by the recipe, or by an earlier tick in this dialog), then
+        composes the chosen steps — modal first — and runs the recipe once, so
+        the whole chain resolves in a single pass.
+        """
+        store = self._store
+        mesh = store.preprocessed() if store is not None else None
+        if store is None or mesh is None:
+            self.log(
+                "This analysis needs a preprocessed model \u2014 use Model \u25b8 "
+                "Split elements or Mesh areas first.",
+                "warn",
+            )
+            return
+        if self._worker is not None and self._worker.isRunning():
+            self.log("An analysis is already running.", "warn")
+            return
+
+        from ..workflow import Step, satisfied_kinds, step_to_command
+        from ..workflow.verbs.modal import resolve_default_modal_case
+        from .views.analysis_wizard import AnalysisWizard
+
+        produced = satisfied_kinds(list(self._recipe_panel.recipe), initial={"geometry"})
+        verbs = AnalysisWizard.get_request(produced, self)
+        if not verbs:
+            return
+
+        default_modal = resolve_default_modal_case(store.raw())
+        for verb in verbs:
+            if verb == "modal":
+                params = {"name": default_modal} if default_modal else {}
+            else:
+                params = {"modal_case": default_modal} if default_modal else {}
+            step = Step(verb=verb, params=params)
+            self._recipe_panel.add_step(
+                step.verb, step.selection, step.params, optional=step.optional
+            )
+            self.log(f"command: {step_to_command(step)}")
+        self._pending_label = "Analysis wizard"
+        self._on_recipe_run()
+
     def _analysis_preset(self, verb: str, label: str) -> None:
         """Compose an analysis step in a dialog, append it, and run the recipe.
 
@@ -4214,6 +4275,7 @@ class MainWindow(QMainWindow):
             "analysis.pushover",
             "analysis.nonlinear_dynamic",
             "analysis.ida",
+            "analysis.wizard",
         ):
             self._actions[key].setEnabled(enabled)
         # Saving the meshed model needs the same preprocessed ``MeshModel``, but

@@ -27,11 +27,13 @@ from fea_toolkit.model.sap_data import (
 )
 from fea_toolkit.model.selection import Selection
 from fea_toolkit.workflow import (
+    ANALYSIS_CHAIN,
     STEP_SPECS,
     ParamSpec,
     Recipe,
     Step,
     StepError,
+    analysis_chain_rows,
     list_verbs,
     run_recipe,
     validate_params,
@@ -503,6 +505,39 @@ class TestAnalysisVerbs:
         context = StepContext(model_data=_slab_model(), model=object(), results={})
         with pytest.raises(ValueError):
             resolve_spectrum(context, source="auto_seismic", name="", T_spec=[], Sa_spec=[])
+
+
+class TestAnalysisChain:
+    """The wizard's chain planner mirrors the recipe validator's ``needs``."""
+
+    def test_chain_order_and_runnability_with_only_geometry(self):
+        rows = analysis_chain_rows({"geometry"})
+        assert [verb for verb, _help, _ok in rows] == list(ANALYSIS_CHAIN)
+        by_verb = {verb: ok for verb, _help, ok in rows}
+        assert by_verb["modal"] is True
+        assert by_verb["response_spectrum"] is False
+        assert by_verb["pushover"] is False
+        assert by_verb["nonlinear_dynamic"] is False
+        assert by_verb["ida"] is False
+
+    def test_ticking_modal_unlocks_its_dependents(self):
+        rows = analysis_chain_rows({"geometry"}, wanted={"modal"})
+        by_verb = {verb: ok for verb, _help, ok in rows}
+        assert by_verb["modal"] is True
+        assert by_verb["response_spectrum"] is True
+        assert by_verb["pushover"] is True
+        assert by_verb["ida"] is True
+
+    def test_a_dependent_cannot_run_without_its_precursor(self):
+        rows = analysis_chain_rows({"geometry"}, wanted={"pushover"})
+        by_verb = {verb: ok for verb, _help, ok in rows}
+        assert by_verb["pushover"] is False
+
+    def test_an_already_solved_modal_unlocks_dependents(self):
+        rows = analysis_chain_rows({"geometry", "modal"})
+        by_verb = {verb: ok for verb, _help, ok in rows}
+        assert by_verb["response_spectrum"] is True
+        assert by_verb["ida"] is True
 
 
 class TestModalCaseSelection:

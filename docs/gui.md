@@ -603,6 +603,13 @@ is served from.
 > than living in your memory of which menu items you clicked.  Both register
 > their cases as views.
 
+**Analysis ▸ Analysis wizard…** guides the modal-dependent chain in one dialog:
+it lists Modal analysis → Response spectrum → Pushover → Nonlinear time-history
+→ IDA, greying each analysis until its precursors are satisfied (by the recipe,
+or by an earlier tick in the dialog), then appends the chosen steps — modal
+first — and runs the recipe once.  The same chain is reachable step-by-step
+through the Analysis menu's individual presets.
+
 **Two masonry options, both available and independent.**  `scale_sections`
 *keeps* the wall elements and reduces their stiffness, so their weight stays with
 them; a `mesh` step whose selection matches the walls *leaves them out* of the
@@ -629,7 +636,7 @@ jarring than a greyed-out one.
 | **Edit** | Duplicate view, Edit view selection… | Copy, Preferences |
 | **View** | Zoom to fit, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show beams, Show shells, Show restraints, Show loads, Colour area loads, Show force diagrams, Clear highlights) | Show element labels, Reset layout |
 | **Model** | Mesh… (composes a `mesh` step in a dialog and runs it on OK), Combinations (Edit… / Open… / Save…), Name selection… | Units |
-| **Analysis** | Run static… (`Ctrl+R`), Stop, Modal analysis, Response spectrum, Pushover, Nonlinear time-history, IDA | — |
+| **Analysis** | Run static… (`Ctrl+R`), Modal analysis, Response spectrum (*Linear*); Pushover, Nonlinear time-history…, IDA… (*Nonlinear*); Analysis wizard…, Stop | — |
 | **Recipe** | Run recipe (`Ctrl+Shift+R`), Open recipe…, Save recipe…, Export as Python…, Import script…, Command… (`Ctrl+K`), Clear recipe | — |
 | **Results** | Deformed shape (+ Deform %), Force diagrams (+ Force selector + Flags %), Shell results (+ Shell selector), Animate deformed shape, Clear results | Storey response, Pushover curve |
 | **Help** | Documentation, Modeling guidance, Benchmark register, LLM guide, Source repository, About | — |
