@@ -189,13 +189,15 @@ def _recorded_level_coverage(
     storey_elevations: Sequence[float],
     z_tolerance: float = 0.5,
 ) -> int:
-    """Count of storey elevations that carry at least one usable recorded history.
+    """Count of adjacent storey intervals both of whose levels are recorded.
 
-    The interstorey path needs histories spanning at least two levels.  A
-    transient whose recording was restricted (``transient_record_node_tags``) to
-    a single level — e.g. only the roof node — cannot produce an interstorey
-    drift, so this count lets :func:`_peak_drift` report the drift as unavailable
-    instead of reading the skipped base-to-roof interval as zero.
+    The interstorey path reduces drift over *consecutive* level pairs, so it
+    needs both levels of every interval to carry a usable history.  Two
+    non-consecutive covered levels — e.g. only the base and the roof of a
+    three-level model — resolve no interval at all and would read as a zero
+    drift, so this count of resolvable adjacent intervals lets
+    :func:`_peak_drift` report the drift as unavailable unless every interval is
+    resolvable.
     """
     elevations = np.unique(np.asarray([float(e) for e in storey_elevations], dtype=float))
     covered: set = set()
@@ -210,7 +212,7 @@ def _recorded_level_coverage(
         level = int(np.argmin(np.abs(elevations - float(z))))
         if abs(elevations[level] - float(z)) <= z_tolerance / 2:
             covered.add(level)
-    return len(covered)
+    return sum(1 for j in range(1, len(elevations)) if j - 1 in covered and j in covered)
 
 
 def _peak_drift(
@@ -227,11 +229,11 @@ def _peak_drift(
     passed *node_xy* so the torsional contribution is preserved);
     otherwise the roof-drift proxy (max horizontal nodal displacement / height),
     which for a single-interval structure is the same quantity.  When storey
-    levels exist but the recorded histories do not span at least two of them —
-    a recording restricted to one level, e.g. only the roof via
-    ``transient_record_node_tags`` — the drift cannot be evaluated and is
-    reported as ``(NaN, "unavailable")`` rather than a zero that would read as
-    "no drift".
+    levels exist but the recorded histories do not resolve every adjacent level
+    interval — a recording restricted to one level, or to two non-consecutive
+    levels (e.g. only the base and roof via ``transient_record_node_tags``) —
+    the drift cannot be evaluated and is reported as ``(NaN, "unavailable")``
+    rather than a zero that would read as "no drift".
 
     Returns:
         ``(drift_ratio, measure)`` where *measure* is ``"interstorey_d_max"``,
@@ -245,7 +247,12 @@ def _peak_drift(
     if len(storey_elevations) >= 2:
         from ..model.storey_response import peak_interstorey_drift
 
-        if _recorded_level_coverage(node_z, displacements, storey_elevations) < 2:
+        elevations = np.unique(np.asarray([float(e) for e in storey_elevations], dtype=float))
+        # The reducer differences each *adjacent* level pair, so the recorded
+        # histories must resolve every one of those intervals — two non-consecutive
+        # levels (e.g. only the base and the roof of a three-level model) produce
+        # no resolvable interval and would read as a zero drift.
+        if _recorded_level_coverage(node_z, displacements, storey_elevations) < len(elevations) - 1:
             return float("nan"), "unavailable"
         return (
             peak_interstorey_drift(node_z, displacements, storey_elevations, node_xy=node_xy),
@@ -289,10 +296,10 @@ def run_ida(
     The drift measure is the **peak interstorey-drift ratio** when storey
     levels are available (at least two), and the **roof-drift proxy** (max
     horizontal nodal displacement / structure height) otherwise.  When storey
-    levels exist but the recorded histories do not span at least two of them —
-    a recording restricted to one level, e.g. only the roof via
-    ``transient_record_node_tags`` — the drift cannot be evaluated and is
-    reported as ``NaN`` with :attr:`drift_measure` = ``"unavailable"``.  The
+    levels exist but the recorded histories do not resolve every adjacent level
+    interval — a recording restricted to one level, or to two non-consecutive
+    levels (e.g. only the base and roof via ``transient_record_node_tags``) —
+    the drift cannot be evaluated and is reported as ``NaN`` with :attr:`drift_measure` = ``"unavailable"``.  The
     :attr:`drift_measure` field records which of the three was used, so a proxy
     or unavailable value is never misread as interstorey drift.
 
@@ -480,11 +487,13 @@ def run_ida(
         top = ladder[-1]
         while 0 < top < max_scale:
             top = min(2.0 * top, max_scale)
-            drift, ok, data, _measure = _run(top)
+            drift, ok, data, measure = _run(top)
             _note(top, ok, drift, data)
             ladder.append(top)
             drifts.append(drift)
             converged.append(ok)
+            if measure == "unavailable":
+                drift_measure = "unavailable"
             if (not ok) or (collapse_drift is not None and drift > collapse_drift):
                 im_collapse = top
                 break
@@ -507,8 +516,10 @@ def run_ida(
                     # The bracket can no longer be narrowed in floating point;
                     # stop rather than re-running the same transient forever.
                     break
-                drift, ok, data, _measure = _run(mid)
+                drift, ok, data, measure = _run(mid)
                 _note(mid, ok, drift, data)
+                if measure == "unavailable":
+                    drift_measure = "unavailable"
                 evaluations.append({"intensity": mid, "drift": drift, "converged": ok})
                 if (not ok) or (collapse_drift is not None and drift > collapse_drift):
                     hi = mid
