@@ -67,6 +67,18 @@ def test_step_to_command_round_trips_nested_string_keys():
     assert again.params["cases"] == {"Wind": {"Wind direction=Y": 1.0}}
 
 
+def test_step_to_command_round_trips_a_non_bmp_nested_key():
+    """A non-BMP character in a nested cases key keeps its original value.
+
+    ``json.dumps`` with the default ``ensure_ascii=True`` escapes a non-BMP
+    character to a surrogate pair, which ``ast.literal_eval`` re-reads as a
+    *different* string (two lone surrogates) rather than the original emoji.
+    """
+    step = compile_command('run_static cases={"Wind \U0001f300": {"Wind": 1.0}}')
+    again = compile_command(step_to_command(step))
+    assert again.params["cases"] == {"Wind \U0001f300": {"Wind": 1.0}}
+
+
 def test_compile_bare_word_parameter_is_a_string():
     assert compile_command("chart chart=storey_displacements").params["chart"] == (
         "storey_displacements"

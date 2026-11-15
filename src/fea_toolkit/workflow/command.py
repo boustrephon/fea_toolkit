@@ -52,7 +52,10 @@ def _render_value(value: Any) -> str:
     exactly (bools and ``None`` keep their Python spellings).
     """
     if isinstance(value, str):
-        return json.dumps(value)
+        # ``ensure_ascii=False`` keeps non-BMP characters (emoji, CJK) as their
+        # literal selves instead of ``\uXXXX`` / surrogate escapes, which
+        # ``ast.literal_eval`` would otherwise re-read as a different string.
+        return json.dumps(value, ensure_ascii=False)
     if isinstance(value, bool) or value is None:
         return repr(value)
     if isinstance(value, dict):
