@@ -472,6 +472,7 @@ class ETABSParser:
             shell_uniform_load_sets=shell_uniform_load_sets,
             shell_uniform_load_set_assignments=shell_uniform_load_set_assignments,
             units=units,
+            program="ETABS",
             source=str(self.file_path),
         )
         # ── Apply material defaults in-place ──────────────────────

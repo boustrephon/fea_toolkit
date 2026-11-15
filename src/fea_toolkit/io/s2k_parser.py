@@ -289,6 +289,7 @@ class SAP2000Parser:
             load_combinations=load_combinations,
             response_spectrum_functions=response_spectrum_functions,
             units=model_units,
+            program="SAP2000",
             source=str(self.file_path),
         )
 

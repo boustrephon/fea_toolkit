@@ -2620,6 +2620,10 @@ class SAPModelData:
     # SAFE automatic-mesh intent (global max size + per-area overrides),
     # consumed by the gmsh floor-meshing stage.  ``{}`` for SAP2000 / ETABS.
     floor_mesh_options: dict[str, Any] = field(default_factory=dict)
+    # The source program the model was parsed from: ``"SAP2000"``, ``"ETABS"``
+    # or ``"SAFE"``.  Set by each parser; ``"SAP2000"`` for hand-built models.
+    # Used to tailor UI defaults (e.g. the mesh dialog's storey-detection flag).
+    program: str = "SAP2000"
     # Provenance — the file path the model was parsed from (empty for a model
     # built in code).  Used by the analysis verbs' Tcl-export QC checkbox to
     # place the dump next to its source.

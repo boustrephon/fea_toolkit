@@ -659,6 +659,7 @@ class SAFEDBParser(SAFEF2KParser):
             area_roles=self._get_area_roles(),
             floor_mesh_options=self._get_floor_mesh_options(),
             units=self.get_model_units(),
+            program="SAFE",
             source=str(self.file_path),
         )
         md.apply_material_defaults()
