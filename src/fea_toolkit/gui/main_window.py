@@ -715,6 +715,7 @@ class MainWindow(QMainWindow):
             fields.add("material")
         if story_levels(model):
             fields.add("story")
+            fields.add("nearest_story")
         return fields
 
     def _group_context_menu(self, index, pos) -> None:

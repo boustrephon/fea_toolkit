@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional, Union
 
+from .stories import story_name_at_or_above
+
 if TYPE_CHECKING:
     from .mesh_model import MeshModel
     from .sap_data import (
@@ -449,10 +451,13 @@ class Selection:
             of all vertex nodes.  ``None`` (default) means no elevation
             filter.
         story: Filter by storey name(s) — e.g. ``["Roof", "Level 2"]``.  An
-            element is included if its mid-height Z is within
-            ``story_z_tolerance`` of the named storey's elevation.  Requires
-            ``storey_data`` to be passed to :meth:`resolve_to_mesh_sets`.
-            ``None`` (default) means no storey filter.
+            element is assigned to the storey at its **top** (the ETABS
+            convention: a column belongs to the storey above it, a beam or
+            slab to its own level) and included when that storey is named.
+            Requires ``storey_data`` to be passed to
+            :meth:`resolve_to_mesh_sets` (or ``story_elevations`` to
+            :meth:`get_frame_ids` / :meth:`get_area_ids`).  ``None`` (default)
+            means no storey filter.
 
     Examples:
         Select all frame members in a lateral-resisting group:
@@ -863,14 +868,14 @@ class Selection:
         model: Union["SAPModelData", "MeshModel"],
         eid: str,
         story_elevations: Optional[dict[str, float]] = None,
-        story_z_tolerance: float = 0.5,
     ) -> bool:
         """Check all selection criteria against either model type.
 
         When ``story_elevations`` is supplied (e.g. from
         :func:`~fea_toolkit.model.stories.identify_stories`), the
-        :attr:`elevation_range` and :attr:`story` filters are also applied
-        using the frame's mid-height Z.
+        :attr:`elevation_range` filter uses the frame's mid-height Z and the
+        :attr:`story` filter uses its **top** Z (the ETABS convention — a
+        column belongs to the storey at its top).
         """
         if not self._match_element_type("Frame"):
             return False
@@ -897,7 +902,8 @@ class Selection:
             or self.exclude_story is not None
         ):
             z_mid = self._get_frame_z_mid(model, eid)
-            if not self._match_z_filter(z_mid, story_elevations, story_z_tolerance):
+            z_top = self._get_frame_z_top(model, eid)
+            if not self._match_z_filter(z_mid, z_top, story_elevations):
                 return False
         return True
 
@@ -906,14 +912,13 @@ class Selection:
         model: Union["SAPModelData", "MeshModel"],
         eid: str,
         story_elevations: Optional[dict[str, float]] = None,
-        story_z_tolerance: float = 0.5,
     ) -> bool:
         """Check all selection criteria against either model type.
 
         When ``story_elevations`` is supplied (e.g. from
         :func:`~fea_toolkit.model.stories.identify_stories`), the
-        :attr:`elevation_range` and :attr:`story` filters are also applied
-        using the area's centroid Z.
+        :attr:`elevation_range` filter uses the area's centroid Z and the
+        :attr:`story` filter uses its **top** Z (max node Z).
         """
         if not self._match_element_type("Area"):
             return False
@@ -937,7 +942,8 @@ class Selection:
             or self.exclude_story is not None
         ):
             z_mid = self._get_area_z_mid(model, eid)
-            if not self._match_z_filter(z_mid, story_elevations, story_z_tolerance):
+            z_top = self._get_area_z_top(model, eid)
+            if not self._match_z_filter(z_mid, z_top, story_elevations):
                 return False
         return True
 
@@ -961,7 +967,6 @@ class Selection:
         self,
         model: Union["SAPModelData", "MeshModel"],
         story_elevations: Optional[dict[str, float]] = None,
-        story_z_tolerance: float = 0.5,
     ) -> list[str]:
         """Return frame element IDs matching this selection.
 
@@ -976,16 +981,13 @@ class Selection:
         """
         self._require_resolved()
         return [
-            eid
-            for eid in model.frame_elements
-            if self._frame_matches(model, eid, story_elevations, story_z_tolerance)
+            eid for eid in model.frame_elements if self._frame_matches(model, eid, story_elevations)
         ]
 
     def get_area_ids(
         self,
         model: Union["SAPModelData", "MeshModel"],
         story_elevations: Optional[dict[str, float]] = None,
-        story_z_tolerance: float = 0.5,
     ) -> list[str]:
         """Return area element IDs matching this selection.
 
@@ -1000,9 +1002,7 @@ class Selection:
         """
         self._require_resolved()
         return [
-            eid
-            for eid in model.area_elements
-            if self._area_matches(model, eid, story_elevations, story_z_tolerance)
+            eid for eid in model.area_elements if self._area_matches(model, eid, story_elevations)
         ]
 
     def get_node_ids(self, model: Union["SAPModelData", "MeshModel"]) -> list[str]:
@@ -1368,7 +1368,6 @@ class Selection:
         self,
         mesh_model: "MeshModel",
         storey_data: "Optional[list[StoryLevel]]" = None,
-        story_z_tolerance: float = 0.5,
     ) -> tuple[set[str], set[str]]:
         """Resolve this Selection against a ``MeshModel``.
 
@@ -1389,10 +1388,6 @@ class Selection:
                 Output of :func:`~fea_toolkit.model.stories.identify_stories`,
                 i.e. ``List[StoryLevel]``.  Required only when :attr:`story`
                 is set; ignored otherwise.
-            story_z_tolerance:
-                Tolerance (in model length units) for matching an element's
-                mid-height Z to a storey elevation from *storey_data*.
-                Default 0.5 (half-metre in metre-based models).
 
         Returns:
             ``(record_frame_ids, record_area_ids)`` — two :class:`set` of
@@ -1445,7 +1440,6 @@ class Selection:
                 mesh_model,
                 eid,
                 story_elevations,
-                story_z_tolerance,
             ):
                 frame_ids.add(eid)
 
@@ -1456,7 +1450,6 @@ class Selection:
                 mesh_model,
                 aid,
                 story_elevations,
-                story_z_tolerance,
             ):
                 area_ids.add(aid)
 
@@ -1467,22 +1460,24 @@ class Selection:
     def _match_z_filter(
         self,
         z_mid: Optional[float],
+        z_top: Optional[float],
         story_elevations: Optional[dict[str, float]] = None,
-        story_z_tolerance: float = 0.5,
     ) -> bool:
-        """Apply the elevation-range and storey filters to a resolved Z.
+        """Apply the elevation-range and storey filters to resolved Z values.
 
-        The elevation and storey criteria are applied only when set.  A
-        ``None`` ``z_mid`` — element geometry unavailable — excludes the
-        element when a *positive* criterion needs it, but keeps it when only
-        an exclusion is set (nothing to test means nothing to exclude).
+        The elevation range uses the element's mid-height Z; the storey filter
+        uses its **top** Z (the ETABS convention — a column belongs to the
+        storey at its top).  Both are applied only when set.  ``None``
+        geometry excludes the element when a *positive* criterion needs it,
+        but keeps it when only an exclusion is set (nothing to test means
+        nothing to exclude).
         """
-        if z_mid is None:
+        if z_mid is None or z_top is None:
             has_positive = self.elevation_range is not None or self.story is not None
             return not has_positive
         if not self._match_elevation(z_mid):
             return False
-        return self._match_story(z_mid, story_elevations, story_z_tolerance)
+        return self._match_story(z_top, story_elevations)
 
     def _match_elevation(self, z_mid: float) -> bool:
         """Check if a Z coordinate falls within *elevation_range* (or not)."""
@@ -1498,31 +1493,30 @@ class Selection:
 
     def _match_story(
         self,
-        z_mid: float,
+        z_top: float,
         story_elevations: Optional[dict[str, float]],
-        story_z_tolerance: float,
     ) -> bool:
-        """Check if a Z coordinate matches (or is excluded from) a storey."""
+        """Check if a top Z belongs to (or is excluded from) a storey.
+
+        Uses the ETABS rule — an element belongs to the lowest storey at or
+        above its top Z — so a column is matched against the storey at its
+        top rather than its mid-height.
+        """
+        levels = (
+            sorted(story_elevations.items(), key=lambda kv: (kv[1], kv[0]))
+            if story_elevations is not None
+            else None
+        )
         if self.story is not None:
-            if story_elevations is None:
+            if levels is None:
                 return False  # no elevation data to match against — exclude
-            matched = False
-            for story_name in self.story:
-                elev = story_elevations.get(story_name)
-                if elev is None:
-                    continue  # unknown story name — skip conservatively
-                if abs(z_mid - elev) <= story_z_tolerance:
-                    matched = True
-                    break
-            if not matched:
+            if story_name_at_or_above(z_top, levels) not in self.story:
                 return False
         if self.exclude_story is not None:
-            if story_elevations is None:
+            if levels is None:
                 return True  # no elevation data — cannot tell whether to exclude
-            for story_name in self.exclude_story:
-                elev = story_elevations.get(story_name)
-                if elev is not None and abs(z_mid - elev) <= story_z_tolerance:
-                    return False
+            if story_name_at_or_above(z_top, levels) in self.exclude_story:
+                return False
         return True
 
     @staticmethod
@@ -1538,6 +1532,18 @@ class Selection:
         return (node_i.z + node_j.z) / 2.0
 
     @staticmethod
+    def _get_frame_z_top(model: Union["SAPModelData", "MeshModel"], eid: str) -> Optional[float]:
+        """Return the top Z of a frame element (max of its two node Zs)."""
+        fe = model.frame_elements.get(eid)
+        if fe is None:
+            return None
+        node_i = model.nodes.get(fe.node_i)
+        node_j = model.nodes.get(fe.node_j)
+        if node_i is None or node_j is None:
+            return None
+        return max(node_i.z, node_j.z)
+
+    @staticmethod
     def _get_area_z_mid(model: Union["SAPModelData", "MeshModel"], aid: str) -> Optional[float]:
         """Return the centroid Z of an area element, or None."""
         ae = model.area_elements.get(aid)
@@ -1551,6 +1557,15 @@ class Selection:
         if not z_vals:
             return None
         return sum(z_vals) / len(z_vals)
+
+    @staticmethod
+    def _get_area_z_top(model: Union["SAPModelData", "MeshModel"], aid: str) -> Optional[float]:
+        """Return the top Z of an area element (max of its node Zs)."""
+        ae = model.area_elements.get(aid)
+        if ae is None:
+            return None
+        z_vals = [model.nodes[nid].z for nid in ae.node_ids if nid in model.nodes]
+        return max(z_vals) if z_vals else None
 
     # ── Brace detection ──────────────────────────────────────────────────────
 

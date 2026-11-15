@@ -79,6 +79,17 @@ class TestStoryLevels:
     def test_reads_story_definitions(self):
         assert story_levels(_model()) == [("Base", 0.0), ("L2", 3.0), ("Roof", 6.0)]
 
+    def test_sorts_ascending_by_elevation(self):
+        from fea_toolkit.model.sap_data import StoryDefinition
+
+        model = _model()
+        model.stories = [
+            StoryDefinition(name="Roof", elevation=6.0),
+            StoryDefinition(name="Base", elevation=0.0),
+            StoryDefinition(name="L2", elevation=3.0),
+        ]
+        assert story_levels(model) == [("Base", 0.0), ("L2", 3.0), ("Roof", 6.0)]
+
     def test_empty_without_stories(self):
         model = _model()
         model.stories = []
@@ -93,8 +104,13 @@ class TestFrameLabels:
     def test_material_walks_section(self):
         assert frame_labels(_model(), "material") == {"F1": "Steel", "F2": "Steel"}
 
-    def test_story_uses_mid_height(self):
-        assert frame_labels(_model(), "story") == {"F1": "Base", "F2": "L2"}
+    def test_story_uses_top(self):
+        # F1 tops at 2.5 (→ L2), F2 tops at 6 (→ Roof): ETABS names a column
+        # for the storey at its top.
+        assert frame_labels(_model(), "story") == {"F1": "L2", "F2": "Roof"}
+
+    def test_nearest_story_uses_mid_height(self):
+        assert frame_labels(_model(), "nearest_story") == {"F1": "Base", "F2": "L2"}
 
     def test_inactive_parents_are_skipped(self):
         labels = frame_labels(_model(), "section")
@@ -113,8 +129,11 @@ class TestShellLabels:
     def test_material(self):
         assert shell_labels(_model(), "material") == {"A1": "Concrete"}
 
-    def test_story_uses_centroid(self):
+    def test_story_uses_top(self):
         assert shell_labels(_model(), "story") == {"A1": "L2"}
+
+    def test_nearest_story_uses_centroid(self):
+        assert shell_labels(_model(), "nearest_story") == {"A1": "L2"}
 
 
 class TestColourByField:
@@ -141,3 +160,36 @@ class TestMetadata:
         assert FIELD_LABELS["section"] == "Section"
         assert FIELD_LABELS["material"] == "Material"
         assert FIELD_LABELS["story"] == "Story"
+        assert FIELD_LABELS["nearest_story"] == "Nearest Story"
+
+
+class TestStoryNameAtOrAbove:
+    """The shared ETABS band rule: lowest storey at or above the top Z."""
+
+    def test_at_a_level(self):
+        from fea_toolkit.model.stories import story_name_at_or_above
+
+        levels = [("S1", 0.0), ("S2", 3.0), ("S3", 6.0)]
+        assert story_name_at_or_above(3.0, levels) == "S2"
+
+    def test_above_the_next_storey_down(self):
+        from fea_toolkit.model.stories import story_name_at_or_above
+
+        levels = [("S1", 0.0), ("S2", 3.0), ("S3", 6.0)]
+        assert story_name_at_or_above(1.0, levels) == "S2"
+
+    def test_below_lowest_belongs_to_lowest(self):
+        from fea_toolkit.model.stories import story_name_at_or_above
+
+        assert story_name_at_or_above(-1.0, [("S1", 0.0), ("S2", 3.0)]) == "S1"
+
+    def test_above_highest_belongs_to_highest(self):
+        from fea_toolkit.model.stories import story_name_at_or_above
+
+        assert story_name_at_or_above(9.0, [("S1", 0.0), ("S2", 3.0)]) == "S2"
+
+    def test_unresolvable(self):
+        from fea_toolkit.model.stories import story_name_at_or_above
+
+        assert story_name_at_or_above(None, [("S1", 0.0)]) is None
+        assert story_name_at_or_above(1.0, []) is None

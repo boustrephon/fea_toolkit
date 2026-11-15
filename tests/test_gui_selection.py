@@ -149,6 +149,7 @@ def test_colour_by_fields_available(window):
     assert "section" in fields
     assert "material" in fields
     assert "story" not in fields
+    assert "nearest_story" not in fields
 
 
 def test_entity_scope_resolves_material_and_section(window):

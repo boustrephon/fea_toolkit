@@ -1,9 +1,13 @@
 """Qt-free colour-by resolver: map a model attribute to per-element labels.
 
-The Model Tree's right-click **Colour by Material / Section / Story** menus
-resolve one label per drawn element (frame or shell), which the viewer turns
-into a colour.  Pure data logic, Qt-free — unit-tested without Qt, like
-:mod:`fea_toolkit.gui.controllers.selection`.
+The Model Tree's right-click **Colour by Material / Section / Story / Nearest
+Story** menus resolve one label per drawn element (frame or shell), which the
+viewer turns into a colour.  Pure data logic, Qt-free — unit-tested without
+Qt, like :mod:`fea_toolkit.gui.controllers.selection`.
+
+**Story** follows the ETABS convention — an element belongs to the storey at
+its **top** (a column is named for the storey above it) — while **Nearest
+Story** assigns the storey nearest the element's mid-height Z.
 
 The palette is shared with the model viewer:
 :func:`fea_toolkit.plotting.viz_common.categorical_palette`.  An element whose
@@ -13,6 +17,7 @@ no label and the renderer draws it grey.
 
 from typing import Any, Optional
 
+from ...model.stories import story_name_at_or_above
 from ...plotting.viz_common import categorical_palette
 
 __all__ = [
@@ -29,10 +34,11 @@ FIELD_LABELS = {
     "material": "Material",
     "section": "Section",
     "story": "Story",
+    "nearest_story": "Nearest Story",
 }
 
 #: Fields a menu can colour by, in menu order.
-COLOUR_FIELDS = ("material", "section", "story")
+COLOUR_FIELDS = ("material", "section", "story", "nearest_story")
 
 #: A field that could not be resolved for an element — drawn grey by the renderer.
 _UNLABELLED = ""
@@ -47,7 +53,7 @@ def _active_items(model: Any, attr: str) -> list[tuple[str, Any]]:
 
 
 def story_levels(model: Any) -> list[tuple[str, float]]:
-    """``[(name, elevation), ...]`` in model units, or ``[]`` when unknown.
+    """``[(name, elevation), ...]`` sorted ascending, or ``[]`` when unknown.
 
     Prefers the imported ``stories`` table (``StoryDefinition``); falls back to
     detected ``story_levels`` (``StoryLevel``), matching
@@ -57,9 +63,11 @@ def story_levels(model: Any) -> list[tuple[str, float]]:
         return []
     stories = getattr(model, "stories", None) or []
     if stories:
-        return [(s.name, float(s.elevation)) for s in stories]
-    levels = getattr(model, "story_levels", None) or []
-    return [(level.name, float(level.elevation)) for level in levels]
+        pairs = [(s.name, float(s.elevation)) for s in stories]
+    else:
+        levels = getattr(model, "story_levels", None) or []
+        pairs = [(level.name, float(level.elevation)) for level in levels]
+    return sorted(pairs, key=lambda pair: (pair[1], pair[0]))
 
 
 def _nearest_story(z_mid: Optional[float], levels: list[tuple[str, float]]) -> str:
@@ -67,6 +75,11 @@ def _nearest_story(z_mid: Optional[float], levels: list[tuple[str, float]]) -> s
     if z_mid is None or not levels:
         return _UNLABELLED
     return min(levels, key=lambda pair: abs(pair[1] - z_mid))[0]
+
+
+def _story_label(name: Optional[str]) -> str:
+    """The resolved story name, mapped to ``""`` when there is none."""
+    return name if name is not None else _UNLABELLED
 
 
 def _section_of(model: Any, assignments: dict, eid: str) -> str:
@@ -93,6 +106,19 @@ def _frame_z_mid(model: Any, eid: str) -> Optional[float]:
     return (float(ni.z) + float(nj.z)) / 2.0
 
 
+def _frame_z_top(model: Any, eid: str) -> Optional[float]:
+    """Top Z of a frame (max of its two node Zs), or ``None``."""
+    elem = (getattr(model, "frame_elements", {}) or {}).get(eid)
+    if elem is None:
+        return None
+    nodes = getattr(model, "nodes", {}) or {}
+    ni = nodes.get(getattr(elem, "node_i", None))
+    nj = nodes.get(getattr(elem, "node_j", None))
+    if ni is None or nj is None:
+        return None
+    return max(float(ni.z), float(nj.z))
+
+
 def _area_z_mid(model: Any, aid: str) -> Optional[float]:
     """Centroid Z of an area, or ``None`` when its nodes are absent."""
     elem = (getattr(model, "area_elements", {}) or {}).get(aid)
@@ -103,25 +129,37 @@ def _area_z_mid(model: Any, aid: str) -> Optional[float]:
     return sum(zs) / len(zs) if zs else None
 
 
+def _area_z_top(model: Any, aid: str) -> Optional[float]:
+    """Top Z of an area (max of its node Zs), or ``None``."""
+    elem = (getattr(model, "area_elements", {}) or {}).get(aid)
+    if elem is None:
+        return None
+    nodes = getattr(model, "nodes", {}) or {}
+    zs = [float(nodes[nid].z) for nid in getattr(elem, "node_ids", ()) if nid in nodes]
+    return max(zs) if zs else None
+
+
 def frame_labels(model: Any, field: str) -> dict[str, str]:
     """``{frame_elem_id: label}`` for *field* over the model's active frames.
 
     Args:
         model: A ``SAPModelData`` or ``MeshModel``.
-        field: ``"section"``, ``"material"`` or ``"story"``.
+        field: ``"section"``, ``"material"``, ``"story"`` or ``"nearest_story"``.
 
     Returns:
         ``{frame_elem_id: label}``; unresolved elements map to ``""``.
     """
     assignments = getattr(model, "frame_assignments", {}) or {}
-    levels = story_levels(model) if field == "story" else []
+    levels = story_levels(model) if field in ("story", "nearest_story") else []
     out: dict[str, str] = {}
     for eid, _elem in _active_items(model, "frame_elements"):
         if field == "section":
             out[eid] = _section_of(model, assignments, eid)
         elif field == "material":
             out[eid] = _material_of(model, _section_of(model, assignments, eid))
-        else:  # story
+        elif field == "story":
+            out[eid] = _story_label(story_name_at_or_above(_frame_z_top(model, eid), levels))
+        else:  # nearest_story
             out[eid] = _nearest_story(_frame_z_mid(model, eid), levels)
     return out
 
@@ -129,14 +167,16 @@ def frame_labels(model: Any, field: str) -> dict[str, str]:
 def shell_labels(model: Any, field: str) -> dict[str, str]:
     """``{area_elem_id: label}`` for *field* over the model's active areas."""
     assignments = getattr(model, "area_assignments", {}) or {}
-    levels = story_levels(model) if field == "story" else []
+    levels = story_levels(model) if field in ("story", "nearest_story") else []
     out: dict[str, str] = {}
     for aid, _elem in _active_items(model, "area_elements"):
         if field == "section":
             out[aid] = _section_of(model, assignments, aid)
         elif field == "material":
             out[aid] = _material_of(model, _section_of(model, assignments, aid))
-        else:  # story
+        elif field == "story":
+            out[aid] = _story_label(story_name_at_or_above(_area_z_top(model, aid), levels))
+        else:  # nearest_story
             out[aid] = _nearest_story(_area_z_mid(model, aid), levels)
     return out
 
@@ -152,7 +192,7 @@ def colour_by_field(
 
     Args:
         model: A ``SAPModelData`` or ``MeshModel``.
-        field: ``"section"``, ``"material"`` or ``"story"``.
+        field: ``"section"``, ``"material"``, ``"story"`` or ``"nearest_story"``.
 
     Returns:
         ``({frame_elem_id: rgb}, {area_elem_id: rgb})`` — only resolvable

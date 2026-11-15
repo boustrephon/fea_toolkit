@@ -59,6 +59,36 @@ class StoryLevel:
         return f"{self.name} @ {self.elevation:.3f} [{self.method}, {self.confidence}]"
 
 
+def story_name_at_or_above(
+    z_top: Optional[float], levels: list[tuple[str, float]]
+) -> Optional[str]:
+    """The ETABS story name for an element whose top is at *z_top*.
+
+    ETABS names a column for the storey at its **top** (the storey above the
+    column), and a beam or slab for its own level — an element belongs to a
+    storey when its top is at that storey's level or anywhere above the next
+    storey down.  With *levels* sorted ascending by elevation that is the
+    **lowest storey whose elevation is at or above** *z_top*; a top below the
+    lowest storey belongs to that storey, and a top above the highest belongs
+    to the highest.
+
+    Args:
+        z_top: The element's top Z (max node Z for a frame or area), or
+            ``None`` when the geometry is unresolvable.
+        levels: ``[(name, elevation), ...]`` sorted ascending by elevation.
+
+    Returns:
+        The story name, or ``None`` when *z_top* is ``None`` or *levels* is
+        empty.
+    """
+    if z_top is None or not levels:
+        return None
+    for name, elevation in levels:
+        if elevation >= z_top:
+            return name
+    return levels[-1][0]
+
+
 # ========================================================================
 # Tolerance helpers
 # ========================================================================

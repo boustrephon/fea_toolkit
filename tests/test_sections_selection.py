@@ -894,44 +894,50 @@ class TestSelectionMeshModel:
 
     # ── story filter ──
 
-    def test_story_filter_basic(self, mesh_model):
-        """story=['Storey 1'] at elevation 0 → matches frames at Z=0."""
-        stories = [
+    def _stories(self):
+        """Storeys matching the fixture's levels (0, 3, 6, 9)."""
+        return [
             StoryLevel(name="Storey 1", elevation=0.0, method="manual", confidence="high"),
+            StoryLevel(name="Storey 2", elevation=3.0, method="manual", confidence="high"),
+            StoryLevel(name="Storey 3", elevation=6.0, method="manual", confidence="high"),
+            StoryLevel(name="Storey 4", elevation=9.0, method="manual", confidence="high"),
         ]
+
+    def test_story_filter_basic(self, mesh_model):
+        """A beam at a level belongs to that level's storey (top-based)."""
         sel = Selection(element_types=["Frame"], story=["Storey 1"])
-        frame_ids, area_ids = sel.resolve_to_mesh_sets(
-            mesh_model,
-            storey_data=stories,
-        )
+        frame_ids, area_ids = sel.resolve_to_mesh_sets(mesh_model, storey_data=self._stories())
         assert frame_ids == {"1"}
         assert area_ids == set()
 
     def test_story_filter_multiple_storeys(self, mesh_model):
-        """story=['Storey 1', 'Storey 2'] → frames at Z=0 and Z=3."""
-        stories = [
-            StoryLevel(name="Storey 1", elevation=0.0, method="manual", confidence="high"),
-            StoryLevel(name="Storey 2", elevation=3.0, method="manual", confidence="high"),
-        ]
+        """story=['Storey 1', 'Storey 2'] → frames at those levels."""
         sel = Selection(element_types=["Frame"], story=["Storey 1", "Storey 2"])
-        frame_ids, _ = sel.resolve_to_mesh_sets(
-            mesh_model,
-            storey_data=stories,
-        )
+        frame_ids, _ = sel.resolve_to_mesh_sets(mesh_model, storey_data=self._stories())
         assert frame_ids == {"1", "2"}
 
-    def test_story_filter_custom_tolerance(self, mesh_model):
-        """With tolerance=0.1, frame at Z=3 matches Storey 2 at Z=3.0."""
-        stories = [
-            StoryLevel(name="Storey 2", elevation=3.0, method="manual", confidence="high"),
-        ]
-        sel = Selection(element_types=["Frame"], story=["Storey 2"])
-        frame_ids, _ = sel.resolve_to_mesh_sets(
-            mesh_model,
-            storey_data=stories,
-            story_z_tolerance=0.1,
+    def test_story_filter_names_a_column_for_its_top_storey(self):
+        """A column from Storey 1 to Storey 2 is named for Storey 2 (its top)."""
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=0.0, y=0.0, z=3.0),
+        }
+        column = MeshModel(
+            nodes=nodes,
+            frame_elements={"1": FrameElement(elem_id="1", elem_tag=1, node_i="1", node_j="2")},
+            frame_assignments={"1": "UB100"},
+            area_elements={},
+            area_assignments={},
+            frame_dist_loads=[],
+            materials={},
+            sections={},
+            groups={},
         )
-        assert frame_ids == {"2"}
+        stories = self._stories()
+        top = Selection(element_types=["Frame"], story=["Storey 2"])
+        assert top.resolve_to_mesh_sets(column, storey_data=stories)[0] == {"1"}
+        bottom = Selection(element_types=["Frame"], story=["Storey 1"])
+        assert bottom.resolve_to_mesh_sets(column, storey_data=stories)[0] == set()
 
     def test_story_filter_raises_without_storey_data(self, mesh_model):
         """story filter without storey_data raises ValueError."""
@@ -939,29 +945,16 @@ class TestSelectionMeshModel:
         with pytest.raises(ValueError, match="storey_data"):
             sel.resolve_to_mesh_sets(mesh_model)
 
-    def test_story_filter_area(self, mesh_model):
-        """Area at centroid Z≈1.5 matches Storey 1 at Z=1.5 with tolerance."""
-        stories = [
-            StoryLevel(name="Storey 1", elevation=1.5, method="manual", confidence="medium"),
-        ]
-        sel = Selection(element_types=["Area"], story=["Storey 1"])
-        _, area_ids = sel.resolve_to_mesh_sets(
-            mesh_model,
-            storey_data=stories,
-            story_z_tolerance=0.1,
-        )
+    def test_story_filter_area_belongs_to_top_level(self, mesh_model):
+        """A wall spanning Storey 1→2 belongs to Storey 2 (its top)."""
+        sel = Selection(element_types=["Area"], story=["Storey 2"])
+        _, area_ids = sel.resolve_to_mesh_sets(mesh_model, storey_data=self._stories())
         assert area_ids == {"1"}
 
     def test_story_filter_no_match(self, mesh_model):
-        """Non-existent storey name returns empty."""
-        stories = [
-            StoryLevel(name="Roof", elevation=9.0, method="manual", confidence="high"),
-        ]
+        """A storey name with no matching band returns empty."""
         sel = Selection(element_types=["Frame"], story=["Basement"])
-        frame_ids, _ = sel.resolve_to_mesh_sets(
-            mesh_model,
-            storey_data=stories,
-        )
+        frame_ids, _ = sel.resolve_to_mesh_sets(mesh_model, storey_data=self._stories())
         assert frame_ids == set()
 
     # ── missing geometry (z_mid is None) ──
@@ -993,21 +986,14 @@ class TestSelectionMeshModel:
         assert area_ids == set()
 
     def test_elevation_and_story(self, mesh_model):
-        """Both elevation_range and story must match (AND logic)."""
-        stories = [
-            StoryLevel(name="Storey 2", elevation=3.0, method="manual", confidence="high"),
-        ]
-        # elevation_range=(0, 2) ∩ story=["Storey 2"] (Z=3) → no match
+        """elevation_range and story combine (AND): frame 1 is in range and Storey 1."""
         sel = Selection(
             element_types=["Frame"],
             elevation_range=(0.0, 2.0),
-            story=["Storey 2"],
+            story=["Storey 1"],
         )
-        frame_ids, _ = sel.resolve_to_mesh_sets(
-            mesh_model,
-            storey_data=stories,
-        )
-        assert frame_ids == set()
+        frame_ids, _ = sel.resolve_to_mesh_sets(mesh_model, storey_data=self._stories())
+        assert frame_ids == {"1"}
 
     # ── None defaults ──
 
