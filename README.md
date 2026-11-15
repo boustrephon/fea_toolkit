@@ -143,7 +143,7 @@ the "Package tree (abbreviated)" section below for the full subpackage list
 | **Frame Member Types (Steel)** | ✅ Complete | All steel section shapes (I, Box, Pipe, Channel, Angle, etc.) with `Steel01` fiber sections or elastic sections. |
 | **Frame Member Types (RC)** | ⚠️ Partial | Concrete materials and section shapes supported; rebar auto-placement implemented; confined concrete (Mander) wired via `fiber_confinement()`. See [`docs/pushover_analysis.md`](docs/pushover_analysis.md). |
 | **Code-Specific Capacity Modules** | ✅ Complete | `fea_toolkit.capacity` — GB 50010-2010 flexure/axial/shear/wall checks and ASCE 41-17 plastic hinge length, unit-aware (strengths authored in SI Pa, scaled to model units exactly once). See [`docs/capacity.md`](docs/capacity.md). |
-| **Storey Identification** | ✅ Complete | `identify_stories()` — 4 strategies: S2K story table → diaphragm constraints → horizontal area elements → node Z clustering. Returns sorted `StoryLevel` list with confidence ratings. See [`docs/storey_response.md`](docs/storey_response.md). |
+| **Storey Identification** | ✅ Complete | `identify_stories()` — 5 strategies: ETABS story table (`SAPModelData.stories`) → S2K `STORY DATA` (legacy) → diaphragm constraints → horizontal area elements → node Z clustering. Returns sorted `StoryLevel` list with confidence ratings. See [`docs/storey_response.md`](docs/storey_response.md). |
 | **Storey Response Analysis** | ✅ Complete | `storey_displacements()` (rigid-body fit with outlier rejection), `storey_drifts()` (inter-storey drift ratios), `storey_shears()` (summed element-end forces), `modal_storey_drifts()` (CQC-combined modal drifts). |
 | **Rigid Diaphragms** | ✅ Complete | `ops.rigidDiaphragm()` per group — S2K Z‑axis constraints, forced storey detection, or explicit named groups; slab‑derived levels are detected but applied only when explicitly requested (`rigid_diaphragms: True`/Z‑list), and `False` always disables. See [`docs/shell_support.md`](docs/shell_support.md). |
 | **Connectivity Diagnostics** | ✅ Complete | `check_model_connectivity()` (orphan nodes, shell-only base), `check_split_connectivity()` (zero-length elements), `check_mesh_connectivity()` (unrestrained mesh), `diagnose_singularity()` (tree-plot distribution). |
@@ -317,7 +317,7 @@ parsing through analysis to visualisation and reporting.
 | **Apply edge constraints** | `apply_edge_constraints()` | Tie fine-mesh nodes to coarse edges via `equationConstraint` |
 | **Detect unconnected edges** | `detect_unconnected_edges()` | Diagnostic: find shell nodes on coarse edges not yet connected |
 | **Record as script** | `RecordingOpenSees` proxy | Capture all `ops.*` calls as standalone Python or Tcl script |
-| **Detect storeys** | `identify_stories()` | 4 strategies to find storey elevations (S2K table → diaphragm → area elements → node clustering) |
+| **Detect storeys** | `identify_stories()` | 5 strategies to find storey elevations (ETABS story table → diaphragm → area elements → node clustering) |
 | **Model connectivity check** | `check_model_connectivity()` | Pre-build scan for orphan nodes, shell-only base fixity, duplicate coordinates |
 | **Split connectivity check** | `check_split_connectivity()` | After splitting: zero-length elements, duplicate nodes |
 | **Mesh connectivity check** | `check_mesh_connectivity()` | After meshing: unrestrained base mesh, low-connectivity nodes |

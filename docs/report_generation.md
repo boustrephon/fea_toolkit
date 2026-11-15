@@ -142,7 +142,7 @@ builder:
 
 # ── Storey Detection ─────────────────────────────────────────────────
 storeys:
-  method: "auto"                # "auto" | "s2k_table" | "diaphragm" | "area_elements" | "node_clustering"
+  method: "auto"                # "auto" | "story_table" | "s2k_table" | "diaphragm" | "area_elements" | "node_clustering"
   z_tolerance: 0.5
 
 # ── Analyses ─────────────────────────────────────────────────────────

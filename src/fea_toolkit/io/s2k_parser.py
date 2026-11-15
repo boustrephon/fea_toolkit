@@ -77,8 +77,8 @@ class SAP2000Parser:
     def raw_tables(self) -> dict[str, list[dict[str, Any]]]:
         """Public accessor for the raw parsed table data.
 
-        Returns a dict mapping table names (e.g. ``"STORY DATA"``,
-        ``"JOINT COORDINATES"``) to lists of row dicts.  Used by
+        Returns a dict mapping table names (e.g. ``"JOINT COORDINATES"``,
+        ``"FRAME SECTION ASSIGNMENTS"``) to lists of row dicts.  Used by
         :func:`~fea_toolkit.model.stories.identify_stories` for
         storey detection and by downstream diagnostic tools.
 

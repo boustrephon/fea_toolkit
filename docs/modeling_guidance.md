@@ -284,9 +284,10 @@ nonlinear verification paper.
 ## 9. Storey levels and multi-tower ETABS models
 
 Storey detection (`fea_toolkit.model.stories.identify_stories`) resolves levels
-in priority order — the ETABS `STORY DATA` table, Z-axis diaphragm constraints,
-nearly-horizontal area elements, then node Z-clustering.  SAP2000 and SAFE
-models do **not** guarantee storey definitions (ETABS does), so the IDA drift
+in priority order — the ETABS story table (parsed into `SAPModelData.stories`),
+Z-axis diaphragm constraints, nearly-horizontal area elements, then node
+Z-clustering.  SAP2000 and SAFE models do **not** guarantee storey definitions
+(ETABS does), so the IDA drift
 measure degrades along the same chain: with **≥ 2 levels** it is the peak
 **interstorey-drift ratio** (`d_max`); with fewer it is the **roof-drift proxy**
 (max horizontal nodal displacement ÷ structure height); and when storey levels
@@ -300,10 +301,12 @@ several "towers", each with its own grid system and its own set of story
 levels (CSI: *Edit > Towers, Stories and Grid Systems*).  Story drift and shear
 are reported per tower only when the multiple-tower option is enabled, and CSI
 notes that a tower cannot be analysed separately — a separate model per tower
-is needed for independent results.  `identify_stories` reads one flat
-`STORY DATA` table and cannot associate a level with its tower, so levels from
-different towers are merged by elevation; the detector warns when duplicate
-story names or elevations are present.  **Do not trust interstorey drift on a
+is needed for independent results.  `identify_stories` reads the story levels
+declared on `SAPModelData.stories` (whose `StoryDefinition.tower` records which
+tower each level belongs to) but still returns one flat level list — per-tower
+drift is not computed, so levels from different towers are merged by elevation;
+the detector warns when duplicate story names or elevations are present.  **Do
+not trust interstorey drift on a
 multi-tower model — split the towers into separate models first.**
 
 Sources (cited, not reproduced): CSI ETABS help — *Edit > Towers, Stories and

@@ -37,14 +37,37 @@ attributes, never from the parser's raw `_raw_tables` dict.
 ## 2. Storey Identification (`model/stories.py`)
 
 `identify_stories(md, raw_tables=None, method="auto", z_tolerance=0.5)`
-tries four strategies in priority order:
+tries five strategies in priority order:
 
 | # | Strategy | Source | Confidence |
 |---|---|---|---|
-| 1 | `s2k_table` | `STORY DATA` / `STORY` table (requires `raw_tables`) | high |
-| 2 | `diaphragm` | `md.constraints` / `md.constraint_assignments` (Z-axis `DIAPHRAGM` only) | high |
-| 3 | `area_elements` | Nearly-horizontal floor/roof slabs | medium |
-| 4 | `node_clustering` | Fallback Z-clustering for bare frame models | low |
+| 1 | `story_table` | `SAPModelData.stories` (parsed from ETABS `$ STORIES - IN SEQUENCE FROM TOP`) | high |
+| 2 | `s2k_table` | `STORY DATA` / `STORY` table (legacy, requires `raw_tables`) | high |
+| 3 | `diaphragm` | `md.constraints` / `md.constraint_assignments` (Z-axis `DIAPHRAGM` only) | high |
+| 4 | `area_elements` | Nearly-horizontal floor/roof slabs | medium |
+| 5 | `node_clustering` | Fallback Z-clustering for bare frame models | low |
+
+### Story table strategy reads from `SAPModelData`
+
+The ETABS `.e2k` / `.$et` `$ STORIES - IN SEQUENCE FROM TOP` table is parsed
+by `ETABSParser.get_model_data()` into `SAPModelData.stories`, a list of
+`StoryDefinition` records (`name`, absolute `elevation`, and the `TOWER` /
+`MASTERSTORY` / `SIMILARTO` flags).  `_try_model_stories(md)` promotes those
+parse-time facts into `StoryLevel` objects, preserving the imported story
+names so a `Selection(story=["ROOF"])` criterion resolves against them.
+
+- **`TOWER`** marks which tower a story belongs to in a multi-tower model; it
+  is retained on the record and used to warn when names/elevations collide
+  across towers (the flat level list cannot separate towers — model each tower
+  separately for per-tower results).
+- **`MASTERSTORY "Yes"`** / **`SIMILARTO "sname"`** record the "similar
+  stories" mirroring relationship; they are captured for introspection and a
+  future similarity-aware editing verb, but do not affect the name→elevation
+  mapping `identify_stories` produces.
+
+SAP2000 `.s2k` / `.$2k` and SAFE exports carry no story table, so
+`SAPModelData.stories` is empty for them and the detection strategies below
+apply.
 
 ### Diaphragm strategy reads from `SAPModelData`
 
@@ -72,8 +95,9 @@ other type (`EQUAL`, `WELD`, `BEAM`, `ROD`, `PLATE`, `LOCAL`) is parsed but
 > **Historical note:** an earlier version read `raw_tables` directly
 > (`CONSTRAINT DEFINITIONS - DIAPHRAGM`). It now reads the structured
 > `SAPModelData` attributes, so a caller does not need the parser's
-> internal tables. Only the `s2k_table` strategy still requires
-> `raw_tables`.
+> internal tables.  The `s2k_table` strategy is the remaining legacy path —
+> it reads the ETABS `STORY DATA` / `STORY` table from `raw_tables`, but the
+> canonical source of imported story names is now `SAPModelData.stories`.
 
 ## 3. Diaphragm Level Detection (Preprocessor)
 

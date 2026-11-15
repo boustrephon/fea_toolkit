@@ -74,8 +74,9 @@ __all__ = [
 # ═══════════════════════════════════════════════════════════════════════
 
 #: Exact table names the parser (or another toolkit module) consumes.
-#: ``STORY DATA`` is read by :mod:`fea_toolkit.model.stories`, not by the
-#: parser, but it is consumed by the toolkit, so it belongs here.
+#: ``STORY DATA`` (an ETABS table, absent from SAP2000 exports) is read by
+#: :mod:`fea_toolkit.model.stories`, not by the parser, but it is consumed by
+#: the toolkit, so it belongs here.
 HANDLED_TABLES: frozenset[str] = frozenset(
     {
         # ── program / units ──
@@ -84,8 +85,8 @@ HANDLED_TABLES: frozenset[str] = frozenset(
         "JOINT COORDINATES",
         "JOINT RESTRAINT ASSIGNMENTS",
         "JOINT CONSTRAINT ASSIGNMENTS",
-        "STORY DATA",  # consumed by model.stories (not the parser)
-        "STORY",  # legacy story table, also read by model.stories
+        "STORY DATA",  # ETABS story table, read by model.stories (not the parser)
+        "STORY",  # legacy ETABS story table, also read by model.stories
         # ── materials, sections, rebar ──
         "MATERIAL PROPERTIES 01 - GENERAL",
         "REBAR SIZES",
