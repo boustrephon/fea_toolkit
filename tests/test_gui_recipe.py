@@ -139,6 +139,47 @@ class TestDocumentAdoption:
         assert "no longer open" in window._message_log.toPlainText()
 
 
+class TestBenchmarkLibrary:
+    """The Benchmark Library panel presets a benchmark's recipe (P46)."""
+
+    def test_the_library_lists_every_benchmark(self, window):
+        from qtpy.QtCore import Qt
+
+        from fea_toolkit.benchmarks.catalogue import BENCHMARK_ENTRIES
+
+        panel = window._benchmark_panel
+        assert panel._list.count() == len(BENCHMARK_ENTRIES)
+        enabled = sum(
+            1
+            for i in range(panel._list.count())
+            if panel._list.item(i).flags() & Qt.ItemFlag.ItemIsEnabled
+        )
+        assert enabled == sum(1 for entry in BENCHMARK_ENTRIES if entry.builder is not None)
+
+    def test_open_presets_a_build_model_plus_mesh_recipe(self, window):
+        window._open_benchmark_from_library("ik2005_generic_frame")
+        recipe = window._recipe_panel.recipe
+        assert [step.verb for step in recipe.steps] == ["build_model", "mesh"]
+        assert recipe.steps[0].params["builder"] == "generic_frame"
+
+    def test_open_emits_the_catalogue_id(self, window):
+        from qtpy.QtCore import Qt
+
+        panel = window._benchmark_panel
+        received: list = []
+        panel.open_requested.connect(received.append)
+        for i in range(panel._list.count()):
+            if panel._list.item(i).data(Qt.ItemDataRole.UserRole) == "ik2005_generic_frame":
+                panel._list.setCurrentRow(i)
+                break
+        panel._on_open_clicked()
+        assert received == ["ik2005_generic_frame"]
+
+    def test_open_rejects_an_unknown_benchmark(self, window):
+        window._open_benchmark_from_library("nope")
+        assert "Could not open benchmark" in window._message_log.toPlainText()
+
+
 class TestModelPresets:
     """The Model menu writes steps into the recipe rather than hiding the work."""
 

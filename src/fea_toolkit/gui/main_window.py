@@ -1740,6 +1740,7 @@ class MainWindow(QMainWindow):
         self._log_dock.setWidget(self._message_log)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._log_dock)
         self._build_recipe_dock()
+        self._build_benchmark_dock()
 
     def _build_recipe_dock(self) -> None:
         """Build the Recipe dock — the workflow as an ordered list of steps.
@@ -1757,6 +1758,44 @@ class MainWindow(QMainWindow):
         self._recipe_dock.setObjectName("dock_recipe")
         self._recipe_dock.setWidget(self._recipe_panel)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._recipe_dock)
+
+    def _build_benchmark_dock(self) -> None:
+        """Build the Benchmark Library dock — the validated example models.
+
+        Lists the benchmark catalogue with tier/status badges; "open" presets the
+        benchmark's ``build_model`` + ``mesh`` recipe into the Recipe dock.  The
+        panel imports only the OpenSees-free catalogue, so it renders before a
+        model is open.
+        """
+        from .views.benchmark_library_panel import BenchmarkLibraryPanel
+
+        self._benchmark_panel = BenchmarkLibraryPanel(self)
+        self._benchmark_panel.open_requested.connect(self._open_benchmark_from_library)
+        self._benchmark_dock = QDockWidget("Benchmark Library", self)
+        self._benchmark_dock.setObjectName("dock_benchmarks")
+        self._benchmark_dock.setWidget(self._benchmark_panel)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._benchmark_dock)
+
+    def _open_benchmark_from_library(self, benchmark_id: str) -> None:
+        """Preset a benchmark's ``build_model`` + ``mesh`` recipe into the Recipe dock.
+
+        One spelling of "open a benchmark" (anti-pattern 17): the panel emits the
+        catalogue id, and this presets the recipe the user then runs — the
+        user-choice ``build_model`` parameters (e.g. the frame code) are edited in
+        the step dialog, not re-picked in a bespoke dialog.
+        """
+        from ..benchmarks.catalogue import benchmark_recipe
+
+        try:
+            recipe = benchmark_recipe(benchmark_id)
+        except (KeyError, ValueError) as exc:
+            self.log(f"Could not open benchmark {benchmark_id!r}: {exc}", "error")
+            return
+        self._recipe_panel.set_recipe(recipe)
+        self.log(
+            f"Preset recipe for benchmark {benchmark_id!r} (build_model + mesh). "
+            "Edit the step's parameters, then run."
+        )
 
     def _size_bottom_docks(self) -> None:
         """Keep the Messages and Recipe docks to a fifth of the window height.
