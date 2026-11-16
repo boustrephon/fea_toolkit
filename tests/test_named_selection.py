@@ -312,3 +312,35 @@ def test_a_document_recipe_opens_then_selects(tmp_path):
     recipe.add("select", params={"name": "core", "expression": "type=Frame"})
     run = run_recipe(recipe, make_sample_model())
     assert [result.kind for result in run.results] == ["session", "table"]
+
+
+def test_run_recipe_exposes_the_final_document_state(tmp_path):
+    """A recipe ending in ``open`` reports the document it ended with (P35)."""
+    from fea_toolkit.io.model_codec import model_to_json
+    from fea_toolkit.workflow import Recipe, Step, run_recipe
+
+    path = tmp_path / "doc.json"
+    path.write_text(model_to_json(make_sample_model()), encoding="utf-8")
+    run = run_recipe(Recipe(steps=[Step("open", params={"path": str(path)})]), make_sample_model())
+    assert run.document_reset is True
+    assert run.document.document_path == str(path)
+    assert run.document.model_data is not None
+
+
+def test_save_does_not_reset_the_document(tmp_path):
+    from fea_toolkit.workflow import Recipe, Step, run_recipe
+
+    path = str(tmp_path / "doc.json")
+    run = run_recipe(Recipe(steps=[Step("save", params={"path": path})]), make_sample_model())
+    assert run.document_reset is False
+    assert run.document.document_path == path
+
+
+def test_close_resets_the_document_but_keeps_the_model():
+    from fea_toolkit.workflow import Recipe, Step, run_recipe
+
+    model = make_sample_model()
+    run = run_recipe(Recipe(steps=[Step("close")]), model)
+    assert run.document_reset is True
+    assert run.document.document_path == ""
+    assert run.document.model_data is model

@@ -29,6 +29,7 @@ from typing import Any, Optional
 
 from ..model.named_selection import resolve_named_selections
 from ..model.selection import Selection
+from .steps import DocumentState
 
 __all__ = ["Recipe", "RecipeRun", "run_recipe", "satisfied_kinds"]
 
@@ -415,6 +416,13 @@ class RecipeRun:
     #: may produce no result, a tolerated failure appears here as well as in
     #: ``failures``, and a *disabled* step is recorded ``"skipped"``).
     step_status: list = field(default_factory=list)
+    #: The working document's state after the last step, for a caller that must
+    #: adopt it (the GUI).  ``None`` until the run completes.
+    document: Optional[DocumentState] = None
+    #: Whether a document-lifecycle step (``open`` / ``close``) replaced or
+    #: closed the document mid-run, so the caller must re-adopt the document
+    #: rather than keep showing the one it was handed.
+    document_reset: bool = False
 
 
 def _resolve_step_selection(step: Any, context: Any) -> Any:
@@ -581,6 +589,7 @@ def run_recipe(
                 produced.clear()
                 context.case_results.clear()
                 context.results.clear()
+                run.document_reset = True
             if context.cancelled:
                 # A solve cancelled between cases still completed its run;
                 # record a distinct status instead of a misleading "ok".
@@ -608,4 +617,9 @@ def run_recipe(
             # when that step was the last one.
             run.cancelled = True
             break
+    run.document = DocumentState(
+        model_data=context.model_data,
+        document_path=context.document_path,
+        named_selections=dict(context.named_selections),
+    )
     return run

@@ -37,6 +37,7 @@ __all__ = [
     "PUSHOVER",
     "RS",
     "TABLE",
+    "DocumentState",
     "ParamSpec",
     "Step",
     "StepContext",
@@ -319,6 +320,23 @@ class StepContext:
     document_dirty: bool = False
     #: The named-selections store — ``{name: NamedSelection}``, written by the
     #: ``select`` verb and referenced by a step's ``Selection.selections`` field.
+    named_selections: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class DocumentState:
+    """The working document's state at the end of a recipe run.
+
+    A snapshot of the :class:`StepContext` document fields, for a caller that
+    must adopt the document the run ended with (the GUI).  ``model_data`` is
+    the document's parsed model — the opened document after an ``open`` step,
+    or the caller's own model when no document-lifecycle step ran.  The
+    ``named_selections`` mapping is copied out, so mutating the context
+    afterwards cannot change the snapshot.
+    """
+
+    model_data: Any
+    document_path: str = ""
     named_selections: dict = field(default_factory=dict)
 
 

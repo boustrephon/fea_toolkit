@@ -55,6 +55,40 @@ def _await(window, timeout=60.0):
     assert window._worker is None, "the recipe worker never finished"
 
 
+class TestDocumentAdoption:
+    """A document-lifecycle recipe (``open`` / ``close``) drives the window (P35)."""
+
+    def test_a_document_reset_run_replaces_the_store(self, window, tmp_path):
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.workflow import RecipeRun
+        from fea_toolkit.workflow.steps import DocumentState, StepResult
+
+        opened = make_sample_model()  # a fresh instance, distinct from the window's
+        path = str(tmp_path / "doc.json")
+        run = RecipeRun(
+            document=DocumentState(model_data=opened, document_path=path),
+            document_reset=True,
+            results=[StepResult(kind="session", label="Opened document", payload=path)],
+        )
+        window._recipe_finished((run, []))
+        assert window._store.raw() is opened
+        assert window._source_label == path
+
+    def test_a_save_only_run_keeps_the_store(self, window, tmp_path):
+        from fea_toolkit.workflow import RecipeRun
+        from fea_toolkit.workflow.steps import DocumentState, StepResult
+
+        before = window._store.raw()
+        path = str(tmp_path / "doc.json")
+        run = RecipeRun(
+            document=DocumentState(model_data=before, document_path=path),
+            document_reset=False,
+            results=[StepResult(kind="session", label="Saved document", payload=path)],
+        )
+        window._recipe_finished((run, []))
+        assert window._store.raw() is before
+
+
 class TestModelPresets:
     """The Model menu writes steps into the recipe rather than hiding the work."""
 

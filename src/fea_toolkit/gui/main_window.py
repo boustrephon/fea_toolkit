@@ -3676,8 +3676,10 @@ class MainWindow(QMainWindow):
 
         A ``cases`` result carries the same in-memory archive the **Analysis ▸
         Run** path serves, so it becomes one view per case, exactly as there —
-        a recipe's results are no longer merely a line in the log.  Cancellation
-        and failure stay distinct: a *cancelled* run legitimately holds only the
+        a recipe's results are no longer merely a line in the log.  A
+        document-lifecycle step (``open`` / ``close``) is adopted into the window
+        first, so every result registers against the document the user is now
+        looking at.  Cancellation and failure stay distinct: a *cancelled* run legitimately holds only the
         cases it solved before stopping, so no result is reported as failed, and
         an empty one is left to the cancellation line rather than called out as
         missing data.
@@ -3686,9 +3688,15 @@ class MainWindow(QMainWindow):
             payload: ``(RecipeRun, [log lines])`` from the worker.
         """
         from ..workflow import CASES, FIGURE, TABLE
-        from ..workflow.steps import IDA, MODAL, NLD, PUSHOVER, RS
+        from ..workflow.steps import IDA, MODAL, NLD, PUSHOVER, RS, SESSION
 
         run, messages = payload
+        # A document-lifecycle step (``open`` / ``close``) replaced or closed the
+        # working document; adopt it *before* registering the results below, so a
+        # meshing/analysis result attaches to the document the user now sees
+        # rather than the stale one (P35 follow-up).
+        if run.document_reset:
+            self._adopt_document(run.document)
         self._last_run = run
         # Persist each step's outcome onto the recipe (a step that ran "ok" is
         # unchecked), so the run state survives save → reopen.
@@ -3698,6 +3706,15 @@ class MainWindow(QMainWindow):
         for result in run.results:
             if result.kind == "geometry":
                 self._show_geometry_result(result.label, result.payload)
+            elif result.kind == SESSION:
+                # The document was already adopted up-front (``document_reset``);
+                # a SESSION result here just records the lifecycle event for the
+                # log — ``open``/``close``/``save`` carry their path, ``close``
+                # carries none.
+                if result.payload:
+                    self.log(f"{result.label}: {result.payload}")
+                else:
+                    self.log(result.label)
             elif result.kind == CASES:
                 added = self._show_results_result(result.label, result.payload)
                 if not added and not run.cancelled:
@@ -3721,6 +3738,23 @@ class MainWindow(QMainWindow):
         if run.cancelled:
             self.log("The recipe was cancelled.", "warn")
         self._set_analysis_actions_enabled()
+
+    def _adopt_document(self, document: Any) -> None:
+        """Adopt the document a recipe run ended with into the window.
+
+        A document-lifecycle step (``open`` / ``close``) replaced or closed the
+        worker's document; the window's ``_store`` still shows the previous one.
+        This replaces the store, restores the document's named selections and
+        re-renders — the same sequence ``File ▸ Open`` runs — so the results the
+        recipe produced register against the document the user is now looking at
+        rather than the stale one (P35 follow-up).
+        """
+        # Preserve the outgoing model's view before switching, as ``open_path``
+        # does.
+        self._save_view_state()
+        self._remember_source(document.model_data, source=document.document_path)
+        self._named_selections = dict(document.named_selections)
+        self.show_model(document.model_data)
 
     def _show_table_result(self, label: str, table: Any) -> None:
         """Register a check's ``table`` result as a view and show it.
