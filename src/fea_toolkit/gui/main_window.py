@@ -1012,15 +1012,10 @@ class MainWindow(QMainWindow):
         a["file.open"] = self._real_action(
             "Open", self._on_open, shortcut="Ctrl+O", tip="Open a SAP2000 / ETABS model"
         )
-        a["file.open_benchmark"] = self._real_action(
-            "Open benchmark\u2026",
-            self._on_open_benchmark,
-            tip="Build a FEMA 355C / SAC Phase 2 benchmark model",
-        )
-        a["file.open_generic_frame"] = self._real_action(
-            "Open generic-frame benchmark\u2026",
-            self._on_open_generic_frame,
-            tip="Build an IK-2005 generic frame (collapse benchmark)",
+        a["file.build_fema355c"] = self._real_action(
+            "Build FEMA 355C model\u2026",
+            self._on_build_fema355c,
+            tip="Preset a FEMA 355C / SAC Phase 2 example model (build_model + mesh)",
         )
         a["file.open_results"] = self._real_action(
             "Open results\u2026",
@@ -1342,8 +1337,7 @@ class MainWindow(QMainWindow):
 
         m = bar.addMenu("&File")
         m.addAction(a["file.open"])
-        m.addAction(a["file.open_benchmark"])
-        m.addAction(a["file.open_generic_frame"])
+        m.addAction(a["file.build_fema355c"])
         m.addAction(a["file.open_results"])
         m.addAction(a["file.open_project"])
         m.addSeparator()
@@ -1608,7 +1602,7 @@ class MainWindow(QMainWindow):
         main.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         for key in (
             "file.open",
-            "file.open_benchmark",
+            "file.build_fema355c",
             "file.save_results",
             None,
             "analysis.run",
@@ -4666,57 +4660,29 @@ class MainWindow(QMainWindow):
                 self, "Open failed", f"Could not open:\n{path}\n\nSee the message log."
             )
 
-    def _on_open_benchmark(self) -> None:
-        """Build a FEMA 355C / SAC Phase 2 benchmark model and display it."""
-        from .views.benchmark_dialog import BenchmarkDialog
+    def _on_build_fema355c(self) -> None:
+        """Preset a FEMA 355C ``build_model`` + ``mesh`` recipe into the Recipe dock.
 
-        choice = BenchmarkDialog.edit(parent=self)
-        if choice is None:
-            return
-        from ..benchmarks.fema355c import build_fema355c
+        FEMA 355C is supporting code, not a §3 catalogue row, so it has no
+        library-panel entry; this one menu item presets the recipe the user then
+        edits (region / stories / design / direction in the step dialog, rendered
+        as dropdowns from ``build_model``'s ``choices``) and runs — one spelling of
+        "build a FEMA 355C model" rather than the retired picker dialog.
+        """
+        from ..workflow import Recipe, Step
 
-        source = (
-            f"FEMA 355C {choice['region']}{choice['stories']} "
-            f"{choice['design']} ({choice['direction']})"
-        )
-        self.log(f"Building benchmark {source} \u2026")
-        try:
-            model = build_fema355c(
-                str(choice["region"]),
-                int(choice["stories"]),
-                str(choice["design"]),
-                str(choice["direction"]),
+        self._recipe_panel.set_recipe(
+            Recipe(
+                name="fema355c",
+                steps=[
+                    Step("build_model", params={"builder": "fema355c"}),
+                    Step("mesh"),
+                ],
             )
-        except Exception as exc:
-            self.log(f"Failed to build benchmark {source}: {exc}", "error")
-            return
-        self._save_view_state()
-        self._remember_source(model, source=source)
-        self.show_model(model)
-        self.log(f"Opened benchmark: {source}.")
-
-    def _on_open_generic_frame(self) -> None:
-        """Build an IK-2005 generic frame and display it in 3-D."""
-        from .views.generic_frame_dialog import GenericFrameDialog
-
-        code = GenericFrameDialog.edit(parent=self)
-        if code is None:
-            return
-        from ..benchmarks import generic_frame as gf
-
-        source = f"IK-2005 generic frame {code}"
-        self.log(f"Building {source} \u2026")
-        try:
-            model = gf.enrich_imk(gf.build_model(code), code)
-        except Exception as exc:
-            self.log(f"Failed to build {source}: {exc}", "error")
-            return
-        self._save_view_state()
-        self._remember_source(model, source=source)
-        self.show_model(model)
+        )
         self.log(
-            f"Opened {source}.  Use File \u25b8 Open results\u2026 on its IDA "
-            "archive to view the collapse curves."
+            "Preset a FEMA 355C build_model + mesh recipe. "
+            "Edit region/stories/design/direction, then run."
         )
 
     def _on_open_results(self) -> None:

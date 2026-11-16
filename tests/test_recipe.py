@@ -1609,3 +1609,25 @@ class TestBuildModelVerb:
                 Recipe(steps=[Step("build_model", params={"builder": "generic_frame"})]),
                 _slab_model(),
             )
+
+    def test_build_model_choices_fold_the_retired_dialog_pickers(self):
+        """The picker dialogs' combos live on as ``build_model`` parameter choices."""
+        from fea_toolkit.workflow.verbs import BUILD_MODEL_PARAMS
+
+        assert BUILD_MODEL_PARAMS["builder"].choices == ("fema355c", "sac", "generic_frame")
+        assert BUILD_MODEL_PARAMS["region"].choices == ("LA", "SE", "BO")
+        assert BUILD_MODEL_PARAMS["n_stories"].choices == (3, 9, 20)
+        assert BUILD_MODEL_PARAMS["design"].choices == ("pre", "post", "rbs", "r1", "r2", "r3")
+        assert BUILD_MODEL_PARAMS["direction"].choices == ("3d", "2d")
+        assert BUILD_MODEL_PARAMS["building"].choices == (3, 9, 20)
+        assert BUILD_MODEL_PARAMS["backbone"].choices == (
+            "bilinear",
+            "trilinear",
+            "trilinear_steel02",
+            "trilinear_clough",
+            "imk",
+            "imk_peak",
+        )
+        # The frame-code picker folded into a free-text parameter (its 12 codes
+        # live in benchmarks/generic_frame_data.py), so it carries no choices.
+        assert BUILD_MODEL_PARAMS["code"].choices is None

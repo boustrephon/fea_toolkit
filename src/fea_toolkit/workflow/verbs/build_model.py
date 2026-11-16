@@ -15,21 +15,55 @@ from ..steps import MODEL, ParamSpec, Step, StepContext, StepResult, validate_pa
 
 __all__ = ["BUILD_MODEL_PARAMS", "run_build_model"]
 
+#: The builder names ``build_model`` delegates to.
+_BUILDERS = ("fema355c", "sac", "generic_frame")
+#: FEMA 355C schedule axes — the retired picker dialog's combos, folded into the
+#: step parameters so the GUI renders them as dropdowns.
+_FEMA_REGIONS = ("LA", "SE", "BO")
+_FEMA_STORIES = (3, 9, 20)
+_FEMA_DESIGNS = ("pre", "post", "rbs", "r1", "r2", "r3")
+#: SAC hinge backbones ``sac.load_model`` accepts.
+_SAC_BACKBONES = (
+    "bilinear",
+    "trilinear",
+    "trilinear_steel02",
+    "trilinear_clough",
+    "imk",
+    "imk_peak",
+)
+
 BUILD_MODEL_PARAMS: dict[str, ParamSpec] = {
     "builder": ParamSpec(
-        default="",
+        default="fema355c",
         type=str,
+        choices=_BUILDERS,
         help="Which builder: 'fema355c', 'sac' or 'generic_frame'.",
     ),
     # FEMA 355C / SAC Phase 2
-    "region": ParamSpec(default="LA", type=str, help="FEMA 355C region: 'LA', 'SE' or 'BO'."),
-    "n_stories": ParamSpec(default=3, type=int, help="FEMA 355C storey count: 3, 9 or 20."),
+    "region": ParamSpec(
+        default="LA",
+        type=str,
+        choices=_FEMA_REGIONS,
+        help="FEMA 355C region: 'LA', 'SE' or 'BO'.",
+    ),
+    "n_stories": ParamSpec(
+        default=3,
+        type=int,
+        choices=_FEMA_STORIES,
+        help="FEMA 355C storey count: 3, 9 or 20.",
+    ),
     "design": ParamSpec(
         default="pre",
         type=str,
+        choices=_FEMA_DESIGNS,
         help="FEMA 355C design: 'pre', 'post', 'rbs', or LA9 'r1'/'r2'/'r3'.",
     ),
-    "direction": ParamSpec(default="3d", type=str, help="FEMA 355C direction: '3d' or '2d'."),
+    "direction": ParamSpec(
+        default="3d",
+        type=str,
+        choices=("3d", "2d"),
+        help="FEMA 355C direction: '3d' or '2d'.",
+    ),
     "restrain_ground_laterally": ParamSpec(
         default=True,
         type=bool,
@@ -38,8 +72,18 @@ BUILD_MODEL_PARAMS: dict[str, ParamSpec] = {
     # IK-2005 generic frame
     "code": ParamSpec(default="", type=str, help="Generic-frame code, e.g. '0909'."),
     # SAC
-    "building": ParamSpec(default=3, type=int, help="SAC building: 3, 9 or 20."),
-    "backbone": ParamSpec(default="bilinear", type=str, help="SAC hinge backbone."),
+    "building": ParamSpec(
+        default=3,
+        type=int,
+        choices=_FEMA_STORIES,
+        help="SAC building: 3, 9 or 20.",
+    ),
+    "backbone": ParamSpec(
+        default="bilinear",
+        type=str,
+        choices=_SAC_BACKBONES,
+        help="SAC hinge backbone.",
+    ),
     "nonlinear": ParamSpec(default=True, type=bool, help="SAC: enrich for nonlinear use."),
 }
 

@@ -229,9 +229,11 @@ just the collapse scalars) and writes `output/ik2005_<code>.npz` carrying:
 
 Plots are one call away from the archive: `plot_ida_curves()` (IDA curves +
 median) and `plot_collapse_fragility()` (P(collapse) vs Sa(T1)/g), re-exported
-from `fea_toolkit.plotting`.  In the **FEA-GUI**, *File ▸ Open generic-frame
-benchmark…* builds and displays the frame in 3-D, and *File ▸ Open results…* on
-the archive registers an "IDA collapse" figure view (the two-panel summary).
+from `fea_toolkit.plotting`.  In the **FEA-GUI**, open the **Benchmark Library**
+dock and choose *IK-2005 generic-frame collapse (IDA)* — it presets a
+`build_model` + `mesh` recipe whose `code` parameter picks one of the 12
+Appendix-A frames — then *File ▸ Open results…* on the archive registers an
+"IDA collapse" figure view (the two-panel summary).
 
 ### IDA plot markers — how to read the `plot_ida_curves` figure
 
