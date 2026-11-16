@@ -3677,9 +3677,10 @@ class MainWindow(QMainWindow):
         A ``cases`` result carries the same in-memory archive the **Analysis ▸
         Run** path serves, so it becomes one view per case, exactly as there —
         a recipe's results are no longer merely a line in the log.  A
-        document-lifecycle step (``open`` / ``close``) is adopted into the window
-        first, so every result registers against the document the user is now
-        looking at.  Cancellation and failure stay distinct: a *cancelled* run legitimately holds only the
+        document-lifecycle step (``open`` / ``close`` / ``build_model``) is
+        adopted into the window first, so every result registers against the
+        document the user is now looking at.  Cancellation and failure stay
+        distinct: a *cancelled* run legitimately holds only the
         cases it solved before stopping, so no result is reported as failed, and
         an empty one is left to the cancellation line rather than called out as
         missing data.
@@ -3691,19 +3692,21 @@ class MainWindow(QMainWindow):
         from ..workflow.steps import IDA, MODAL, NLD, PUSHOVER, RS, SESSION
 
         run, messages = payload
-        # A document-lifecycle step (``open`` / ``close``) replaced or closed the
-        # working document; adopt it *before* registering the results below, so a
-        # meshing/analysis result attaches to the document the user now sees
-        # rather than the stale one (P35 follow-up).
+        # A document-lifecycle step (``open`` / ``close`` / ``build_model``)
+        # replaced or closed the working document; adopt it *before* registering
+        # the results below, so a meshing/analysis result attaches to the
+        # document the user now sees rather than the stale one (P35 follow-up).
         if run.document_reset:
             self._adopt_document(run.document)
         elif run.document is not None:
             # The document itself was not replaced, but a ``select`` step (or any
             # verb that mutates the document's named selections) left the store
-            # in place while changing the selection mapping — synchronize it so
-            # the Selections tree reflects what the run authored, without
-            # re-adopting the unchanged model store.
-            self._named_selections = dict(run.document.named_selections)
+            # in place while changing the selection mapping — merge the run's
+            # selections back into the window's store rather than replacing it,
+            # so selections the user added while the run was in flight survive
+            # (the run's snapshot cannot see them), without re-adopting the
+            # unchanged model store.
+            self._named_selections.update(dict(run.document.named_selections))
         self._last_run = run
         # Persist each step's outcome onto the recipe (a step that ran "ok" is
         # unchecked), so the run state survives save → reopen.
@@ -3749,8 +3752,9 @@ class MainWindow(QMainWindow):
     def _adopt_document(self, document: Any) -> None:
         """Adopt the document a recipe run ended with into the window.
 
-        A document-lifecycle step (``open`` / ``close``) replaced or closed the
-        worker's document; the window's ``_store`` still shows the previous one.
+        A document-lifecycle step (``open`` / ``close`` / ``build_model``)
+        replaced or closed the worker's document; the window's ``_store`` still
+        shows the previous one.
         This replaces the store, restores the document's named selections and
         saved view state, raises the viewport page and re-renders — the same
         sequence ``File ▸ Open`` runs — so the results the recipe produced
@@ -4320,8 +4324,9 @@ class MainWindow(QMainWindow):
         partial run state, so the steps that completed before the failure are
         still committed (unchecked, like a successful run) instead of being
         re-run next time.  It also carries the document state: a completed
-        ``open`` / ``close`` step may have replaced the document before the
-        failing step, so that state is adopted before the lifecycle steps are
+        ``open`` / ``close`` / ``build_model`` step may have replaced the
+        document before the failing step, so that state is adopted before the
+        lifecycle steps are
         committed — otherwise the window would keep showing the pre-recipe
         document while the recipe recorded the switch as done.
         """
@@ -4332,11 +4337,22 @@ class MainWindow(QMainWindow):
         step_status = getattr(error, "step_status", None)
         document = getattr(error, "document", None)
         document_reset = getattr(error, "document_reset", False)
-        # A completed ``open`` / ``close`` step may have replaced the document
-        # before the failing step; adopt it first so the lifecycle steps are
-        # only committed against the document the window now shows.
+        # A completed ``open`` / ``close`` / ``build_model`` step may have
+        # replaced the document before the failing step; adopt it first so the
+        # lifecycle steps are only committed against the document the window now
+        # shows.
         if document_reset and document is not None:
             self._adopt_document(document)
+        # A completed ``mesh`` step's topology has no view to register on the
+        # failure path, but a retry of the analysis step needs it in the store —
+        # record it (mirroring ``_show_geometry_result`` on the success path) so
+        # the committed mesh step need not re-run.
+        if (
+            document is not None
+            and getattr(document, "model", None) is not None
+            and self._store is not None
+        ):
+            self._store.set_preprocessed(document.model)
         if step_status:
             if document_reset and document is None:
                 # The document changed but the error carried no state to adopt —
