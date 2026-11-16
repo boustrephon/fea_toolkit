@@ -88,6 +88,56 @@ class TestDocumentAdoption:
         window._recipe_finished((run, []))
         assert window._store.raw() is before
 
+    def test_a_select_only_run_merges_only_changed_selections(self, window):
+        """Only the entries a recipe changed are merged; a concurrent user edit survives."""
+        from fea_toolkit.model.named_selection import NamedSelection
+        from fea_toolkit.model.selection import Selection
+        from fea_toolkit.workflow import RecipeRun
+        from fea_toolkit.workflow.steps import DocumentState
+
+        core = NamedSelection(name="core", selection=Selection(sections=["COL"]))
+        other = NamedSelection(name="other", selection=Selection(sections=["BEAM"]))
+        window._recipe_named_snapshot = {"core": core, "other": other}
+        # The user edits "other" while the run is in flight.
+        other_edited = NamedSelection(name="other", selection=Selection(sections=["SLAB"]))
+        window._named_selections = {"core": core, "other": other_edited}
+
+        core_changed = NamedSelection(name="core", selection=Selection(sections=["BRACE"]))
+        run = RecipeRun(
+            document=DocumentState(
+                model_data=window._store.raw(),
+                named_selections={"core": core_changed, "other": other},
+            ),
+            document_reset=False,
+        )
+        window._recipe_finished((run, []))
+
+        assert window._named_selections["core"] == core_changed  # the recipe's change landed
+        assert window._named_selections["other"] == other_edited  # the user's edit survived
+
+    def test_a_stale_run_is_rejected_after_switching_documents(self, window):
+        """A run started for document A cannot affect document B opened mid-run."""
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.workflow import RecipeRun
+        from fea_toolkit.workflow.steps import DocumentState
+
+        starting_store = window._store
+        window._recipe_starting_store = starting_store
+        # The user switches documents while the run is in flight.
+        window._remember_source(make_sample_model())
+        new_store = window._store
+        assert new_store is not starting_store
+
+        run = RecipeRun(
+            document=DocumentState(model_data=starting_store.raw()),
+            document_reset=True,
+        )
+        window._recipe_finished((run, []))
+
+        # The stale run's document was not adopted — B's store is untouched.
+        assert window._store is new_store
+        assert "no longer open" in window._message_log.toPlainText()
+
 
 class TestModelPresets:
     """The Model menu writes steps into the recipe rather than hiding the work."""

@@ -352,6 +352,14 @@ class MainWindow(QMainWindow):
         self._nld_frames: dict = {}
         self._nld_times: dict = {}
         self._named_selections: dict = {}
+        #: The window's named selections as they were when the recipe run started,
+        #: used to merge only what the run changed on completion (see
+        #: :meth:`_merge_recipe_named_selections`).  ``None`` outside a run.
+        self._recipe_named_snapshot: Optional[dict] = None
+        #: The store the recipe run was started against, used to reject a run
+        #: whose document was switched away while it was in flight (see
+        #: :meth:`_recipe_store_is_current`).  ``None`` outside a run.
+        self._recipe_starting_store: Any = None
 
         self._create_viewport()
         self._create_actions()
@@ -3630,8 +3638,13 @@ class MainWindow(QMainWindow):
         reporter: list = [None]
         # Snapshot the window's named selections on the GUI thread, so a recipe
         # step referencing a GUI-authored selection resolves it without the
-        # worker touching the live store.
+        # worker touching the live store.  The snapshot is also kept on the
+        # window so the completion handler can merge back only what the run
+        # changed.  The store the run starts from is likewise remembered, so a
+        # run whose document was switched away while in flight is rejected.
         named_snapshot = dict(self._named_selections)
+        self._recipe_named_snapshot = named_snapshot
+        self._recipe_starting_store = store
 
         def task(should_cancel):
             def on_step(index, verb, status):
@@ -3679,11 +3692,14 @@ class MainWindow(QMainWindow):
         a recipe's results are no longer merely a line in the log.  A
         document-lifecycle step (``open`` / ``close`` / ``build_model``) is
         adopted into the window first, so every result registers against the
-        document the user is now looking at.  Cancellation and failure stay
-        distinct: a *cancelled* run legitimately holds only the
-        cases it solved before stopping, so no result is reported as failed, and
-        an empty one is left to the cancellation line rather than called out as
-        missing data.
+        document the user is now looking at; when the document is *not* replaced,
+        only the named selections the run changed are merged back, so selections
+        the user edited while it ran survive.  A run whose document was switched
+        away while in flight is rejected rather than applied to the document now
+        open.  Cancellation and failure stay distinct: a *cancelled* run
+        legitimately holds only the cases it solved before stopping, so no result
+        is reported as failed, and an empty one is left to the cancellation line
+        rather than called out as missing data.
 
         Args:
             payload: ``(RecipeRun, [log lines])`` from the worker.
@@ -3692,6 +3708,17 @@ class MainWindow(QMainWindow):
         from ..workflow.steps import IDA, MODAL, NLD, PUSHOVER, RS, SESSION
 
         run, messages = payload
+        # A run started for one document must not install its mesh, selections or
+        # results onto a document the user switched to while it was in flight
+        # (``open_path`` replaced ``self._store``): reject the stale run's
+        # outcomes rather than affecting the document now open.
+        if not self._recipe_store_is_current():
+            self.log(
+                "Recipe run finished for a document that is no longer open; "
+                "its outcomes were discarded.",
+                "warn",
+            )
+            return
         # A document-lifecycle step (``open`` / ``close`` / ``build_model``)
         # replaced or closed the working document; adopt it *before* registering
         # the results below, so a meshing/analysis result attaches to the
@@ -3701,12 +3728,12 @@ class MainWindow(QMainWindow):
         elif run.document is not None:
             # The document itself was not replaced, but a ``select`` step (or any
             # verb that mutates the document's named selections) left the store
-            # in place while changing the selection mapping — merge the run's
-            # selections back into the window's store rather than replacing it,
-            # so selections the user added while the run was in flight survive
-            # (the run's snapshot cannot see them), without re-adopting the
-            # unchanged model store.
-            self._named_selections.update(dict(run.document.named_selections))
+            # in place while changing the selection mapping — merge only the
+            # entries the run changed back into the window's store, so selections
+            # the user added or edited while the run was in flight survive (the
+            # run's snapshot cannot see them), without re-adopting the unchanged
+            # model store.
+            self._merge_recipe_named_selections(run.document)
         self._last_run = run
         # Persist each step's outcome onto the recipe (a step that ran "ok" is
         # unchecked), so the run state survives save → reopen.
@@ -3748,6 +3775,38 @@ class MainWindow(QMainWindow):
         if run.cancelled:
             self.log("The recipe was cancelled.", "warn")
         self._set_analysis_actions_enabled()
+
+    def _recipe_store_is_current(self) -> bool:
+        """Whether the recipe run's document is still the one the window shows.
+
+        ``open_path`` (and ``open_project_path`` / the benchmark openers) replace
+        ``self._store`` through :meth:`_remember_source`, so a run started for one
+        document must not apply its recovered mesh, named selections or results
+        to a document the user switched to while it was in flight.  When no run
+        is being tracked (``_recipe_starting_store`` is ``None`` — the tests drive
+        the completion handlers directly), there is nothing to guard and the
+        store is treated as current.
+        """
+        return self._recipe_starting_store is None or self._store is self._recipe_starting_store
+
+    def _merge_recipe_named_selections(self, document: Any) -> None:
+        """Adopt only the named selections a recipe run actually changed.
+
+        The run operates on a snapshot of the window's selections taken when it
+        started; merging the whole ``document.named_selections`` back would
+        clobber selections the user added or edited through
+        :meth:`_on_name_selection` while the run was in flight (the snapshot
+        predates those edits).  Only entries whose value differs from that
+        starting snapshot are applied, so the run's ``select`` steps land while
+        the user's concurrent edits to *other* keys survive.  A key the recipe
+        changed and the user also edited during the run resolves in the recipe's
+        favour: its ``select`` step is the explicit, completed operation the run
+        was asked to perform.
+        """
+        snapshot = self._recipe_named_snapshot or {}
+        for name, value in document.named_selections.items():
+            if name not in snapshot or snapshot[name] != value:
+                self._named_selections[name] = value
 
     def _adopt_document(self, document: Any) -> None:
         """Adopt the document a recipe run ended with into the window.
@@ -4326,9 +4385,11 @@ class MainWindow(QMainWindow):
         re-run next time.  It also carries the document state: a completed
         ``open`` / ``close`` / ``build_model`` step may have replaced the
         document before the failing step, so that state is adopted before the
-        lifecycle steps are
-        committed — otherwise the window would keep showing the pre-recipe
-        document while the recipe recorded the switch as done.
+        lifecycle steps are committed — otherwise the window would keep showing
+        the pre-recipe document while the recipe recorded the switch as done.  A
+        document that was *not* replaced still merges the named selections the
+        completed steps changed, and a run whose document was switched away while
+        in flight is rejected rather than applied to the document now open.
         """
         for pending in getattr(self, "_recipe_messages", None) or []:
             self.log(pending)
@@ -4337,35 +4398,56 @@ class MainWindow(QMainWindow):
         step_status = getattr(error, "step_status", None)
         document = getattr(error, "document", None)
         document_reset = getattr(error, "document_reset", False)
-        # A completed ``open`` / ``close`` / ``build_model`` step may have
-        # replaced the document before the failing step; adopt it first so the
-        # lifecycle steps are only committed against the document the window now
-        # shows.
-        if document_reset and document is not None:
-            self._adopt_document(document)
-        # A completed ``mesh`` step's topology has no view to register on the
-        # failure path, but a retry of the analysis step needs it in the store —
-        # record it (mirroring ``_show_geometry_result`` on the success path) so
-        # the committed mesh step need not re-run.
-        if (
-            document is not None
-            and getattr(document, "model", None) is not None
-            and self._store is not None
-        ):
-            self._store.set_preprocessed(document.model)
-        if step_status:
-            if document_reset and document is None:
-                # The document changed but the error carried no state to adopt —
-                # keep the lifecycle steps retryable rather than marking them
-                # complete against a window that still shows the old document.
-                from ..workflow.registry import STEP_SPECS
+        # A run started for one document must not install its recovered mesh or
+        # document state onto a document the user switched to while it was in
+        # flight (``open_path`` replaced ``self._store``): reject the stale
+        # recovery state and outcomes rather than affecting the document now open.
+        if not self._recipe_store_is_current():
+            self.log(
+                "Recipe failed for a document that is no longer open; "
+                "its recovered state was discarded.",
+                "warn",
+            )
+        else:
+            # A completed ``open`` / ``close`` / ``build_model`` step may have
+            # replaced the document before the failing step; adopt it first so the
+            # lifecycle steps are only committed against the document the window now
+            # shows.
+            if document_reset and document is not None:
+                self._adopt_document(document)
+            elif document is not None:
+                # The document was not replaced, but a completed ``select`` step
+                # may have changed its named selections before the failing step —
+                # merge only what the run changed (mirroring ``_recipe_finished``)
+                # so the completed ``select`` step's work is retained without
+                # clobbering selections the user edited while the run was in
+                # flight.
+                self._merge_recipe_named_selections(document)
+            # A completed ``mesh`` step's topology has no view to register on the
+            # failure path, but a retry of the analysis step needs it in the store —
+            # record it (mirroring ``_show_geometry_result`` on the success path) so
+            # the committed mesh step need not re-run.
+            if (
+                document is not None
+                and getattr(document, "model", None) is not None
+                and self._store is not None
+            ):
+                self._store.set_preprocessed(document.model)
+            if step_status:
+                if document_reset and document is None:
+                    # The document changed but the error carried no state to adopt —
+                    # keep the lifecycle steps retryable rather than marking them
+                    # complete against a window that still shows the old document.
+                    from ..workflow.registry import STEP_SPECS
 
-                step_status = [
-                    (index, verb, status)
-                    for index, verb, status in step_status
-                    if not (STEP_SPECS.get(verb) is not None and STEP_SPECS[verb].resets_document)
-                ]
-            self._recipe_panel.apply_run_outcomes(step_status)
+                    step_status = [
+                        (index, verb, status)
+                        for index, verb, status in step_status
+                        if not (
+                            STEP_SPECS.get(verb) is not None and STEP_SPECS[verb].resets_document
+                        )
+                    ]
+                self._recipe_panel.apply_run_outcomes(step_status)
         self.log(f"Recipe failed: {message}", "error")
 
     def _preprocess_ended(self) -> None:
