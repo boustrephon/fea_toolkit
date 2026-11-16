@@ -186,6 +186,22 @@ def test_bad_visibility_toggle_falls_back_to_the_default():
     assert any("show_nodes" in note for note in notes)
 
 
+def test_single_view_defaults_to_on():
+    assert DISPLAY_DEFAULTS.single_view is True
+
+
+def test_single_view_is_applied():
+    settings, notes = resolve_display({"single_view": False})
+    assert settings.single_view is False
+    assert notes == []
+
+
+def test_bad_single_view_falls_back_to_the_default():
+    settings, notes = resolve_display({"single_view": "yes"})
+    assert settings.single_view is DISPLAY_DEFAULTS.single_view
+    assert any("single_view" in note for note in notes)
+
+
 def test_unknown_extruded_detail_falls_back_to_the_default():
     settings, notes = resolve_display({"extruded_detail": "wireframe"})
     assert settings.extruded_detail == DISPLAY_DEFAULTS.extruded_detail
@@ -323,3 +339,27 @@ def test_apply_display_values_restores_widgets(qapp, monkeypatch, tmp_path):
     assert win._actions["view.show_extruded"].isChecked() is True
     assert win._actions["view.show_load_colours"].isChecked() is True
     win.close()
+
+
+@pytest.mark.needs_gui
+def test_single_view_config_is_honoured_and_persisted(qapp, monkeypatch, tmp_path):
+    """The ``display.single_view`` config starts the layout and round-trips."""
+    from fea_toolkit.gui.controllers.interaction import CONFIG_ENV_VAR
+    from fea_toolkit.gui.main_window import MainWindow
+
+    monkeypatch.setenv(CONFIG_ENV_VAR, str(tmp_path / "gui.json"))
+    (tmp_path / "gui.json").write_text(json.dumps({"display": {"single_view": False}}))
+
+    win = MainWindow()
+    assert win._quad.single_view is False  # config starts it in quad view
+    win._actions["view.single_view"].setChecked(True)  # user switches to single
+    assert win._quad.single_view is True
+    win.close()  # closeEvent -> _save_display_settings
+
+    data = json.loads((tmp_path / "gui.json").read_text())
+    assert data["display"]["single_view"] is True
+
+    win2 = MainWindow()
+    assert win2._display.single_view is True
+    assert win2._quad.single_view is True
+    win2.close()

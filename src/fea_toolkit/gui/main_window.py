@@ -513,6 +513,7 @@ class MainWindow(QMainWindow):
         self._backend = self._quad.backend
         self._create_interaction()
         self._quad.install_camera_sync()
+        self._quad.set_single_view(self._display.single_view)
 
     # ── Picking (viewport -> tree) ───────────────────────────────────
 
@@ -1116,6 +1117,12 @@ class MainWindow(QMainWindow):
             self._on_reset_view,
             tip="Reset the camera, show all hidden elements, and forget this model's saved view state",
         )
+        a["view.single_view"] = self._toggle_action(
+            "Single view",
+            self._on_single_view_toggled,
+            tip="Show the active viewport full-size (single) or a 2×2 grid of four (quad)",
+            checked=self._display.single_view,
+        )
         a["view.iso"] = self._real_action("Isometric", self._view_iso, tip="Isometric view")
         a["view.xy"] = self._real_action("Top (XY)", self._view_xy, tip="Look down the Z axis")
         a["view.xz"] = self._real_action("Front (XZ)", self._view_xz, tip="Look along the Y axis")
@@ -1449,6 +1456,7 @@ class MainWindow(QMainWindow):
         m = bar.addMenu("&View")
         m.addAction(a["view.fit"])
         m.addAction(a["view.reset_view"])
+        m.addAction(a["view.single_view"])
         m.addSeparator()
         camera = m.addMenu("Camera")
         for key in ("view.iso", "view.xy", "view.xz", "view.yz"):
@@ -5502,6 +5510,13 @@ class MainWindow(QMainWindow):
     def _on_zoom_fit(self) -> None:
         self._quad.apply_orientations()
 
+    def _on_single_view_toggled(self, checked: bool) -> None:
+        """**View ▸ Single view**: collapse to one viewport or restore the 2×2 grid."""
+        from dataclasses import replace
+
+        self._quad.set_single_view(checked)
+        self._display = replace(self._display, single_view=checked)
+
     def _view_iso(self) -> None:
         self._quad.set_orientation(self._quad.active_index, "iso")
 
@@ -5963,10 +5978,17 @@ class MainWindow(QMainWindow):
     def _save_display_settings(self) -> None:
         """Write the display knobs to the settings file, best effort.
 
+        ``single_view`` is a user layout preference, not a per-model display
+        value, so it is written to the settings file here rather than through
+        :meth:`_collect_display_values` (which also feeds ``File ▸ Save
+        project``).
+
         A failure to save is reported in the log rather than raised, so closing
         the window never blocks on a read-only config directory.
         """
-        for note in save_display_settings(default_config_path(), self._collect_display_values()):
+        values = self._collect_display_values()
+        values["single_view"] = self._display.single_view
+        for note in save_display_settings(default_config_path(), values):
             self.log(note, "warn")
 
     def _current_camera(self) -> Optional[list]:

@@ -76,9 +76,10 @@ AREA_LOAD_STYLES = ("arrows", "extrusion")
 #: Every field a ``theme`` section may name.
 THEME_FIELDS = frozenset({"panel_colour"})
 
-#: Every field a ``display`` section may name (the numeric knobs plus the
-#: force-diagram quantity label, the restraint style, the extruded-frame
-#: toggle / detail, and the four element-visibility toggles).
+#: Every field a ``display`` section may name (the numeric knobs, the
+#: force/shell quantity labels, the restraint style, the extruded-frame
+#: toggle / detail, the element-visibility toggles, and the single/quad
+#: layout toggle).
 DISPLAY_FIELDS = frozenset(
     (
         *_DISPLAY_NUMERIC_FIELDS,
@@ -95,10 +96,11 @@ DISPLAY_FIELDS = frozenset(
         "load_source",
         "load_area_style",
         "show_load_colours",
+        "single_view",
     )
 )
 
-#: Boolean element-visibility toggles (defaulting to shown).
+#: Boolean display toggles (defaulting to on).
 _DISPLAY_BOOL_FIELDS = (
     "show_nodes",
     "show_frames",
@@ -106,6 +108,7 @@ _DISPLAY_BOOL_FIELDS = (
     "show_restraints",
     "show_loads",
     "show_load_colours",
+    "single_view",
 )
 
 
@@ -143,6 +146,8 @@ class DisplaySettings:
         load_area_style: How an area pressure is drawn — ``"arrows"`` (a grid
             of arrows over the face) or ``"extrusion"`` (a one-sided prism).
         show_load_colours: Colour each area element by its shell-face pressure.
+        single_view: Show one viewport (the active view) rather than the
+            2×2 grid of four — the desktop app's single/quad layout.
     """
 
     shell_opacity: float = 0.7
@@ -163,6 +168,7 @@ class DisplaySettings:
     load_source: str = ""
     load_area_style: str = "arrows"
     show_load_colours: bool = False
+    single_view: bool = True
 
 
 #: The defaults, as a reusable constant (callers may ``replace`` over it).

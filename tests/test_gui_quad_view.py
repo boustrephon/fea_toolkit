@@ -91,3 +91,50 @@ def test_fit_reorients_every_viewport(window):
     window._actions["view.fit"].trigger()
     for interactor in window._quad.interactors:
         assert interactor.camera_position is not None
+
+
+def test_the_default_is_a_single_view(window):
+    """The config defaults to single view: the active (initially primary) view shown."""
+    quad = window._quad
+    assert quad.single_view is True
+    assert quad._cells[0].isHidden() is False
+    assert all(quad._cells[i].isHidden() for i in (1, 2, 3))
+
+
+def test_set_single_view_toggles_the_grid(window):
+    """Quad restores all four cells; single hides the three secondary cells."""
+    quad = window._quad
+    quad.set_single_view(False)
+    assert quad.single_view is False
+    assert all(not quad._cells[i].isHidden() for i in range(4))
+
+    quad.set_single_view(True)
+    assert quad.single_view is True
+    assert quad._cells[0].isHidden() is False
+    assert all(quad._cells[i].isHidden() for i in (1, 2, 3))
+
+
+def test_the_single_view_action_drives_the_layout(window):
+    """View ▸ Single view (checkable) collapses and restores the grid."""
+    quad = window._quad
+    assert quad.single_view is True
+
+    window._actions["view.single_view"].setChecked(False)  # -> quad
+    assert quad.single_view is False
+    assert all(not quad._cells[i].isHidden() for i in range(4))
+
+    window._actions["view.single_view"].setChecked(True)  # -> single
+    assert quad.single_view is True
+    assert all(quad._cells[i].isHidden() for i in (1, 2, 3))
+
+
+def test_collapsing_to_single_shows_the_active_viewport(window):
+    """Entering single view keeps the active viewport full-size (not the primary)."""
+    quad = window._quad
+    quad.set_single_view(False)
+    quad.set_active(2)
+    quad.set_single_view(True)
+    assert quad.active_index == 2
+    assert quad.active_interactor is quad.interactors[2]
+    assert quad._cells[2].isHidden() is False
+    assert all(quad._cells[i].isHidden() for i in (0, 1, 3))

@@ -78,7 +78,9 @@ class QuadViewport(QWidget):
         self._interactors: list = []
         self._captions: list[QLabel] = []
         self._buttons: list[QToolButton] = []
+        self._cells: list[QWidget] = []
         self._active_index = 0
+        self._single = False
 
         grid = QGridLayout(self)
         grid.setContentsMargins(0, 0, 0, 0)
@@ -108,6 +110,7 @@ class QuadViewport(QWidget):
             self._interactors.append(interactor)
             self._captions.append(caption)
             self._buttons.append(cycle)
+            self._cells.append(cell)
             grid.addWidget(cell, index // 2, index % 2)
 
         # One backend renders the scene; the other three plotters mirror it.
@@ -159,6 +162,25 @@ class QuadViewport(QWidget):
             font = caption.font()
             font.setBold(index == self._active_index)
             caption.setFont(font)
+
+    # ── Single view ─────────────────────────────────────────────────
+
+    @property
+    def single_view(self) -> bool:
+        """Whether the grid is collapsed to the active viewport only."""
+        return self._single
+
+    def set_single_view(self, single: bool) -> None:
+        """Collapse to the active viewport, or restore the 2×2 grid.
+
+        Args:
+            single: When true, only the active viewport is shown and it
+                expands to fill the container; when false, all four
+                viewports are shown.
+        """
+        self._single = bool(single)
+        for index, cell in enumerate(self._cells):
+            cell.setVisible(not self._single or index == self._active_index)
 
     # ── Orientations ─────────────────────────────────────────────────
 

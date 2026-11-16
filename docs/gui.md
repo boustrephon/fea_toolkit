@@ -274,6 +274,11 @@ show/hide or opacity change updates every view at once).  `gui/views/quad_viewpo
 owns the grid; the primary (isometric) viewport is the one the rest of the window
 and its tests refer to as the interactor.
 
+By default the window opens in **single view** — the active viewport fills the
+central area and the other three are hidden — and **View ▸ Single view**
+(checkable) toggles between the two layouts.  The choice is remembered as the
+`display.single_view` setting (see below).
+
 * **Clicking a viewport makes it active** (its caption is bolded); picks,
   marquee selections and the **View ▸ Camera** menu all act on the active
   viewport.
@@ -365,6 +370,7 @@ the same file:
 | `deformed_scale` | `10.0` | Deformed-shape size, % of the model diagonal |
 | `force_scale` | `10.0` | Force-diagram size, % of the model diagonal |
 | `force_quantity` | `"M3"` | End-force component drawn as a flag diagram (a SAP local-DOF label) |
+| `single_view` | `true` | Show one viewport (the active view) instead of the 2×2 quad grid |
 
 The display section is written when the window closes; the interaction keys and
 anything else in the file are left untouched.
@@ -669,7 +675,7 @@ jarring than a greyed-out one.
 |---|---|---|
 | **File** | Open (`Ctrl+O`), Open results…, Save model…, Save results…, Quit | Export Tcl, Export screenshot |
 | **Edit** | Duplicate view, Edit view selection… | Copy, Preferences |
-| **View** | Zoom to fit, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show beams, Show shells, Show restraints, Show loads, Colour area loads, Show force diagrams, Clear highlights) | Show element labels, Reset layout |
+| **View** | Zoom to fit, Single view, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show beams, Show shells, Show restraints, Show loads, Colour area loads, Show force diagrams, Clear highlights) | Show element labels, Reset layout |
 | **Model** | Mesh… (composes a `mesh` step in a dialog and runs it on OK), Combinations (Edit… / Open… / Save…), Name selection… | Units |
 | **Analysis** | Run static… (`Ctrl+R`), Modal analysis, Response spectrum (*Linear*); Pushover, Nonlinear time-history…, IDA… (*Nonlinear*); Analysis wizard…, Stop | — |
 | **Recipe** | Run recipe (`Ctrl+Shift+R`), Open recipe…, Save recipe…, Export as Python…, Import script…, Command… (`Ctrl+K`), Clear recipe | — |
