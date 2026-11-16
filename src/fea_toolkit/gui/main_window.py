@@ -3697,6 +3697,13 @@ class MainWindow(QMainWindow):
         # rather than the stale one (P35 follow-up).
         if run.document_reset:
             self._adopt_document(run.document)
+        elif run.document is not None:
+            # The document itself was not replaced, but a ``select`` step (or any
+            # verb that mutates the document's named selections) left the store
+            # in place while changing the selection mapping — synchronize it so
+            # the Selections tree reflects what the run authored, without
+            # re-adopting the unchanged model store.
+            self._named_selections = dict(run.document.named_selections)
         self._last_run = run
         # Persist each step's outcome onto the recipe (a step that ran "ok" is
         # unchecked), so the run state survives save → reopen.
@@ -3745,16 +3752,32 @@ class MainWindow(QMainWindow):
         A document-lifecycle step (``open`` / ``close``) replaced or closed the
         worker's document; the window's ``_store`` still shows the previous one.
         This replaces the store, restores the document's named selections and
-        re-renders — the same sequence ``File ▸ Open`` runs — so the results the
-        recipe produced register against the document the user is now looking at
-        rather than the stale one (P35 follow-up).
+        saved view state, raises the viewport page and re-renders — the same
+        sequence ``File ▸ Open`` runs — so the results the recipe produced
+        register against the document the user is now looking at rather than the
+        stale one (P35 follow-up).
         """
         # Preserve the outgoing model's view before switching, as ``open_path``
         # does.
         self._save_view_state()
         self._remember_source(document.model_data, source=document.document_path)
         self._named_selections = dict(document.named_selections)
+        # Restore the incoming document's saved visibility, matching
+        # ``open_path``: a saved hidden set is validated against the incoming
+        # model, and no saved state clears it so the previous document's
+        # exclusions do not leak across the switch.
+        state, notes = load_view_state(document.document_path)
+        for note in notes:
+            level = "info" if "is stale" in note else "warn"
+            self.log(note, level)
+        self._hidden_elem_ids = self._restore_hidden_elements(
+            state.get("hidden_elem_ids"), document.model_data
+        )
+        # Adoption draws geometry, so raise the viewport page even if the user
+        # was looking at a table / figure view.
+        self._stack.setCurrentWidget(self._viewport_container)
         self.show_model(document.model_data)
+        self._restore_camera(state.get("camera_position"))
 
     def _show_table_result(self, label: str, table: Any) -> None:
         """Register a check's ``table`` result as a view and show it.
@@ -4296,14 +4319,36 @@ class MainWindow(QMainWindow):
         in :meth:`_recipe_finished`.  A non-optional ``StepError`` carries the
         partial run state, so the steps that completed before the failure are
         still committed (unchecked, like a successful run) instead of being
-        re-run next time.
+        re-run next time.  It also carries the document state: a completed
+        ``open`` / ``close`` step may have replaced the document before the
+        failing step, so that state is adopted before the lifecycle steps are
+        committed — otherwise the window would keep showing the pre-recipe
+        document while the recipe recorded the switch as done.
         """
         for pending in getattr(self, "_recipe_messages", None) or []:
             self.log(pending)
         self._recipe_messages = None
         error = getattr(self._worker, "error", None)
         step_status = getattr(error, "step_status", None)
+        document = getattr(error, "document", None)
+        document_reset = getattr(error, "document_reset", False)
+        # A completed ``open`` / ``close`` step may have replaced the document
+        # before the failing step; adopt it first so the lifecycle steps are
+        # only committed against the document the window now shows.
+        if document_reset and document is not None:
+            self._adopt_document(document)
         if step_status:
+            if document_reset and document is None:
+                # The document changed but the error carried no state to adopt —
+                # keep the lifecycle steps retryable rather than marking them
+                # complete against a window that still shows the old document.
+                from ..workflow.registry import STEP_SPECS
+
+                step_status = [
+                    (index, verb, status)
+                    for index, verb, status in step_status
+                    if not (STEP_SPECS.get(verb) is not None and STEP_SPECS[verb].resets_document)
+                ]
             self._recipe_panel.apply_run_outcomes(step_status)
         self.log(f"Recipe failed: {message}", "error")
 
