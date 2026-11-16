@@ -223,6 +223,18 @@ class QuadViewport(QWidget):
                 continue
             self._apply_orientation_to(index)
 
+    def reset_orientations(self) -> None:
+        """Restore the four viewports to their default orientations and re-fit.
+
+        The per-view ↻ button cycles an orientation *away* from its default, so
+        ``View ▸ Reset view`` must not just re-fit the current (cycled) set —
+        it has to put iso / front / top / side back first.
+        """
+        for index, name in enumerate(ORIENTATIONS):
+            self._orientations[index] = name
+            self._captions[index].setText(ORIENTATION_LABELS[name])
+        self.apply_orientations()
+
     # ── Camera sync ──────────────────────────────────────────────────
 
     def sync_focus(self, source_index: int) -> None:

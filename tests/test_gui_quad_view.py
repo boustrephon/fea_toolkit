@@ -97,6 +97,17 @@ def test_cycle_orientation_advances_the_caption(window):
     assert quad._captions[0].text() == "Front"
 
 
+def test_reset_view_restores_the_default_orientations(window):
+    """View ▸ Reset view puts iso / front / top / side back after a cycle."""
+    quad = window._quad
+    quad.cycle_orientation(1)  # front -> top
+    assert quad.orientation(1) == "xy"
+
+    window._actions["view.reset_view"].trigger()
+
+    assert [quad.orientation(i) for i in range(4)] == ["iso", "xz", "xy", "yz"]
+
+
 def test_sync_focus_reaims_every_other_view(window):
     """Re-aiming one view re-targets the others at the same focal point."""
     quad = window._quad

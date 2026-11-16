@@ -3196,13 +3196,14 @@ class MainWindow(QMainWindow):
     def _on_reset_view(self) -> None:
         """**View ▸ Reset view**: return to a clean view and forget the saved state.
 
-        Resets the camera, restores every hidden element and clears the saved
+        Resets the camera — restoring the four viewports to their default
+        orientations — restores every hidden element and clears the saved
         per-model state, so a strange saved view cannot follow the model to its
         next open.  Display *preferences* (opacity, shrink, …) are untouched —
         those are user settings, not this model's state.
         """
         if self._quad is not None:
-            self._quad.apply_orientations()
+            self._quad.reset_orientations()
         if self._hidden_elem_ids:
             self._hidden_elem_ids.clear()
             self._refresh_display()

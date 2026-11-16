@@ -286,7 +286,8 @@ central area and the other three are hidden — and **View ▸ Single view**
   orientation through iso / front / top / side.
 * **Camera sync** — the four views share a focal point: orbiting or zooming one
   re-aims the others at the same world point while each keeps its own direction.
-* **View ▸ Zoom to fit** / **Reset view** reorient every viewport.
+* **View ▸ Zoom to fit** / **Reset view** reorient every viewport — **Reset
+  view** also puts iso / front / top / side back.
 
 ## Selecting
 
