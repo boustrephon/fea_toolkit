@@ -94,11 +94,12 @@ from .controllers.view_state import clear_view_state, load_view_state, save_view
 from .controllers.worker import TaskWorker
 from .doc_links import DOCS_URL
 from .models.tree_model import ModelTreeModel
-from .render_backend import QtRenderBackend, make_select_style
+from .render_backend import make_select_style
 from .views.interactor import PickResult, ViewportInteraction
 from .views.message_log import MessageLog
 from .views.property_inspector import PropertyInspector
 from .views.qt_mouse import install_mouse_filter
+from .views.quad_viewport import QuadViewport
 
 _PROJECT_URL = "https://github.com/boustrephon/fea_toolkit"
 #: File extensions dropped onto the window are opened as results archives.
@@ -355,6 +356,7 @@ class MainWindow(QMainWindow):
         self._external_combinations: dict = {}
         self._viewer: Any = None
         self._interactor: Any = None
+        self._quad: Any = None
         self._backend: Any = None
         self._selection_index: Any = None
         self._interaction: Any = None
@@ -365,7 +367,7 @@ class MainWindow(QMainWindow):
         #: The camera and hidden set right after ``View ▸ Reset view``, so
         #: ``closeEvent`` can tell an unchanged view from one the user has moved.
         self._reset_view_baseline: Optional[tuple] = None
-        self._default_style: Any = None  # interactor style to restore after Select mode
+        self._default_styles: dict = {}  # interactor -> style, restored after Select mode
         self._worker: Any = None
         #: The last completed :class:`~fea_toolkit.workflow.recipe.RecipeRun`,
         #: retained so ``File ▸ Save project`` can serialise its results.
@@ -483,18 +485,17 @@ class MainWindow(QMainWindow):
     # ── Viewport ────────────────────────────────────────────────────
 
     def _create_viewport(self) -> None:
-        """Create the embedded PyVistaQt interactor and its render backend.
+        """Create the quad view (four PyVistaQt viewports) and its render backend.
 
-        The central area is a stacked widget: page 0 is the 3-D viewport, and
-        pages 1 and 2 are created lazily for a table view and a figure view
-        (P30 phase C) — a model view draws geometry, but a ``check`` step
-        produces a table and a ``chart`` step a figure, neither of which belongs
-        in the viewport.
+        The central area is a stacked widget: page 0 is the 3-D viewport — now a
+        2×2 grid of ``QtInteractor``s (iso / front / top / side) sharing one
+        scene — and pages 1 and 2 are created lazily for a table view and a
+        figure view (P30 phase C) — a model view draws geometry, but a ``check``
+        step produces a table and a ``chart`` step a figure, neither of which
+        belongs in the viewport.
         """
-        from .render_backend import MainThreadQtInteractor
-
-        # Quad-view-ready container: holds a single viewport today, a grid of
-        # them later (roadmap design rule 10).
+        # Quad-view-ready container (roadmap design rule 10), now holding the
+        # 2×2 grid rather than a single viewport.
         self._viewport_container = QWidget(self)
         self._viewport_layout = QVBoxLayout(self._viewport_container)
         self._viewport_layout.setContentsMargins(0, 0, 0, 0)
@@ -503,10 +504,15 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._viewport_container)  # page 0: the viewport
         self.setCentralWidget(self._stack)
 
-        self._interactor = MainThreadQtInteractor(self._viewport_container)
-        self._viewport_layout.addWidget(self._interactor)
-        self._backend = QtRenderBackend(self._interactor)
+        # The primary (isometric) viewport keeps the ``_interactor`` /
+        # ``_backend`` names the rest of the window and its tests rely on; the
+        # other three viewports mirror its scene through the same backend.
+        self._quad = QuadViewport(self._viewport_container)
+        self._viewport_layout.addWidget(self._quad)
+        self._interactor = self._quad.primary_interactor
+        self._backend = self._quad.backend
         self._create_interaction()
+        self._quad.install_camera_sync()
 
     # ── Picking (viewport -> tree) ───────────────────────────────────
 
@@ -517,20 +523,59 @@ class MainWindow(QMainWindow):
         from VTK observers: measured on macOS, the widget forwards a press to
         the interactor but never the matching release, so a release-driven
         gesture as a VTK observer can never complete (`docs/dev_notes.md`).
+
+        Every viewport gets its own picker (so a click in any of the four
+        selects), each forwarding to the same handlers after marking itself the
+        active view.  The primary keeps the ``_interaction`` / ``_mouse_filter``
+        names the pick tests drive directly.
         """
-        self._interaction = ViewportInteraction(
-            self._interactor,
-            policy=self._policy,
-            on_pick=self._on_viewport_pick,
-            node_actors=lambda: self._backend.actors("nodes"),
-            on_marquee=self._on_marquee,
-        )
-        self._mouse_filter = install_mouse_filter(
-            self._interactor,
-            self._interaction,
-            self,
-            on_context_menu=self._on_viewport_context_menu,
-        )
+        self._secondary_interactions: list = []
+        for index, interactor in enumerate(self._quad.interactors):
+            interaction = ViewportInteraction(
+                interactor,
+                policy=self._policy,
+                on_pick=self._make_pick_handler(index),
+                node_actors=lambda: self._backend.actors("nodes"),
+                on_marquee=self._make_marquee_handler(index),
+            )
+            mouse_filter = install_mouse_filter(
+                interactor,
+                interaction,
+                self,
+                on_context_menu=self._make_context_menu_handler(index),
+            )
+            if index == 0:
+                self._interaction = interaction
+                self._mouse_filter = mouse_filter
+            else:
+                self._secondary_interactions.append((interactor, interaction, mouse_filter))
+
+    def _make_pick_handler(self, index: int):
+        """Return an ``on_pick`` that marks viewport *index* active, then picks."""
+
+        def _handle(result: PickResult) -> None:
+            self._quad.set_active(index)
+            self._on_viewport_pick(result)
+
+        return _handle
+
+    def _make_marquee_handler(self, index: int):
+        """Return an ``on_marquee`` that marks viewport *index* active, then selects."""
+
+        def _handle(start: tuple, end: tuple, modifiers: tuple = ()) -> None:
+            self._quad.set_active(index)
+            self._on_marquee(start, end, modifiers)
+
+        return _handle
+
+    def _make_context_menu_handler(self, index: int):
+        """Return an ``on_context_menu`` that marks viewport *index* active first."""
+
+        def _handle(global_pos: Any) -> None:
+            self._quad.set_active(index)
+            self._on_viewport_context_menu(global_pos)
+
+        return _handle
 
     def _on_viewport_pick(self, result: PickResult) -> None:
         """Apply a click to the selection: replace, add, toggle, or clear.
@@ -647,7 +692,7 @@ class MainWindow(QMainWindow):
         """
         import vtk
 
-        renderer = self._interactor.renderer
+        renderer = self._quad.active_interactor.renderer
 
         def project(world: Any) -> tuple:
             coord = vtk.vtkCoordinate()
@@ -972,22 +1017,25 @@ class MainWindow(QMainWindow):
 
         self._policy = replace(self._policy, select_mode=checked)
         self._interaction.set_policy(self._policy)
+        for _interactor, interaction, _mouse_filter in self._secondary_interactions:
+            interaction.set_policy(self._policy)
         self._set_select_style(checked)
         self.log("Select mode on." if checked else "Orbit mode on.")
 
     def _set_select_style(self, select: bool) -> None:
-        """Disable the select button's orbit while in Select mode."""
-        iren = getattr(self._interactor, "iren", None)
-        if iren is None:
-            return
-        vtk_iren = getattr(iren, "interactor", None) or iren
-        if select:
-            if self._default_style is None:
-                self._default_style = vtk_iren.GetInteractorStyle()
-            vtk_iren.SetInteractorStyle(make_select_style(self._policy.pick_button))
-        elif self._default_style is not None:
-            vtk_iren.SetInteractorStyle(self._default_style)
-            self._default_style = None
+        """Disable the select button's orbit while in Select mode (every viewport)."""
+        for interactor in self._quad.interactors:
+            iren = getattr(interactor, "iren", None)
+            if iren is None:
+                continue
+            vtk_iren = getattr(iren, "interactor", None) or iren
+            if select:
+                self._default_styles.setdefault(id(interactor), vtk_iren.GetInteractorStyle())
+                vtk_iren.SetInteractorStyle(make_select_style(self._policy.pick_button))
+            else:
+                default = self._default_styles.pop(id(interactor), None)
+                if default is not None:
+                    vtk_iren.SetInteractorStyle(default)
 
     # ── Actions ─────────────────────────────────────────────────────
 
@@ -1887,7 +1935,8 @@ class MainWindow(QMainWindow):
             return
         self._interaction_enabled = True
         try:
-            self._interactor.enable_terrain_style()
+            for interactor in self._quad.interactors:
+                interactor.enable_terrain_style()
             self._interactor.track_mouse_position()
         except RuntimeError:
             self.log(
@@ -1905,7 +1954,7 @@ class MainWindow(QMainWindow):
         previous value -- so a failed pick is a no-op, not an error.
         """
         try:
-            point = self._interactor.pick_mouse_position()
+            point = self._quad.active_interactor.pick_mouse_position()
         except Exception:
             return
         if point is None:
@@ -2083,9 +2132,10 @@ class MainWindow(QMainWindow):
         if rebuild_tree:
             self._tree_model.set_model(self._tree_model_source(model), self._views.views())
         if camera is None:
-            self._interactor.reset_camera()
+            self._quad.apply_orientations()
         else:
             self._interactor.camera_position = camera
+            self._quad.apply_orientations(skip=0)
         self._update_units_label()
         self._set_model_actions_enabled(self._store is not None)
         self._set_analysis_actions_enabled()
@@ -3143,9 +3193,8 @@ class MainWindow(QMainWindow):
         next open.  Display *preferences* (opacity, shrink, …) are untouched —
         those are user settings, not this model's state.
         """
-        if self._interactor is not None:
-            with contextlib.suppress(Exception):
-                self._interactor.reset_camera()
+        if self._quad is not None:
+            self._quad.apply_orientations()
         if self._hidden_elem_ids:
             self._hidden_elem_ids.clear()
             self._refresh_display()
@@ -5451,19 +5500,19 @@ class MainWindow(QMainWindow):
         return True
 
     def _on_zoom_fit(self) -> None:
-        self._interactor.reset_camera()
+        self._quad.apply_orientations()
 
     def _view_iso(self) -> None:
-        self._interactor.view_isometric()
+        self._quad.set_orientation(self._quad.active_index, "iso")
 
     def _view_xy(self) -> None:
-        self._interactor.view_xy()
+        self._quad.set_orientation(self._quad.active_index, "xy")
 
     def _view_xz(self) -> None:
-        self._interactor.view_xz()
+        self._quad.set_orientation(self._quad.active_index, "xz")
 
     def _view_yz(self) -> None:
-        self._interactor.view_yz()
+        self._quad.set_orientation(self._quad.active_index, "yz")
 
     def _on_docs(self) -> None:
         """**Help ▸ Documentation**: open the documentation site."""
@@ -5820,14 +5869,17 @@ class MainWindow(QMainWindow):
         if self._mouse_filter is not None:
             self._interactor.removeEventFilter(self._mouse_filter)
             self._mouse_filter = None
+        for _interactor, _interaction, mouse_filter in getattr(self, "_secondary_interactions", []):
+            _interactor.removeEventFilter(mouse_filter)
         if self._worker is not None and self._worker.isRunning():
             # Preprocessing is atomic, so this only gives it a grace period
             # rather than interrupting it mid-call.
             self._worker.cancel()
             self._worker.wait(3000)
-        if self._interactor is not None:
-            with contextlib.suppress(Exception):
-                self._interactor.close()
+        if self._quad is not None:
+            for interactor in self._quad.interactors:
+                with contextlib.suppress(Exception):
+                    interactor.close()
         super().closeEvent(event)
 
     def _collect_display_values(self) -> dict:

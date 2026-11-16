@@ -1,6 +1,7 @@
 """Qt render backend bridging ModelViewer to an embedded PyVista/Qt viewport."""
 
-from typing import Any
+import contextlib
+from typing import Any, Optional
 
 from pyvistaqt import QtInteractor
 
@@ -94,10 +95,64 @@ class QtRenderBackend(PyVistaRenderer):
     Args:
         plotter: A live ``pyvistaqt.QtInteractor`` (or any ``pyvista.Plotter``)
             to render into.
+        mirrors: Optional list of additional plotters that show the *same*
+            scene.  The backend renders into *plotter* and mirrors every actor
+            into these, sharing the same ``vtkActor`` objects — so a
+            visibility / opacity change on an actor updates every view at
+            once, and the scene is held in memory once.  Used by the quad view
+            (iso / front / top / side) so one render feeds four viewports.
     """
 
-    def __init__(self, plotter: Any) -> None:
+    def __init__(self, plotter: Any = None, mirrors: Optional[list] = None) -> None:
         super().__init__(plotter=plotter)
+        self._mirrors: list = []
+        if mirrors:
+            self.set_mirrors(mirrors)
+
+    def set_mirrors(self, mirrors: list) -> None:
+        """Set the secondary plotters this backend mirrors its actors into."""
+        self._mirrors = list(mirrors)
+
+    def render_mirrors(self) -> None:
+        """Re-render every mirror plotter, best effort."""
+        for plotter in self._mirrors:
+            with contextlib.suppress(Exception):
+                plotter.render()
+
+    def _add_actor(self, actor: Any, category: str) -> None:
+        """Track *actor* and add it to every mirror viewport too."""
+        super()._add_actor(actor, category)
+        for plotter in self._mirrors:
+            with contextlib.suppress(Exception):
+                plotter.add_actor(actor)
+
+    def clear(self) -> None:
+        """Remove every actor from the primary *and* the mirror viewports."""
+        for actor in self._actors:
+            for plotter in self._mirrors:
+                with contextlib.suppress(Exception):
+                    plotter.remove_actor(actor, render=False)
+        super().clear()
+        self.render_mirrors()
+
+    def clear_category(self, category: str) -> None:
+        """Remove one overlay from the primary and every mirror viewport."""
+        for actor in self._categories.get(category, []):
+            for plotter in self._mirrors:
+                with contextlib.suppress(Exception):
+                    plotter.remove_actor(actor, render=False)
+        super().clear_category(category)
+        self.render_mirrors()
+
+    def set_category_visible(self, category: str, visible: bool) -> None:
+        """Show/hide a category; the shared actors update every viewport."""
+        super().set_category_visible(category, visible)
+        self.render_mirrors()
+
+    def set_category_opacity(self, category: str, opacity: float) -> None:
+        """Set a category's opacity; the shared actors update every viewport."""
+        super().set_category_opacity(category, opacity)
+        self.render_mirrors()
 
     def show(self) -> None:
         """No-op -- the embedding Qt application owns the event loop.

@@ -23,7 +23,7 @@ results…** writes one out.  **Modal analysis** / **Response spectrum** /
 presets;
 modal analysis still fails to complete (see
 [What is still missing](#what-is-still-missing)).  Element labels, the
-Property Tree, window-layout persistence and the quad view are still ahead;
+Property Tree and window-layout persistence are still ahead;
 see [What is still missing](#what-is-still-missing).
 
 ## Installing and launching
@@ -52,7 +52,7 @@ results, figures and views).
 
 | Area | What it is |
 |---|---|
-| Central viewport | Embedded PyVista view; the model is coloured by section |
+| Central viewport | Four viewports (iso / front / top / side) sharing one scene; the model is coloured by section |
 | **Model** dock (left, top) | Tabs: **Model Tree** (live — a **Views** group, then the model's own groups; a **Collapse all** header button) and **Property Tree** (not yet implemented) |
 | **Inspector** dock (left, bottom) | Every field of the selected object, read-only — plus a node's supports, an element's section/material/groups and its applied loads |
 | **Messages** dock (bottom) | Log of what the application did, including any settings-file problems |
@@ -264,6 +264,24 @@ stays vertical** while you orbit:
 | `R` | Reset the camera (same as **View ▸ Zoom to fit**) |
 | View cube (top right) | Click a face, edge or corner to snap to that view |
 | **View ▸ Camera** | Isometric / Top (XY) / Front (XZ) / Side (YZ) |
+
+## Quad view
+
+The central area is a **2×2 grid of viewports** — **Isometric**, **Front (XZ)**,
+**Top (XY)** and **Side (YZ)** — that all show the **same scene**.  The scene is
+rendered once and mirrored into the other three viewports (the same actors, so a
+show/hide or opacity change updates every view at once).  `gui/views/quad_viewport.py`
+owns the grid; the primary (isometric) viewport is the one the rest of the window
+and its tests refer to as the interactor.
+
+* **Clicking a viewport makes it active** (its caption is bolded); picks,
+  marquee selections and the **View ▸ Camera** menu all act on the active
+  viewport.
+* **Per-view orientation** — each viewport's small ↻ button cycles its
+  orientation through iso / front / top / side.
+* **Camera sync** — the four views share a focal point: orbiting or zooming one
+  re-aims the others at the same world point while each keeps its own direction.
+* **View ▸ Zoom to fit** / **Reset view** reorient every viewport.
 
 ## Selecting
 
@@ -695,9 +713,8 @@ toggles](#display-toggles), [Menus at a glance](#menus-at-a-glance) and
 | Modal / spectrum / pushover analyses (milestone 5, the rest) | The three menu entries are wired as recipe presets and run, but the underlying analyses are not yet reliable — modal analysis starts and then fails to complete |
 | Nonlinear time-history result visualisation | **Analysis ▸ Nonlinear time-history** runs **only with OpenSeesPy in-process** (the out-of-process runner does not support this verb); its peak quantities are summarised as a table view and its transient history is animated in the viewport (**Results ▸ Animate** steps through the record) |
 | Storey-response / pushover-curve menu plots (milestone 7) | The **Results ▸ Storey response** / **Pushover curve** menu items are still greyed; the same plots render as embedded figures from a recipe's `chart` step |
-| Element labels ([P23](_pending_work.md)), the Property Tree tab | Element labels and the Property Tree are still greyed; the explicit interaction modes (Select / Orbit + marquee) landed with milestone 4 |
 | Window-layout persistence (milestone 8) | The mouse policy and the display-quality knobs **are** remembered (see the settings file above); dock positions and window geometry are not |
-| Quad view (milestone 10) | A single viewport; use the Camera menu and the view cube |
+| Element labels ([P23](_pending_work.md)), the Property Tree tab | Element labels and the Property Tree are still greyed; the explicit interaction modes (Select / Orbit + marquee) landed with milestone 4 |
 
 ## Troubleshooting
 
