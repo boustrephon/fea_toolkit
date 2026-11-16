@@ -1631,3 +1631,43 @@ class TestBuildModelVerb:
         # The frame-code picker folded into a free-text parameter (its 12 codes
         # live in benchmarks/generic_frame_data.py), so it carries no choices.
         assert BUILD_MODEL_PARAMS["code"].choices is None
+
+
+class TestStepSpecReferences:
+    """Per-verb doc/DOI provenance — the ``StepSpec`` ``docs`` / ``citations`` fields."""
+
+    def test_docs_and_citations_default_to_empty(self):
+        from fea_toolkit.workflow import StepSpec
+
+        spec = StepSpec(verb="probe", run=lambda ctx, step: [], params={}, kind="table")
+        assert spec.docs == ()
+        assert spec.citations == ()
+
+    def test_every_referenced_doc_exists(self):
+        from pathlib import Path
+
+        from fea_toolkit.workflow import STEP_SPECS
+
+        docs_dir = Path(__file__).resolve().parent.parent / "docs"
+        for verb, spec in STEP_SPECS.items():
+            for name in spec.docs:
+                assert (docs_dir / name).is_file(), f"{verb}: missing doc {name}"
+
+    def test_every_citation_is_a_well_formed_doi(self):
+        import re
+
+        from fea_toolkit.workflow import STEP_SPECS
+
+        pattern = re.compile(r"^10\.\d{4,9}/\S+$")
+        for verb, spec in STEP_SPECS.items():
+            for doi in spec.citations:
+                assert pattern.match(doi), f"{verb}: malformed DOI {doi!r}"
+
+    def test_spot_checks_of_the_verb_mapping(self):
+        from fea_toolkit.workflow import STEP_SPECS
+
+        assert "pushover_analysis.md" in STEP_SPECS["pushover"].docs
+        assert "10.14359/1283" in STEP_SPECS["pushover"].citations
+        assert "10.1002/eqe.495" in STEP_SPECS["ida"].citations
+        assert "imk_deterioration_model.md" in STEP_SPECS["ida"].docs
+        assert STEP_SPECS["close"].docs == ()

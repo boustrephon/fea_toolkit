@@ -70,6 +70,7 @@ from .controllers.settings import (
 from .controllers.view_registry import FIGURE, GEOMETRY, RESULTS, TABLE, View, ViewRegistry
 from .controllers.view_state import clear_view_state, load_view_state, save_view_state
 from .controllers.worker import TaskWorker
+from .doc_links import DOCS_URL
 from .models.tree_model import ModelTreeModel
 from .render_backend import QtRenderBackend, make_select_style
 from .views.interactor import PickResult, ViewportInteraction
@@ -78,7 +79,6 @@ from .views.property_inspector import PropertyInspector
 from .views.qt_mouse import install_mouse_filter
 
 _PROJECT_URL = "https://github.com/boustrephon/fea_toolkit"
-_DOCS_URL = "https://boustrephon.github.io/fea_toolkit/"
 #: Documentation pages the Help menu links to, keyed by short name — the MkDocs
 #: site serves each ``docs/*.md`` as a ``<name>/`` directory URL.
 _DOC_PAGES = {
@@ -5329,7 +5329,7 @@ class MainWindow(QMainWindow):
 
     def _on_docs(self) -> None:
         """**Help ▸ Documentation**: open the documentation site."""
-        QDesktopServices.openUrl(QUrl(_DOCS_URL))
+        QDesktopServices.openUrl(QUrl(DOCS_URL))
 
     def _open_docs(self, page: str) -> None:
         """Open one documentation page on the MkDocs site.
@@ -5337,7 +5337,7 @@ class MainWindow(QMainWindow):
         Args:
             page: A key in ``_DOC_PAGES`` naming the page to open.
         """
-        QDesktopServices.openUrl(QUrl(_DOCS_URL + _DOC_PAGES[page]))
+        QDesktopServices.openUrl(QUrl(DOCS_URL + _DOC_PAGES[page]))
 
     def _on_copy_context(self) -> None:
         """**Help ▸ Copy model context…**: snapshot the session to the clipboard.

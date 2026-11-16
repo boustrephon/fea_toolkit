@@ -59,7 +59,7 @@ editable and reproducible.
 | **Step** | `(verb, Selection, params, optional)` — one operation applied to a selection | `workflow/steps.py` |
 | **Recipe** | An ordered list of steps, plus a name | `workflow/recipe.py` |
 | **Verb** | The operation itself: an implementation plus the parameters it declares | `workflow/verbs/` |
-| **Spec** | The declarative description of a verb — name, parameters, help, prerequisites | `workflow/registry.py` |
+| **Spec** | The declarative description of a verb — name, parameters, help, prerequisites, documentation pages and paper DOIs | `workflow/registry.py` |
 
 ## Package layout, and why it is split this way
 
@@ -176,6 +176,18 @@ as in `fea_toolkit.analysis`, while prerequisites become checkable.
 The `modal` kind is the next addition the mechanism needs: P32's `modal` verb
 produces it, and `response_spectrum` / `pushover` declare
 `needs=("model", "modal")`.
+
+### Provenance — a verb's docs and DOIs
+
+`StepSpec.docs` lists the `docs/*.md` pages that describe or validate a verb,
+and `StepSpec.citations` the paper DOIs its method is sourced from — e.g.
+`pushover` cites the Vecchio & Emara (1992) frame (`10.14359/1283`) and `ida`
+the IMK model (`10.1002/eqe.495`).  Both are authored beside the verb in
+`registry.py`, under the same one-home rule as `help` and `needs`, and the GUI's
+per-verb **Help** dialog renders them as clickable links (`docs/gui.md`).
+Standards (ASCE 41-17, GB 50010-2010, FEMA 355C) have no DOI and stay named in
+the verb's `help`.  `tests/test_recipe.py` asserts every referenced doc exists
+and every citation is a well-formed DOI.
 
 ### Failure, and cancellation
 

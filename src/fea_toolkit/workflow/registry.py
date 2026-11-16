@@ -102,6 +102,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         needs=(),
         resets_document=True,
         help="Load a model file into the working document.",
+        docs=("parser_coverage.md", "safe_import.md", "tcl_import.md"),
     ),
     "save": StepSpec(
         verb="save",
@@ -110,6 +111,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         kind=SESSION,
         needs=(),
         help="Write the working document to a (versioned) file.",
+        docs=("json_serialization.md",),
     ),
     "close": StepSpec(
         verb="close",
@@ -127,6 +129,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         kind=TABLE,
         needs=(),
         help="Make (or replace) a named selection.",
+        docs=("workflow_authoring.md",),
     ),
     "check_connectivity": StepSpec(
         verb="check_connectivity",
@@ -134,6 +137,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         params=CONNECTIVITY_PARAMS,
         kind=TABLE,
         help="Check for orphan nodes, duplicated coordinates and zero-area sections.",
+        docs=("model_review.md",),
     ),
     "check_self_weight": StepSpec(
         verb="check_self_weight",
@@ -141,6 +145,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         params=SELF_WEIGHT_PARAMS,
         kind=TABLE,
         help="Compare the model's self-weight against the weight its geometry implies.",
+        docs=("model_review.md",),
     ),
     "check_brace_buckling": StepSpec(
         verb="check_brace_buckling",
@@ -148,6 +153,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         params=BRACE_BUCKLING_PARAMS,
         kind=TABLE,
         help="Check the selected braces against Euler buckling.",
+        docs=("model_review.md",),
     ),
     "mesh_checks": StepSpec(
         verb="mesh_checks",
@@ -163,6 +169,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         params=HINGE_LENGTH_PARAMS,
         kind=TABLE,
         help="Plastic hinge length per ASCE 41-17 §10.8 for the selected members.",
+        docs=("capacity.md",),
     ),
     "member_shear_capacity": StepSpec(
         verb="member_shear_capacity",
@@ -170,6 +177,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         params=MEMBER_SHEAR_CAPACITY_PARAMS,
         kind=TABLE,
         help="Nominal RC shear capacity (simplified MCFT) for the selected frame sections.",
+        docs=("shear_failure_modelling.md", "capacity.md"),
     ),
     "wall_shear_check": StepSpec(
         verb="wall_shear_check",
@@ -177,6 +185,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         params=WALL_SHEAR_CHECK_PARAMS,
         kind=TABLE,
         help="In-plane shear / normal stress check (GB 50010) for the selected walls.",
+        docs=("capacity.md",),
     ),
     "build_model": StepSpec(
         verb="build_model",
@@ -185,6 +194,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         kind=SESSION,
         resets_document=True,
         help="Build a benchmark example model (FEMA 355C / SAC / generic frame).",
+        docs=("benchmark_register.md", "fema355c_schedules.md"),
     ),
     "scale_sections": StepSpec(
         verb="scale_sections",
@@ -195,6 +205,7 @@ STEP_SPECS: dict[str, StepSpec] = {
             "Reduce a selection's section stiffness in place — the masonry "
             "'soften the wall' option, keeping its elements, loads and mass."
         ),
+        docs=("stiffness_factors.md",),
     ),
     "fix_shell_only_base": StepSpec(
         verb="fix_shell_only_base",
@@ -205,6 +216,7 @@ STEP_SPECS: dict[str, StepSpec] = {
             "Upgrade the model's shell-only base nodes to full fixity before "
             "meshing (pinned → fixed rotations)."
         ),
+        docs=("shell_support.md",),
     ),
     "mesh": StepSpec(
         verb="mesh",
@@ -212,6 +224,12 @@ STEP_SPECS: dict[str, StepSpec] = {
         params=MESH_PARAMS,
         kind=GEOMETRY,
         help="Split frames, mesh areas into shells, and hold a selection back as loads-only.",
+        docs=(
+            "element_splitting.md",
+            "shell_support.md",
+            "member_offsets.md",
+            "member_releases.md",
+        ),
     ),
     "save_model": StepSpec(
         verb="save_model",
@@ -220,6 +238,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         kind=TABLE,
         needs=("geometry",),
         help="Write the prepared model to a JSON, NPZ or HDF5 file.",
+        docs=("results_schema.md", "json_serialization.md"),
     ),
     "run_static": StepSpec(
         verb="run_static",
@@ -228,6 +247,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         kind=CASES,
         needs=("geometry",),
         help="Solve the model's static load cases.",
+        docs=("analysis.md",),
     ),
     "load_verification": StepSpec(
         verb="load_verification",
@@ -236,6 +256,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         kind=TABLE,
         needs=("geometry",),
         help="Load/reaction summary — applied loads vs summed reactions per static case, plus RS base shear/moment.",
+        docs=("load_cases_and_combinations.md", "model_review.md"),
     ),
     "modal": StepSpec(
         verb="modal",
@@ -244,6 +265,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         kind=MODAL,
         needs=("geometry",),
         help="Solve the eigenvalue (modal) problem against the prepared topology.",
+        docs=("modal_analysis.md", "shear_building_benchmark.md"),
     ),
     "response_spectrum": StepSpec(
         verb="response_spectrum",
@@ -252,6 +274,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         kind=RS,
         needs=("geometry", "modal"),
         help="CQC response-spectrum combination for one spectrum direction.",
+        docs=("modal_analysis.md", "shear_building_benchmark.md"),
     ),
     "pushover": StepSpec(
         verb="pushover",
@@ -260,6 +283,8 @@ STEP_SPECS: dict[str, StepSpec] = {
         kind=PUSHOVER,
         needs=("geometry", "modal"),
         help="Nonlinear static (pushover) analysis with CSM evaluation.",
+        docs=("pushover_analysis.md", "vecchio_emara_benchmark.md", "duong_benchmark.md"),
+        citations=("10.14359/1283",),
     ),
     "nonlinear_dynamic": StepSpec(
         verb="nonlinear_dynamic",
@@ -268,6 +293,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         kind=NLD,
         needs=("geometry", "modal"),
         help="Nonlinear dynamic (time-history) analysis of a ground-motion record.",
+        docs=("nonlinear_dynamic_analysis.md", "sac_nonlinear_benchmark.md"),
     ),
     "ida": StepSpec(
         verb="ida",
@@ -276,6 +302,12 @@ STEP_SPECS: dict[str, StepSpec] = {
         kind=IDA,
         needs=("geometry", "modal"),
         help="Incremental dynamic analysis — collapse intensity over a record ladder.",
+        docs=(
+            "sac_imk_collapse_benchmark.md",
+            "ik2005_generic_frame_benchmark.md",
+            "imk_deterioration_model.md",
+        ),
+        citations=("10.1002/eqe.495", "10.1061/(ASCE)ST.1943-541X.0000376"),
     ),
     "combine": StepSpec(
         verb="combine",
@@ -284,6 +316,7 @@ STEP_SPECS: dict[str, StepSpec] = {
         kind=CASES,
         needs=("cases",),
         help="Reduce the solved cases into load combinations.",
+        docs=("load_combinations.md", "load_cases_and_combinations.md"),
     ),
     "chart": StepSpec(
         verb="chart",
@@ -296,6 +329,7 @@ STEP_SPECS: dict[str, StepSpec] = {
             "solved case; 'response_spectra' plots the model's parsed spectra; "
             "'pushover' / 'modal' / 'csm' / 'ida' plot the analysis results."
         ),
+        docs=("storey_response.md", "force_diagram_unification.md"),
     ),
 }
 

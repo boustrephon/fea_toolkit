@@ -919,6 +919,24 @@ def test_the_verb_help_dialog_shows_the_verbs_surface(qapp):
     assert "run_static" in dialog.windowTitle()
 
 
+def test_the_verb_help_dialog_links_docs_and_dois(qapp):
+    """A verb's docs / citations render as clickable external links."""
+    from qtpy.QtWidgets import QLabel
+
+    from fea_toolkit.gui.views.verb_help_dialog import VerbHelpDialog
+    from fea_toolkit.workflow import STEP_SPECS
+
+    dialog = VerbHelpDialog("pushover", STEP_SPECS["pushover"])
+
+    labels = dialog.findChildren(QLabel)
+    docs_label = next(label for label in labels if "Documentation" in label.text())
+    cites_label = next(label for label in labels if "Citations" in label.text())
+    assert "pushover_analysis" in docs_label.text()
+    assert "10.14359/1283" in cites_label.text()
+    assert docs_label.openExternalLinks()
+    assert cites_label.openExternalLinks()
+
+
 class TestStepDialog:
     """The step inspector moved from the Recipe panel to a modal dialog (P33)."""
 

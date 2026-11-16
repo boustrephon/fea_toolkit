@@ -366,6 +366,13 @@ class StepSpec:
             invalidating the prior document's prepared topology, results and
             satisfied prerequisite kinds.  ``False`` for a ``save`` step, which
             preserves them.
+        docs: The project documentation pages that describe or validate this
+            verb — ``docs/*.md`` filenames (with extension), e.g.
+            ``("pushover_analysis.md",)``.  Rendered as clickable links by the
+            GUI's help dialog.
+        citations: The paper DOIs this verb's method is sourced from, e.g.
+            ``("10.1002/eqe.495",)``.  Standards (ASCE 41, GB 50010, FEMA 355C)
+            have no DOI and stay named in :attr:`help`.
     """
 
     verb: str
@@ -375,6 +382,8 @@ class StepSpec:
     help: str = ""
     needs: tuple = ()
     resets_document: bool = False
+    docs: tuple[str, ...] = ()
+    citations: tuple[str, ...] = ()
 
     def defaults(self) -> dict[str, Any]:
         """Every parameter's default — the form of a freshly added step.

@@ -573,8 +573,9 @@ of stopping.
 
 Right-click a step in the list and choose **Help** to open a read-only dialog for
 that step's verb: its `StepSpec.help`, every parameter's name / type / default /
-choices / help, and its `needs` prerequisite — all rendered from the Qt-free
-`STEP_SPECS`, so the dialog cannot drift from what the verb accepts.  **Copy
+choices / help, its `needs` prerequisite, and clickable **Documentation** /
+**Citations** links (the verb's `docs` pages and paper DOIs) — all rendered from
+the Qt-free `STEP_SPECS`, so the dialog cannot drift from what the verb accepts.  **Copy
 command** puts the step's command-string spelling (`mesh create_shells=true`) on
 the clipboard, and **Copy as Python** a one-step `RECIPE` literal.  The same
 **Configuration (optional)** group appears at the foot of the **Analysis ▸ Run static…**
