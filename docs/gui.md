@@ -128,6 +128,10 @@ combination when the two differ).  An archive carries the geometry it was
 written from, so this works with **no model open**: the views draw the analysed
 geometry, and the case views share one display model between them.
 
+The same open runs **without a dialog** — drag an `.npz` / `.h5` / `.hdf5`
+archive onto the window and each load case becomes a view; a dropped file that
+is not a readable archive is logged (and reported when nothing opened).
+
 Those views are display-only — an archive has no materials, loads or restraints
 and no unit system — so `Model ▸ Mesh…` stays
 disabled while one is displayed.  Open the `.s2k` when you want to preprocess or

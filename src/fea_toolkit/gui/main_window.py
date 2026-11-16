@@ -19,8 +19,24 @@ import math
 from typing import Any, Optional
 
 import numpy as np
-from qtpy.QtCore import QItemSelection, QItemSelectionModel, QItemSelectionRange, Qt, QTimer, QUrl
-from qtpy.QtGui import QAction, QDesktopServices, QGuiApplication, QKeySequence
+from qtpy.QtCore import (
+    QItemSelection,
+    QItemSelectionModel,
+    QItemSelectionRange,
+    QMimeData,
+    Qt,
+    QTimer,
+    QUrl,
+)
+from qtpy.QtGui import (
+    QAction,
+    QDesktopServices,
+    QDragEnterEvent,
+    QDragMoveEvent,
+    QDropEvent,
+    QGuiApplication,
+    QKeySequence,
+)
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -79,6 +95,8 @@ from .views.property_inspector import PropertyInspector
 from .views.qt_mouse import install_mouse_filter
 
 _PROJECT_URL = "https://github.com/boustrephon/fea_toolkit"
+#: File extensions dropped onto the window are opened as results archives.
+_RESULTS_DROP_EXTENSIONS = (".npz", ".h5", ".hdf5")
 #: Documentation pages the Help menu links to, keyed by short name — the MkDocs
 #: site serves each ``docs/*.md`` as a ``<name>/`` directory URL.
 _DOC_PAGES = {
@@ -308,6 +326,8 @@ class MainWindow(QMainWindow):
     def __init__(self, model: Optional[Any] = None, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setWindowTitle(APP_NAME)
+        # Accept a drag-and-drop of a results archive (.npz / .h5 / .hdf5).
+        self.setAcceptDrops(True)
 
         self._model: Any = None
         self._store: Any = None
@@ -4684,6 +4704,57 @@ class MainWindow(QMainWindow):
             "Preset a FEMA 355C build_model + mesh recipe. "
             "Edit region/stories/design/direction, then run."
         )
+
+    # ── Drag-and-drop ────────────────────────────────────────────────
+
+    @staticmethod
+    def _drop_targets(mime_data: QMimeData) -> list[str]:
+        """The local file paths carried by a drag's URL list."""
+        if not mime_data.hasUrls():
+            return []
+        return [url.toLocalFile() for url in mime_data.urls() if url.isLocalFile()]
+
+    @staticmethod
+    def _is_droppable(path: str) -> bool:
+        """Whether a dropped file is a results archive this window can open."""
+        return path.lower().endswith(_RESULTS_DROP_EXTENSIONS)
+
+    def _droppable_paths(self, mime_data: QMimeData) -> list[str]:
+        """The local result-archive paths in a drag's URL list."""
+        return [p for p in self._drop_targets(mime_data) if self._is_droppable(p)]
+
+    def _open_dropped_files(self, paths: list[str]) -> int:
+        """Open each dropped results archive; return how many opened."""
+        opened = 0
+        for path in paths:
+            if self.open_results_path(path):
+                opened += 1
+        return opened
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if self._droppable_paths(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        if self._droppable_paths(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        paths = self._droppable_paths(event.mimeData())
+        if not paths:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        if self._open_dropped_files(paths) == 0:
+            QMessageBox.warning(
+                self,
+                "Nothing opened",
+                "None of the dropped files is a readable results archive.\n\nSee the message log.",
+            )
 
     def _on_open_results(self) -> None:
         """**File ▸ Open results…**: choose an archive and register its cases."""

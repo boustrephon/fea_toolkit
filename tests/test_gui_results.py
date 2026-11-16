@@ -89,6 +89,42 @@ def test_opening_an_archive_registers_one_view_per_case(window, tmp_path):
     assert "Opened 2 results view(s)" in window._message_log.toPlainText()
 
 
+def test_window_accepts_dropped_results_archives(window):
+    """The window is a drop target for results archives (drag-and-drop)."""
+    assert window.acceptDrops() is True
+
+
+def test_drop_targets_extracts_only_local_files(window):
+    from qtpy.QtCore import QMimeData, QUrl
+
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile("/tmp/results.npz"), QUrl("https://example.com/x.h5")])
+    assert window._drop_targets(mime) == ["/tmp/results.npz"]
+
+
+def test_droppable_paths_filters_non_archives(window):
+    from qtpy.QtCore import QMimeData, QUrl
+
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile("/tmp/a.npz"), QUrl.fromLocalFile("/tmp/b.s2k")])
+    assert window._droppable_paths(mime) == ["/tmp/a.npz"]
+
+
+def test_is_droppable_matches_results_extensions(window):
+    assert window._is_droppable("results.npz")
+    assert window._is_droppable("results.H5")
+    assert window._is_droppable("results.hdf5")
+    assert not window._is_droppable("model.s2k")
+    assert not window._is_droppable("notes.txt")
+
+
+def test_open_dropped_files_opens_archives_and_skips_unreadable(window, tmp_path):
+    archive = str(_write_archive(tmp_path))
+    bad = str(tmp_path / "not-an-archive.npz")
+    assert window._open_dropped_files([archive, bad]) == 1
+    assert [view.name for view in window._views.views()] == ["DEAD", "COMB1"]
+
+
 def test_visibility_toggles_survive_a_case_switch(window, tmp_path):
     """Show-nodes / show-frames persist across a results-view switch, not reset."""
     window.open_results_path(str(_write_archive(tmp_path)))
