@@ -74,7 +74,10 @@ TABLE = "table"
 #: A step's output is a figure — a chart, rendered as an image.
 FIGURE = "figure"
 #: A step's output is a document-lifecycle change (``open`` / ``close`` /
-#: ``save``) — nothing to render; the working document itself changed.
+#: ``save``) or a document replacement (``build_model``) — the working
+#: document itself changed.  ``open`` / ``close`` / ``save`` render nothing;
+#: ``build_model`` additionally emits a :data:`MODEL` result for the model it
+#: built.
 SESSION = "session"
 
 
@@ -314,8 +317,9 @@ class StepContext:
     opensees_python: Optional[str] = None
     cancelled: bool = False
     #: The open document's path (``""`` until an ``open`` step runs) and whether
-    #: it has unsaved edits — cleared by ``open`` / ``close`` / ``save``, set by
-    #: any verb that mutates the document (e.g. ``select``).
+    #: it has unsaved edits — cleared by ``open`` / ``close`` / ``save`` /
+    #: ``build_model``, set by any verb that mutates the document (e.g.
+    #: ``select``).
     document_path: str = ""
     document_dirty: bool = False
     #: The named-selections store — ``{name: NamedSelection}``, written by the
@@ -330,14 +334,17 @@ class DocumentState:
     A snapshot of the :class:`StepContext` document fields, for a caller that
     must adopt the document the run ended with (the GUI).  ``model_data`` is
     the document's parsed model — the opened document after an ``open`` step,
-    or the caller's own model when no document-lifecycle step ran.  The
-    ``named_selections`` mapping is copied out, so mutating the context
-    afterwards cannot change the snapshot.
+    or the caller's own model when no document-lifecycle step ran.  ``model``
+    is the prepared topology a completed meshing step produced (``None`` when
+    none ran), carried so a failure can hand the mesh back for a retry of a
+    later analysis step.  The ``named_selections`` mapping is copied out, so
+    mutating the context afterwards cannot change the snapshot.
     """
 
     model_data: Any
     document_path: str = ""
     named_selections: dict = field(default_factory=dict)
+    model: Optional[Any] = None
 
 
 @dataclass(frozen=True)
@@ -355,9 +362,10 @@ class StepSpec:
             topology.  ``run_recipe`` validates the chain in order; a caller may
             read the same field to grey out a step that cannot run yet.
         resets_document: Whether this :data:`SESSION` step replaces or closes
-            the working document (``open`` / ``close``), invalidating the prior
-            document's prepared topology, results and satisfied prerequisite
-            kinds.  ``False`` for a ``save`` step, which preserves them.
+            the working document (``open`` / ``close`` / ``build_model``),
+            invalidating the prior document's prepared topology, results and
+            satisfied prerequisite kinds.  ``False`` for a ``save`` step, which
+            preserves them.
     """
 
     verb: str
@@ -407,10 +415,11 @@ class StepError(RuntimeError):
             the work that already succeeded.  ``None`` when not provided.
         document: The working document's state at the point of failure, carried
             so a caller (the GUI) can adopt a document a completed ``open`` /
-            ``close`` step had replaced before the failing step.  ``None`` when
-            not provided.
-        document_reset: Whether a document-lifecycle step replaced or closed the
-            document before the failure, so the caller must adopt ``document``.
+            ``close`` / ``build_model`` step had replaced before the failing
+            step.  ``None`` when not provided.
+        document_reset: Whether a document-lifecycle step (``open`` / ``close``
+            / ``build_model``) replaced or closed the document before the
+            failure, so the caller must adopt ``document``.
     """
 
     def __init__(

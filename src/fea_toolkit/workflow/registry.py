@@ -182,7 +182,8 @@ STEP_SPECS: dict[str, StepSpec] = {
         verb="build_model",
         run=run_build_model,
         params=BUILD_MODEL_PARAMS,
-        kind=MODEL,
+        kind=SESSION,
+        resets_document=True,
         help="Build a benchmark example model (FEMA 355C / SAC / generic frame).",
     ),
     "scale_sections": StepSpec(

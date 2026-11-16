@@ -23,7 +23,7 @@ BUILD_MODEL_PARAMS: dict[str, ParamSpec] = {
     ),
     # FEMA 355C / SAC Phase 2
     "region": ParamSpec(default="LA", type=str, help="FEMA 355C region: 'LA', 'SE' or 'BO'."),
-    "stories": ParamSpec(default=3, type=int, help="FEMA 355C storey count: 3, 9 or 20."),
+    "n_stories": ParamSpec(default=3, type=int, help="FEMA 355C storey count: 3, 9 or 20."),
     "design": ParamSpec(
         default="pre",
         type=str,
@@ -74,7 +74,7 @@ def run_build_model(context: StepContext, step: Step) -> list[StepResult]:
 
         model = build_fema355c(
             params["region"],
-            params["stories"],
+            params["n_stories"],
             params["design"],
             params["direction"],
             params["restrain_ground_laterally"],

@@ -81,8 +81,9 @@ def satisfied_kinds(steps: Any, *, initial: Any = ()) -> set:
     The one ordering vocabulary the palette and the validator share: a linear
     scan (no graph, no topo-sort) accumulates each step's ``kind``; a geometry
     step invalidates the solved-case / modal / figure results a previous
-    topology produced, and an ``open`` / ``close`` step clears them all —
-    exactly as :func:`run_recipe` does.  A ``save`` step changes nothing.
+    topology produced, and an ``open`` / ``close`` / ``build_model`` step
+    clears them all — exactly as :func:`run_recipe` does.  A ``save`` step
+    changes nothing.
 
     Args:
         steps: An iterable of steps (or a :class:`Recipe`).
@@ -106,9 +107,9 @@ def satisfied_kinds(steps: Any, *, initial: Any = ()) -> set:
         if spec.kind == GEOMETRY:
             produced.difference_update((CASES, MODAL, FIGURE))
         elif spec.kind == SESSION and spec.resets_document:
-            # ``open`` / ``close`` replace or close the working document, so the
-            # kinds a previous document produced no longer hold — mirroring
-            # ``run_recipe``'s reset (a ``save`` step keeps them).
+            # ``open`` / ``close`` / ``build_model`` replace or close the working
+            # document, so the kinds a previous document produced no longer hold —
+            # mirroring ``run_recipe``'s reset (a ``save`` step keeps them).
             produced.clear()
     return produced
 
@@ -400,9 +401,10 @@ class RecipeRun:
     Attributes:
         results: Every :class:`~fea_toolkit.workflow.steps.StepResult` the run
             produced for the *final* document, in step order.  A step may
-            contribute several.  A document-lifecycle step (``open`` / ``close``)
-            discards the results the previous document produced, so a caller
-            never registers A's mesh / tables after B was opened.
+            contribute several.  A document-lifecycle step (``open`` / ``close``
+            / ``build_model``) discards the results the previous document
+            produced, so a caller never registers A's mesh / tables after B was
+            opened.
         failures: ``(step index, verb, message)`` for each *optional* step that
             failed and was tolerated.  A non-optional failure does not appear
             here — it raises :class:`~fea_toolkit.workflow.steps.StepError`, so
@@ -422,9 +424,9 @@ class RecipeRun:
     #: The working document's state after the last step, for a caller that must
     #: adopt it (the GUI).  ``None`` until the run completes.
     document: Optional[DocumentState] = None
-    #: Whether a document-lifecycle step (``open`` / ``close``) replaced or
-    #: closed the document mid-run, so the caller must re-adopt the document
-    #: rather than keep showing the one it was handed.
+    #: Whether a document-lifecycle step (``open`` / ``close`` / ``build_model``)
+    #: replaced or closed the document mid-run, so the caller must re-adopt the
+    #: document rather than keep showing the one it was handed.
     document_reset: bool = False
 
 
@@ -506,7 +508,8 @@ def run_recipe(
             index, its verb, the original exception, the partial ``step_status``
             run state, and the working document's state (``document`` /
             ``document_reset``) — so a caller that catches it can adopt a document
-            a completed ``open`` / ``close`` step had replaced before the failure.
+            a completed ``open`` / ``close`` / ``build_model`` step had replaced
+            before the failure.
         ValueError: If a step names an unknown verb.
     """
     from .registry import STEP_SPECS
@@ -586,19 +589,19 @@ def run_recipe(
                 context.case_results.clear()
                 context.results.clear()
             if spec.kind == SESSION and spec.resets_document:
-                # A document-lifecycle step (``open`` / ``close``) replaced or
-                # closed the working document, so every prior result is stale —
-                # the precursor chain starts again from the new document.  A
-                # ``save`` step preserves geometry availability and the solved
-                # results.  Named selections are owned by the verbs themselves:
-                # ``open`` replaces the store with the loaded document's, and
-                # ``close`` clears it.
+                # A document-lifecycle step (``open`` / ``close`` /
+                # ``build_model``) replaced or closed the working document, so
+                # every prior result is stale — the precursor chain starts again
+                # from the new document.  A ``save`` step preserves geometry
+                # availability and the solved results.  Named selections are
+                # owned by the verbs themselves: ``open`` replaces the store with
+                # the loaded document's, and ``close`` / ``build_model`` clear it.
                 produced.clear()
                 context.case_results.clear()
                 context.results.clear()
                 # Drop the prior document's results from ``run.results`` too, so
                 # a caller (the GUI) never registers A's mesh / tables after B
-                # was opened — only the current step's own SESSION result and any
+                # was opened — only the current step's own result(s) and any
                 # later step's results are kept.
                 del run.results[:prior_results]
                 run.document_reset = True
@@ -617,9 +620,9 @@ def run_recipe(
             if not step.optional:
                 # Preserve the partial run state and the current document state on
                 # the error, so a caller that catches it (the GUI's failure path)
-                # can adopt a document a completed ``open`` / ``close`` step had
-                # replaced, and commit the steps that completed before this one
-                # rather than re-running them.
+                # can adopt a document a completed ``open`` / ``close`` /
+                # ``build_model`` step had replaced, and commit the steps that
+                # completed before this one rather than re-running them.
                 raise StepError(
                     index,
                     step.verb,
@@ -629,6 +632,7 @@ def run_recipe(
                         model_data=context.model_data,
                         document_path=context.document_path,
                         named_selections=dict(context.named_selections),
+                        model=context.model,
                     ),
                     document_reset=run.document_reset,
                 ) from exc
@@ -646,5 +650,6 @@ def run_recipe(
         model_data=context.model_data,
         document_path=context.document_path,
         named_selections=dict(context.named_selections),
+        model=context.model,
     )
     return run
