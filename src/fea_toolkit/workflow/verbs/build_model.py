@@ -48,8 +48,9 @@ def run_build_model(context: StepContext, step: Step) -> list[StepResult]:
     """Build a benchmark example model as the working document.
 
     The built model replaces ``context.model_data``; the prepared topology,
-    solved cases and named selections are cleared, so a later step cannot read
-    a stale payload left over from the model the recipe started from.
+    solved cases and named selections are cleared and the prior document's
+    source path is detached, so a later step cannot read a stale payload or
+    path left over from the model the recipe started from.
 
     Args:
         context: The run's working state; ``model_data`` is replaced with the
@@ -103,5 +104,12 @@ def run_build_model(context: StepContext, step: Step) -> list[StepResult]:
     context.model = None
     context.case_results.clear()
     context.results.clear()
+    # The built model replaces the working document, so detach the prior
+    # document's source path and clear its named selections — mirroring ``open``
+    # / ``close`` — before a later ``select`` / ``save`` step can read a stale
+    # selection or path that belonged to the document being replaced.
+    context.named_selections.clear()
+    context.document_path = ""
+    context.document_dirty = False
     context.log(f"build_model: built {builder} ({context.model_data})")
     return [StepResult(kind=MODEL, label="Built model", payload=model)]
