@@ -113,6 +113,9 @@ _MODEL_DROP_EXTENSIONS = (
     *SAFE_DB_SUFFIXES,
     ".json",
 )
+#: File extensions dropped onto the window are opened as a project bundle — the
+#: zip ``File ▸ Save project…`` writes, plus the legacy ``.fea`` spelling.
+_PROJECT_DROP_EXTENSIONS = (".zip", ".fea")
 #: Documentation pages the Help menu links to, keyed by short name — the MkDocs
 #: site serves each ``docs/*.md`` as a ``<name>/`` directory URL.
 _DOC_PAGES = {
@@ -4732,25 +4735,33 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _is_droppable(path: str) -> bool:
-        """Whether a dropped file is a results archive or a model file."""
+        """Whether a dropped file is a results archive, model or project bundle."""
         lower = path.lower()
-        return lower.endswith(_RESULTS_DROP_EXTENSIONS) or lower.endswith(_MODEL_DROP_EXTENSIONS)
+        return (
+            lower.endswith(_RESULTS_DROP_EXTENSIONS)
+            or lower.endswith(_MODEL_DROP_EXTENSIONS)
+            or lower.endswith(_PROJECT_DROP_EXTENSIONS)
+        )
 
     def _droppable_paths(self, mime_data: QMimeData) -> list[str]:
         """The local archive-or-model paths in a drag's URL list."""
         return [p for p in self._drop_targets(mime_data) if self._is_droppable(p)]
 
     def _open_dropped_files(self, paths: list[str]) -> int:
-        """Open each dropped archive or model; return how many opened.
+        """Open each dropped archive, model or project; return how many opened.
 
         Results archives open one view per load case via
-        :meth:`open_results_path`; model files replace the displayed model via
-        :meth:`open_path` — the same two paths the File menus use.
+        :meth:`open_results_path`; project bundles rebuild a saved session via
+        :meth:`open_project_path`; model files replace the displayed model via
+        :meth:`open_path` — the same three paths the File menus use.
         """
         opened = 0
         for path in paths:
-            if path.lower().endswith(_RESULTS_DROP_EXTENSIONS):
+            lower = path.lower()
+            if lower.endswith(_RESULTS_DROP_EXTENSIONS):
                 ok = self.open_results_path(path)
+            elif lower.endswith(_PROJECT_DROP_EXTENSIONS):
+                ok = self.open_project_path(path)
             else:
                 ok = self.open_path(path)
             if ok:
@@ -4779,7 +4790,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 "Nothing opened",
-                "None of the dropped files is a readable results archive or model.\n\nSee the message log.",
+                "None of the dropped files is a readable results archive, model or project.\n\nSee the message log.",
             )
 
     def _on_open_results(self) -> None:

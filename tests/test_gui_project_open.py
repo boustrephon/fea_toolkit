@@ -49,6 +49,39 @@ class TestOpenProjectDialog:
         assert "*.zip" in call["args"][3]
 
 
+def test_dropping_a_project_zip_reopens_the_model(window, tmp_path):
+    """Dropping a project ``.zip`` routes through ``open_project_path``."""
+    from examples.sample_model import make_sample_model
+    from fea_toolkit.gui.project import build_manifest, write_project_zip
+
+    sap = make_sample_model()
+    manifest = build_manifest(
+        name="session",
+        source_label="sample.s2k",
+        model_file="model.npz",
+        units=dict(sap.units),
+        recipe=None,
+        views=[],
+        active_view=None,
+        camera=None,
+        hidden_elem_ids=[],
+        display={},
+    )
+    zip_path = tmp_path / "session.zip"
+    write_project_zip(
+        zip_path,
+        manifest=manifest,
+        sap=sap,
+        mesh=None,
+        results_arrays={},
+        figures={},
+        tables={},
+        model_fmt="npz",
+    )
+    assert window._open_dropped_files([str(zip_path)]) == 1
+    assert window._store is not None
+
+
 def test_tree_source_prefers_the_mesh(window):
     """The tree presents the mesh when one exists, else the raw model."""
     from examples.sample_model import make_sample_model

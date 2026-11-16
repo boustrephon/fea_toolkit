@@ -110,7 +110,7 @@ def test_droppable_paths_filters_unsupported_files(window):
     assert window._droppable_paths(mime) == ["/tmp/a.npz"]
 
 
-def test_is_droppable_matches_results_and_model_extensions(window):
+def test_is_droppable_matches_results_model_and_project_extensions(window):
     assert window._is_droppable("results.npz")
     assert window._is_droppable("results.H5")
     assert window._is_droppable("results.hdf5")
@@ -121,6 +121,8 @@ def test_is_droppable_matches_results_and_model_extensions(window):
     assert window._is_droppable("model.$sf")
     assert window._is_droppable("model.$2k")
     assert window._is_droppable("document.json")
+    assert window._is_droppable("session.zip")
+    assert window._is_droppable("session.fea")
     assert not window._is_droppable("notes.txt")
 
 
@@ -131,12 +133,16 @@ def test_open_dropped_files_opens_archives_and_skips_unreadable(window, tmp_path
     assert [view.name for view in window._views.views()] == ["DEAD", "COMB1"]
 
 
-def test_open_dropped_files_routes_results_archives_and_model_files(window, monkeypatch):
-    """Results archives go to open_results_path; model files go to open_path."""
+def test_open_dropped_files_routes_archives_models_and_projects(window, monkeypatch):
+    """Results → open_results_path; projects → open_project_path; models → open_path."""
     calls = []
 
     def fake_open_results(path):
         calls.append(("results", path))
+        return True
+
+    def fake_open_project(path):
+        calls.append(("project", path))
         return True
 
     def fake_open_path(path):
@@ -144,16 +150,18 @@ def test_open_dropped_files_routes_results_archives_and_model_files(window, monk
         return True
 
     monkeypatch.setattr(window, "open_results_path", fake_open_results)
+    monkeypatch.setattr(window, "open_project_path", fake_open_project)
     monkeypatch.setattr(window, "open_path", fake_open_path)
 
-    dropped = ["a.npz", "b.s2k", "c.e2k", "d.json", "e.h5"]
-    assert window._open_dropped_files(dropped) == 5
+    dropped = ["a.npz", "b.s2k", "c.zip", "d.fea", "e.json", "f.h5"]
+    assert window._open_dropped_files(dropped) == 6
     assert calls == [
         ("results", "a.npz"),
         ("model", "b.s2k"),
-        ("model", "c.e2k"),
-        ("model", "d.json"),
-        ("results", "e.h5"),
+        ("project", "c.zip"),
+        ("project", "d.fea"),
+        ("model", "e.json"),
+        ("results", "f.h5"),
     ]
 
 

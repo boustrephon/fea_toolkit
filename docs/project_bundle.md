@@ -13,7 +13,7 @@ related: [gui.md, model_stage_file.md, results_schema.md, workflow_authoring.md]
 results, figures, the ordered view list and the viewport — to a single
 **`.zip` file** (a zip archive named `<name>.zip`).  `File ▸ Open project…`
 reads it back with the native file picker and rebuilds the session **without
-re-running any analysis**.
+re-running any analysis**; dropping the archive onto the window does the same.
 
 The bundle members are all canonical formats, so each is independently usable.
 `model.h5` (written with HDF5 gzip) and `results.npz` are already compressed, so

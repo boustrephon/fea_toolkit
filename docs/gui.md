@@ -44,8 +44,9 @@ runs the Preprocessor and replaces the display with the prepared topology (see
 [Preprocessing](#preprocessing-split-and-mesh)).
 
 The same open runs by **drag-and-drop** — a CSi text export (`.s2k`, `.e2k`,
-`.f2k`, `.$sf`) or a saved `.json` document dropped onto the window replaces
-the displayed model.
+`.f2k`, `.$sf`), a saved `.json` document, or a `.zip` project bundle dropped
+onto the window replaces the displayed model (a project also restores its
+results, figures and views).
 
 ## The window
 
