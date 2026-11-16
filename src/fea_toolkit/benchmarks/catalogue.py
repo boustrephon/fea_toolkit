@@ -8,20 +8,23 @@ parses the register §3 and fails CI when the shared facts — title, type, tier
 status, doc, test — disagree with this catalogue (the project's §7.4
 "one owner per fact" rule).
 
-The per-benchmark builder/recipe reference is deliberately absent here: it
-arrives with the ``build_model`` verb (P46, the next increment), because only
-some benchmarks expose a GUI-openable builder today and a ``Recipe`` needs the
-verb layer.
+A benchmark that exposes a GUI-openable builder carries its ``builder`` name
+and the fixed ``build_model`` defaults in ``builder_params``; the
+``benchmark_recipe`` helper turns that into the recipe a caller presets when a
+user opens the benchmark.  Only some benchmarks expose a builder today — the
+rest are validated in their test scripts and carry no builder.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any, Optional
 
 __all__ = [
     "BENCHMARK_ENTRIES",
     "STATUS_BADGES",
     "BenchmarkEntry",
+    "benchmark_recipe",
     "get_benchmark",
 ]
 
@@ -57,6 +60,13 @@ class BenchmarkEntry:
     status: str
     doc: tuple[str, ...]
     test: tuple[str, ...]
+    #: The GUI-openable builder (``"sac"`` / ``"generic_frame"``), or ``None``
+    #: when the benchmark is validated only in its test (no interactive builder).
+    builder: Optional[str] = None
+    #: Fixed ``build_model`` defaults for the builder; the user-choice parameters
+    #: (``building`` / ``code`` / ``region`` / ``stories`` / ``design``) take
+    #: their ``build_model`` defaults and are edited in the step dialog.
+    builder_params: dict = field(default_factory=dict)
 
 
 BENCHMARK_ENTRIES: tuple[BenchmarkEntry, ...] = (
@@ -89,6 +99,8 @@ BENCHMARK_ENTRIES: tuple[BenchmarkEntry, ...] = (
         status="validated",
         doc=("sac_benchmark.md",),
         test=("test_benchmark_sac3.py", "test_benchmark_sac920.py"),
+        builder="sac",
+        builder_params={"nonlinear": False},
     ),
     BenchmarkEntry(
         id="sac_nltha",
@@ -99,6 +111,7 @@ BENCHMARK_ENTRIES: tuple[BenchmarkEntry, ...] = (
         status="validated",
         doc=("sac_nonlinear_benchmark.md",),
         test=("test_benchmark_sac3_nltha.py", "test_benchmark_sac920.py"),
+        builder="sac",
     ),
     BenchmarkEntry(
         id="sac_imk_collapse_ida",
@@ -109,6 +122,8 @@ BENCHMARK_ENTRIES: tuple[BenchmarkEntry, ...] = (
         status="partial",
         doc=("sac_imk_collapse_benchmark.md",),
         test=("test_benchmark_sac_ida.py",),
+        builder="sac",
+        builder_params={"building": 3, "backbone": "imk"},
     ),
     BenchmarkEntry(
         id="ik2005_generic_frame",
@@ -119,6 +134,7 @@ BENCHMARK_ENTRIES: tuple[BenchmarkEntry, ...] = (
         status="in_progress",
         doc=("ik2005_generic_frame_benchmark.md",),
         test=("test_generic_frame*.py",),
+        builder="generic_frame",
     ),
     BenchmarkEntry(
         id="vecchio_emara_frame",
@@ -158,3 +174,43 @@ _BY_ID: dict[str, BenchmarkEntry] = {entry.id: entry for entry in BENCHMARK_ENTR
 def get_benchmark(benchmark_id: str) -> BenchmarkEntry:
     """Return the catalogue entry for *benchmark_id* (``KeyError`` if unknown)."""
     return _BY_ID[benchmark_id]
+
+
+def benchmark_recipe(benchmark_id: str) -> Any:
+    """Return a ``Recipe`` that builds and meshes *benchmark_id*.
+
+    The first step is a ``build_model`` verb preset with the entry's ``builder``
+    and its fixed ``builder_params`` (the user-choice parameters — ``building``
+    / ``code`` / ``region`` / ``stories`` / ``design`` — take their
+    ``build_model`` defaults and are edited in the step dialog); the second
+    prepares the topology.  This is the *recipe* a caller (the GUI library
+    panel) presets when a user opens a benchmark — one spelling of "build the
+    example" rather than a per-entry-point code path (anti-pattern 17).
+
+    Args:
+        benchmark_id: A catalogue :attr:`BenchmarkEntry.id`.
+
+    Returns:
+        A ``Recipe`` whose steps are ``build_model`` then ``mesh``.
+
+    Raises:
+        KeyError: If *benchmark_id* is unknown.
+        ValueError: If the benchmark has no GUI-openable builder.
+    """
+    from ..workflow import Recipe, Step
+
+    entry = get_benchmark(benchmark_id)
+    if entry.builder is None:
+        raise ValueError(
+            f"benchmark {benchmark_id!r} has no GUI-openable builder — it is "
+            f"validated in {', '.join(entry.test)}, not built interactively"
+        )
+    params = dict(entry.builder_params)
+    params["builder"] = entry.builder
+    return Recipe(
+        name=entry.id,
+        steps=[
+            Step("build_model", params=params),
+            Step("mesh"),
+        ],
+    )
