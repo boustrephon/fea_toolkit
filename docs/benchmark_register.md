@@ -60,8 +60,10 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
 > are the feature pages rather than a `_benchmark.md`.
 >
 > **Status** — ✅ validated, ⚠️ partial (runs, but its reference comparison is
-> not fully closed), 🚧 in progress (a known gap under investigation).  Detail
-> lives in each benchmark's own doc.
+> not fully closed), 🚧 in progress (a known gap under investigation).  For the
+> tier `—` synthetic exercise, ✅ means *implemented and tested* — its basis is
+> the feature pages themselves, not a paper reference.  Detail lives in each
+> benchmark's own doc.
 
 Supporting code, not separate benchmarks:
 

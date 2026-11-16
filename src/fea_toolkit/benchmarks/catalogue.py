@@ -26,10 +26,12 @@ __all__ = [
 ]
 
 #: Validation-status vocabulary -> display badge (the project's §4.7 notation).
-#: ``validated`` matches its closed-form/paper reference within the tier band;
-#: ``partial`` runs but its reference comparison is not fully closed;
-#: ``in_progress`` is actively under investigation with a known gap.  The
-#: authoritative detail lives in each benchmark's own doc, not here.
+#: ``validated`` matches its closed-form/paper reference within the tier band
+#: (for a tier ``—`` synthetic exercise it means *implemented and tested* — the
+#: feature pages are the basis, not a paper); ``partial`` runs but its reference
+#: comparison is not fully closed; ``in_progress`` is actively under
+#: investigation with a known gap.  The authoritative detail lives in each
+#: benchmark's own doc, not here.
 STATUS_BADGES = {
     "validated": "✅",
     "partial": "⚠️",
