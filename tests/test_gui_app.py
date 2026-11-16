@@ -251,10 +251,11 @@ def test_configure_application_sets_the_qt_identity(qapp):
     from qtpy.QtCore import QCoreApplication
     from qtpy.QtGui import QGuiApplication
 
-    from fea_toolkit.gui.app import APP_NAME, ORG_NAME, configure_application
+    from fea_toolkit.gui.app import APP_MISSION, APP_NAME, ORG_NAME, configure_application
 
     configure_application()
     assert (APP_NAME, ORG_NAME) == ("FEA Toolkit", "fea_toolkit")
     assert QCoreApplication.applicationName() == APP_NAME
     assert QCoreApplication.organizationName() == ORG_NAME
     assert QGuiApplication.applicationDisplayName() == APP_NAME
+    assert "OpenSees" in APP_MISSION

@@ -53,8 +53,8 @@ category: [planning]
 **Next — GUI/workflow follow-ups, then physics.**  A six-item GUI follow-up
 batch precedes the physics tranche: ~~**P46** (benchmark library panel, below)~~ ✅,
 ~~the P35 `SESSION`-result follow-up~~ ✅, ~~per-verb doc/DOI links~~ ✅,
-~~drag-and-drop NPZ/H5 results~~ ✅, the quad-view milestone, and the
-mission-statement / `llm_guide` GUI docs.  **Then — physics / feature gaps:**
+~~drag-and-drop NPZ/H5 results~~ ✅, ~~the mission-statement / `llm_guide` GUI
+docs~~ ✅, and the quad-view milestone.  **Then — physics / feature gaps:**
 P6b, P7 (fibre patches, Python-native NLD), then P19 / P23 / P25.
 
 **Opportunistic — Tier 4.**  ~~P9 (linting Phase 3 triage)~~ ✅ **resolved

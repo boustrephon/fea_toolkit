@@ -64,7 +64,7 @@ from ..io.model_loader import (
     SAFE_SUFFIXES,
     TEXT_SUFFIXES,
 )
-from .app import APP_NAME
+from .app import APP_MISSION, APP_NAME
 from .controllers.colour_by import (
     COLOUR_FIELDS,
     FIELD_LABELS,
@@ -5533,13 +5533,8 @@ class MainWindow(QMainWindow):
             self,
             f"About {APP_NAME}",
             f"<b>{APP_NAME}</b> {version}<br><br>"
-            "A pathway to OpenSees structural analysis \u2014 import an FEA model, "
-            "visualise its geometry, materials, sections and results, and run "
-            "linear, modal, response-spectrum, pushover and nonlinear "
-            "time-history analyses.<br><br>"
-            "A study and teaching tool, documented at "
-            '<a href="https://boustrephon.github.io/fea_toolkit/">'
-            "boustrephon.github.io/fea_toolkit</a>.",
+            f"{APP_MISSION}<br><br>"
+            f'Documented at <a href="{DOCS_URL}">{DOCS_URL.rstrip("/")}</a>.',
         )
 
     # ── Analysis (Analysis menu) ────────────────────────────────────

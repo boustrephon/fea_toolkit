@@ -25,6 +25,15 @@ from typing import Optional
 #: evidence, and the attempts that failed: ``docs/dev_notes.md``.
 APP_NAME = "FEA Toolkit"
 
+#: One-sentence mission statement — shown in the Help ▸ About box and recorded
+#: in ``docs/gui.md`` → "Application identity".
+APP_MISSION = (
+    "A study and teaching desktop app that imports CSi structural models, "
+    "shows their geometry, loading and results in 3-D, and runs linear, modal, "
+    "response-spectrum, pushover and nonlinear time-history analyses through "
+    "OpenSees."
+)
+
 #: Internal organisation name; only used for ``QSettings`` paths (Milestone 8).
 ORG_NAME = "fea_toolkit"
 

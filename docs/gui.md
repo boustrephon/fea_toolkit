@@ -666,6 +666,15 @@ The window title, the About box and Qt's own naming read **FEA Toolkit**
 (`gui/app.py` → `APP_NAME`), and on macOS the Application menu's *About* /
 *Hide* / *Quit* items are retitled accordingly at launch.
 
+The application's mission statement (`gui/app.py` → `APP_MISSION`) is:
+
+> A study and teaching desktop app that imports CSi structural models, shows
+> their geometry, loading and results in 3-D, and runs linear, modal,
+> response-spectrum, pushover and nonlinear time-history analyses through
+> OpenSees.
+
+It is shown in the **Help ▸ About** box alongside the version.
+
 The **bold menu-bar label, the Dock entry and the Cmd-Tab name still say
 `Python`**, because macOS paints those from the interpreter's framework bundle
 and no runtime Qt or Python call changes that.  A self-contained bundle that

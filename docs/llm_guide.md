@@ -722,3 +722,57 @@ def plot_mesh(builder, **kwargs):
         >>> plot_mesh(builder)
     \"\"\"
 ```
+
+
+---
+
+## 10. Desktop GUI (the `[gui]` extra)
+
+The desktop app lives under `fea_toolkit/gui/` and is **Python 3.10+**, shipped
+via the `[gui]` extra (`qtpy`, `PySide6`, `pyvistaqt`) — the core package never
+imports it, and `import fea_toolkit.workflow` must not load OpenSees or Qt.  It
+is a **thin shell** over the two-stage pipeline: it imports, displays and runs,
+but never reimplements analysis or topology.
+
+### Where the code lives
+
+| Concern | Module | Notes |
+|---|---|---|
+| Bootstrap + identity | `gui/app.py` | `APP_NAME`, `APP_MISSION`, `configure_application()`, the macOS Application-menu retitle, the `fea-gui` entry point |
+| The main window | `gui/main_window.py` | menubar / toolbars / docks, drag-and-drop routing, Help ▸ About, `open_project_path` |
+| Controllers (Qt-free logic) | `gui/controllers/` | `selection.py`, `settings.py`, `context_snapshot.py`, `colour_by.py`, `view_registry.py` |
+| Dialogs & views | `gui/views/` | `analysis_dialog.py`, `recipe_panel.py`, `verb_help_dialog.py`, `benchmark_library_panel.py`, … |
+| Project bundle | `gui/project.py` | Qt-free / OpenSees-free save & load of a `.zip` session |
+| Doc / DOI URLs | `gui/doc_links.py` | `DOCS_URL`, `doc_url()`, `doi_url()` — the single spelling of a link |
+
+### Goal → code
+
+- **Add a menu action** → register it in `MainWindow._make_actions()`
+  (`self._actions`), then wire it in `_build_menubar()`.
+- **Add a dialog / panel** → a class in `gui/views/`, opened from a
+  `MainWindow` handler; keep its *logic* Qt-free where possible.
+- **Add an operation the GUI performs** → it must be a `workflow` *verb* (a
+  step in a recipe), so a menu action at most *presets* a step and runs the
+  recipe — never a second code path (`.clinerules` §3.12, anti-pattern 17).
+- **Open documentation / a DOI** → `doc_links.doc_url()` / `doi_url()`, never a
+  hand-written URL.
+- **Drag-and-drop a file** → `MainWindow._drop_targets()` /
+  `_is_droppable()` / `_open_dropped_files()` route by suffix to
+  `open_results_path` (NPZ/H5), `open_project_path` (`.zip` / `.fea`) or
+  `open_path` (model files); the drop handlers are thin wrappers over plain
+  testable helpers.
+
+### Constraints
+
+- **Lazy heavy imports**: `gui/project.py` and the `workflow` verbs import
+  nothing heavy at module scope — OpenSees / PyVista / matplotlib load inside
+  the function that uses them, so a GUI can render a verb's parameter form
+  before a model is open.
+- **3-D only**: the GUI drives the 3-D `AnalysisBuilder` path (`.clinerules`
+  §3.11); there is no 2-D GUI mode.
+- **Testing**: GUI tests live in `tests/test_gui_*.py` with the `needs_gui`
+  marker (`tests/conftest.py` forces `QT_QPA_PLATFORM=offscreen`); run them
+  with the `[gui]` extra installed — `pip install -e ".[gui]"`.
+- **Unit-agnostic**: never hardcode `g` or material constants in the window —
+  everything derives from the model's unit system (§4.6).
+
