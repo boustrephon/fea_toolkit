@@ -52,7 +52,7 @@ category: [planning]
 
 **Next — GUI/workflow follow-ups, then physics.**  A six-item GUI follow-up
 batch precedes the physics tranche: **P46** (benchmark library panel, below),
-the P35 `SESSION`-result follow-up, per-verb doc/DOI links, drag-and-drop
+~~the P35 `SESSION`-result follow-up~~ ✅, per-verb doc/DOI links, drag-and-drop
 NPZ/H5 results, the quad-view milestone, and the mission-statement /
 `llm_guide` GUI docs.  **Then — physics / feature gaps:** P6b, P7 (fibre
 patches, Python-native NLD), then P19 / P23 / P25.
@@ -822,13 +822,12 @@ group), ``workflow/steps.py`` (``SESSION`` kind + ``StepContext`` document
 state), ``workflow/verbs/{open,close,save,select}.py``, ``io/`` (versioned-path
 helper), and the GUI's tree + selection-authoring surface.
 
-**Follow-up (document-recipe GUI completion).**  `MainWindow._recipe_finished`
-has no `SESSION` branch, so an `open` step replaces `context.model_data` on the
-worker while the window's `_store` still points at the previous document —
-subsequent mesh / analysis results then apply to a document the window is not
-showing.  Handle the `SESSION` result (transfer the opened / closed document to
-the window's `_store`, or establish a supported worker → GUI transfer
-mechanism) so a recipe beginning with `open` actually drives the window.
+**Follow-up (document-recipe GUI completion).** ✅ **Landed 2026-11-16** —
+`run_recipe` records the final document state on `RecipeRun` (`document` +
+`document_reset`), and `MainWindow._recipe_finished` adopts it (via
+`_adopt_document`) *before* registering results — so a recipe beginning with
+`open` replaces the window's `_store` and its results attach to the document
+the user is now looking at, instead of the stale one.
 
 #### P46 — Benchmark library panel (validated example models)
 
