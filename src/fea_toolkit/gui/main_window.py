@@ -58,6 +58,12 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from ..io.model_loader import (
+    ETABS_SUFFIXES,
+    SAFE_DB_SUFFIXES,
+    SAFE_SUFFIXES,
+    TEXT_SUFFIXES,
+)
 from .app import APP_NAME
 from .controllers.colour_by import (
     COLOUR_FIELDS,
@@ -97,6 +103,16 @@ from .views.qt_mouse import install_mouse_filter
 _PROJECT_URL = "https://github.com/boustrephon/fea_toolkit"
 #: File extensions dropped onto the window are opened as results archives.
 _RESULTS_DROP_EXTENSIONS = (".npz", ".h5", ".hdf5")
+#: File extensions dropped onto the window are opened as models — the CSi text
+#: exports :func:`~fea_toolkit.io.model_loader.load_model_data` dispatches on,
+#: plus the saved-document ``.json`` envelope.
+_MODEL_DROP_EXTENSIONS = (
+    *TEXT_SUFFIXES,
+    *ETABS_SUFFIXES,
+    *SAFE_SUFFIXES,
+    *SAFE_DB_SUFFIXES,
+    ".json",
+)
 #: Documentation pages the Help menu links to, keyed by short name — the MkDocs
 #: site serves each ``docs/*.md`` as a ``<name>/`` directory URL.
 _DOC_PAGES = {
@@ -4716,18 +4732,28 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _is_droppable(path: str) -> bool:
-        """Whether a dropped file is a results archive this window can open."""
-        return path.lower().endswith(_RESULTS_DROP_EXTENSIONS)
+        """Whether a dropped file is a results archive or a model file."""
+        lower = path.lower()
+        return lower.endswith(_RESULTS_DROP_EXTENSIONS) or lower.endswith(_MODEL_DROP_EXTENSIONS)
 
     def _droppable_paths(self, mime_data: QMimeData) -> list[str]:
-        """The local result-archive paths in a drag's URL list."""
+        """The local archive-or-model paths in a drag's URL list."""
         return [p for p in self._drop_targets(mime_data) if self._is_droppable(p)]
 
     def _open_dropped_files(self, paths: list[str]) -> int:
-        """Open each dropped results archive; return how many opened."""
+        """Open each dropped archive or model; return how many opened.
+
+        Results archives open one view per load case via
+        :meth:`open_results_path`; model files replace the displayed model via
+        :meth:`open_path` — the same two paths the File menus use.
+        """
         opened = 0
         for path in paths:
-            if self.open_results_path(path):
+            if path.lower().endswith(_RESULTS_DROP_EXTENSIONS):
+                ok = self.open_results_path(path)
+            else:
+                ok = self.open_path(path)
+            if ok:
                 opened += 1
         return opened
 
@@ -4753,7 +4779,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 "Nothing opened",
-                "None of the dropped files is a readable results archive.\n\nSee the message log.",
+                "None of the dropped files is a readable results archive or model.\n\nSee the message log.",
             )
 
     def _on_open_results(self) -> None:

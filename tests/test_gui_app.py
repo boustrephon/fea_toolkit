@@ -144,6 +144,13 @@ def test_open_path_renders_a_fixture(window):
     assert window._model is not None
 
 
+def test_dropping_an_s2k_opens_the_model(window):
+    """Dropping a CSi text file routes through ``open_path`` and opens it."""
+    assert _FIXTURE.exists()
+    assert window._open_dropped_files([str(_FIXTURE)]) == 1
+    assert window._model is not None
+
+
 def test_open_path_reports_failure_without_a_dialog(window):
     """A bad path logs an error and returns False -- no modal dialog in tests."""
     missing = str(_FIXTURE.with_name("does_not_exist.s2k"))

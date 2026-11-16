@@ -43,6 +43,10 @@ see first is the **parsed** model, as drawn in SAP2000; `Model ▸ Mesh…` then
 runs the Preprocessor and replaces the display with the prepared topology (see
 [Preprocessing](#preprocessing-split-and-mesh)).
 
+The same open runs by **drag-and-drop** — a CSi text export (`.s2k`, `.e2k`,
+`.f2k`, `.$sf`) or a saved `.json` document dropped onto the window replaces
+the displayed model.
+
 ## The window
 
 | Area | What it is |

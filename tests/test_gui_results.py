@@ -102,19 +102,25 @@ def test_drop_targets_extracts_only_local_files(window):
     assert window._drop_targets(mime) == ["/tmp/results.npz"]
 
 
-def test_droppable_paths_filters_non_archives(window):
+def test_droppable_paths_filters_unsupported_files(window):
     from qtpy.QtCore import QMimeData, QUrl
 
     mime = QMimeData()
-    mime.setUrls([QUrl.fromLocalFile("/tmp/a.npz"), QUrl.fromLocalFile("/tmp/b.s2k")])
+    mime.setUrls([QUrl.fromLocalFile("/tmp/a.npz"), QUrl.fromLocalFile("/tmp/b.txt")])
     assert window._droppable_paths(mime) == ["/tmp/a.npz"]
 
 
-def test_is_droppable_matches_results_extensions(window):
+def test_is_droppable_matches_results_and_model_extensions(window):
     assert window._is_droppable("results.npz")
     assert window._is_droppable("results.H5")
     assert window._is_droppable("results.hdf5")
-    assert not window._is_droppable("model.s2k")
+    assert window._is_droppable("model.s2k")
+    assert window._is_droppable("model.e2k")
+    assert window._is_droppable("model.f2k")
+    assert window._is_droppable("model.$et")
+    assert window._is_droppable("model.$sf")
+    assert window._is_droppable("model.$2k")
+    assert window._is_droppable("document.json")
     assert not window._is_droppable("notes.txt")
 
 
@@ -123,6 +129,32 @@ def test_open_dropped_files_opens_archives_and_skips_unreadable(window, tmp_path
     bad = str(tmp_path / "not-an-archive.npz")
     assert window._open_dropped_files([archive, bad]) == 1
     assert [view.name for view in window._views.views()] == ["DEAD", "COMB1"]
+
+
+def test_open_dropped_files_routes_results_archives_and_model_files(window, monkeypatch):
+    """Results archives go to open_results_path; model files go to open_path."""
+    calls = []
+
+    def fake_open_results(path):
+        calls.append(("results", path))
+        return True
+
+    def fake_open_path(path):
+        calls.append(("model", path))
+        return True
+
+    monkeypatch.setattr(window, "open_results_path", fake_open_results)
+    monkeypatch.setattr(window, "open_path", fake_open_path)
+
+    dropped = ["a.npz", "b.s2k", "c.e2k", "d.json", "e.h5"]
+    assert window._open_dropped_files(dropped) == 5
+    assert calls == [
+        ("results", "a.npz"),
+        ("model", "b.s2k"),
+        ("model", "c.e2k"),
+        ("model", "d.json"),
+        ("results", "e.h5"),
+    ]
 
 
 def test_visibility_toggles_survive_a_case_switch(window, tmp_path):
