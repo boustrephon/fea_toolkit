@@ -399,7 +399,10 @@ class RecipeRun:
 
     Attributes:
         results: Every :class:`~fea_toolkit.workflow.steps.StepResult` the run
-            produced, in step order.  A step may contribute several.
+            produced for the *final* document, in step order.  A step may
+            contribute several.  A document-lifecycle step (``open`` / ``close``)
+            discards the results the previous document produced, so a caller
+            never registers A's mesh / tables after B was opened.
         failures: ``(step index, verb, message)`` for each *optional* step that
             failed and was tolerated.  A non-optional failure does not appear
             here — it raises :class:`~fea_toolkit.workflow.steps.StepError`, so
@@ -500,7 +503,10 @@ def run_recipe(
 
     Raises:
         StepError: If a non-optional step raises.  The error carries the step's
-            index, its verb and the original exception.
+            index, its verb, the original exception, the partial ``step_status``
+            run state, and the working document's state (``document`` /
+            ``document_reset``) — so a caller that catches it can adopt a document
+            a completed ``open`` / ``close`` step had replaced before the failure.
         ValueError: If a step names an unknown verb.
     """
     from .registry import STEP_SPECS
@@ -567,6 +573,7 @@ def run_recipe(
                     f"run a step that produces {missing[0]!r} first"
                 )
             resolved_step = _resolve_step_selection(step, context)
+            prior_results = len(run.results)
             run.results.extend(spec.run(context, resolved_step))
             produced.add(spec.kind)
             if spec.kind == GEOMETRY:
@@ -589,6 +596,11 @@ def run_recipe(
                 produced.clear()
                 context.case_results.clear()
                 context.results.clear()
+                # Drop the prior document's results from ``run.results`` too, so
+                # a caller (the GUI) never registers A's mesh / tables after B
+                # was opened — only the current step's own SESSION result and any
+                # later step's results are kept.
+                del run.results[:prior_results]
                 run.document_reset = True
             if context.cancelled:
                 # A solve cancelled between cases still completed its run;
@@ -603,10 +615,23 @@ def run_recipe(
             run.step_status.append((index, step.verb, "failed"))
             _notify(index, step.verb, "failed")
             if not step.optional:
-                # Preserve the partial run state on the error, so a caller that
-                # catches it (the GUI's failure path) can still commit the steps
-                # that completed before this one rather than re-running them.
-                raise StepError(index, step.verb, exc, step_status=list(run.step_status)) from exc
+                # Preserve the partial run state and the current document state on
+                # the error, so a caller that catches it (the GUI's failure path)
+                # can adopt a document a completed ``open`` / ``close`` step had
+                # replaced, and commit the steps that completed before this one
+                # rather than re-running them.
+                raise StepError(
+                    index,
+                    step.verb,
+                    exc,
+                    step_status=list(run.step_status),
+                    document=DocumentState(
+                        model_data=context.model_data,
+                        document_path=context.document_path,
+                        named_selections=dict(context.named_selections),
+                    ),
+                    document_reset=run.document_reset,
+                ) from exc
             run.failures.append((index, step.verb, message))
             context.log(
                 f"recipe: step {index} ({step.verb}) failed and is optional — continuing: {message}"

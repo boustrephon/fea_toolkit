@@ -405,6 +405,12 @@ class StepError(RuntimeError):
             before the failure — the steps that completed (and the failing one,
             as ``"failed"``) — so a caller can persist them instead of re-running
             the work that already succeeded.  ``None`` when not provided.
+        document: The working document's state at the point of failure, carried
+            so a caller (the GUI) can adopt a document a completed ``open`` /
+            ``close`` step had replaced before the failing step.  ``None`` when
+            not provided.
+        document_reset: Whether a document-lifecycle step replaced or closed the
+            document before the failure, so the caller must adopt ``document``.
     """
 
     def __init__(
@@ -413,9 +419,13 @@ class StepError(RuntimeError):
         verb: str,
         cause: BaseException,
         step_status: Optional[list] = None,
+        document: Optional[Any] = None,
+        document_reset: bool = False,
     ) -> None:
         super().__init__(f"step {index} ({verb}) failed: {type(cause).__name__}: {cause}")
         self.index = index
         self.verb = verb
         self.cause = cause
         self.step_status = step_status
+        self.document = document
+        self.document_reset = document_reset
