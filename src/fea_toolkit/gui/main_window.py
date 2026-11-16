@@ -5258,12 +5258,40 @@ class MainWindow(QMainWindow):
             "",
             "FEA project (*.zip);;All files (*)",
         )
-        if path and not self.open_project_path(path):
+        if not path:
+            return
+        if not self._confirm_project_open(path):
+            return
+        if not self.open_project_path(path):
             QMessageBox.critical(
                 self,
                 "Open failed",
                 f"Could not open project:\n{path}\n\nSee the message log.",
             )
+
+    def _confirm_project_open(self, path: str) -> bool:
+        """Preview a recognised project archive's members and ask before opening.
+
+        The member list is read from the zip's central directory — nothing is
+        extracted — so the user sees what the archive holds before it is
+        unpacked.  A directory or a non-project file returns ``True`` and is
+        left to :meth:`open_project_path` to open or report.
+        """
+        from pathlib import Path
+
+        from .project import is_project, project_member_summary
+
+        if Path(path).is_dir() or not is_project(path):
+            return True
+        members = "\n".join(project_member_summary(path)) or "(no members)"
+        answer = QMessageBox.question(
+            self,
+            "Open project",
+            f"This project contains:\n\n{members}\n\nOpen it?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        return answer == QMessageBox.StandardButton.Yes
 
     def open_project_path(self, path: str) -> bool:
         """Load a project (directory or ``.zip`` archive) and rebuild the session.
@@ -5274,13 +5302,15 @@ class MainWindow(QMainWindow):
         restored from the manifest.
         """
         from ..workflow import Recipe
-        from .project import is_project, read_project, regenerate_figure
+        from .project import is_project, project_member_summary, read_project, regenerate_figure
 
         self.log(f"Opening project {path} …")
         try:
             if not is_project(path):
                 self.log(f"{path} is not a project (directory or .zip archive).", "error")
                 return False
+            for member in project_member_summary(path):
+                self.log(f"  · {member}")
             bundle = read_project(path)
         except Exception as exc:
             self.log(f"Failed to open project {path}: {exc}", "error")

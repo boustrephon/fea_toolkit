@@ -21,6 +21,13 @@ the archive *stores* those members and only deflates the JSON text members.  The
 loader (`read_project` / `open_project_path`) also accepts a legacy `<name>.fea`
 *directory* when handed a path directly — `zip_project` converts one.
 
+Opening a `.zip` verifies it **before extracting anything**: `is_project` checks
+that the file is a real zip whose central directory names `project.json`, and
+`File ▸ Open project…` previews the member list and asks for confirmation first.
+Extraction then writes only the six canonical members, each capped in
+decompressed size, so a zip that is not a project — or a zip bomb — is rejected
+without unpacking anything.
+
 ## Contents
 
 The `.zip` archive holds these members at its root:

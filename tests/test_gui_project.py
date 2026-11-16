@@ -23,6 +23,7 @@ from fea_toolkit.gui.project import (
     ida_figure_payload,
     is_project,
     mode_shape_arrays,
+    project_member_summary,
     pushover_displacement_arrays,
     read_project,
     rs_displacement_arrays,
@@ -639,6 +640,35 @@ def test_is_project(tmp_path):
     assert is_project(directory)
     assert is_project(zip_project(directory))
     assert not is_project(tmp_path)
+
+
+def test_is_project_rejects_a_zip_without_the_manifest(tmp_path):
+    """A zip that is not a project is rejected before anything is extracted."""
+    archive = tmp_path / "notes.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("README.txt", "hello")
+    assert not is_project(archive)
+
+
+def test_is_project_rejects_a_non_zip_file(tmp_path):
+    """A ``.zip``-suffixed file that is not a zip is rejected."""
+    fake = tmp_path / "fake.zip"
+    fake.write_text("this is not a zip archive")
+    assert not is_project(fake)
+
+
+def test_project_member_summary_lists_members_without_extracting(tmp_path):
+    archive = tmp_path / "p.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("project.json", "{}")
+        zf.writestr("results.npz", b"abc")
+
+    assert project_member_summary(archive) == ["project.json (2 B)", "results.npz (3 B)"]
+    assert project_member_summary(tmp_path / "missing.zip") == []
+
+    not_a_zip = tmp_path / "plain.zip"
+    not_a_zip.write_text("nope")
+    assert project_member_summary(not_a_zip) == []
 
 
 def test_detect_model_format_is_h5_or_npz():

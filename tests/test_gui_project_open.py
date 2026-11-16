@@ -6,6 +6,8 @@ macOS directory picker cannot select a folder whose name carries a file
 extension, which is why the bundle is a file rather than a directory.
 """
 
+import zipfile
+
 import pytest
 
 pytestmark = pytest.mark.needs_gui
@@ -42,11 +44,68 @@ class TestOpenProjectDialog:
         opened = []
 
         monkeypatch.setattr(window, "open_project_path", lambda path: opened.append(path) or True)
+        monkeypatch.setattr(window, "_confirm_project_open", lambda path: True)
 
         window._on_open_project()
 
         assert opened == ["/chosen/project/admin_2.zip"]
         assert "*.zip" in call["args"][3]
+
+
+def test_confirm_project_open_previews_members_and_confirms(window, tmp_path, monkeypatch):
+    from qtpy.QtWidgets import QMessageBox
+
+    archive = tmp_path / "session.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("project.json", "{}")
+        zf.writestr("results.npz", b"abc")
+
+    shown = {}
+
+    def _fake_question(parent, title, text, *args, **kwargs):
+        shown["text"] = text
+        return QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(_fake_question))
+
+    assert window._confirm_project_open(str(archive)) is True
+    assert "project.json" in shown["text"]
+    assert "results.npz" in shown["text"]
+
+
+def test_confirm_project_open_returns_false_when_declined(window, tmp_path, monkeypatch):
+    from qtpy.QtWidgets import QMessageBox
+
+    archive = tmp_path / "session.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("project.json", "{}")
+
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        staticmethod(lambda *a, **k: QMessageBox.StandardButton.No),
+    )
+
+    assert window._confirm_project_open(str(archive)) is False
+
+
+def test_confirm_project_open_skips_preview_for_a_non_project(window, tmp_path, monkeypatch):
+    from qtpy.QtWidgets import QMessageBox
+
+    archive = tmp_path / "notes.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("README.txt", "hello")
+
+    called = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        staticmethod(lambda *a, **k: called.append(True) or QMessageBox.StandardButton.No),
+    )
+
+    # Not a project → no dialog; open_project_path reports the failure instead.
+    assert window._confirm_project_open(str(archive)) is True
+    assert called == []
 
 
 def test_dropping_a_project_zip_reopens_the_model(window, tmp_path):

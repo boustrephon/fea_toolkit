@@ -47,6 +47,7 @@ __all__ = [
     "ida_figure_payload",
     "is_project",
     "mode_shape_arrays",
+    "project_member_summary",
     "read_project",
     "regenerate_figure",
     "rs_displacement_arrays",
@@ -684,17 +685,64 @@ def _read_dir(bundle_dir: Path) -> dict:
 def is_project(path: str | Path) -> bool:
     """Whether *path* looks like a project (a directory, or a zip of one).
 
+    A ``.zip`` / ``.fea`` candidate is verified **without extracting anything**:
+    :func:`zipfile.is_zipfile` confirms the container, then the zip's central
+    directory is checked for the ``project.json`` manifest.  A random zip is
+    therefore rejected up front rather than after :func:`read_project` has
+    extracted members.
+
     Args:
         path: A directory, or a ``.zip`` (or legacy ``.fea``) archive.
 
     Returns:
-        ``True`` when the directory contains a manifest, or the path has a zip
-        suffix.
+        ``True`` when the directory contains a manifest, or the path is a zip
+        archive that carries the manifest member.
     """
     path = Path(path)
     if path.is_dir():
         return (path / MANIFEST_NAME).is_file()
-    return path.suffix.lower() in (".zip", ".fea")
+    if path.suffix.lower() not in (".zip", ".fea"):
+        return False
+    try:
+        if not zipfile.is_zipfile(path):
+            return False
+        with zipfile.ZipFile(path) as zf:
+            return MANIFEST_NAME in zf.namelist()
+    except (zipfile.BadZipFile, OSError):
+        return False
+
+
+def _human_size(num_bytes: int) -> str:
+    """Format a byte count as a short, human-readable string."""
+    size = float(num_bytes)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024.0 or unit == "GB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024.0
+    return f"{size:.1f} GB"
+
+
+def project_member_summary(path: str | Path) -> list[str]:
+    """List a project archive's members with their uncompressed sizes.
+
+    Reads only the zip **central directory** — no member data is decompressed
+    or written to disk — so it is safe to call before :func:`read_project`.
+    Returns ``[]`` for a directory, a missing file, or a file that is not a
+    zip archive.
+
+    Args:
+        path: A ``.zip`` / ``.fea`` project archive.
+
+    Returns:
+        One ``"<name> (<size>)"`` line per member, in archive order.
+    """
+    try:
+        if not zipfile.is_zipfile(path):
+            return []
+        with zipfile.ZipFile(path) as zf:
+            return [f"{info.filename} ({_human_size(info.file_size)})" for info in zf.infolist()]
+    except (zipfile.BadZipFile, OSError):
+        return []
 
 
 def _extract_project_members(zf: zipfile.ZipFile, destination: str) -> None:
