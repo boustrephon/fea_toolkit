@@ -75,6 +75,43 @@ def _strip_run_state(data: dict) -> dict:
     return {"name": data.get("name", ""), "steps": steps}
 
 
+def _migrate_step_params(verb: str, params: dict) -> dict:
+    """Normalise legacy parameter spellings before a step is validated.
+
+    ``build_model``'s storey count was renamed from ``stories`` to ``n_stories``;
+    a recipe saved against the old spelling must still load, and the migrated
+    value is returned under the canonical name so the rebuilt step round-trips
+    to the new form.
+
+    Args:
+        verb: The step's verb.
+        params: The step's parameters as read from the recipe, before coercion.
+
+    Returns:
+        The parameters with any legacy names migrated.
+
+    Raises:
+        ValueError: If a step supplies both spellings of a renamed parameter
+            with different values — that document cannot be migrated losslessly.
+    """
+    if verb != "build_model":
+        return params
+    if "stories" in params and "n_stories" in params:
+        if params["stories"] != params["n_stories"]:
+            raise ValueError(
+                "build_model: 'stories' and 'n_stories' conflict "
+                f"({params['stories']!r} vs {params['n_stories']!r}); remove one"
+            )
+        # Both present and equal: drop the legacy spelling.
+        return {k: v for k, v in params.items() if k != "stories"}
+    if "stories" in params:
+        return {
+            **{k: v for k, v in params.items() if k != "stories"},
+            "n_stories": params["stories"],
+        }
+    return params
+
+
 def satisfied_kinds(steps: Any, *, initial: Any = ()) -> set:
     """The kinds produced by *steps* in order, without validating ``needs``.
 
@@ -259,7 +296,7 @@ class Recipe:
                     f"recipe step {index}: unknown verb {verb!r}; known verbs: {sorted(STEP_SPECS)}"
                 )
             spec = STEP_SPECS[verb]
-            given = dict(raw.get("params") or {})
+            given = _migrate_step_params(verb, dict(raw.get("params") or {}))
             for name, value in given.items():
                 if name not in spec.params:
                     raise ValueError(

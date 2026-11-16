@@ -878,7 +878,7 @@ as a future *analysis* step, not a sweep verb today.
 **Where.**  `benchmarks/catalogue.py` (new, OpenSees-free), a `build_model`
 verb in `workflow/verbs/`, per-benchmark recipes, a
 `gui/views/benchmark_library_panel.py` replacing the two dialogs (their
-region/stories/design and frame-code pickers fold into the `build_model`
+region/n_stories/design and frame-code pickers fold into the `build_model`
 step's parameters), a sync test, and the register §3 Status/Notes columns.
 `benchmark_register.md` §3 stays hand-edited.
 

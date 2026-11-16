@@ -733,6 +733,23 @@ class TestRecipeSerialisation:
         with pytest.raises(ValueError, match="unknown parameter 'split_wals'"):
             Recipe.from_dict(data)
 
+    def test_a_legacy_stories_key_migrates_to_n_stories(self):
+        """A recipe saved before the ``stories`` → ``n_stories`` rename still loads."""
+        data = {"steps": [{"verb": "build_model", "params": {"builder": "fema355c", "stories": 9}}]}
+        rebuilt = Recipe.from_dict(data)
+        assert rebuilt.steps[0].params == {"builder": "fema355c", "n_stories": 9}
+
+    def test_equal_stories_and_n_stories_drop_the_legacy_spelling(self):
+        """Both spellings present but equal: keep the canonical ``n_stories`` only."""
+        data = {"steps": [{"verb": "build_model", "params": {"stories": 9, "n_stories": 9}}]}
+        assert Recipe.from_dict(data).steps[0].params == {"n_stories": 9}
+
+    def test_conflicting_stories_and_n_stories_are_rejected(self):
+        """Two spellings with different values cannot be migrated losslessly."""
+        data = {"steps": [{"verb": "build_model", "params": {"stories": 9, "n_stories": 20}}]}
+        with pytest.raises(ValueError, match="conflict"):
+            Recipe.from_dict(data)
+
     def test_a_wrongly_typed_parameter_is_rejected(self):
         data = {"steps": [{"verb": "scale_sections", "params": {"factor": "tiny"}}]}
         with pytest.raises(ValueError, match="must be a number"):
