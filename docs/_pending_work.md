@@ -51,7 +51,7 @@ category: [planning]
    entry below).
 
 **Next — GUI/workflow follow-ups, then physics.**  A six-item GUI follow-up
-batch precedes the physics tranche: **P46** (benchmark library panel, below),
+batch precedes the physics tranche: ~~**P46** (benchmark library panel, below)~~ ✅,
 ~~the P35 `SESSION`-result follow-up~~ ✅, per-verb doc/DOI links, drag-and-drop
 NPZ/H5 results, the quad-view milestone, and the mission-statement /
 `llm_guide` GUI docs.  **Then — physics / feature gaps:** P6b, P7 (fibre
@@ -843,6 +843,17 @@ stays **outside the GUI**.  This item gives the GUI a **library of example
 models**: a dock/tab listing the benchmark studies (tier, coverage, status)
 that lets a user open one to *follow* the documented research process, compare
 against the paper if they want, or just use it as a trusted reference model.
+
+**Status: ✅ Landed 2026-11-16.**  The `build_model` verb, the structured
+catalogue + sync test, the builder mapping (`builder` / `builder_params`) and
+`benchmark_recipe(id)`, and the **Benchmark Library** dock (catalogue listed
+with tier/status badges; "Open" presets a `build_model` + `mesh` recipe) are
+all in — the built model displays through the existing `document_reset` →
+`_adopt_document` path, so no `MODEL`-result branch is needed.  One follow-up
+remains: the two legacy dialogs (`benchmark_dialog.py` /
+`generic_frame_dialog.py`) are still wired; retiring them (and deciding where
+the FEMA 355C model-builder generator — not a §3 catalogue row — lives) is
+deferred.
 
 **Two decisions (settled 2026-11-16).**
 
