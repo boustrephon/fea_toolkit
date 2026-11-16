@@ -47,6 +47,30 @@ def test_the_scene_is_mirrored_to_every_viewport(window):
         assert frame_actors[0] in renderer_actors
 
 
+def test_mirroring_preserves_a_non_pickable_actor(window):
+    """A non-pickable decoration stays non-pickable after being mirrored.
+
+    PyVista's ``Plotter.add_actor`` defaults to ``pickable=True``, which
+    silently re-enables picking on the **shared** actor — so the click aimed at
+    the element beneath is stolen by the overlay (``docs/dev_notes.md`` →
+    *PyVista picking contract*).  ``QtRenderBackend._add_actor`` must pass the
+    actor's own flag back, or single-click selection resolves to the wrong
+    element.
+    """
+    import pyvista as pv
+
+    backend = window._backend
+    actor = pv.Actor()
+    actor.SetPickable(False)
+    backend._add_actor(actor, "test_overlay")
+
+    assert actor.GetPickable() == 0
+    # The same (still non-pickable) actor is mirrored into every secondary view.
+    for interactor in window._quad.interactors[1:]:
+        renderer_actors = list(interactor.renderer.actors.values())
+        assert actor in renderer_actors
+
+
 def test_camera_action_targets_the_active_viewport(window):
     """View ▸ Camera ▸ Top reorients the active viewport (the primary, initially)."""
     quad = window._quad

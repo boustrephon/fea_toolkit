@@ -120,11 +120,20 @@ class QtRenderBackend(PyVistaRenderer):
                 plotter.render()
 
     def _add_actor(self, actor: Any, category: str) -> None:
-        """Track *actor* and add it to every mirror viewport too."""
+        """Track *actor* and add it to every mirror viewport too.
+
+        PyVista's ``Plotter.add_actor`` defaults to ``pickable=True`` and calls
+        ``actor.SetPickable(True)`` — so mirroring a *non-pickable* actor (an
+        overlay, an extruded-solid decoration) through it silently re-enabled
+        picking on the **shared** actor, and a click aimed at the element
+        beneath was stolen by the decoration.  The actor's own flag is passed
+        back so ``SetPickable(False)`` survives the mirror.
+        """
         super()._add_actor(actor, category)
+        pickable = bool(actor.GetPickable())
         for plotter in self._mirrors:
             with contextlib.suppress(Exception):
-                plotter.add_actor(actor)
+                plotter.add_actor(actor, pickable=pickable)
 
     def clear(self) -> None:
         """Remove every actor from the primary *and* the mirror viewports."""

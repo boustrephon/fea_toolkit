@@ -1015,6 +1015,15 @@ Consequences — and why ``enable_mesh_picking`` was replaced:
   element, so a pickable overlay stole the click aimed at the element beneath;
   ``PyVistaRenderer._add_overlay`` sets ``SetPickable(False)`` on every
   decoration (highlight, label, deformed shape, force flag).
+- **`Plotter.add_actor` re-arms pickability.**  ``add_actor(actor)`` defaults
+  to ``pickable=True`` and calls ``actor.SetPickable(True)`` — so the quad
+  view's ``QtRenderBackend._add_actor``, which mirrors the *same* ``vtkActor``
+  into the secondary renderers through ``add_actor``, silently flipped every
+  ``SetPickable(False)`` decoration (and the extruded-solid skeleton) back to
+  pickable.  The symptom: single-click selection "rarely" worked — the ray
+  sometimes hit the decoration's mesh and returned a cell id that does not map
+  to the model.  The mirror must pass the actor's own flag back
+  (``add_actor(actor, pickable=bool(actor.GetPickable()))``).
 - **Node markers were sub-pixel.**  ``render_nodes`` used
   ``point_size=radius * 20`` → **0.4 px** at the default ``node_size=0.02``:
   invisible on screen and effectively unclickable.  ``node_point_size()`` now
