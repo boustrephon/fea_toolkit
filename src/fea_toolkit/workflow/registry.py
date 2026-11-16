@@ -30,6 +30,7 @@ from .steps import (
 )
 from .verbs import (
     BRACE_BUCKLING_PARAMS,
+    BUILD_MODEL_PARAMS,
     CHART_PARAMS,
     CLOSE_PARAMS,
     COMBINE_PARAMS,
@@ -53,6 +54,7 @@ from .verbs import (
     SELECT_PARAMS,
     SELF_WEIGHT_PARAMS,
     WALL_SHEAR_CHECK_PARAMS,
+    run_build_model,
     run_chart,
     run_check_brace_buckling,
     run_check_connectivity,
@@ -175,6 +177,13 @@ STEP_SPECS: dict[str, StepSpec] = {
         params=WALL_SHEAR_CHECK_PARAMS,
         kind=TABLE,
         help="In-plane shear / normal stress check (GB 50010) for the selected walls.",
+    ),
+    "build_model": StepSpec(
+        verb="build_model",
+        run=run_build_model,
+        params=BUILD_MODEL_PARAMS,
+        kind=MODEL,
+        help="Build a benchmark example model (FEMA 355C / SAC / generic frame).",
     ),
     "scale_sections": StepSpec(
         verb="scale_sections",

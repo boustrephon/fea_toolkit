@@ -148,6 +148,7 @@ class TestManifest:
             "hinge_length",
             "member_shear_capacity",
             "wall_shear_check",
+            "build_model",
             "scale_sections",
             "fix_shell_only_base",
             "mesh",
@@ -1560,3 +1561,34 @@ class TestEndToEnd:
         model = _slab_model()  # a bare slab: no load patterns
         run = run_recipe(Recipe(steps=[Step("mesh"), Step("load_verification")]), model)
         assert [result.kind for result in run.results] == ["geometry"]
+
+
+class TestBuildModelVerb:
+    """The ``build_model`` verb builds a benchmark example in memory (P46)."""
+
+    def test_builds_a_generic_frame(self):
+        run = run_recipe(
+            Recipe(
+                steps=[Step("build_model", params={"builder": "generic_frame", "code": "0909"})]
+            ),
+            _slab_model(),
+        )
+        assert run.results[0].kind == "model"
+        built = run.document.model_data
+        # The slab input has no frame elements; the built frame does.
+        assert built.frame_elements
+        assert built.nodes
+
+    def test_rejects_an_unknown_builder(self):
+        with pytest.raises(StepError):
+            run_recipe(
+                Recipe(steps=[Step("build_model", params={"builder": "nope"})]),
+                _slab_model(),
+            )
+
+    def test_generic_frame_requires_a_code(self):
+        with pytest.raises(StepError):
+            run_recipe(
+                Recipe(steps=[Step("build_model", params={"builder": "generic_frame"})]),
+                _slab_model(),
+            )
