@@ -4,6 +4,8 @@ import time
 
 import pytest
 
+pytestmark = pytest.mark.needs_gui
+
 
 def _model():
     from examples.sample_model import make_sample_model
