@@ -1205,7 +1205,7 @@ real-backend probe pattern in `local/gui_pick_probe.py`).
 **Status.** **Optional** — no demand yet.  Do not schedule until click-target
 accuracy on large sections is reported as a real problem.
 
-#### P48 — Recipe-panel ownership: Option B → A′/A (decide later)
+#### P48 — Recipe-panel ownership: A′ (done, R6)
 
 Source: the Session refactor (R1, 2026-11-17) — the GUI's document state
 consolidated onto a Qt-free `gui/session.py` `Session` object (store / views /
@@ -1246,7 +1246,11 @@ so the later move stays small.
 **Where.** `gui/main_window.py` (`_sync_recipe_to_session` + the `changed`
 connect), `gui/views/recipe_panel.py`.
 
-**Status.** **Optional** — decide in R6.
+**Status.** **Done** — option **A′ (panel-as-view)** landed in R6 (2026-11-18):
+`RecipePanel.set_session()` binds the panel to the session, `panel.recipe`
+returns `session.recipe`, and `_sync_recipe_to_session` plus its `changed`
+connect are deleted.  The window rebinds the panel wherever it reassigns the
+session (`_build_recipe_dock`, `open_project_path`).
 
 #### Closed items (README reconciliation, 2026-08-25)
 - **Deeper opstool result-post-processing integration** — closed as **no
