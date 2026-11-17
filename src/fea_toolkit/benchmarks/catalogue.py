@@ -25,6 +25,7 @@ __all__ = [
     "STATUS_BADGES",
     "BenchmarkEntry",
     "benchmark_recipe",
+    "builder_recipe",
     "get_benchmark",
 ]
 
@@ -176,16 +177,47 @@ def get_benchmark(benchmark_id: str) -> BenchmarkEntry:
     return _BY_ID[benchmark_id]
 
 
-def benchmark_recipe(benchmark_id: str) -> Any:
-    """Return a ``Recipe`` that builds and meshes *benchmark_id*.
+def builder_recipe(
+    builder: str, params: Optional[dict] = None, *, name: Optional[str] = None
+) -> Any:
+    """Return a ``Recipe`` that builds *builder* and then meshes it.
 
-    The first step is a ``build_model`` verb preset with the entry's ``builder``
-    and its fixed ``builder_params`` (the user-choice parameters — ``building``
-    / ``code`` / ``region`` / ``stories`` / ``design`` — take their
-    ``build_model`` defaults and are edited in the step dialog); the second
-    prepares the topology.  This is the *recipe* a caller (the GUI library
-    panel) presets when a user opens a benchmark — one spelling of "build the
-    example" rather than a per-entry-point code path (anti-pattern 17).
+    The first step is a ``build_model`` step preset with *builder* and any fixed
+    *params* (the user-choice parameters take their ``build_model`` defaults and
+    are edited in the step dialog); the second prepares the topology.  This is
+    the one spelling of "build an example model": the GUI library panel and the
+    ``File ▸ Open example…`` shortcut both preset through it, and
+    :func:`benchmark_recipe` delegates to it (anti-pattern 17).
+
+    Args:
+        builder: A ``build_model`` builder name (``"fema355c"``, ``"sac"`` or
+            ``"generic_frame"``).
+        params: Fixed ``build_model`` defaults to bake into the step.
+        name: Recipe name; defaults to *builder*.
+
+    Returns:
+        A ``Recipe`` whose steps are ``build_model`` then ``mesh``.
+    """
+    from ..workflow import Recipe, Step
+
+    step_params = dict(params or {})
+    step_params["builder"] = builder
+    return Recipe(
+        name=name or builder,
+        steps=[
+            Step("build_model", params=step_params),
+            Step("mesh"),
+        ],
+    )
+
+
+def benchmark_recipe(benchmark_id: str) -> Any:
+    """Return a ``Recipe`` that builds and meshes the benchmark *benchmark_id*.
+
+    Resolves the catalogue entry and delegates to :func:`builder_recipe` with
+    the entry's ``builder`` and fixed ``builder_params`` (the user-choice
+    parameters — ``building`` / ``code`` / ``region`` / ``stories`` / ``design``
+    — take their ``build_model`` defaults and are edited in the step dialog).
 
     Args:
         benchmark_id: A catalogue :attr:`BenchmarkEntry.id`.
@@ -197,20 +229,10 @@ def benchmark_recipe(benchmark_id: str) -> Any:
         KeyError: If *benchmark_id* is unknown.
         ValueError: If the benchmark has no GUI-openable builder.
     """
-    from ..workflow import Recipe, Step
-
     entry = get_benchmark(benchmark_id)
     if entry.builder is None:
         raise ValueError(
             f"benchmark {benchmark_id!r} has no GUI-openable builder — it is "
             f"validated in {', '.join(entry.test)}, not built interactively"
         )
-    params = dict(entry.builder_params)
-    params["builder"] = entry.builder
-    return Recipe(
-        name=entry.id,
-        steps=[
-            Step("build_model", params=params),
-            Step("mesh"),
-        ],
-    )
+    return builder_recipe(entry.builder, entry.builder_params, name=entry.id)

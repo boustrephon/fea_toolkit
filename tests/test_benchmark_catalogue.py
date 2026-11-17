@@ -17,6 +17,7 @@ from fea_toolkit.benchmarks.catalogue import (
     BENCHMARK_ENTRIES,
     STATUS_BADGES,
     benchmark_recipe,
+    builder_recipe,
     get_benchmark,
 )
 
@@ -78,6 +79,12 @@ def test_benchmark_recipe_presets_build_model_then_mesh() -> None:
     recipe = benchmark_recipe("ik2005_generic_frame")
     assert [step.verb for step in recipe.steps] == ["build_model", "mesh"]
     assert recipe.steps[0].params["builder"] == "generic_frame"
+
+
+def test_builder_recipe_presets_build_model_then_mesh() -> None:
+    recipe = builder_recipe("fema355c")
+    assert [step.verb for step in recipe.steps] == ["build_model", "mesh"]
+    assert recipe.steps[0].params == {"builder": "fema355c"}
 
 
 def test_benchmark_recipe_carries_the_fixed_builder_params() -> None:

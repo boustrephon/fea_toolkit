@@ -13,10 +13,18 @@ from typing import Any
 
 from ..steps import MODEL, ParamSpec, Step, StepContext, StepResult, validate_params
 
-__all__ = ["BUILD_MODEL_PARAMS", "run_build_model"]
+__all__ = ["BUILDER_TITLES", "BUILD_MODEL_PARAMS", "run_build_model"]
 
+#: Human-readable titles for the GUI's example chooser.  Co-located with the
+#: builder names so a name and its title cannot drift apart (one owner per
+#: fact, §7.4); :data:`_BUILDERS` derives from these keys.
+BUILDER_TITLES: dict[str, str] = {
+    "fema355c": "FEMA 355C / SAC Phase 2 steel frame",
+    "sac": "SAC steel moment frame",
+    "generic_frame": "IK-2005 generic frame",
+}
 #: The builder names ``build_model`` delegates to.
-_BUILDERS = ("fema355c", "sac", "generic_frame")
+_BUILDERS = tuple(BUILDER_TITLES)
 #: FEMA 355C schedule axes — the retired picker dialog's combos, folded into the
 #: step parameters so the GUI renders them as dropdowns.
 _FEMA_REGIONS = ("LA", "SE", "BO")

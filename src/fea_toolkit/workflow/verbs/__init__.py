@@ -12,7 +12,7 @@ this package — and therefore the manifest — does not load OpenSees.  That is
 what lets the GUI render a verb's parameter form before a model is open.
 """
 
-from .build_model import BUILD_MODEL_PARAMS, run_build_model
+from .build_model import BUILD_MODEL_PARAMS, BUILDER_TITLES, run_build_model
 from .chart import CHART_PARAMS, run_chart
 from .checks import (
     BRACE_BUCKLING_PARAMS,
@@ -49,6 +49,7 @@ from .select import SELECT_PARAMS, run_select
 
 __all__ = [
     "BRACE_BUCKLING_PARAMS",
+    "BUILDER_TITLES",
     "BUILD_MODEL_PARAMS",
     "CHART_PARAMS",
     "CLOSE_PARAMS",
