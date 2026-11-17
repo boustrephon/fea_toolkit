@@ -18,6 +18,51 @@ from typing import Any, Optional
 
 __all__ = ["InMemoryModelStore", "ModelHeader", "ModelStore", "model_header"]
 
+#: The declared model collections :meth:`ModelStore.collection` answers — the
+#: attribute names the tree, the header and the load backfill read.  A name
+#: outside this set raises ``KeyError``, so a typo is an error rather than a
+#: silently empty group.
+_COLLECTIONS = frozenset(
+    {
+        # dict-valued
+        "nodes",
+        "frame_elements",
+        "area_elements",
+        "wall_elements",
+        "materials",
+        "sections",
+        "groups",
+        "restraints",
+        "load_patterns",
+        "load_cases",
+        "load_combinations",
+        "mass_sources",
+        "response_spectrum_functions",
+        "shell_uniform_load_sets",
+        "shell_uniform_load_set_assignments",
+        "units",
+        # list-valued
+        "joint_loads",
+        "frame_dist_loads",
+        "area_uniform_loads",
+        "frame_gravity_loads",
+        "area_gravity_loads",
+        "stories",
+        "story_levels",
+    }
+)
+
+#: The collections :meth:`ModelStore.backfill_mesh_load_metadata` copies from
+#: the raw model onto a mesh that lacks them.
+_BACKFILL_COLLECTIONS = (
+    "load_cases",
+    "load_combinations",
+    "response_spectrum_functions",
+    "shell_uniform_load_sets",
+    "shell_uniform_load_set_assignments",
+    "stories",
+)
+
 
 @dataclass(frozen=True)
 class ModelHeader:
@@ -102,6 +147,17 @@ class ModelStore(ABC):
         GUI thread (the roadmap's threading model).
         """
 
+    @abstractmethod
+    def collection(self, name: str) -> Any:
+        """One model collection by name, or ``None`` when the model lacks it.
+
+        The validated read behind the store: the in-memory backend answers
+        from the dataclass it holds, an HDF5 backend from a named dataset.
+        *name* must be one of :data:`_COLLECTIONS` — anything else raises
+        ``KeyError``, so a typo is an error rather than a silently empty
+        group.
+        """
+
     def preprocessed(self) -> Any:
         """The ``MeshModel`` a previous :meth:`mesh` produced, or ``None``.
 
@@ -122,6 +178,21 @@ class ModelStore(ABC):
         answer :meth:`preprocessed` either.
         """
         return None
+
+    def backfill_mesh_load_metadata(self, mesh_model: Any) -> None:
+        """Copy SAP load definitions onto a disk-loaded *mesh_model* lacking them.
+
+        A project saved before ``MeshModel`` carried ``load_cases`` /
+        ``load_combinations`` / ``response_spectrum_functions`` holds a mesh
+        with empty dicts.  Preprocessing never changes those definitions, so
+        backfill them from the raw model at open time — the Model Tree then
+        shows Load Cases, Load Combinations and Response Spectra without a
+        re-save.
+        """
+        for name in _BACKFILL_COLLECTIONS:
+            source = getattr(self.raw(), name, None)
+            if source and not getattr(mesh_model, name, None):
+                setattr(mesh_model, name, source)
 
 
 class InMemoryModelStore(ModelStore):
@@ -151,6 +222,12 @@ class InMemoryModelStore(ModelStore):
 
     def raw(self) -> Any:
         return self._raw
+
+    def collection(self, name: str) -> Any:
+        if name not in _COLLECTIONS:
+            raise KeyError(f"unknown model collection: {name!r}")
+        source = self.preprocessed() or self.raw()
+        return getattr(source, name, None)
 
     def mesh(self, config: Optional[dict] = None) -> Any:
         """Preprocess the raw model with *config*.

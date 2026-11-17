@@ -9,6 +9,8 @@ adapter that materialises rows lazily as the user expands them.
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
+from ...io.model_store import ModelStore
+
 __all__ = [
     "VIEWS_GROUP_KEY",
     "TreeGroup",
@@ -154,7 +156,7 @@ def views_group(views: list) -> TreeGroup:
     )
 
 
-def shell_uniform_load_sets_group(model: Any) -> Optional[TreeGroup]:
+def shell_uniform_load_sets_group(store: ModelStore) -> Optional[TreeGroup]:
     """Describe the **Shell Uniform Load Sets** group, or ``None`` when empty.
 
     One row per named set (``SAPModelData.shell_uniform_load_sets``), labelled by
@@ -164,16 +166,16 @@ def shell_uniform_load_sets_group(model: Any) -> Optional[TreeGroup]:
     objects assigned to that set (``SAPModelData.shell_uniform_load_set_assignments``),
     surfacing the assignment in the tree rather than only as a string map.
     """
-    sets = getattr(model, "shell_uniform_load_sets", None) or {}
+    sets = store.collection("shell_uniform_load_sets") or {}
     if not sets:
         return None
-    assignments = getattr(model, "shell_uniform_load_set_assignments", None) or {}
+    assignments = store.collection("shell_uniform_load_set_assignments") or {}
     areas_by_set: dict[str, list] = {name: [] for name in sets}
     for area_id, set_name in assignments.items():
         bucket = areas_by_set.get(set_name)
         if bucket is not None:
             bucket.append(area_id)
-    area_elements = getattr(model, "area_elements", None) or {}
+    area_elements = store.collection("area_elements") or {}
 
     def load_items() -> list:
         return [(name, sets[name]) for name in sorted(sets)]
@@ -213,7 +215,7 @@ def selections_group(named: Optional[dict]) -> Optional[TreeGroup]:
     )
 
 
-def stories_group(source: Any) -> Optional[TreeGroup]:
+def stories_group(store: ModelStore) -> Optional[TreeGroup]:
     """Describe the **Stories** group, or ``None`` when the model has none.
 
     Two sources feed the group, in preference order:
@@ -229,9 +231,9 @@ def stories_group(source: Any) -> Optional[TreeGroup]:
     so the inspector shows its fields (name, elevation, tower / method,
     confidence, …).  A model with neither source omits the group.
     """
-    stories = getattr(source, "stories", None) or []
+    stories = store.collection("stories") or []
     if not stories:
-        stories = getattr(source, "story_levels", None) or []
+        stories = store.collection("story_levels") or []
     if not stories:
         return None
 
@@ -247,13 +249,13 @@ def stories_group(source: Any) -> Optional[TreeGroup]:
 
 
 def build_groups(
-    model: Any, views: Optional[list] = None, selections: Optional[dict] = None
+    store: Optional[ModelStore], views: Optional[list] = None, selections: Optional[dict] = None
 ) -> list:
     """Describe the tree groups for *model*.
 
     Args:
-        model: A ``SAPModelData``, a ``MeshModel`` or an ``AnalysisBuilder``
-            (whose ``.model`` is used).
+        store: A :class:`~fea_toolkit.io.model_store.ModelStore` supplying the
+            model collections (``None`` gives a views/selections-only tree).
         views: Registered views; rendered as a **Views** group ahead of the
             model's own groups.
 
@@ -261,7 +263,6 @@ def build_groups(
         One :class:`TreeGroup` per **non-empty** group, in a stable order.
         Empty groups are omitted, so the tree never shows an empty row.
     """
-    source = getattr(model, "model", model)  # AnalysisBuilder -> MeshModel
     groups: list = []
 
     if views:
@@ -271,23 +272,26 @@ def build_groups(
     if selections_group_ is not None:
         groups.append(selections_group_)
 
-    stories_group_ = stories_group(source)
+    if store is None:
+        return groups
+
+    stories_group_ = stories_group(store)
     if stories_group_ is not None:
         groups.append(stories_group_)
 
     for attr, label in _DICT_GROUPS:
-        bag = getattr(source, attr, None)
+        bag = store.collection(attr)
         if isinstance(bag, dict) and bag:
             groups.append(
                 TreeGroup(key=attr, label=label, count=len(bag), load_items=_dict_loader(bag))
             )
 
-    uniform_sets_group = shell_uniform_load_sets_group(source)
+    uniform_sets_group = shell_uniform_load_sets_group(store)
     if uniform_sets_group is not None:
         groups.append(uniform_sets_group)
 
     for attr, label, kind in _LIST_GROUPS:
-        seq = getattr(source, attr, None)
+        seq = store.collection(attr)
         if isinstance(seq, (list, tuple)) and seq:
             groups.append(
                 TreeGroup(

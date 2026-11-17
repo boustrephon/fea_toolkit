@@ -47,13 +47,14 @@ def test_name_selection_stores_and_rebuilds_the_tree(window, monkeypatch):
 
 def test_build_groups_includes_and_omits_a_selections_group():
     from fea_toolkit.gui.models.model_index import build_groups
+    from fea_toolkit.io.model_store import InMemoryModelStore
     from fea_toolkit.model.named_selection import NamedSelection
 
     named = {"core": NamedSelection(name="core")}
-    groups = build_groups(_model(), selections=named)
+    groups = build_groups(InMemoryModelStore(_model()), selections=named)
     assert any(group.key == "selections" and group.label == "Selections" for group in groups)
 
-    groups = build_groups(_model(), selections={})
+    groups = build_groups(InMemoryModelStore(_model()), selections={})
     assert not any(group.key == "selections" for group in groups)
 
 

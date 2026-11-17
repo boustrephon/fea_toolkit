@@ -2159,7 +2159,7 @@ class MainWindow(QMainWindow):
             processed = model
         self._inspector.set_processed_model(processed)
         if rebuild_tree:
-            self._tree_model.set_model(self._tree_model_source(model), self._session.views.views())
+            self._tree_model.set_model(self._tree_store(model), self._session.views.views())
         if cameras is None:
             self._quad.apply_orientations()
         else:
@@ -2174,24 +2174,21 @@ class MainWindow(QMainWindow):
         self._reapply_results_overlay(results_intent)
         self.log("Displayed model geometry.")
 
-    def _tree_model_source(self, fallback: Any) -> Any:
-        """The model the Model Tree presents — the mesh, then raw, then *fallback*.
+    def _tree_store(self, fallback: Any) -> Any:
+        """The store the Model Tree reads — the session's, or a transient one.
 
-        A results view's source is a display model rebuilt from the archive: it
-        carries geometry and section names but no supports, materials, groups or
-        loads.  The tree should present the *real* model, so it uses the store's
-        preprocessed (mesh) model when one exists, the parsed (raw) model
-        otherwise, and the view's source only with no store at all (a standalone
-        results archive).
+        The tree reads the session's store when one exists, so an HDF5-backed
+        store can serve collections without materialising a graph.  Otherwise a
+        transient in-memory store wraps *fallback* — a standalone results
+        archive's display model.
         """
         if self._session.store is not None:
-            preprocessed = self._session.store.preprocessed()
-            if preprocessed is not None:
-                return preprocessed
-            raw = self._session.store.raw()
-            if raw is not None:
-                return raw
-        return fallback
+            return self._session.store
+        if fallback is None:
+            return None
+        from ..io.model_store import InMemoryModelStore
+
+        return InMemoryModelStore(fallback)
 
     def _reset_session_display(self) -> None:
         """Reset the display and results toggles for a freshly opened model.
@@ -2376,7 +2373,7 @@ class MainWindow(QMainWindow):
         group.  This repopulates the tree without touching the viewport.
         """
         self._tree_model.set_model(
-            self._tree_model_source(self._model),
+            self._tree_store(self._model),
             self._session.views.views(),
             self._session.named_selections,
         )

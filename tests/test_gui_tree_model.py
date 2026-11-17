@@ -14,8 +14,9 @@ def model(qapp):
     """A tree model over the sample model."""
     from examples.sample_model import make_sample_model
     from fea_toolkit.gui.models.tree_model import ModelTreeModel
+    from fea_toolkit.io.model_store import InMemoryModelStore
 
-    return ModelTreeModel(make_sample_model())
+    return ModelTreeModel(InMemoryModelStore(make_sample_model()))
 
 
 def test_root_lists_groups_with_counts(model):
@@ -82,12 +83,13 @@ def test_nested_views_bundle_children_under_their_parent(model):
     """A fan-out child view nests under its parent view, and round-trips back."""
     from examples.sample_model import make_sample_model
     from fea_toolkit.gui.controllers.view_registry import View
+    from fea_toolkit.io.model_store import InMemoryModelStore
 
     parent = View(key="table:modal", name="Modal", kind="table", source="test")
     child = View(
         key="results:Mode-1", name="Mode 1", kind="results", source="test", parent="table:modal"
     )
-    model.set_model(make_sample_model(), views=[parent, child])
+    model.set_model(InMemoryModelStore(make_sample_model()), views=[parent, child])
 
     views_group = model.index(0, 0)
     assert model.data(views_group) == "Views"

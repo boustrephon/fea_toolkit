@@ -6,10 +6,11 @@ Qt, so these run on a minimal install (no ``[gui]`` extra).
 
 from examples.sample_model import make_sample_model
 from fea_toolkit.gui.models.model_index import build_groups, element_label, load_label
+from fea_toolkit.io.model_store import InMemoryModelStore
 
 
 def _by_label(model):
-    return {group.label: group for group in build_groups(model)}
+    return {group.label: group for group in build_groups(InMemoryModelStore(model))}
 
 
 def test_sample_model_groups_and_counts():

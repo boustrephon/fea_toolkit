@@ -205,16 +205,23 @@ def test_opening_a_different_project_refits_secondary_viewports(window, tmp_path
     assert not np.allclose(restored, _flat(wrong), rtol=1e-6, atol=1e-9)
 
 
-def test_tree_source_prefers_the_mesh(window):
-    """The tree presents the mesh when one exists, else the raw model."""
+def test_tree_store_prefers_the_mesh(window):
+    """The tree reads through the store, which prefers the mesh when one exists."""
     from examples.sample_model import make_sample_model
+
+    class _Mesh:
+        def __init__(self):
+            self.frame_elements = {"1": object()}
 
     sap = make_sample_model()
     window._remember_source(sap)
-    assert window._tree_model_source(None) is sap  # no mesh yet → raw
+    store = window._tree_store(None)
+    assert store is window._session.store  # the session's store, not a transient one
+    assert store.collection("frame_elements") is sap.frame_elements  # no mesh yet → raw
 
-    window._session.store.set_preprocessed(object())
-    assert window._tree_model_source(None) is window._session.store.preprocessed()
+    mesh = _Mesh()
+    window._session.store.set_preprocessed(mesh)
+    assert store.collection("frame_elements") is mesh.frame_elements  # mesh preferred
 
 
 def test_preferred_open_view_chooses_geometry(window):
@@ -271,7 +278,9 @@ def test_backfill_mesh_load_metadata_restores_a_stale_mesh(window):
     mesh.response_spectrum_functions = {}
     mesh.stories = []
 
-    window._session._backfill_mesh_load_metadata(mesh, sap)
+    from fea_toolkit.io.model_store import InMemoryModelStore
+
+    InMemoryModelStore(sap).backfill_mesh_load_metadata(mesh)
 
     assert set(mesh.load_cases) == {"DEAD"}
     assert set(mesh.load_combinations) == {"COMB1"}

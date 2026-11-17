@@ -143,3 +143,63 @@ def test_an_injected_mesh_short_circuits_the_pipeline():
 
     assert store.mesh({"split_elements": True, "create_shells": True}) is injected
     assert store.preprocessed() is injected
+
+
+# ── The collection accessors (the tree's read behind the store) ─────
+
+
+def test_collection_serves_the_declared_collections():
+    """``collection(name)`` reads the model's attribute, unchanged."""
+    from examples.sample_model import make_sample_model
+    from fea_toolkit.io.model_store import InMemoryModelStore
+
+    md = make_sample_model()
+    store = InMemoryModelStore(md)
+
+    assert store.collection("frame_elements") is md.frame_elements
+    assert store.collection("nodes") is md.nodes
+    assert store.collection("units") == md.units
+
+
+def test_collection_reads_the_mesh_when_one_is_preprocessed():
+    """The tree presents the preprocessed mesh, so ``collection`` does too."""
+    from examples.sample_model import make_sample_model
+    from fea_toolkit.io.model_store import InMemoryModelStore
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+
+    store = InMemoryModelStore(make_sample_model())
+    mesh = preprocess_model(store.raw(), {"split_elements": True})
+    store.set_preprocessed(mesh)
+
+    assert store.collection("frame_elements") is mesh.frame_elements
+
+
+def test_collection_rejects_an_unknown_name():
+    """A typo is an error, not a silently empty group."""
+    import pytest
+
+    from examples.sample_model import make_sample_model
+    from fea_toolkit.io.model_store import InMemoryModelStore
+
+    store = InMemoryModelStore(make_sample_model())
+    with pytest.raises(KeyError, match="unknown model collection"):
+        store.collection("no_such_collection")
+
+
+def test_backfill_mesh_load_metadata_copies_only_missing_definitions():
+    """Backfill restores the load definitions a stale mesh is missing."""
+    from examples.sample_model import make_sample_model
+    from fea_toolkit.io.model_store import InMemoryModelStore
+    from fea_toolkit.model.sap_data import LoadCase
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+
+    sap = make_sample_model()
+    sap.load_cases = {
+        "DEAD": LoadCase("DEAD", "LinStatic", "Prog Det", "DEAD", "Prog Det", "Non-Composite")
+    }
+    mesh = preprocess_model(sap)
+    mesh.load_cases = {}
+
+    InMemoryModelStore(sap).backfill_mesh_load_metadata(mesh)
+
+    assert set(mesh.load_cases) == {"DEAD"}

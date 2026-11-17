@@ -161,7 +161,7 @@ class Session:
             # (replacing it by key when the project saved one).
             session.views.add_geometry("unprocessed", "Unprocessed", sap, source=source_label)
             if mesh is not None:
-                session._backfill_mesh_load_metadata(mesh, sap)
+                session.store.backfill_mesh_load_metadata(mesh)
                 session.store.set_preprocessed(mesh)
 
         geometry_sources = {"unprocessed": sap, "processed": mesh, "meshed": mesh}
@@ -246,29 +246,6 @@ class Session:
             if view is not None:
                 return view
         return self.views.get(saved_key) if saved_key else None
-
-    @staticmethod
-    def _backfill_mesh_load_metadata(mesh: Any, sap: Any) -> None:
-        """Copy SAP load definitions onto a disk-loaded mesh that lacks them.
-
-        A project saved before ``MeshModel`` carried ``load_cases`` /
-        ``load_combinations`` / ``response_spectrum_functions`` holds a mesh
-        with empty dicts.  Preprocessing never changes those definitions, so
-        backfill them from the raw model at open time — the Model Tree then
-        shows Load Cases, Load Combinations and Response Spectra without a
-        re-save.
-        """
-        for attr in (
-            "load_cases",
-            "load_combinations",
-            "response_spectrum_functions",
-            "shell_uniform_load_sets",
-            "shell_uniform_load_set_assignments",
-            "stories",
-        ):
-            source = getattr(sap, attr, None)
-            if source and not getattr(mesh, attr, None):
-                setattr(mesh, attr, source)
 
     def _drawable_element_ids(self, model: Any) -> set[str]:
         """Type-qualified ids of the elements *model* can draw.
