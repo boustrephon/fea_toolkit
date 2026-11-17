@@ -1,7 +1,7 @@
 """The ``open`` verb — load a model file into the working document.
 
-Loads the model through :func:`~fea_toolkit.workflow.verbs.save._load_document`
-(a wrapper over :func:`fea_toolkit.io.model_loader.load_model_data` that also
+Loads the model through :func:`fea_toolkit.io.document.load_document` (a
+wrapper over :func:`fea_toolkit.io.model_loader.load_model_data` that also
 restores a document's persisted named selections).  The working ``model_data``
 is replaced, the prepared topology / results are cleared, and the
 named-selection store is replaced with the document's own — so a recipe
@@ -35,15 +35,15 @@ def run_open(context: StepContext, step: Step) -> list[StepResult]:
         ValueError: If ``path`` is empty.
         FileNotFoundError: If the file does not exist.
     """
+    from ...io.document import load_document
     from ...model.mesh_model import MeshModel
-    from .save import _load_document
 
     params: dict[str, Any] = validate_params("open", OPEN_PARAMS, step.params)
     path = params["path"]
     if not path:
         raise ValueError("open: 'path' is required (the model file to load)")
 
-    loaded, selections = _load_document(path)
+    loaded, selections = load_document(path)
     context.model_data = loaded
     context.model = loaded if isinstance(loaded, MeshModel) else None
     context.case_results.clear()

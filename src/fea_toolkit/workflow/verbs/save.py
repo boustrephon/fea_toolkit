@@ -1,23 +1,19 @@
 """The ``save`` verb — write the working document to a (versioned) JSON file.
 
 Persists ``context.model_data`` as a model-codec snapshot and, when named
-selections are present, wraps it in a document envelope (keyed by
-:data:`DOCUMENT_KEY`) so an ``open`` step restores them with the model.  The
+selections are present, wraps it in a document envelope (see
+:func:`fea_toolkit.io.document.write_document`) so an ``open`` step restores
+them with the model.  The
 write goes to a temporary file and is atomically moved over the target, and the
 output path must end in ``.json`` (the payload is JSON regardless of the
 original file's format).
 """
 
-import os
 from typing import Any
 
 from ..steps import SESSION, ParamSpec, Step, StepContext, StepResult, validate_params
 
 __all__ = ["SAVE_PARAMS", "run_save"]
-
-#: Top-level marker key distinguishing a document envelope (model + named
-#: selections) from a bare model-codec snapshot.
-DOCUMENT_KEY = "__document__"
 
 SAVE_PARAMS: dict[str, ParamSpec] = {
     "path": ParamSpec(
@@ -31,116 +27,6 @@ SAVE_PARAMS: dict[str, ParamSpec] = {
         help="Version the filename (_v1/_v2…) instead of overwriting.",
     ),
 }
-
-
-def _publish_no_overwrite(tmp_path: str, base: Any) -> str:
-    """Publish *tmp_path* under the first free ``_vN`` suffix of *base*.
-
-    ``os.link`` creates the destination atomically and raises
-    ``FileExistsError`` when it already exists, so the next suffix is tried
-    instead — neither the new snapshot nor an existing one is lost to a
-    concurrent writer.
-    """
-    index = 1
-    while True:
-        candidate = base.with_name(f"{base.stem}_v{index}{base.suffix}")
-        try:
-            os.link(tmp_path, candidate)
-        except FileExistsError:
-            index += 1
-            continue
-        os.unlink(tmp_path)
-        return str(candidate)
-
-
-def _write_document(context: StepContext, path: str, *, versioned: bool = False) -> str:
-    """Write ``context.model_data`` (and its named selections) to a JSON document.
-
-    The model is written as a model-codec snapshot; when the context holds named
-    selections they are persisted in a document envelope keyed by
-    :data:`DOCUMENT_KEY`, so an ``open`` step restores them with the model.
-    Writes go to a temporary file in the destination directory.  A versioned
-    save publishes with atomic **no-overwrite** semantics (the next ``_vN``
-    suffix, retried on a collision), while a non-versioned save atomically
-    replaces the target — a failed write never clobbers an existing document.
-    """
-    import contextlib
-    import json
-    import os
-    import tempfile
-    from pathlib import Path
-
-    from ...io.model_codec import model_to_dict, model_to_json
-
-    destination = Path(path)
-    if destination.suffix.lower() != ".json":
-        raise ValueError(
-            "save: the document is written as model-codec JSON, so the output "
-            "path must end in '.json' (an .s2k/.e2k/.f2k path would not "
-            "round-trip through 'open')"
-        )
-
-    selections = {name: ns.to_dict() for name, ns in context.named_selections.items()}
-    if selections:
-        payload = json.dumps(
-            {
-                DOCUMENT_KEY: True,
-                "model": model_to_dict(context.model_data),
-                "named_selections": selections,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
-    else:
-        payload = model_to_json(context.model_data)
-
-    fd, tmp_path = tempfile.mkstemp(dir=str(destination.parent), suffix=".json.tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(payload)
-        if versioned:
-            target = _publish_no_overwrite(tmp_path, destination)
-        else:
-            os.replace(tmp_path, destination)
-            target = str(destination)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp_path)
-        raise
-
-    context.document_dirty = False
-    return target
-
-
-def _load_document(path: str) -> tuple[Any, dict]:
-    """Load a saved document as ``(model, named_selections)``.
-
-    A document envelope (:data:`DOCUMENT_KEY`) restores the persisted named
-    selections alongside the model; a bare model-codec snapshot (or any other
-    supported model file) returns an empty selection store.
-    """
-    import json
-    from pathlib import Path
-
-    from ...io.model_codec import dict_to_model
-    from ...io.model_loader import load_model_data
-    from ...model.named_selection import NamedSelection
-
-    p = Path(path)
-    if p.suffix.lower() == ".json":
-        try:
-            payload = json.loads(p.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            payload = None
-        if isinstance(payload, dict) and payload.get(DOCUMENT_KEY) is True:
-            model = dict_to_model(payload.get("model"))
-            selections = {
-                str(name): NamedSelection.from_dict(data)
-                for name, data in (payload.get("named_selections") or {}).items()
-            }
-            return model, selections
-    return load_model_data(path), {}
 
 
 def run_save(context: StepContext, step: Step) -> list[StepResult]:
@@ -158,12 +44,20 @@ def run_save(context: StepContext, step: Step) -> list[StepResult]:
         ValueError: If no ``path`` is given and no document has been opened, or
             the resolved output path does not end in ``.json``.
     """
+    from ...io.document import write_document
+
     params: dict[str, Any] = validate_params("save", SAVE_PARAMS, step.params)
     path = params["path"] or context.document_path
     if not path:
         raise ValueError("save: 'path' is required (or the document must have been opened)")
 
-    written = _write_document(context, path, versioned=params["versioned"])
+    written = write_document(
+        context.model_data,
+        path,
+        named_selections=context.named_selections,
+        versioned=params["versioned"],
+    )
+    context.document_dirty = False
     context.document_path = str(written)
     context.log(f"save: wrote {written}")
     return [StepResult(kind=SESSION, label="Saved document", payload=str(written))]

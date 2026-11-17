@@ -16,6 +16,7 @@ npz_reader — Deserialise NPZ archives and convert to PyVista meshes.
 results_schema — NPZ key layout and validation.
 model_store — Metadata-only model headers and the model-store seam.
 results_repository — One NumPy-typed read seam for results archives.
+document — The model + named-selections document envelope (load_document / write_document).
 unified_writer — Combined NPZ/HDF5 writer with geometry + results.
 report — pandas-based summary tables (modal, section, load, etc.).
 ground_motion — PEER record reading, scaling, baseline correction.
@@ -24,6 +25,7 @@ helper — File-chooser dialogs (tkinter / macOS native).
 
 from ._serial import collect_geometry_arrays
 from .combination_set import read_combination_set, write_combination_set
+from .document import DOCUMENT_KEY, load_document, write_document
 from .e2k_parser import ETABSParser
 from .f2k_parser import SAFEF2KParser
 from .ground_motion import (
@@ -145,6 +147,7 @@ def __dir__():
 
 
 __all__ = [
+    "DOCUMENT_KEY",
     "GEOMETRY_ARRAY_KEYS",
     "SCHEMA_VERSION",
     "SCHEMA_VERSION_LEGACY",
@@ -173,6 +176,7 @@ __all__ = [
     "flatten_stage",
     "format_linear_table",
     "get_schema_version",
+    "load_document",
     "load_manifest_registry",
     "load_model_data",
     "load_pattern_totals",
@@ -217,6 +221,7 @@ __all__ = [
     "unhandled_tables",
     "validate_npz",
     "write_combination_set",
+    "write_document",
     "write_model_stages",
     "write_results",
     "write_results_npz",

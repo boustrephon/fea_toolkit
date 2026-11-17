@@ -5499,11 +5499,11 @@ class MainWindow(QMainWindow):
 
         Dialog-free so tests can drive it directly.
         """
-        from ..workflow.verbs.save import _load_document
+        from ..io.document import load_document
 
         self.log(f"Opening {path} \u2026")
         try:
-            model, selections = _load_document(path)
+            model, selections = load_document(path)
         except Exception as exc:
             self.log(f"Failed to open {path}: {exc}", "error")
             return False

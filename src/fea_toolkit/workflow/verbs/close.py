@@ -33,13 +33,18 @@ def run_close(context: StepContext, step: Step) -> list[StepResult]:
     """
     params: dict[str, Any] = validate_params("close", CLOSE_PARAMS, step.params)
     if params["save"]:
-        from .save import _write_document
+        from ...io.document import write_document
 
         if not context.document_path:
             raise ValueError(
                 "close: 'save' requested but no document path is set — run a 'save' step first"
             )
-        written = _write_document(context, context.document_path, versioned=params["versioned"])
+        written = write_document(
+            context.model_data,
+            context.document_path,
+            named_selections=context.named_selections,
+            versioned=params["versioned"],
+        )
         context.log(f"close: saved {written}")
 
     context.model = None
