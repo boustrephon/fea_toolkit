@@ -259,8 +259,8 @@ class QuadViewport(QWidget):
                 continue
             with contextlib.suppress(Exception):
                 pos, old_focal, up = interactor.camera_position
-            direction = _as_array(old_focal) - _as_array(pos)
-            interactor.camera_position = (source_focal - direction, source_focal, up)
+                direction = _as_array(old_focal) - _as_array(pos)
+                interactor.camera_position = (source_focal - direction, source_focal, up)
 
     def install_camera_sync(self) -> None:
         """Wire live camera sync: after any view finishes an interaction, the

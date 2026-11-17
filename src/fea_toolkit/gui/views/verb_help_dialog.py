@@ -89,6 +89,9 @@ class VerbHelpDialog(QDialog):
         html = " · ".join(f'<a href="{url}">{text}</a>' for url, text in links)
         label = QLabel(f"<b>{heading}</b> — {html}")
         label.setOpenExternalLinks(True)
+        label.setTextInteractionFlags(
+            label.textInteractionFlags() | Qt.TextInteractionFlag.LinksAccessibleByKeyboard
+        )
         label.setTextFormat(Qt.TextFormat.RichText)
         label.setWordWrap(True)
         return label

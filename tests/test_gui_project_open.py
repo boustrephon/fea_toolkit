@@ -108,8 +108,8 @@ def test_confirm_project_open_skips_preview_for_a_non_project(window, tmp_path, 
     assert called == []
 
 
-def test_dropping_a_project_zip_reopens_the_model(window, tmp_path):
-    """Dropping a project ``.zip`` routes through ``open_project_path``."""
+def test_dropping_a_project_zip_reopens_the_model(window, tmp_path, monkeypatch):
+    """Dropping a project ``.zip`` confirms, then routes through ``open_project_path``."""
     from examples.sample_model import make_sample_model
     from fea_toolkit.gui.project import build_manifest, write_project_zip
 
@@ -137,7 +137,12 @@ def test_dropping_a_project_zip_reopens_the_model(window, tmp_path):
         tables={},
         model_fmt="npz",
     )
+    confirmed = []
+    monkeypatch.setattr(
+        window, "_confirm_project_open", lambda path: confirmed.append(path) or True
+    )
     assert window._open_dropped_files([str(zip_path)]) == 1
+    assert confirmed == [str(zip_path)]
     assert window._store is not None
 
 

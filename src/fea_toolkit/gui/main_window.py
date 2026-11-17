@@ -2041,7 +2041,7 @@ class MainWindow(QMainWindow):
             selection: Optional ``Selection`` narrowing what is drawn — a view's
                 lens, applied without copying the model.
             reset_view: Reset the camera first.  ``False`` keeps the current
-                view, which is what switching views wants.
+                camera of every viewport, which is what switching views wants.
             rebuild_tree: Rebuild the Model Tree for *model*.  ``False`` for a
                 pure display change — the same model, so rebuilding would only
                 throw away the user's selection and expansion.
@@ -2052,10 +2052,12 @@ class MainWindow(QMainWindow):
 
         selection = self._merge_hidden(selection)
 
-        camera = None
+        cameras = None
         if not reset_view:
-            with contextlib.suppress(Exception):
-                camera = self._interactor.camera_position
+            cameras = [None] * len(self._quad.interactors)
+            for index, interactor in enumerate(self._quad.interactors):
+                with contextlib.suppress(Exception):
+                    cameras[index] = interactor.camera_position
 
         # A new model replaces the previous scene outright -- the backend
         # *appends* actors, so without this the old geometry would linger
@@ -2139,11 +2141,13 @@ class MainWindow(QMainWindow):
         self._inspector.set_processed_model(processed)
         if rebuild_tree:
             self._tree_model.set_model(self._tree_model_source(model), self._views.views())
-        if camera is None:
+        if cameras is None:
             self._quad.apply_orientations()
         else:
-            self._interactor.camera_position = camera
-            self._quad.apply_orientations(skip=0)
+            for interactor, camera in zip(self._quad.interactors, cameras):
+                if camera is not None:
+                    with contextlib.suppress(Exception):
+                        interactor.camera_position = camera
         self._update_units_label()
         self._set_model_actions_enabled(self._store is not None)
         self._set_analysis_actions_enabled()
@@ -4810,8 +4814,9 @@ class MainWindow(QMainWindow):
 
         Results archives open one view per load case via
         :meth:`open_results_path`; project bundles rebuild a saved session via
-        :meth:`open_project_path`; model files replace the displayed model via
-        :meth:`open_path` — the same three paths the File menus use.
+        :meth:`open_project_path` after :meth:`_confirm_project_open`; model
+        files replace the displayed model via :meth:`open_path` — the same three
+        paths the File menus use.
         """
         opened = 0
         for path in paths:
@@ -4819,6 +4824,8 @@ class MainWindow(QMainWindow):
             if lower.endswith(_RESULTS_DROP_EXTENSIONS):
                 ok = self.open_results_path(path)
             elif lower.endswith(_PROJECT_DROP_EXTENSIONS):
+                if not self._confirm_project_open(path):
+                    continue
                 ok = self.open_project_path(path)
             else:
                 ok = self.open_path(path)
