@@ -1158,6 +1158,52 @@ GUI — it should subdivide into ≈0.25 m rectangles.
 
 
 
+#### P47 — Pickable extruded frame skeleton (optional, future)
+
+Source: quad-view selection fix (2026-11-16); `render_extruded_frames`
+docstring and `docs/dev_notes.md` → *PyVista picking contract*.
+
+**What.** The extruded frame solids drawn by `render_extruded_frames` are
+deliberately **non-pickable** decoration: the line skeleton (`render_frames`)
+is the pickable layer because it has exactly **one cell per frame**, so
+`vtkCellPicker.GetCellId()` *is* the frame index.  The extruded mesh instead
+has several faces per frame (~3 for `plates` detail, more for `solid`), so its
+cell ids do not map 1:1 to frames.  This is exactly the bug class the
+quad-view selection fix closed — the mirror path silently re-armed the
+non-pickable extruded actor and picks began returning *face* ids that resolved
+to the wrong element or to none.
+
+**Why it might be worth doing.** A larger, "click-what-you-see" target.  The
+cell picker tolerates ~13 px around the member *centreline*; for deep beams /
+columns the visible solid surface is further than that, so clicking the edge
+of a flange can miss even though it is clearly on the member.  A pickable
+extruded skeleton would make the click target match the drawn volume.
+
+**Design (if ever pursued).**
+
+1. Make the extruded actor pickable again (drop the `SetPickable(False)` in
+   `render_extruded_frames`; the mirror path's pickable-flag preservation is
+   already in place).
+2. Extend `SelectionIndex` with a face-count walk for the extruded mesh —
+   mirroring `_shell_label` — so a face index maps back to its frame.  The
+   face-per-frame count varies by section shape and `extruded_detail`, so it
+   must come from the renderer (or a shared helper), never be hard-coded.
+3. The solid surface sits in front of the centreline, so the extruded actor
+   would win most ray-casts; decide whether the line skeleton stays pickable
+   as a fallback or is demoted to decoration too.
+
+**Constraints / risk.** A pickable extruded actor with a stale face→frame map
+silently selects the wrong element — the very failure mode already fixed.
+Never flip the flag without the mapping step, plus a regression test that picks
+a frame *through the extruded surface* and asserts the correct label (the
+real-backend probe pattern in `local/gui_pick_probe.py`).
+
+**Where.** `plotting/renderers/pyvista.py` (`render_extruded_frames`),
+`gui/controllers/selection.py` (`SelectionIndex`).
+
+**Status.** **Optional** — no demand yet.  Do not schedule until click-target
+accuracy on large sections is reported as a real problem.
+
 #### Closed items (README reconciliation, 2026-08-25)
 - **Deeper opstool result-post-processing integration** — closed as **no
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
