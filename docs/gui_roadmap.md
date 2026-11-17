@@ -525,6 +525,14 @@ This section converts §7's milestones into concrete artefacts — the packaging
 changes, the file layout, the key classes, the threading model, the
 per-milestone acceptance criteria and the testing strategy.
 
+> **Note (post-R6):** this §9 plan predates the R1–R6 controller decomposition.
+> The actual `gui/controllers/` now holds `results_presenter.py`,
+> `project_controller.py`, `analysis_controller.py` and `recipe_controller.py`
+> (beside `view_registry.py`, `worker.py`, `selection.py`, …), and
+> `MainWindow.run_static_analysis` builds a `[run_static, combine,
+> load_verification]` recipe rather than a monolithic `run_analysis`.  Treat
+> §9.2/§9.3 as the original proposal, not the current layout or signatures.
+
 ### 9.1 Packaging changes
 
 - **New optional extra** in `pyproject.toml`:

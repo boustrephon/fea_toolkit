@@ -160,8 +160,9 @@ delegates to it), and the `load_verification` verb now reads the solved
 summaries from `context.results["static_summaries"]` plus
 `context.results["rs"]` and emits the `Table`, falling back to the re-solving
 wrapper only when no preceding `run_static` result exists.  The GUI's
-`Analysis ▸ Run` path registers the same table via
-`_show_load_reaction_summary` — one spelling, per anti-pattern 17.
+`Analysis ▸ Run` path registers the same table by running a
+`[run_static, load_verification]` recipe — one spelling, per anti-pattern 17
+(the old `_show_load_reaction_summary` duplicate was removed).
 
 **Item 3 — shell deformation (static / RS / modal).**  Modal shell deformation
 already worked (`npz_to_pyvista_modal_mesh` / `plot_mode_animation`), and the NPZ
@@ -824,8 +825,8 @@ helper), and the GUI's tree + selection-authoring surface.
 
 **Follow-up (document-recipe GUI completion).** ✅ **Landed 2026-11-16** —
 `run_recipe` records the final document state on `RecipeRun` (`document` +
-`document_reset`), and `MainWindow._recipe_finished` adopts it (via
-`_adopt_document`) *before* registering results — so a recipe beginning with
+`document_reset`), and `RecipeController._finished` adopts it (via
+`RecipeController._adopt_document`) *before* registering results — so a recipe beginning with
 `open` replaces the window's `_store` and its results attach to the document
 the user is now looking at, instead of the stale one.
 
@@ -850,7 +851,7 @@ catalogue + sync test, the builder mapping (`builder` / `builder_params`) and
 then the catalogue listed with tier/status badges; "Open" presets a
 `build_model` + `mesh` recipe) are
 all in — the built model displays through the existing `document_reset` →
-`_adopt_document` path, so no `MODEL`-result branch is needed.  The two legacy dialogs
+`RecipeController._adopt_document` path, so no `MODEL`-result branch is needed.  The two legacy dialogs
 (`benchmark_dialog.py` / `generic_frame_dialog.py`) are retired: their
 region/stories/design/direction and frame-code pickers folded into the
 `build_model` step's `choices` (rendered as dropdowns), the IK-2005 frame is

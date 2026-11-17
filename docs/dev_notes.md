@@ -698,7 +698,7 @@ to check is whether something new is allocating Qt/VTK objects *inside* a task.
 
 
 Related: the Preprocessor's `copy.deepcopy` ran on the GUI's worker thread and
-hit the same race.  `main_window._freeze_gc_once()` (a `gc.freeze()` before the
+hit the same race.  `recipe_controller._freeze_gc_once()` (a `gc.freeze()` before the
 handoff) is the stop-gap there; the deepcopy itself has since been replaced by
 copy-on-write — see the next section.
 
@@ -821,7 +821,7 @@ preparation from the builder's domain emission:
     little or not at all, so the deepcopy was near-100 % waste.
 *   The worker thread no longer allocates a second copy of the model.  It still
     allocates new children and mesh nodes, so `gc.freeze()`
-    (`main_window._freeze_gc_once()`) **stays** as the safety net: this removes
+    (`recipe_controller._freeze_gc_once()`) **stays** as the safety net: this removes
     the largest allocation burst, not the whole class of race.  Do not retire
     the freeze on the strength of this change.
 

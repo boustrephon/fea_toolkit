@@ -141,12 +141,13 @@ like a static load case (Option C).
 
 ## Related fixes
 
-- `_recipe_finished` now dispatches the `RS` kind (`_show_rs_result` registers a
+- `RecipeController._finished` now dispatches the `RS` kind
+  (`ResultsPresenter.show_rs_result` registers a
   one-row base-shear/moment table **and** a `results` view per direction from the
   CQC `node_displacements`), so response-spectrum results are visible and
   savable — they previously were logged and dropped.
-- `_show_pushover_result` and the loader share `figure_identity` (one spelling
-  for the figure view key/name).
+- `ResultsPresenter.show_pushover_result` and the loader share `figure_identity`
+  (one spelling for the figure view key/name).
 - Table and figure views (modal/RS tables, pushover ADRS figures) are now added
   to the Model Tree when a recipe registers them — `show_model` repopulates the
   tree only when it draws geometry, so `_show_view` rebuilds it explicitly for
