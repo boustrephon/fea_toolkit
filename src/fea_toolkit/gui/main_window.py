@@ -1840,6 +1840,12 @@ class MainWindow(QMainWindow):
 
         self._recipe_panel = RecipePanel(self)
         self._recipe_panel.changed.connect(self._set_recipe_actions_enabled)
+        # The panel is a *view* over the session's recipe, not a second owner:
+        # ``changed`` fires on every in-place edit and rebind, so this reference
+        # write-back keeps ``session.recipe`` and the panel's recipe the same
+        # object (``Recipe`` is mutated in place — no copy, no stale mirror).
+        self._recipe_panel.changed.connect(self._sync_recipe_to_session)
+        self._session.recipe = self._recipe_panel.recipe  # initial sync
         self._recipe_panel.copied.connect(self.log)
         self._recipe_dock = QDockWidget("Recipe", self)
         self._recipe_dock.setObjectName("dock_recipe")
@@ -3576,7 +3582,7 @@ class MainWindow(QMainWindow):
         from .views.analysis_wizard import AnalysisWizard
         from .views.step_dialog import StepDialog
 
-        produced = satisfied_kinds(list(self._recipe_panel.recipe), initial={"geometry"})
+        produced = satisfied_kinds(list(self._session.recipe), initial={"geometry"})
         verbs = AnalysisWizard.get_request(produced, self)
         if not verbs:
             return
@@ -3750,7 +3756,7 @@ class MainWindow(QMainWindow):
         if store is None:
             self.log("Open a SAP2000 model before running a recipe.", "warn")
             return
-        if not len(self._recipe_panel.recipe):
+        if not len(self._session.recipe):
             self.log(
                 "The recipe has no steps \u2014 use Model \u25b8 Split elements / "
                 "Mesh areas, or add one from the Recipe menu.",
@@ -3761,7 +3767,7 @@ class MainWindow(QMainWindow):
             self.log("A run is already in progress.", "warn")
             return
 
-        recipe = Recipe.from_dict(self._recipe_panel.recipe.to_dict())
+        recipe = Recipe.from_dict(self._session.recipe.to_dict())
         model_data = store.raw()
         from .controllers.settings import load_opensees_setting
 
@@ -4704,9 +4710,30 @@ class MainWindow(QMainWindow):
         """
         if not hasattr(self, "_recipe_panel"):
             return
+        # Reads the panel (not ``session.recipe``): this is a ``changed``
+        # handler, so it must see the live editor's contents — the session is
+        # only rebinded by the *later* ``_sync_recipe_to_session`` connection.
         has_steps = len(self._recipe_panel.recipe) > 0
         for key in ("recipe.run", "recipe.clear", "recipe.save", "recipe.export"):
             self._actions[key].setEnabled(has_steps)
+
+    def _sync_recipe_to_session(self) -> None:
+        """Point the session's recipe at the panel's live recipe.
+
+        The recipe panel is the de-facto owner while the user edits; this one
+        reference assignment (not a copy — ``Recipe`` is mutated in place) keeps
+        ``session.recipe is panel.recipe`` after every change, so save and run
+        read exactly what the panel shows.  Connected to
+        :attr:`~fea_toolkit.gui.views.recipe_panel.RecipePanel.changed`.
+
+        In-place edits (``add_step`` / ``remove_selected`` / ``move_selected`` /
+        ``reset_statuses`` / ``apply_run_outcomes``) mutate the shared object, so
+        they need no signal; the rebinds (``set_recipe`` / ``clear``) do emit
+        ``changed``, which is what carries this write-back.  Keep this the
+        *single* place the session's recipe is rebound, so a later move to a
+        panel-as-view design stays a delete-plus-repoint.
+        """
+        self._session.recipe = self._recipe_panel.recipe
 
     # ── Recipe files ────────────────────────────────────────────────
 
@@ -4723,7 +4750,7 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            self._recipe_panel.recipe.to_json(path)
+            self._session.recipe.to_json(path)
         except OSError as exc:
             self.log(f"Could not write {path}: {exc}", "error")
             return
@@ -4754,7 +4781,7 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            Path(path).write_text(self._recipe_panel.recipe.to_python(), encoding="utf-8")
+            Path(path).write_text(self._session.recipe.to_python(), encoding="utf-8")
         except OSError as exc:
             self.log(f"Could not write {path}: {exc}", "error")
             return
@@ -4772,7 +4799,7 @@ class MainWindow(QMainWindow):
 
         mesh = self._session.store.preprocessed() if self._session.store is not None else None
         initial = {"geometry"} if mesh is not None else ()
-        step = get_step(self, list(self._recipe_panel.recipe), initial=initial)
+        step = get_step(self, list(self._session.recipe), initial=initial)
         if step is None:
             return
         self._recipe_panel.add_step(step.verb, step.selection, step.params, optional=step.optional)
@@ -5308,7 +5335,7 @@ class MainWindow(QMainWindow):
         tables = project_mod.tables_payload(self._project_tables())
         active = self._session.views.active
         active_key = active.key if active is not None else None
-        recipe = getattr(getattr(self, "_recipe_panel", None), "recipe", None)
+        recipe = self._session.recipe
         manifest = project_mod.build_manifest(
             name=stem,
             source_label=self._source_label,
@@ -5606,7 +5633,7 @@ class MainWindow(QMainWindow):
             selection = sel.to_string()
 
         recipe_json = ""
-        recipe = self._recipe_panel.recipe
+        recipe = self._session.recipe
         if len(recipe):
             recipe_json = recipe.to_json()
 

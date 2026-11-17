@@ -55,6 +55,39 @@ def _await(window, timeout=60.0):
     assert window._worker is None, "the recipe worker never finished"
 
 
+class TestSessionRecipeOwnership:
+    """The session owns the recipe; the panel is a view over it.
+
+    The panel edits the session's recipe *in place*, and ``changed`` carries
+    the rebinds back, so ``session.recipe is panel.recipe`` always holds.  This
+    pins the single-object invariant the Option B ownership relies on (the
+    panel's editing behaviour is covered elsewhere).
+    """
+
+    def test_the_session_and_panel_share_one_recipe_after_load(self, window):
+        assert window._session.recipe is window._recipe_panel.recipe
+
+    def test_an_in_place_edit_stays_on_the_shared_object(self, window):
+        window._recipe_panel.add_step("mesh")
+        assert window._session.recipe is window._recipe_panel.recipe
+        assert len(window._session.recipe) == 1
+        assert window._session.recipe.steps[0].verb == "mesh"
+
+    def test_a_rebind_resyncs_the_session(self, window):
+        from fea_toolkit.workflow import Recipe
+
+        replacement = Recipe()
+        window._recipe_panel.set_recipe(replacement)
+        assert window._session.recipe is replacement
+        assert window._session.recipe is window._recipe_panel.recipe
+
+    def test_a_clear_resyncs_the_session(self, window):
+        window._recipe_panel.add_step("mesh")
+        window._recipe_panel.clear()
+        assert window._session.recipe is window._recipe_panel.recipe
+        assert len(window._session.recipe) == 0
+
+
 class TestDocumentAdoption:
     """A document-lifecycle recipe (``open`` / ``close``) drives the window (P35)."""
 
