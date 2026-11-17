@@ -81,6 +81,7 @@ from .controllers.marquee import (
     segment_hits_rect,
     segment_inside_rect,
 )
+from .controllers.project_controller import ProjectController
 from .controllers.results_presenter import ResultsPresenter
 from .controllers.selection import CATEGORY_GROUPS, CATEGORY_NOUNS, SelectionIndex, selection_set_op
 from .controllers.settings import (
@@ -375,6 +376,7 @@ class MainWindow(QMainWindow):
             self._nld_times,
             self._set_view_actions_enabled,
         )
+        self._project_controller = ProjectController()
         #: The window's named selections as they were when the recipe run started,
         #: used to merge only what the run changed on completion (see
         #: :meth:`_merge_recipe_named_selections`).  ``None`` outside a run.
@@ -4522,8 +4524,6 @@ class MainWindow(QMainWindow):
             self.log("Open a model before saving a project.", "warn")
             return
 
-        from . import project as project_mod
-
         stem = Path(self._source_label).stem or "project"
         path, _ = QFileDialog.getSaveFileName(
             self, "Save project", f"{stem}.zip", "FEA project (*.zip)"
@@ -4545,13 +4545,14 @@ class MainWindow(QMainWindow):
             if answer != QMessageBox.StandardButton.Yes:
                 return
 
-        bundle = self._session.to_bundle(
+        notes = self._project_controller.save(
+            self._session,
+            target,
             name=stem,
             source_label=self._source_label,
             camera=self._current_camera(),
             display=self._collect_display_values(),
         )
-        notes = project_mod.write_project_zip(target, **bundle)
         for note in notes:
             self.log(note, "warn")
         self.log(f"Saved project to {target}.")
@@ -4589,11 +4590,9 @@ class MainWindow(QMainWindow):
         """
         from pathlib import Path
 
-        from .project import is_project, project_member_summary
-
-        if Path(path).is_dir() or not is_project(path):
+        if Path(path).is_dir() or not self._project_controller.is_project(path):
             return True
-        members = "\n".join(project_member_summary(path)) or "(no members)"
+        members = "\n".join(self._project_controller.member_summary(path)) or "(no members)"
         answer = QMessageBox.question(
             self,
             "Open project",
@@ -4613,16 +4612,14 @@ class MainWindow(QMainWindow):
         :meth:`Session.from_bundle`; this method only re-attaches the GUI
         (recipe panel, display knobs, viewport camera).
         """
-        from .project import is_project, project_member_summary, read_project
-
         self.log(f"Opening project {path} …")
         try:
-            if not is_project(path):
+            if not self._project_controller.is_project(path):
                 self.log(f"{path} is not a project (directory or .zip archive).", "error")
                 return False
-            for member in project_member_summary(path):
+            for member in self._project_controller.member_summary(path):
                 self.log(f"  · {member}")
-            bundle = read_project(path)
+            session, bundle = self._project_controller.load(path)
         except Exception as exc:
             self.log(f"Failed to open project {path}: {exc}", "error")
             return False
@@ -4632,7 +4629,6 @@ class MainWindow(QMainWindow):
             return False
 
         self._save_view_state()
-        session = Session.from_bundle(bundle)
         self._session = session
 
         manifest = bundle["manifest"] or {}
