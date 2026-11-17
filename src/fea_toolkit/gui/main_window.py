@@ -95,6 +95,7 @@ from .controllers.worker import TaskWorker
 from .doc_links import DOCS_URL
 from .models.tree_model import ModelTreeModel
 from .render_backend import make_select_style
+from .session import Session
 from .views.interactor import PickResult, ViewportInteraction
 from .views.message_log import MessageLog
 from .views.property_inspector import PropertyInspector
@@ -350,8 +351,7 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
         self._model: Any = None
-        self._store: Any = None
-        self._views = ViewRegistry()
+        self._session = Session()
         self._source_label = ""
         self._external_combinations: dict = {}
         self._viewer: Any = None
@@ -361,7 +361,6 @@ class MainWindow(QMainWindow):
         self._selection_index: Any = None
         self._interaction: Any = None
         self._mouse_filter: Any = None
-        self._hidden_elem_ids: set[str] = set()
         #: The active colour-by field (``None`` = default section colouring).
         self._color_field: Optional[str] = None
         #: The camera and hidden set right after ``View ▸ Reset view``, so
@@ -369,9 +368,6 @@ class MainWindow(QMainWindow):
         self._reset_view_baseline: Optional[tuple] = None
         self._default_styles: dict = {}  # interactor -> style, restored after Select mode
         self._worker: Any = None
-        #: The last completed :class:`~fea_toolkit.workflow.recipe.RecipeRun`,
-        #: retained so ``File ▸ Save project`` can serialise its results.
-        self._last_run: Any = None
         self._policy, self._display, self._policy_notes = load_gui_settings()
         self._theme, self._theme_notes = load_theme_settings()
         self._cursor_timer: Optional[QTimer] = None
@@ -392,7 +388,6 @@ class MainWindow(QMainWindow):
         self._anim_times: list = []
         self._nld_frames: dict = {}
         self._nld_times: dict = {}
-        self._named_selections: dict = {}
         #: The window's named selections as they were when the recipe run started,
         #: used to merge only what the run changed on completion (see
         #: :meth:`_merge_recipe_named_selections`).  ``None`` outside a run.
@@ -469,21 +464,21 @@ class MainWindow(QMainWindow):
 
         self._source_label = source
         self._reset_view_baseline = None
-        self._store = None
+        self._session.store = None
         self._external_combinations: dict = {}
-        self._views = ViewRegistry()
+        self._session.views = ViewRegistry()
         self._reset_session_display()
         if isinstance(model, SAPModelData):
-            self._store = InMemoryModelStore(model, source=source)
-            self._views = ViewRegistry(self._store)
-            self._views.add_geometry("unprocessed", "Unprocessed", model, source=source)
+            self._session.store = InMemoryModelStore(model, source=source)
+            self._session.views = ViewRegistry(self._session.store)
+            self._session.views.add_geometry("unprocessed", "Unprocessed", model, source=source)
             # Let the recipe step dialog seed the ``run_static`` cases editor
             # from this model's own static cases.
             panel = getattr(self, "_recipe_panel", None)
             if panel is not None:
                 panel.set_model_data(model)
         elif isinstance(model, MeshModel):
-            self._views.add_geometry("processed", "Processed", model, source=source)
+            self._session.views.add_geometry("processed", "Processed", model, source=source)
 
     # ── Viewport ────────────────────────────────────────────────────
 
@@ -2003,7 +1998,7 @@ class MainWindow(QMainWindow):
         criterion, or a type exclusion that leaves nodes in — not only one whose
         ``element_types`` names ``Node``.
         """
-        if not self._hidden_elem_ids and view_selection is None:
+        if not self._session.hidden_elem_ids and view_selection is None:
             return None
         from dataclasses import replace
 
@@ -2013,7 +2008,7 @@ class MainWindow(QMainWindow):
         if base._selects_nodes_explicitly():
             return view_selection
         excluded = set(base.exclude_element_ids or ())
-        excluded.update(self._hidden_elem_ids)
+        excluded.update(self._session.hidden_elem_ids)
         return replace(base, exclude_element_ids=sorted(excluded))
 
     def _warn_if_view_node_scoped(self) -> None:
@@ -2028,7 +2023,7 @@ class MainWindow(QMainWindow):
         type exclusion that leaves nodes in — not only one whose
         ``element_types`` names ``Node``.
         """
-        view = self._views.active
+        view = self._session.views.active
         selection = view.selection if view is not None else None
         if selection is not None and selection._selects_nodes_explicitly():
             self.log(
@@ -2147,17 +2142,19 @@ class MainWindow(QMainWindow):
         # its restraints and constraint assignments across every view — rather
         # than the model currently drawn.  With no store (an archive) it falls
         # back to the displayed model, which simply has neither.
-        self._inspector.set_source_model(self._store.raw() if self._store is not None else model)
+        self._inspector.set_source_model(
+            self._session.store.raw() if self._session.store is not None else model
+        )
         # Resolved soil springs live on the preprocessed MeshModel (its
         # ``point_springs`` is a resolved list), not the raw SAPModelData — so
         # the Inspector is given the processed model for those, alongside the
         # raw model (above) for the spring definitions and assignments.
-        processed = self._store.preprocessed() if self._store is not None else None
+        processed = self._session.store.preprocessed() if self._session.store is not None else None
         if processed is None and isinstance(model, MeshModel):
             processed = model
         self._inspector.set_processed_model(processed)
         if rebuild_tree:
-            self._tree_model.set_model(self._tree_model_source(model), self._views.views())
+            self._tree_model.set_model(self._tree_model_source(model), self._session.views.views())
         if cameras is None:
             self._quad.apply_orientations()
         else:
@@ -2166,7 +2163,7 @@ class MainWindow(QMainWindow):
                     with contextlib.suppress(Exception):
                         interactor.camera_position = camera
         self._update_units_label()
-        self._set_model_actions_enabled(self._store is not None)
+        self._set_model_actions_enabled(self._session.store is not None)
         self._set_analysis_actions_enabled()
         self._set_view_actions_enabled()
         self._reapply_results_overlay(results_intent)
@@ -2182,11 +2179,11 @@ class MainWindow(QMainWindow):
         otherwise, and the view's source only with no store at all (a standalone
         results archive).
         """
-        if self._store is not None:
-            preprocessed = self._store.preprocessed()
+        if self._session.store is not None:
+            preprocessed = self._session.store.preprocessed()
             if preprocessed is not None:
                 return preprocessed
-            raw = self._store.raw()
+            raw = self._session.store.raw()
             if raw is not None:
                 return raw
         return fallback
@@ -2224,11 +2221,11 @@ class MainWindow(QMainWindow):
         # Named selections are authored against the model being replaced, so a
         # stale store would resolve against the new document's elements — clear
         # it, mirroring the ``open`` verb's replacement of the selection store.
-        self._named_selections.clear()
+        self._session.named_selections.clear()
         # The last recipe run belongs to the model being replaced; clear it so
         # ``File ▸ Save project`` cannot persist that run's IDA ladder / transient
         # history against the newly opened model.
-        self._last_run = None
+        self._session.last_run = None
         self._set_toggle_checked("results.animate", False)
         self._set_toggle_checked("results.deformed", False)
         self._sync_force_toggles(False)
@@ -2262,10 +2259,10 @@ class MainWindow(QMainWindow):
         unprocessed — and fall back to the saved view (or ``None``).
         """
         for key in ("meshed", "processed", "unprocessed"):
-            view = self._views.get(key)
+            view = self._session.views.get(key)
             if view is not None:
                 return view
-        return self._views.get(saved_key) if saved_key else None
+        return self._session.views.get(saved_key) if saved_key else None
 
     @staticmethod
     def _backfill_mesh_load_metadata(mesh: Any, sap: Any) -> None:
@@ -2370,8 +2367,8 @@ class MainWindow(QMainWindow):
                 so the outgoing project's secondary cameras are not restored,
                 and the caller then restores the primary camera it saved.
         """
-        previous = self._views.active
-        self._views.set_active(view.key)
+        previous = self._session.views.active
+        self._session.views.set_active(view.key)
         if previous is not None and previous.key != view.key:
             # A view switch invalidates the animation that was drawing the old
             # view's history: stop the timer and clear the toggle so animation
@@ -2381,9 +2378,9 @@ class MainWindow(QMainWindow):
         if view.kind in (GEOMETRY, RESULTS):
             # A node-scoped lens ignores the hidden-element exclusions, so the
             # hidden elements stay visible until a non-node-scoped view is shown.
-            if self._hidden_elem_ids:
+            if self._session.hidden_elem_ids:
                 self._warn_if_view_node_scoped()
-            source = self._views.source(view.key)
+            source = self._session.views.source(view.key)
             if source is None:
                 return
             self._stack.setCurrentWidget(self._viewport_container)
@@ -2403,7 +2400,7 @@ class MainWindow(QMainWindow):
             self._show_figure_view(view)
         else:
             return
-        self._inspector.show_object(self._views.get(view.key))
+        self._inspector.show_object(self._session.views.get(view.key))
         self._set_view_actions_enabled()
         self.log(f"Showing view: {view.name}.")
 
@@ -2417,7 +2414,9 @@ class MainWindow(QMainWindow):
         group.  This repopulates the tree without touching the viewport.
         """
         self._tree_model.set_model(
-            self._tree_model_source(self._model), self._views.views(), self._named_selections
+            self._tree_model_source(self._model),
+            self._session.views.views(),
+            self._session.named_selections,
         )
 
     def _show_table_view(self, view: View) -> None:
@@ -2429,7 +2428,7 @@ class MainWindow(QMainWindow):
         """
         from qtpy.QtWidgets import QAbstractItemView, QHeaderView, QTableWidget, QTableWidgetItem
 
-        table = self._views.table(view.key)
+        table = self._session.views.table(view.key)
         if table is None:
             return
         if self._table_page is None:
@@ -2464,7 +2463,7 @@ class MainWindow(QMainWindow):
         switch re-runs its layout each time, so the legend and markers visibly
         inflate.  The page is shared; only the canvas widget it shows changes.
         """
-        figure = self._views.figure(view.key)
+        figure = self._session.views.figure(view.key)
         if figure is None:
             return
         if self._figure_page is None:
@@ -2501,7 +2500,7 @@ class MainWindow(QMainWindow):
         adds a ``Selection`` — so the dialog asks for that selection straight
         away: an unfiltered duplicate would just be the parent again.
         """
-        parent = self._views.active
+        parent = self._session.views.active
         if parent is None:
             return
         from .views.selection_dialog import SelectionDialog
@@ -2511,7 +2510,7 @@ class MainWindow(QMainWindow):
             return
         key = self._next_derived_key(parent.key)
         name = f"{parent.name} \u00b7 {selection.to_string() or 'unfiltered'}"
-        view = self._views.add_derived(key, name, parent.key, selection)
+        view = self._session.views.add_derived(key, name, parent.key, selection)
         if view is None:
             return
         self._show_view(view, rebuild_tree=True)
@@ -2519,10 +2518,10 @@ class MainWindow(QMainWindow):
 
     def _on_edit_view_selection(self) -> None:
         """**Edit ▸ Edit view selection…**: re-filter the active derived view."""
-        view = self._views.active
+        view = self._session.views.active
         if view is None or view.parent is None:
             return
-        parent = self._views.get(view.parent)
+        parent = self._session.views.get(view.parent)
         from .views.selection_dialog import SelectionDialog
 
         selection = SelectionDialog.edit(view.selection, self)
@@ -2530,7 +2529,7 @@ class MainWindow(QMainWindow):
             return
         stem = parent.name if parent is not None else view.name
         name = f"{stem} \u00b7 {selection.to_string() or 'unfiltered'}"
-        updated = self._views.add_derived(view.key, name, view.parent, selection)
+        updated = self._session.views.add_derived(view.key, name, view.parent, selection)
         if updated is None:
             return
         self._show_view(updated, rebuild_tree=True)
@@ -2539,13 +2538,13 @@ class MainWindow(QMainWindow):
     def _next_derived_key(self, parent_key: str) -> str:
         """A derived-view key no registered view is using."""
         index = 1
-        while self._views.get(f"{parent_key}:{index}") is not None:
+        while self._session.views.get(f"{parent_key}:{index}") is not None:
             index += 1
         return f"{parent_key}:{index}"
 
     def _set_view_actions_enabled(self) -> None:
         """Enable duplication / selection editing to match the active view."""
-        active = self._views.active
+        active = self._session.views.active
         self._actions["edit.duplicate_view"].setEnabled(active is not None)
         self._actions["edit.edit_selection"].setEnabled(
             active is not None and active.kind == GEOMETRY and active.parent is not None
@@ -2553,7 +2552,7 @@ class MainWindow(QMainWindow):
         # A deformed shape needs a results view that carries displacement:
         # a pressed button that could only report "nothing to draw" is worse
         # than a disabled one that is greyed until it can work.
-        repository = self._views.results(active.key) if active is not None else None
+        repository = self._session.views.results(active.key) if active is not None else None
         case = _case_of(active)
         self._actions["results.deformed"].setEnabled(
             repository is not None and bool(case) and repository.has_displacements(case)
@@ -2677,8 +2676,8 @@ class MainWindow(QMainWindow):
         it twice: once for the entries and once for how the archive records
         them.
         """
-        view = self._views.active
-        repository = self._views.results(view.key) if view is not None else None
+        view = self._session.views.active
+        repository = self._session.views.results(view.key) if view is not None else None
         case = _case_of(view) or ""
         return repository, case
 
@@ -2758,7 +2757,7 @@ class MainWindow(QMainWindow):
             frames = self._pushover_step_frames(repository, case)
             if frames:
                 return frames, []
-        view = self._views.active
+        view = self._session.views.active
         key = view.key if view is not None else None
         if key:
             frames = self._nld_frames.get(key)
@@ -2777,7 +2776,7 @@ class MainWindow(QMainWindow):
         or external-results view still re-keys generated-node tags correctly.
         Falls back to the displayed model's mapping when no store holds a mesh.
         """
-        mesh = self._store.preprocessed() if self._store is not None else None
+        mesh = self._session.store.preprocessed() if self._session.store is not None else None
         nodes = getattr(mesh, "nodes", None) or {}
         tag_to_id = {
             getattr(node, "node_tag", None): node_id
@@ -2831,10 +2830,10 @@ class MainWindow(QMainWindow):
         """
         repository, _ = self._active_results_source()
         if repository is not None:
-            view = self._views.active
-            target = self._views.source(view.key) if view is not None else None
+            view = self._session.views.active
+            target = self._session.views.source(view.key) if view is not None else None
         else:
-            target = self._store.preprocessed() if self._store is not None else None
+            target = self._session.store.preprocessed() if self._session.store is not None else None
         if target is not None and self._model is not target:
             self.show_model(target, reset_view=False, rebuild_tree=False)
 
@@ -3207,17 +3206,17 @@ class MainWindow(QMainWindow):
         if not refs:
             self.log("Nothing selected to hide.", "warn")
             return
-        self._hidden_elem_ids.update(refs)
+        self._session.hidden_elem_ids.update(refs)
         self._refresh_display()
         self.log(f"Hid {len(refs)} element(s).")
         self._warn_if_view_node_scoped()
 
     def _on_show_all(self) -> None:
         """**View ▸ Display ▸ Show all**: restore every hidden element."""
-        if not self._hidden_elem_ids:
+        if not self._session.hidden_elem_ids:
             self.log("Nothing is hidden.", "warn")
             return
-        self._hidden_elem_ids.clear()
+        self._session.hidden_elem_ids.clear()
         self._refresh_display()
         self.log("Restored all hidden elements.")
 
@@ -3232,13 +3231,16 @@ class MainWindow(QMainWindow):
         """
         if self._quad is not None:
             self._quad.reset_orientations()
-        if self._hidden_elem_ids:
-            self._hidden_elem_ids.clear()
+        if self._session.hidden_elem_ids:
+            self._session.hidden_elem_ids.clear()
             self._refresh_display()
         if self._source_label:
             for note in clear_view_state(self._source_label):
                 self.log(note, "warn")
-        self._reset_view_baseline = (self._current_camera(), frozenset(self._hidden_elem_ids))
+        self._reset_view_baseline = (
+            self._current_camera(),
+            frozenset(self._session.hidden_elem_ids),
+        )
         self.log("Reset the view to defaults.")
 
     def _drawable_element_ids(self, model: Any) -> set[str]:
@@ -3310,7 +3312,7 @@ class MainWindow(QMainWindow):
         if not keep:
             self.log("Nothing selected to isolate.", "warn")
             return
-        self._hidden_elem_ids = self._all_element_ids() - keep
+        self._session.hidden_elem_ids = self._all_element_ids() - keep
         self._refresh_display()
         self.log(f"Isolated {len(keep)} element(s).")
         self._warn_if_view_node_scoped()
@@ -3342,8 +3344,8 @@ class MainWindow(QMainWindow):
         place.  A no-op when no view is active — the controls are usable before
         anything is open.
         """
-        active = self._views.active
-        source = self._views.source(active.key) if active is not None else None
+        active = self._session.views.active
+        source = self._session.views.source(active.key) if active is not None else None
         if source is None:
             return
         self.show_model(
@@ -3443,7 +3445,7 @@ class MainWindow(QMainWindow):
                     element_ids=element_ids,
                     node_ids=list(pick.node_ids or []),
                 )
-                self._named_selections[name] = named
+                self._session.named_selections[name] = named
                 self.log(
                     f"Named selection {name!r}: {len(named.element_ids)} element(s), "
                     f"{len(named.node_ids)} node(s) from the viewport pick"
@@ -3463,7 +3465,7 @@ class MainWindow(QMainWindow):
         except ValueError as exc:
             self.log(f"Invalid selection expression: {exc}", "error")
             return
-        self._named_selections[name] = NamedSelection(name=name, selection=selection)
+        self._session.named_selections[name] = NamedSelection(name=name, selection=selection)
         self.log(f"Named selection {name!r}: {selection.to_string() or 'whole model'}")
         self._rebuild_tree()
 
@@ -3479,10 +3481,10 @@ class MainWindow(QMainWindow):
         from ..workflow import Step
         from .views.step_dialog import StepDialog
 
-        if self._store is None:
+        if self._session.store is None:
             self.log("Open a SAP2000 model before preprocessing.", "warn")
             return
-        edited = StepDialog.edit(Step(verb="mesh"), self, model_data=self._store.raw())
+        edited = StepDialog.edit(Step(verb="mesh"), self, model_data=self._session.store.raw())
         if edited is None:
             return
         if edited.params.get("create_shells", True):
@@ -3519,7 +3521,7 @@ class MainWindow(QMainWindow):
             config: The Preprocessor configuration the preset stands for.
             label: What the Message Log should say is happening.
         """
-        if self._store is None:
+        if self._session.store is None:
             self.log("Open a SAP2000 model before preprocessing.", "warn")
             return
         from ..workflow import Step
@@ -3556,7 +3558,7 @@ class MainWindow(QMainWindow):
         composes the chosen steps — modal first — and runs the recipe once, so
         the whole chain resolves in a single pass.
         """
-        store = self._store
+        store = self._session.store
         mesh = store.preprocessed() if store is not None else None
         if store is None or mesh is None:
             self.log(
@@ -3642,7 +3644,7 @@ class MainWindow(QMainWindow):
                 ``"pushover"``, ``"nonlinear_dynamic"`` or ``"ida"``.
             label: What the Message Log should say is happening.
         """
-        store = self._store
+        store = self._session.store
         mesh = store.preprocessed() if store is not None else None
         if store is None or mesh is None:
             self.log(
@@ -3744,7 +3746,7 @@ class MainWindow(QMainWindow):
         """
         from ..workflow import Recipe, run_recipe
 
-        store = self._store
+        store = self._session.store
         if store is None:
             self.log("Open a SAP2000 model before running a recipe.", "warn")
             return
@@ -3800,7 +3802,7 @@ class MainWindow(QMainWindow):
         # window so the completion handler can merge back only what the run
         # changed.  The store the run starts from is likewise remembered, so a
         # run whose document was switched away while in flight is rejected.
-        named_snapshot = dict(self._named_selections)
+        named_snapshot = dict(self._session.named_selections)
         self._recipe_named_snapshot = named_snapshot
         self._recipe_starting_store = store
 
@@ -3887,7 +3889,7 @@ class MainWindow(QMainWindow):
         run, messages = payload
         # A run started for one document must not install its mesh, selections or
         # results onto a document the user switched to while it was in flight
-        # (``open_path`` replaced ``self._store``): reject the stale run's
+        # (``open_path`` replaced ``self._session.store``): reject the stale run's
         # outcomes rather than affecting the document now open.
         if not self._recipe_store_is_current():
             self.log(
@@ -3911,7 +3913,7 @@ class MainWindow(QMainWindow):
             # run's snapshot cannot see them), without re-adopting the unchanged
             # model store.
             self._merge_recipe_named_selections(run.document)
-        self._last_run = run
+        self._session.last_run = run
         # Persist each step's outcome onto the recipe (a step that ran "ok" is
         # unchecked), so the run state survives save → reopen.
         self._recipe_panel.apply_run_outcomes(run.step_status)
@@ -3957,14 +3959,17 @@ class MainWindow(QMainWindow):
         """Whether the recipe run's document is still the one the window shows.
 
         ``open_path`` (and ``open_project_path`` / the benchmark openers) replace
-        ``self._store`` through :meth:`_remember_source`, so a run started for one
+        ``self._session.store`` through :meth:`_remember_source`, so a run started for one
         document must not apply its recovered mesh, named selections or results
         to a document the user switched to while it was in flight.  When no run
         is being tracked (``_recipe_starting_store`` is ``None`` — the tests drive
         the completion handlers directly), there is nothing to guard and the
         store is treated as current.
         """
-        return self._recipe_starting_store is None or self._store is self._recipe_starting_store
+        return (
+            self._recipe_starting_store is None
+            or self._session.store is self._recipe_starting_store
+        )
 
     def _merge_recipe_named_selections(self, document: Any) -> None:
         """Adopt only the named selections a recipe run actually changed.
@@ -3983,13 +3988,13 @@ class MainWindow(QMainWindow):
         snapshot = self._recipe_named_snapshot or {}
         for name, value in document.named_selections.items():
             if name not in snapshot or snapshot[name] != value:
-                self._named_selections[name] = value
+                self._session.named_selections[name] = value
 
     def _adopt_document(self, document: Any) -> None:
         """Adopt the document a recipe run ended with into the window.
 
         A document-lifecycle step (``open`` / ``close`` / ``build_model``)
-        replaced or closed the worker's document; the window's ``_store`` still
+        replaced or closed the worker's document; the window's ``_session.store`` still
         shows the previous one.
         This replaces the store, restores the document's named selections and
         saved view state, raises the viewport page and re-renders — the same
@@ -4001,7 +4006,7 @@ class MainWindow(QMainWindow):
         # does.
         self._save_view_state()
         self._remember_source(document.model_data, source=document.document_path)
-        self._named_selections = dict(document.named_selections)
+        self._session.named_selections = dict(document.named_selections)
         # Restore the incoming document's saved visibility, matching
         # ``open_path``: a saved hidden set is validated against the incoming
         # model, and no saved state clears it so the previous document's
@@ -4010,7 +4015,7 @@ class MainWindow(QMainWindow):
         for note in notes:
             level = "info" if "is stale" in note else "warn"
             self.log(note, level)
-        self._hidden_elem_ids = self._restore_hidden_elements(
+        self._session.hidden_elem_ids = self._restore_hidden_elements(
             state.get("hidden_elem_ids"), document.model_data
         )
         # Adoption draws geometry, so raise the viewport page even if the user
@@ -4030,7 +4035,7 @@ class MainWindow(QMainWindow):
             return
         key = _table_key(label)
         name = getattr(table, "title", None) or label
-        view = self._views.add_table(key, name, table, source=f"Recipe: {label}")
+        view = self._session.views.add_table(key, name, table, source=f"Recipe: {label}")
         self._show_view(view, rebuild_tree=True)
         self.log(f"Added table view: {name}.")
 
@@ -4040,7 +4045,7 @@ class MainWindow(QMainWindow):
             self.log(f"{label}: the chart produced no figure.", "warn")
             return
         key = f"figure:{label.lower().replace(' ', '-')}"
-        view = self._views.add_figure(key, label, figure, source=f"Recipe: {label}")
+        view = self._session.views.add_figure(key, label, figure, source=f"Recipe: {label}")
         self._show_view(view, rebuild_tree=True)
         self.log(f"Added figure view: {label}.")
 
@@ -4216,7 +4221,7 @@ class MainWindow(QMainWindow):
         """
         from .project import mode_shape_arrays
 
-        mesh = self._store.preprocessed() if self._store is not None else None
+        mesh = self._session.store.preprocessed() if self._session.store is not None else None
         if mesh is None:
             self.log(f"{label}: no prepared mesh to draw the mode shapes against.", "warn")
             return
@@ -4289,7 +4294,7 @@ class MainWindow(QMainWindow):
         """
         from .project import rs_displacement_arrays
 
-        mesh = self._store.preprocessed() if self._store is not None else None
+        mesh = self._session.store.preprocessed() if self._session.store is not None else None
         if mesh is None:
             self.log(
                 f"{label}: no prepared mesh to draw the {direction} displaced shape against.",
@@ -4394,7 +4399,7 @@ class MainWindow(QMainWindow):
                 else "uniform"
             )
             key, name = figure_identity(label, direction, load_type)
-            view = self._views.add_figure(
+            view = self._session.views.add_figure(
                 key,
                 name,
                 figure,
@@ -4408,7 +4413,7 @@ class MainWindow(QMainWindow):
         # nested under the summary table — only when steps were recorded.  The full
         # per-step history is threaded into the same archive so the "animate" toggle
         # can step through it.
-        mesh = self._store.preprocessed() if self._store is not None else None
+        mesh = self._session.store.preprocessed() if self._session.store is not None else None
         if mesh is not None:
             from ..io.npz_writer import collect_pushover_arrays
             from .project import pushover_displacement_arrays
@@ -4488,10 +4493,10 @@ class MainWindow(QMainWindow):
         if not cases:
             return []
 
-        mesh = self._store.preprocessed() if self._store is not None else None
+        mesh = self._session.store.preprocessed() if self._session.store is not None else None
         model = mesh if mesh is not None else repository.as_model()
         for case in cases:
-            self._views.add_results(
+            self._session.views.add_results(
                 f"{_RESULTS_KEY_PREFIX}{case}",
                 _case_view_name(case, repository.case_meta(case)),
                 repository,
@@ -4503,7 +4508,7 @@ class MainWindow(QMainWindow):
         self.log(f"{label}: {len(cases)} case(s) added as views.")
 
         if show:
-            first = self._views.get(f"{_RESULTS_KEY_PREFIX}{cases[0]}")
+            first = self._session.views.get(f"{_RESULTS_KEY_PREFIX}{cases[0]}")
             if first is not None:
                 self._show_view(first, rebuild_tree=True)
         return cases
@@ -4534,8 +4539,8 @@ class MainWindow(QMainWindow):
         # Record the preprocessed model on the store, so Analysis ▸ Run uses the
         # topology just displayed rather than preprocessing again (P27,
         # refinement 1: preprocessing is a user action, never silent).
-        if self._store is not None:
-            self._store.set_preprocessed(mesh_model)
+        if self._session.store is not None:
+            self._session.store.set_preprocessed(mesh_model)
         # The view *names* are the GUI's own convention: a split-only run is
         # still "Processed" and a meshing run "Meshed", whatever the verb
         # labelled its result.
@@ -4543,9 +4548,9 @@ class MainWindow(QMainWindow):
             key, name = "meshed", "Meshed"
         else:
             key, name = "processed", "Processed"
-        self._views.add_geometry(key, name, mesh_model, source=f"Recipe: {label}")
-        if self._hidden_elem_ids:
-            self._hidden_elem_ids.clear()
+        self._session.views.add_geometry(key, name, mesh_model, source=f"Recipe: {label}")
+        if self._session.hidden_elem_ids:
+            self._session.hidden_elem_ids.clear()
             self.log("Preprocessing rebuilt the model; hidden elements were restored.")
         self.show_model(mesh_model, reset_view=False)
         self.log(f"Added view: {name}.")
@@ -4577,7 +4582,7 @@ class MainWindow(QMainWindow):
         document_reset = getattr(error, "document_reset", False)
         # A run started for one document must not install its recovered mesh or
         # document state onto a document the user switched to while it was in
-        # flight (``open_path`` replaced ``self._store``): reject the stale
+        # flight (``open_path`` replaced ``self._session.store``): reject the stale
         # recovery state and outcomes rather than affecting the document now open.
         if not self._recipe_store_is_current():
             self.log(
@@ -4607,9 +4612,9 @@ class MainWindow(QMainWindow):
             if (
                 document is not None
                 and getattr(document, "model", None) is not None
-                and self._store is not None
+                and self._session.store is not None
             ):
-                self._store.set_preprocessed(document.model)
+                self._session.store.set_preprocessed(document.model)
             if step_status:
                 if document_reset and document is None:
                     # The document changed but the error carried no state to adopt —
@@ -4639,7 +4644,7 @@ class MainWindow(QMainWindow):
         self._progress.setVisible(False)
         self._progress.setRange(0, 100)
         self._actions["analysis.stop"].setEnabled(False)
-        self._set_model_actions_enabled(self._store is not None)
+        self._set_model_actions_enabled(self._session.store is not None)
         self._set_analysis_actions_enabled()
         gc.collect()
 
@@ -4662,7 +4667,7 @@ class MainWindow(QMainWindow):
         greyed and its tooltip names the step it needs.  A run already in flight
         also keeps it disabled, so a second dialog cannot be opened over it.
         """
-        store = self._store
+        store = self._session.store
         mesh = store.preprocessed() if store is not None else None
         running = self._worker is not None and self._worker.isRunning()
         enabled = mesh is not None and not running
@@ -4682,7 +4687,7 @@ class MainWindow(QMainWindow):
         self._actions["file.save_model"].setEnabled(mesh is not None)
         # A project can be saved with just a model (results are optional), so it
         # is gated on a loaded model rather than on a preprocessed mesh.
-        self._actions["file.save_project"].setEnabled(self._store is not None)
+        self._actions["file.save_project"].setEnabled(self._session.store is not None)
         action = self._actions["analysis.run"]
         if mesh is None:
             action.setToolTip(
@@ -4765,7 +4770,7 @@ class MainWindow(QMainWindow):
         from ..workflow import step_to_command
         from .views.command_palette import get_step
 
-        mesh = self._store.preprocessed() if self._store is not None else None
+        mesh = self._session.store.preprocessed() if self._session.store is not None else None
         initial = {"geometry"} if mesh is not None else ()
         step = get_step(self, list(self._recipe_panel.recipe), initial=initial)
         if step is None:
@@ -4928,7 +4933,7 @@ class MainWindow(QMainWindow):
         keys = cases or [name]
         for case in keys:
             meta = repository.case_meta(case) if cases else {}
-            self._views.add_results(
+            self._session.views.add_results(
                 f"results:{case}",
                 _case_view_name(case, meta),
                 repository,
@@ -4938,9 +4943,9 @@ class MainWindow(QMainWindow):
             )
         self.log(f"Opened {len(keys)} results view(s) from {name}.")
 
-        first = self._views.get(f"results:{keys[0]}")
+        first = self._session.views.get(f"results:{keys[0]}")
         if first is not None:
-            self._hidden_elem_ids.clear()
+            self._session.hidden_elem_ids.clear()
             self._show_view(first, rebuild_tree=True)
 
         # IDA (IK-2005 collapse) — register a figure view when the archive
@@ -4955,7 +4960,7 @@ class MainWindow(QMainWindow):
 
                 figure = plot_ida_summary(repository.raw())
                 if figure is not None:
-                    self._views.add_figure(
+                    self._session.views.add_figure(
                         "ida", "IDA collapse", figure, source=name, activate=False
                     )
                     self._rebuild_tree()
@@ -4997,8 +5002,8 @@ class MainWindow(QMainWindow):
         """
         from pathlib import Path
 
-        view = self._views.active
-        repository = self._views.results(view.key) if view is not None else None
+        view = self._session.views.active
+        repository = self._session.views.results(view.key) if view is not None else None
         if repository is None:
             self.log("Nothing to save \u2014 show a results case first.", "warn")
             return
@@ -5038,7 +5043,7 @@ class MainWindow(QMainWindow):
         """
         from pathlib import Path
 
-        store = self._store
+        store = self._session.store
         mesh = store.preprocessed() if store is not None else None
         if mesh is None:
             self.log(
@@ -5131,7 +5136,7 @@ class MainWindow(QMainWindow):
         if rs and rs_force_direction is not None and rs_force_direction in rs_shell_forces:
             arrays.update(collect_rs_shell_force_arrays(rs_shell_forces[rs_force_direction]))
 
-        mesh = self._store.preprocessed() if self._store is not None else None
+        mesh = self._session.store.preprocessed() if self._session.store is not None else None
         if mesh is not None:
             rs_disp = collected.get("rs_nodal_displacements") or {}
             if rs_disp:
@@ -5222,8 +5227,8 @@ class MainWindow(QMainWindow):
         same key, so the label is read back from the completed run's IDA step
         (``name`` parameter) rather than re-defaulting to ``"IDA"``.
         """
-        if self._last_run is not None:
-            for result in self._last_run.results:
+        if self._session.last_run is not None:
+            for result in self._session.last_run.results:
                 if getattr(result, "kind", None) == "ida":
                     return getattr(result, "label", "IDA") or "IDA"
         return "IDA"
@@ -5231,9 +5236,9 @@ class MainWindow(QMainWindow):
     def _project_tables(self) -> dict:
         """Collect ``{key: Table}`` from every table view in the registry."""
         tables = {}
-        for view in self._views.views():
+        for view in self._session.views.views():
             if view.kind == TABLE:
-                table = self._views.table(view.key)
+                table = self._session.views.table(view.key)
                 if table is not None:
                     tables[view.key] = table
         return tables
@@ -5245,9 +5250,9 @@ class MainWindow(QMainWindow):
         produced no ``CASES`` payload, so a project can be saved from either path.
         """
         seen = set()
-        for view in self._views.views():
+        for view in self._session.views.views():
             if view.kind == RESULTS:
-                repository = self._views.results(view.key)
+                repository = self._session.views.results(view.key)
                 if repository is not None and id(repository) not in seen:
                     seen.add(id(repository))
                     arrays.update(repository.raw())
@@ -5262,7 +5267,7 @@ class MainWindow(QMainWindow):
         """
         from pathlib import Path
 
-        if self._store is None:
+        if self._session.store is None:
             self.log("Open a model before saving a project.", "warn")
             return
 
@@ -5290,7 +5295,7 @@ class MainWindow(QMainWindow):
                 return
 
         collected = project_mod.collect_project_results(
-            self._last_run.results if self._last_run is not None else []
+            self._session.last_run.results if self._session.last_run is not None else []
         )
         if not collected["static_arrays"]:
             self._merge_results_view_arrays(collected["static_arrays"])
@@ -5301,26 +5306,26 @@ class MainWindow(QMainWindow):
                 project_mod.ida_figure_payload(collected["ida"], label=self._ida_result_label())
             )
         tables = project_mod.tables_payload(self._project_tables())
-        active = self._views.active
+        active = self._session.views.active
         active_key = active.key if active is not None else None
         recipe = getattr(getattr(self, "_recipe_panel", None), "recipe", None)
         manifest = project_mod.build_manifest(
             name=stem,
             source_label=self._source_label,
             model_file="model.h5",
-            units=dict(getattr(self._store.raw(), "units", None) or {}),
+            units=dict(getattr(self._session.store.raw(), "units", None) or {}),
             recipe=recipe,
-            views=self._views.views(),
+            views=self._session.views.views(),
             active_view=active_key,
             camera=self._current_camera(),
-            hidden_elem_ids=sorted(self._hidden_elem_ids),
+            hidden_elem_ids=sorted(self._session.hidden_elem_ids),
             display=self._collect_display_values(),
         )
         notes = project_mod.write_project_zip(
             target,
             manifest=manifest,
-            sap=self._store.raw(),
-            mesh=self._store.preprocessed(),
+            sap=self._session.store.raw(),
+            mesh=self._session.store.preprocessed(),
             results_arrays=self._project_results_arrays(collected),
             figures=figures,
             tables=tables,
@@ -5416,7 +5421,7 @@ class MainWindow(QMainWindow):
         self._remember_source(sap, source=source_label)
         if mesh is not None:
             self._backfill_mesh_load_metadata(mesh, sap)
-            self._store.set_preprocessed(mesh)
+            self._session.store.set_preprocessed(mesh)
 
         geometry_sources = {"unprocessed": sap, "processed": mesh, "meshed": mesh}
         # Results views render the archive's own geometry, which carries section
@@ -5438,11 +5443,13 @@ class MainWindow(QMainWindow):
             if kind == GEOMETRY:
                 model = geometry_sources.get(key)
                 if model is not None:
-                    self._views.add_geometry(key, name, model, source=source, activate=False)
+                    self._session.views.add_geometry(
+                        key, name, model, source=source, activate=False
+                    )
             elif kind == RESULTS:
                 case = entry.get("case")
                 if repository is not None and case in repository.cases():
-                    self._views.add_results(
+                    self._session.views.add_results(
                         f"results:{case}",
                         name,
                         repository,
@@ -5454,7 +5461,7 @@ class MainWindow(QMainWindow):
             elif kind == TABLE:
                 table = tables.get(entry.get("table_key", key))
                 if table is not None:
-                    self._views.add_table(
+                    self._session.views.add_table(
                         key, name, table, source=source, parent=parent, activate=False
                     )
             elif kind == FIGURE:
@@ -5462,7 +5469,7 @@ class MainWindow(QMainWindow):
                 if figure_data:
                     figure = regenerate_figure(figure_data)
                     if figure is not None:
-                        self._views.add_figure(
+                        self._session.views.add_figure(
                             key, name, figure, source=source, parent=parent, activate=False
                         )
 
@@ -5484,20 +5491,20 @@ class MainWindow(QMainWindow):
             if mesh is not None and active is not None and active.key in ("processed", "meshed")
             else sap
         )
-        self._hidden_elem_ids = self._restore_hidden_elements(
+        self._session.hidden_elem_ids = self._restore_hidden_elements(
             viewport.get("hidden_elem_ids"), hidden_model
         )
 
         self._apply_display_values(manifest.get("display") or {})
 
         if active is None:
-            views = self._views.views()
+            views = self._session.views.views()
             active = views[0] if views else None
         if active is not None:
             self._show_view(active, rebuild_tree=True, reset_view=True)
             self._restore_camera(viewport.get("camera_position"))
 
-        self.log(f"Opened project: {len(self._views)} view(s).")
+        self.log(f"Opened project: {len(self._session.views)} view(s).")
         return True
 
     def open_path(self, path: str) -> bool:
@@ -5520,7 +5527,7 @@ class MainWindow(QMainWindow):
             return False
         self._save_view_state()  # preserve the outgoing model's view before switching
         self._remember_source(model, source=path)
-        self._named_selections = selections
+        self._session.named_selections = selections
         state, notes = load_view_state(path)
         for note in notes:
             # A stale state (the model was re-edited) is an ordinary outcome, so
@@ -5528,7 +5535,7 @@ class MainWindow(QMainWindow):
             level = "info" if "is stale" in note else "warn"
             self.log(note, level)
         hidden = state.get("hidden_elem_ids")
-        self._hidden_elem_ids = self._restore_hidden_elements(hidden, model)
+        self._session.hidden_elem_ids = self._restore_hidden_elements(hidden, model)
         self.show_model(model)
         self._restore_camera(state.get("camera_position"))
         return True
@@ -5603,7 +5610,7 @@ class MainWindow(QMainWindow):
         if len(recipe):
             recipe_json = recipe.to_json()
 
-        views = [(view.name, view.kind) for view in self._views.views()]
+        views = [(view.name, view.kind) for view in self._session.views.views()]
 
         snapshot = build_context_snapshot(
             source=source,
@@ -5641,7 +5648,7 @@ class MainWindow(QMainWindow):
         looked at without an NPZ.  ``File ▸ Save results`` persists one when
         wanted.
         """
-        store = self._store
+        store = self._session.store
         mesh = store.preprocessed() if store is not None else None
         if store is None or mesh is None:
             self.log(
@@ -5696,7 +5703,7 @@ class MainWindow(QMainWindow):
             ``True`` when the run started; ``False`` when it cannot yet (no
             preprocessed model) or one is already running.
         """
-        store = self._store
+        store = self._session.store
         mesh = store.preprocessed() if store is not None else None
         if store is None or mesh is None:
             self.log(
@@ -5879,14 +5886,20 @@ class MainWindow(QMainWindow):
         """
         if not self._source_label:
             return
-        if self._store is not None:
+        if self._session.store is not None:
             displayed = self._model
-            if displayed is not self._store.raw() and displayed is not self._store.preprocessed():
+            if (
+                displayed is not self._session.store.raw()
+                and displayed is not self._session.store.preprocessed()
+            ):
                 return
         camera = self._current_camera()
         if self._reset_view_baseline is not None:
             baseline_camera, baseline_hidden = self._reset_view_baseline
-            if camera == baseline_camera and frozenset(self._hidden_elem_ids) == baseline_hidden:
+            if (
+                camera == baseline_camera
+                and frozenset(self._session.hidden_elem_ids) == baseline_hidden
+            ):
                 return
         state: dict = {}
         # A hidden set only applies to the raw model a later open restores.  If
@@ -5894,8 +5907,8 @@ class MainWindow(QMainWindow):
         # topology, those ids reference child elements absent from the raw file,
         # and restoring them would re-hide raw members that merely share ids
         # with the processed topology — so keep only the camera in that case.
-        if self._store is None or self._model is not self._store.preprocessed():
-            state["hidden_elem_ids"] = sorted(self._hidden_elem_ids)
+        if self._session.store is None or self._model is not self._session.store.preprocessed():
+            state["hidden_elem_ids"] = sorted(self._session.hidden_elem_ids)
         if camera:
             state["camera_position"] = camera
         for note in save_view_state(self._source_label, state):

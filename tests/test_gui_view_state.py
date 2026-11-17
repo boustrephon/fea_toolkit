@@ -141,7 +141,7 @@ def test_view_state_round_trip_through_open_and_close(qapp, monkeypatch, tmp_pat
     assert win.open_path(str(_FIXTURE)) is True
     hidden = sorted(win._all_element_ids())[:1]
     assert hidden
-    win._hidden_elem_ids = set(hidden)
+    win._session.hidden_elem_ids = set(hidden)
     win.close()  # closeEvent -> _save_view_state
 
     state, notes = load_view_state(str(_FIXTURE))
@@ -151,7 +151,7 @@ def test_view_state_round_trip_through_open_and_close(qapp, monkeypatch, tmp_pat
 
     win2 = MainWindow()
     assert win2.open_path(str(_FIXTURE)) is True
-    assert win2._hidden_elem_ids == set(hidden)
+    assert win2._session.hidden_elem_ids == set(hidden)
     win2.close()
 
 
@@ -166,12 +166,12 @@ def test_reset_view_drops_hidden_and_saved_state(qapp, monkeypatch, tmp_path):
     assert win.open_path(str(_FIXTURE)) is True
     hidden = sorted(win._all_element_ids())[:1]
     assert hidden
-    win._hidden_elem_ids = set(hidden)
+    win._session.hidden_elem_ids = set(hidden)
     win._save_view_state()
     assert load_view_state(str(_FIXTURE))[0]["hidden_elem_ids"] == hidden
 
     win._actions["view.reset_view"].trigger()
-    assert win._hidden_elem_ids == set()
+    assert win._session.hidden_elem_ids == set()
     assert load_view_state(str(_FIXTURE))[0] == {}
     win.close()
     # closeEvent must not recreate the state the reset just cleared.
@@ -222,7 +222,7 @@ def test_hidden_set_from_a_processed_topology_is_dropped_on_open(qapp, monkeypat
 
     win = MainWindow()
     assert win.open_path(str(_FIXTURE)) is True
-    assert win._hidden_elem_ids == set()
+    assert win._session.hidden_elem_ids == set()
     win.close()
 
 
@@ -241,10 +241,10 @@ def test_hidden_set_not_saved_when_viewing_the_preprocessed_topology(qapp, monke
     assert win.open_path(str(_FIXTURE)) is True
 
     mesh = object()  # stand-in for the preprocessed topology
-    win._store.set_preprocessed(mesh)
+    win._session.store.set_preprocessed(mesh)
     win._model = mesh
 
-    win._hidden_elem_ids = {"Area:ghost"}
+    win._session.hidden_elem_ids = {"Area:ghost"}
     win._save_view_state()
 
     state, _ = load_view_state(str(_FIXTURE))

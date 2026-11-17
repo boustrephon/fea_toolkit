@@ -71,14 +71,14 @@ class TestDocumentAdoption:
             results=[StepResult(kind="session", label="Opened document", payload=path)],
         )
         window._recipe_finished((run, []))
-        assert window._store.raw() is opened
+        assert window._session.store.raw() is opened
         assert window._source_label == path
 
     def test_a_save_only_run_keeps_the_store(self, window, tmp_path):
         from fea_toolkit.workflow import RecipeRun
         from fea_toolkit.workflow.steps import DocumentState, StepResult
 
-        before = window._store.raw()
+        before = window._session.store.raw()
         path = str(tmp_path / "doc.json")
         run = RecipeRun(
             document=DocumentState(model_data=before, document_path=path),
@@ -86,7 +86,7 @@ class TestDocumentAdoption:
             results=[StepResult(kind="session", label="Saved document", payload=path)],
         )
         window._recipe_finished((run, []))
-        assert window._store.raw() is before
+        assert window._session.store.raw() is before
 
     def test_a_select_only_run_merges_only_changed_selections(self, window):
         """Only the entries a recipe changed are merged; a concurrent user edit survives."""
@@ -100,20 +100,22 @@ class TestDocumentAdoption:
         window._recipe_named_snapshot = {"core": core, "other": other}
         # The user edits "other" while the run is in flight.
         other_edited = NamedSelection(name="other", selection=Selection(sections=["SLAB"]))
-        window._named_selections = {"core": core, "other": other_edited}
+        window._session.named_selections = {"core": core, "other": other_edited}
 
         core_changed = NamedSelection(name="core", selection=Selection(sections=["BRACE"]))
         run = RecipeRun(
             document=DocumentState(
-                model_data=window._store.raw(),
+                model_data=window._session.store.raw(),
                 named_selections={"core": core_changed, "other": other},
             ),
             document_reset=False,
         )
         window._recipe_finished((run, []))
 
-        assert window._named_selections["core"] == core_changed  # the recipe's change landed
-        assert window._named_selections["other"] == other_edited  # the user's edit survived
+        assert (
+            window._session.named_selections["core"] == core_changed
+        )  # the recipe's change landed
+        assert window._session.named_selections["other"] == other_edited  # the user's edit survived
 
     def test_a_stale_run_is_rejected_after_switching_documents(self, window):
         """A run started for document A cannot affect document B opened mid-run."""
@@ -121,11 +123,11 @@ class TestDocumentAdoption:
         from fea_toolkit.workflow import RecipeRun
         from fea_toolkit.workflow.steps import DocumentState
 
-        starting_store = window._store
+        starting_store = window._session.store
         window._recipe_starting_store = starting_store
         # The user switches documents while the run is in flight.
         window._remember_source(make_sample_model())
-        new_store = window._store
+        new_store = window._session.store
         assert new_store is not starting_store
 
         run = RecipeRun(
@@ -135,7 +137,7 @@ class TestDocumentAdoption:
         window._recipe_finished((run, []))
 
         # The stale run's document was not adopted — B's store is untouched.
-        assert window._store is new_store
+        assert window._session.store is new_store
         assert "no longer open" in window._message_log.toPlainText()
 
 
@@ -225,7 +227,7 @@ class TestModelPresets:
         )
         _await(window)
 
-        assert [view.key for view in window._views.views()] == ["unprocessed", "meshed"]
+        assert [view.key for view in window._session.views.views()] == ["unprocessed", "meshed"]
         log = window._message_log.toPlainText()
         assert "Splitting elements at joints and meshing areas" in log
         assert "Preprocessed:" in log
@@ -345,7 +347,7 @@ class TestRunOrder:
         window._actions["recipe.run"].trigger()
         _await(window)
 
-        assert [view.key for view in window._views.views()] == [
+        assert [view.key for view in window._session.views.views()] == [
             "unprocessed",
             "processed",
             "meshed",
@@ -382,10 +384,10 @@ class TestResultViews:
         window._actions["recipe.run"].trigger()
         _await(window)
 
-        view = window._views.get("results:DEAD")
+        view = window._session.views.get("results:DEAD")
         assert view is not None, "the solved case registered no view"
         assert view.kind == "results"
-        assert window._views.results("results:DEAD") is not None
+        assert window._session.views.results("results:DEAD") is not None
         assert view.source == "Recipe: Static cases \u00b7 DEAD"
         assert "Static cases: 1 case(s) added as views." in window._message_log.toPlainText()
 
@@ -407,14 +409,14 @@ class TestResultViews:
         window._actions["recipe.run"].trigger()
         _await(window)
 
-        keys = [view.key for view in window._views.views()]
+        keys = [view.key for view in window._session.views.views()]
         assert "results:DEAD" in keys
         assert "results:GRAV" in keys
 
     def test_an_empty_archive_registers_no_view(self, window):
         """An archive with no case in it adds nothing — it does not invent a view."""
         assert window._show_results_result("Static cases", {}) == []
-        assert window._views.get("results:") is None
+        assert window._session.views.get("results:") is None
 
     def test_a_cancelled_run_that_solved_nothing_is_not_a_failure(self, window):
         """A cancelled run's empty result is explained by cancelling, not as an error.
@@ -450,7 +452,7 @@ class TestResultViews:
         from fea_toolkit.opensees.preprocessor import preprocess_model
 
         mesh = preprocess_model(make_sample_model(), {"split_elements": True})
-        window._store.set_preprocessed(mesh)
+        window._session.store.set_preprocessed(mesh)
         node_tags = [node.node_tag for node in mesh.nodes.values()]
         field = dict.fromkeys(node_tags, (0.001, 0.0, 0.0))
 
@@ -471,11 +473,11 @@ class TestResultViews:
         )
         window._show_rs_result("Response spectrum (X)", payload)
 
-        view = window._views.get("results:RS-X")
+        view = window._session.views.get("results:RS-X")
         assert view is not None, "the RS result registered no deformed-shape view"
         assert view.kind == "results"
         assert view.parent == "table:response-spectrum-(x)", "RS view should nest under its table"
-        repository = window._views.results("results:RS-X")
+        repository = window._session.views.results("results:RS-X")
         assert repository.has_displacements("RS-X")
         assert repository.nodal_displacements("RS-X")
 
@@ -486,7 +488,7 @@ class TestResultViews:
         from fea_toolkit.opensees.preprocessor import preprocess_model
 
         mesh = preprocess_model(make_sample_model(), {"split_elements": True})
-        window._store.set_preprocessed(mesh)
+        window._session.store.set_preprocessed(mesh)
         node_tags = [node.node_tag for node in mesh.nodes.values()]
         shapes = {
             0: dict.fromkeys(node_tags, (0.001, 0.0, 0.0)),
@@ -512,11 +514,11 @@ class TestResultViews:
         window._show_modal_result("Modal", payload)
 
         for key in ("results:Mode-1", "results:Mode-2"):
-            view = window._views.get(key)
+            view = window._session.views.get(key)
             assert view is not None, f"{key} registered no mode-shape view"
             assert view.kind == "results"
             assert view.parent == "table:modal", f"{key} should nest under the modal table"
-            assert window._views.results(key).has_displacements(key.split(":")[1])
+            assert window._session.views.results(key).has_displacements(key.split(":")[1])
 
     def test_animate_toggle_starts_and_stops_the_timer(self, window):
         """Results ▸ Animate starts a timer over the active view's displacement field."""
@@ -525,7 +527,7 @@ class TestResultViews:
         from fea_toolkit.opensees.preprocessor import preprocess_model
 
         mesh = preprocess_model(make_sample_model(), {"split_elements": True})
-        window._store.set_preprocessed(mesh)
+        window._session.store.set_preprocessed(mesh)
         node_tags = [node.node_tag for node in mesh.nodes.values()]
         field = dict.fromkeys(node_tags, (0.001, 0.0, 0.0))
 
@@ -650,7 +652,7 @@ class TestResultViews:
 
         # Switch to the unprocessed geometry view — the animation must stop and
         # the toggle must clear rather than keep drawing the old view's history.
-        window._show_view(window._views.get("unprocessed"))
+        window._show_view(window._session.views.get("unprocessed"))
 
         assert not window._anim_timer.isActive()
         assert window._actions["results.animate"].isChecked() is False
@@ -665,10 +667,10 @@ class TestTableAndFigureViews:
         window._actions["recipe.run"].trigger()
         _await(window)
 
-        view = window._views.get("table:connectivity")
+        view = window._session.views.get("table:connectivity")
         assert view is not None, "the check registered no table view"
         assert view.kind == "table"
-        assert window._views.table("table:connectivity") is not None
+        assert window._session.views.table("table:connectivity") is not None
         assert window._stack.currentWidget() is window._table_page
 
     def test_a_table_result_renders_its_cells(self, window):
@@ -678,9 +680,9 @@ class TestTableAndFigureViews:
         table = Table(title="Probe", columns=("a", "b"), rows=(("1", "2"), ("3", "4")))
         window._show_table_result("Probe", table)
 
-        view = window._views.get("table:probe")
+        view = window._session.views.get("table:probe")
         assert view is not None and view.kind == "table"
-        assert window._views.table("table:probe") is table
+        assert window._session.views.table("table:probe") is table
         assert window._table_widget.rowCount() == 2
         assert window._table_widget.columnCount() == 2
         assert window._table_widget.item(0, 1).text() == "2"
@@ -693,9 +695,9 @@ class TestTableAndFigureViews:
         figure.gca().plot([0.0, 1.0], [0.0, 1.0])
         window._show_figure_result("Storey displacements", figure)
 
-        view = window._views.get("figure:storey-displacements")
+        view = window._session.views.get("figure:storey-displacements")
         assert view is not None and view.kind == "figure"
-        assert window._views.figure("figure:storey-displacements") is figure
+        assert window._session.views.figure("figure:storey-displacements") is figure
         assert window._stack.currentWidget() is window._figure_page
         assert window._figure_layout.count() == 1
 
@@ -766,7 +768,7 @@ class TestTableAndFigureViews:
         from fea_toolkit.opensees.preprocessor import preprocess_model
 
         mesh = preprocess_model(make_sample_model(), {"split_elements": True})
-        window._store.set_preprocessed(mesh)
+        window._session.store.set_preprocessed(mesh)
         node_tags = [node.node_tag for node in mesh.nodes.values()]
         field = dict.fromkeys(node_tags, (0.004, 0.0, 0.0))
 
@@ -803,21 +805,21 @@ class TestTableAndFigureViews:
         )
         window._show_pushover_result("Pushover", payload)
 
-        assert window._views.get("table:pushover") is not None, (
+        assert window._session.views.get("table:pushover") is not None, (
             "pushover registered no summary table"
         )
-        figure = window._views.get("figure:pushover-plusx-uniform")
+        figure = window._session.views.get("figure:pushover-plusx-uniform")
         assert figure is not None, "pushover registered no ADRS figure"
-        view = window._views.get("results:Pushover+X-uniform")
+        view = window._session.views.get("results:Pushover+X-uniform")
         assert view is not None, "pushover registered no deformed-shape view"
         assert view.parent == "table:pushover"
-        assert window._views.results("results:Pushover+X-uniform").has_displacements(
+        assert window._session.views.results("results:Pushover+X-uniform").has_displacements(
             "Pushover+X-uniform"
         )
 
         # The recorded step history is threaded through, so the animation steps
         # through it rather than oscillating a single field.
-        window._views.set_active("results:Pushover+X-uniform")
+        window._session.views.set_active("results:Pushover+X-uniform")
         window._on_animate_toggled(True)
         assert window._anim_step_mode is True
         assert len(window._anim_frames) == 2

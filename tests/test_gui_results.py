@@ -84,8 +84,8 @@ def window(qapp, monkeypatch, tmp_path):
 def test_opening_an_archive_registers_one_view_per_case(window, tmp_path):
     assert window.open_results_path(str(_write_archive(tmp_path))) is True
 
-    assert [view.name for view in window._views.views()] == ["DEAD", "COMB1"]
-    assert window._views.active.name == "DEAD"
+    assert [view.name for view in window._session.views.views()] == ["DEAD", "COMB1"]
+    assert window._session.views.active.name == "DEAD"
     assert "Opened 2 results view(s)" in window._message_log.toPlainText()
 
 
@@ -130,7 +130,7 @@ def test_open_dropped_files_opens_archives_and_skips_unreadable(window, tmp_path
     archive = str(_write_archive(tmp_path))
     bad = str(tmp_path / "not-an-archive.npz")
     assert window._open_dropped_files([archive, bad]) == 1
-    assert [view.name for view in window._views.views()] == ["DEAD", "COMB1"]
+    assert [view.name for view in window._session.views.views()] == ["DEAD", "COMB1"]
 
 
 def test_open_dropped_files_routes_archives_models_and_projects(window, monkeypatch):
@@ -185,14 +185,16 @@ def test_the_archive_draws_without_a_model(window, tmp_path):
 
     assert len(frames) == 1
     assert len(nodes) == 2
-    assert window._model is window._views.source("results:DEAD")
+    assert window._model is window._session.views.source("results:DEAD")
 
 
 def test_the_case_views_share_one_model(window, tmp_path):
     """A lens, not a copy: a dozen cases cost one display model between them."""
     window.open_results_path(str(_write_archive(tmp_path)))
 
-    assert window._views.source("results:DEAD") is window._views.source("results:COMB1")
+    assert window._session.views.source("results:DEAD") is window._session.views.source(
+        "results:COMB1"
+    )
 
 
 def test_the_tree_lists_the_case_views(window, tmp_path):
@@ -206,7 +208,7 @@ def test_preprocessing_stays_unavailable(window, tmp_path):
     """An archive is display-only: there is no store behind it to preprocess."""
     window.open_results_path(str(_write_archive(tmp_path)))
 
-    assert window._store is None
+    assert window._session.store is None
     assert window._actions["model.mesh"].isEnabled() is False
 
 
@@ -223,7 +225,7 @@ def test_a_case_from_another_combination_is_qualified(window, tmp_path):
     window.open_results_path(str(path))
 
     assert NpzResultsRepository(path).case_meta("COMB1")["group"] == "COMB1"
-    assert window._views.get("results:COMB1").name == "COMB1"
+    assert window._session.views.get("results:COMB1").name == "COMB1"
 
 
 def test_a_file_that_is_not_a_results_archive_is_reported(window, tmp_path):
@@ -730,7 +732,7 @@ def test_open_ida_archive_registers_a_figure_view(window, tmp_path):
         str(tmp_path / "ida.npz"), make_sample_model(), ida_results=_synthetic_ida_result()
     )
     assert window.open_results_path(path) is True
-    view = window._views.get("ida")
+    view = window._session.views.get("ida")
     assert view is not None
     assert view.kind == "figure"
     # The figure is also exposed through the Model Tree's view lookup (labelled

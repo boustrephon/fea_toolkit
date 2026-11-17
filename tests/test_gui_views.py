@@ -241,11 +241,11 @@ def test_preprocessing_freezes_the_gc_before_handing_work_to_the_worker(window, 
 
 def test_opening_a_model_registers_the_unprocessed_view(window):
     """A freshly parsed model is viewable straight away, as ``Unprocessed``."""
-    view = window._views.get("unprocessed")
+    view = window._session.views.get("unprocessed")
 
     assert view is not None
     assert view.active is True
-    assert window._views.source("unprocessed") is window._model
+    assert window._session.views.source("unprocessed") is window._model
 
 
 def test_the_views_group_leads_the_tree(window):
@@ -262,9 +262,9 @@ def test_splitting_adds_and_activates_a_processed_view(window):
     """``Model ▸ Split elements`` registers the result as a view of its own."""
     run_preprocess(window)
 
-    assert [view.name for view in window._views.views()] == ["Unprocessed", "Processed"]
-    assert window._views.active.name == "Processed"
-    assert window._model is window._views.source("processed")
+    assert [view.name for view in window._session.views.views()] == ["Unprocessed", "Processed"]
+    assert window._session.views.active.name == "Processed"
+    assert window._model is window._session.views.source("processed")
 
 
 def test_switching_views_swaps_the_scene(window):
@@ -275,12 +275,12 @@ def test_switching_views_swaps_the_scene(window):
     assert window._select_entity_in_tree("views", "Unprocessed") is True
 
     assert len(window._viewer.geometry()[0]) == 2  # the members as drawn
-    assert window._views.active.key == "unprocessed"
+    assert window._session.views.active.key == "unprocessed"
 
     assert window._select_entity_in_tree("views", "Processed") is True
 
     assert len(window._viewer.geometry()[0]) == 3
-    assert window._views.active.key == "processed"
+    assert window._session.views.active.key == "processed"
 
 
 def test_the_inspector_reports_the_counts_of_the_view(window):
@@ -382,7 +382,7 @@ class TestDisplayQuality:
         assert after[:, 0].min() > before[:, 0].min()
         assert after[:, 0].max() < before[:, 0].max()
         # Still the same view: re-drawing must not lose the user's place.
-        assert slab_window._views.active is not None
+        assert slab_window._session.views.active is not None
 
     def test_shrinking_leaves_the_viewers_geometry_true_sized(self, slab_window):
         """Display-only: what the viewer reports is still the real model."""
@@ -426,7 +426,7 @@ class TestSupportDisplay:
         """No store means no constraint source — the node rows carry on alone."""
         window._select_entity_in_tree("nodes", "4")
         window._inspector.set_source_model(None)
-        window._inspector.show_object(window._views.source("unprocessed").nodes["4"])
+        window._inspector.show_object(window._session.views.source("unprocessed").nodes["4"])
         assert "Restraints" not in _inspector_rows(window)
 
 
@@ -544,18 +544,18 @@ class TestHideSelection:
     def test_a_preprocessing_result_clears_the_hidden_set(self, slab_window):
         slab_window._select_entity_in_tree("area_elements", "A1")
         slab_window._actions["view.hide_selected"].trigger()
-        assert slab_window._hidden_elem_ids == {"Area:A1"}
+        assert slab_window._session.hidden_elem_ids == {"Area:A1"}
 
         slab_window._show_geometry_result("Meshed", _slab_model())
 
-        assert slab_window._hidden_elem_ids == set()
+        assert slab_window._session.hidden_elem_ids == set()
         assert "hidden elements were restored" in slab_window._message_log.toPlainText()
 
     def test_isolate_selected_hides_everything_else(self, slab_window):
         slab_window._select_entity_in_tree("area_elements", "A1")
         slab_window._actions["view.isolate_selected"].trigger()
 
-        assert slab_window._hidden_elem_ids == {"Area:A2", "Area:A3", "Area:A4"}
+        assert slab_window._session.hidden_elem_ids == {"Area:A2", "Area:A3", "Area:A4"}
         _frames, shells, nodes = slab_window._viewer.geometry()
         assert {s.area_id for s in shells} == {"A1"}
         # Only A1's corners remain: its exclusive node 1 plus the shared 2/4/5.
@@ -572,11 +572,11 @@ class TestHideSelection:
     def test_isolate_selected_replaces_the_prior_hidden_set(self, slab_window):
         slab_window._select_entity_in_tree("area_elements", "A4")
         slab_window._actions["view.hide_selected"].trigger()
-        assert slab_window._hidden_elem_ids == {"Area:A4"}
+        assert slab_window._session.hidden_elem_ids == {"Area:A4"}
 
         slab_window._select_entity_in_tree("area_elements", "A1")
         slab_window._actions["view.isolate_selected"].trigger()
-        assert slab_window._hidden_elem_ids == {"Area:A2", "Area:A3", "Area:A4"}
+        assert slab_window._session.hidden_elem_ids == {"Area:A2", "Area:A3", "Area:A4"}
 
     def test_isolate_selected_with_no_selection_warns(self, slab_window):
         slab_window._actions["view.isolate_selected"].trigger()
@@ -586,7 +586,7 @@ class TestHideSelection:
         colliding_window._select_entity_in_tree("frame_elements", "1")
         colliding_window._actions["view.isolate_selected"].trigger()
 
-        assert colliding_window._hidden_elem_ids == {"Frame:2", "Area:1"}
+        assert colliding_window._session.hidden_elem_ids == {"Frame:2", "Area:1"}
         frames, shells, _nodes = colliding_window._viewer.geometry()
         assert {f.elem_id for f in frames} == {"1"}
         assert {s.area_id for s in shells} == set()
@@ -595,7 +595,7 @@ class TestHideSelection:
         colliding_window._select_entity_in_tree("area_elements", "1")
         colliding_window._actions["view.isolate_selected"].trigger()
 
-        assert colliding_window._hidden_elem_ids == {"Frame:1", "Frame:2"}
+        assert colliding_window._session.hidden_elem_ids == {"Frame:1", "Frame:2"}
         frames, shells, _nodes = colliding_window._viewer.geometry()
         assert {f.elem_id for f in frames} == set()
         assert {s.area_id for s in shells} == {"1"}
@@ -603,7 +603,7 @@ class TestHideSelection:
     def test_hide_warns_when_the_view_is_node_scoped(self, slab_window):
         from fea_toolkit.model.selection import Selection
 
-        view = slab_window._views.add_derived(
+        view = slab_window._session.views.add_derived(
             "processed:1", "Nodes", "processed", Selection(element_types=["Node"], node_ids=["1"])
         )
         slab_window._show_view(view)
@@ -619,7 +619,7 @@ class TestHideSelection:
         """A ``node_ids``-only lens expands joints too — hide must warn, not fold."""
         from fea_toolkit.model.selection import Selection
 
-        view = slab_window._views.add_derived(
+        view = slab_window._session.views.add_derived(
             "processed:1", "Nodes", "processed", Selection(node_ids=["1"])
         )
         slab_window._show_view(view)
@@ -635,7 +635,7 @@ class TestHideSelection:
     def test_isolate_warns_when_the_view_is_node_scoped(self, slab_window):
         from fea_toolkit.model.selection import Selection
 
-        view = slab_window._views.add_derived(
+        view = slab_window._session.views.add_derived(
             "processed:1", "Nodes", "processed", Selection(element_types=["Node"], node_ids=["1"])
         )
         slab_window._show_view(view)
@@ -652,9 +652,9 @@ class TestHideSelection:
 
         slab_window._select_entity_in_tree("area_elements", "A1")
         slab_window._actions["view.hide_selected"].trigger()
-        assert slab_window._hidden_elem_ids == {"Area:A1"}
+        assert slab_window._session.hidden_elem_ids == {"Area:A1"}
 
-        view = slab_window._views.add_derived(
+        view = slab_window._session.views.add_derived(
             "processed:1", "Nodes", "processed", Selection(element_types=["Node"], node_ids=["1"])
         )
         slab_window._show_view(view)

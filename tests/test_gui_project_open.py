@@ -143,7 +143,7 @@ def test_dropping_a_project_zip_reopens_the_model(window, tmp_path, monkeypatch)
     )
     assert window._open_dropped_files([str(zip_path)]) == 1
     assert confirmed == [str(zip_path)]
-    assert window._store is not None
+    assert window._session.store is not None
 
 
 def test_opening_a_different_project_refits_secondary_viewports(window, tmp_path):
@@ -213,8 +213,8 @@ def test_tree_source_prefers_the_mesh(window):
     window._remember_source(sap)
     assert window._tree_model_source(None) is sap  # no mesh yet → raw
 
-    window._store.set_preprocessed(object())
-    assert window._tree_model_source(None) is window._store.preprocessed()
+    window._session.store.set_preprocessed(object())
+    assert window._tree_model_source(None) is window._session.store.preprocessed()
 
 
 def test_preferred_open_view_chooses_geometry(window):
@@ -222,7 +222,7 @@ def test_preferred_open_view_chooses_geometry(window):
     from examples.sample_model import make_sample_model
 
     window._remember_source(make_sample_model())  # registers "unprocessed"
-    window._views.add_geometry("meshed", "Meshed", make_sample_model(), source="")
+    window._session.views.add_geometry("meshed", "Meshed", make_sample_model(), source="")
 
     view = window._preferred_open_view("results:Mode-2")
     assert view is not None

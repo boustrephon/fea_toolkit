@@ -40,8 +40,8 @@ def test_name_selection_stores_and_rebuilds_the_tree(window, monkeypatch):
 
     window._on_name_selection()
 
-    assert "core" in window._named_selections
-    assert window._named_selections["core"].selection.to_string() == "section=COL"
+    assert "core" in window._session.named_selections
+    assert window._session.named_selections["core"].selection.to_string() == "section=COL"
     assert "Named selection 'core'" in window._message_log.toPlainText()
 
 
@@ -69,8 +69,8 @@ def test_name_selection_uses_the_viewport_pick_when_chosen(window, monkeypatch):
 
     window._on_name_selection()
 
-    assert "core" in window._named_selections
-    named = window._named_selections["core"]
+    assert "core" in window._session.named_selections
+    named = window._session.named_selections["core"]
     # The pick's element type qualifies the id so a same-id area cannot collide.
     assert named.element_ids == [f"Frame:{frames[0].elem_id}"]
     assert named.node_ids == []

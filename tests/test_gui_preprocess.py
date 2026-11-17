@@ -103,7 +103,7 @@ def test_the_actions_need_a_parsed_source_model(qapp, monkeypatch, tmp_path):
     win = MainWindow(model=_t_junction_model())
     win._remember_source(object())  # a model the Preprocessor cannot consume
     try:
-        assert win._store is None
+        assert win._session.store is None
         win._set_model_actions_enabled(False)
         assert win._actions["model.mesh"].isEnabled() is False
         win._mesh_preset(
@@ -269,5 +269,5 @@ def test_mesh_areas_after_split_really_meshes(slab_window):
 
     run_preprocess(slab_window, "model.mesh")
     assert slab_window._model.area_element_types  # the config was honoured
-    assert slab_window._store.preprocessed() is slab_window._model
+    assert slab_window._session.store.preprocessed() is slab_window._model
     assert "Meshed" in slab_window._message_log.toPlainText()

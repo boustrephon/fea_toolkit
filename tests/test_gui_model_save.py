@@ -53,7 +53,7 @@ def _mesh(window):
         QCoreApplication.processEvents()
         time.sleep(0.01)
     assert window._worker is None, "the recipe worker never finished"
-    assert window._store.preprocessed() is not None
+    assert window._session.store.preprocessed() is not None
 
 
 def _patch_dialog(monkeypatch, target, chosen_filter):
@@ -93,7 +93,10 @@ class TestSaveModelFormats:
         window._on_save_model()
 
         assert target.exists()
-        assert json_to_model(target.read_text(encoding="utf-8")) == window._store.preprocessed()
+        assert (
+            json_to_model(target.read_text(encoding="utf-8"))
+            == window._session.store.preprocessed()
+        )
         assert "Saved model to" in window._message_log.toPlainText()
 
     def test_npz_writes_a_stage_file(self, window, tmp_path, monkeypatch):
@@ -105,7 +108,7 @@ class TestSaveModelFormats:
         window._on_save_model()
 
         assert target.exists()
-        assert read_model_stages(str(target), "mesh") == window._store.preprocessed()
+        assert read_model_stages(str(target), "mesh") == window._session.store.preprocessed()
 
     def test_h5_writes_a_stage_file(self, window, tmp_path, monkeypatch):
         pytest.importorskip("h5py")
@@ -117,7 +120,7 @@ class TestSaveModelFormats:
         window._on_save_model()
 
         assert target.exists()
-        assert read_model_stages(str(target), "mesh") == window._store.preprocessed()
+        assert read_model_stages(str(target), "mesh") == window._session.store.preprocessed()
 
 
 class TestModelFileFormat:

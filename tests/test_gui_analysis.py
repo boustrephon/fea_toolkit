@@ -97,7 +97,7 @@ def test_run_is_greyed_until_the_model_is_preprocessed(window):
 
     _preprocess(window)
 
-    assert isinstance(window._store.preprocessed(), MeshModel)
+    assert isinstance(window._session.store.preprocessed(), MeshModel)
     assert window._actions["analysis.run"].isEnabled() is True
 
 
@@ -109,7 +109,7 @@ def test_ida_is_greyed_until_the_model_is_preprocessed(window):
 
     _preprocess(window)
 
-    assert isinstance(window._store.preprocessed(), MeshModel)
+    assert isinstance(window._session.store.preprocessed(), MeshModel)
     assert window._actions["analysis.ida"].isEnabled() is True
 
 
@@ -128,8 +128,8 @@ def test_an_ida_result_registers_a_table_and_a_curve(window):
             "structure_height": 10.0,
         },
     )
-    assert window._views.get("table:ida") is not None
-    assert window._views.get("figure:ida-curve") is not None
+    assert window._session.views.get("table:ida") is not None
+    assert window._session.views.get("figure:ida-curve") is not None
 
 
 def test_running_without_a_preprocessed_model_declines(window):
@@ -148,9 +148,9 @@ def test_a_run_registers_a_case_view_without_writing_a_file(window, tmp_path):
     assert window.run_static_analysis({"DEAD": {"DEAD": 1.0}}) is True
     _spin(window)
 
-    view = window._views.get("results:DEAD")
+    view = window._session.views.get("results:DEAD")
     assert view is not None
-    assert window._views.results("results:DEAD") is not None
+    assert window._session.views.results("results:DEAD") is not None
     assert "Static cases" in window._message_log.toPlainText()
 
     # Nothing was written: no NPZ anywhere under the test's temp directory.
@@ -172,8 +172,8 @@ def test_a_second_case_is_added_beside_the_first(window):
     window.run_static_analysis({"WIND": {"WIND": 1.0}})
     _spin(window)
 
-    assert window._views.get("results:DEAD") is not None
-    assert window._views.get("results:WIND") is not None
+    assert window._session.views.get("results:DEAD") is not None
+    assert window._session.views.get("results:WIND") is not None
 
 
 def test_a_run_registers_the_load_reaction_summary_table(window):
@@ -183,9 +183,9 @@ def test_a_run_registers_the_load_reaction_summary_table(window):
     assert window.run_static_analysis({"DEAD": {"DEAD": 1.0}}) is True
     _spin(window)
 
-    view = window._views.get("table:load/reaction-summary")
+    view = window._session.views.get("table:load/reaction-summary")
     assert view is not None
-    table = window._views.table("table:load/reaction-summary")
+    table = window._session.views.table("table:load/reaction-summary")
     assert table is not None
     assert table.title == "Load/reaction summary"
     assert table.columns[0] == "Analysis"
@@ -198,8 +198,8 @@ def test_a_combination_is_reduced_to_its_own_view(window):
     assert window.run_static_analysis({"DEAD": {"DEAD": 1.0}}, ["GRAV"]) is True
     _spin(window)
 
-    assert window._views.get("results:DEAD") is not None
-    assert window._views.get("results:GRAV") is not None
+    assert window._session.views.get("results:DEAD") is not None
+    assert window._session.views.get("results:GRAV") is not None
 
 
 # ── Saving (I4) ────────────────────────────────────────────────────────
@@ -218,7 +218,7 @@ def test_save_results_writes_a_round_trippable_archive(window, tmp_path, monkeyp
     monkeypatch.setattr(
         QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(target), ""))
     )
-    window._show_view(window._views.get("results:DEAD"))
+    window._show_view(window._session.views.get("results:DEAD"))
     window._on_save_results()
 
     assert target.exists()

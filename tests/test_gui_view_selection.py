@@ -107,7 +107,7 @@ class TestDuplicateView:
 
         window._on_duplicate_view()
 
-        derived = window._views.active
+        derived = window._session.views.active
         assert derived.parent == "unprocessed"
         assert derived.selection is selection
         assert len(window._viewer.geometry()[0]) == 2  # members 1 and 2, never 3
@@ -115,11 +115,11 @@ class TestDuplicateView:
 
     def test_cancelling_adds_nothing(self, window, monkeypatch):
         _stub_dialog(monkeypatch, None)
-        before = len(window._views)
+        before = len(window._session.views)
 
         window._on_duplicate_view()
 
-        assert len(window._views) == before
+        assert len(window._session.views) == before
 
     def test_the_derived_view_appears_in_the_tree(self, window, monkeypatch):
         from fea_toolkit.model.selection import Selection
@@ -128,7 +128,7 @@ class TestDuplicateView:
 
         window._on_duplicate_view()
 
-        assert window._tree_model.index_for("views", window._views.active.name) is not None
+        assert window._tree_model.index_for("views", window._session.views.active.name) is not None
 
     def test_the_inspector_reports_the_derived_view(self, window, monkeypatch):
         from fea_toolkit.model.selection import Selection
@@ -172,15 +172,15 @@ class TestEditViewSelection:
 
         _stub_dialog(monkeypatch, Selection(sections=["UB300"]))
         window._on_duplicate_view()
-        key = window._views.active.key
+        key = window._session.views.active.key
 
         newer = Selection(element_types=["Node"], node_ids=["1"])
         _stub_dialog(monkeypatch, newer)
 
         window._on_edit_view_selection()
 
-        assert window._views.active.key == key  # the same view, a new lens
-        assert window._views.active.selection is newer
+        assert window._session.views.active.key == key  # the same view, a new lens
+        assert window._session.views.active.selection is newer
         assert len(window._viewer.geometry()[0]) == 1  # just member 1
 
     def test_it_is_only_offered_for_a_derived_view(self, window):
