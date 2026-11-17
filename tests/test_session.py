@@ -34,3 +34,24 @@ def test_reset_preserves_the_recipe():
 
     assert len(session.recipe) == 1
     assert session.recipe.steps[0].verb == "mesh"
+
+
+def test_to_bundle_collects_the_session_into_a_project_payload():
+    from examples.sample_model import make_sample_model
+    from fea_toolkit.io.model_store import InMemoryModelStore
+
+    session = Session()
+    model = make_sample_model()
+    session.store = InMemoryModelStore(model, source="model.s2k")
+    session.recipe.add("mesh")
+    session.hidden_elem_ids.add("Frame:1")
+
+    bundle = session.to_bundle(name="sample", source_label="model.s2k")
+
+    assert set(bundle) == {"manifest", "sap", "mesh", "results_arrays", "figures", "tables"}
+    assert bundle["sap"] is model
+    assert bundle["mesh"] is None
+    manifest = bundle["manifest"]
+    assert manifest["project"]["name"] == "sample"
+    assert manifest["project"]["recipe"]["steps"][0]["verb"] == "mesh"
+    assert manifest["viewport"]["hidden_elem_ids"] == ["Frame:1"]

@@ -14,10 +14,10 @@ holds the *data* the window renders, never a widget.
 """
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 from ..workflow.recipe import Recipe
-from .controllers.view_registry import ViewRegistry
+from .controllers.view_registry import RESULTS, TABLE, ViewRegistry
 
 __all__ = ["Session"]
 
@@ -58,3 +58,235 @@ class Session:
         self.named_selections.clear()
         self.hidden_elem_ids.clear()
         self.last_run = None
+
+    def to_bundle(
+        self, *, name: str, source_label: str, camera: Any = None, display: Optional[dict] = None
+    ) -> dict:
+        """Collect the session's state into an in-memory project bundle.
+
+        Everything needed to reconstruct the session is gathered here, Qt-free;
+        the window supplies the two pieces of state the session does not own —
+        the viewport camera and the display preferences — then hands the
+        returned bundle straight to
+        :func:`~fea_toolkit.gui.project.write_project_zip`.
+
+        Args:
+            name: Project display name.
+            source_label: Original model path (informational only).
+            camera: The viewport camera position, or ``None``.
+            display: The display preferences dict, or ``None``.
+
+        Returns:
+            A dict with ``manifest`` plus the ``sap`` / ``mesh`` /
+            ``results_arrays`` / ``figures`` / ``tables`` payloads.
+        """
+        from . import project as project_mod
+        from .project import collect_project_results
+
+        store = self.store
+        collected = collect_project_results(
+            self.last_run.results if self.last_run is not None else []
+        )
+        if not collected["static_arrays"]:
+            self._merge_results_view_arrays(collected["static_arrays"])
+
+        figures = project_mod.figures_payload(collected["pushover"])
+        if collected.get("ida"):
+            figures.update(
+                project_mod.ida_figure_payload(collected["ida"], label=self._ida_result_label())
+            )
+        tables = project_mod.tables_payload(self._project_tables())
+
+        active = self.views.active
+        manifest = project_mod.build_manifest(
+            name=name,
+            source_label=source_label,
+            model_file="model.h5",
+            units=dict(getattr(store.raw(), "units", None) or {}),
+            recipe=self.recipe,
+            views=self.views.views(),
+            active_view=active.key if active is not None else None,
+            camera=camera,
+            hidden_elem_ids=sorted(self.hidden_elem_ids),
+            display=display or {},
+        )
+        return {
+            "manifest": manifest,
+            "sap": store.raw(),
+            "mesh": store.preprocessed(),
+            "results_arrays": self._project_results_arrays(collected),
+            "figures": figures,
+            "tables": tables,
+        }
+
+    def _project_results_arrays(self, collected: dict) -> dict:
+        """Merge the collected static archive arrays with modal + RS + pushover
+        + IDA.
+
+        RS displacement fields, modal mode shapes and pushover directions are
+        persisted as static-shaped cases (``static/RS-<direction>/node_*``,
+        ``static/Mode-<i>/node_*``, ``static/Pushover-<direction>/node_*``) so
+        each deformed-shape view round-trips like a static load case (Option C).
+        The pushover per-step history is persisted as ``pushover/<direction>/…``.
+        A single-record IDA contributes its scalar ladder / collapse provenance
+        (``ida/<record>/…``) plus the retained collapse-rung transient block
+        (``transient/ida_<record>/…``), so the IDA view and its history rebuild
+        on load without re-running the analysis.
+        """
+        from ..io.npz_writer import collect_pushover_arrays
+        from ..io.unified_writer import (
+            collect_modal_arrays,
+            collect_rs_arrays,
+            collect_rs_element_force_arrays,
+            collect_rs_shell_force_arrays,
+        )
+        from .project import (
+            mode_shape_arrays,
+            pushover_displacement_arrays,
+            rs_displacement_arrays,
+        )
+
+        arrays = dict(collected.get("static_arrays") or {})
+        modal = collected.get("modal")
+        if modal:
+            arrays.update(collect_modal_arrays(modal, collected.get("mode_shapes")))
+        rs = collected.get("rs") or {}
+        if rs:
+            arrays.update(collect_rs_arrays(rs.get("rs_x"), rs.get("rs_y")))
+
+        # Element/shell RS forces are single-direction blocks in the schema
+        # (no direction axis), so one direction must serve both.  Pick the
+        # first direction present in either mapping — mirroring the review
+        # path's first-direction convention — and collect each block only when
+        # it recorded that direction, so the two blocks can never disagree.
+        rs_element_forces = collected.get("rs_element_forces") or {}
+        rs_shell_forces = collected.get("rs_shell_forces") or {}
+        directions = list(dict.fromkeys([*rs_element_forces, *rs_shell_forces]))
+        rs_force_direction = directions[0] if directions else None
+        if rs and rs_force_direction is not None and rs_force_direction in rs_element_forces:
+            arrays.update(collect_rs_element_force_arrays(rs_element_forces[rs_force_direction]))
+        if rs and rs_force_direction is not None and rs_force_direction in rs_shell_forces:
+            arrays.update(collect_rs_shell_force_arrays(rs_shell_forces[rs_force_direction]))
+
+        mesh = self.store.preprocessed() if self.store is not None else None
+        if mesh is not None:
+            rs_disp = collected.get("rs_nodal_displacements") or {}
+            if rs_disp:
+                rs_arrays = rs_displacement_arrays(mesh, rs_disp)
+                self._append_static_case_labels(arrays, rs_arrays.pop("static_case_labels"))
+                arrays.update(rs_arrays)
+
+            shapes = collected.get("mode_shapes") or {}
+            if shapes:
+                mode_arrays = mode_shape_arrays(mesh, shapes)
+                self._append_static_case_labels(arrays, mode_arrays.pop("static_case_labels"))
+                arrays.update(mode_arrays)
+
+            step_results = collected.get("pushover_step_results") or {}
+            pushover_results = collected.get("pushover_results") or {}
+            if step_results:
+                for (direction, load_type), per_step in step_results.items():
+                    arrays.update(
+                        collect_pushover_arrays(
+                            mesh,
+                            per_step,
+                            direction=direction,
+                            load_type=load_type,
+                            pushover_results=pushover_results.get((direction, load_type)),
+                        )
+                    )
+                # Per-(direction, load type) deformed-shape view: the final
+                # recorded step.
+                final_fields = {
+                    (direction, load_type): per_step[-1].get("node_displacements")
+                    for (direction, load_type), per_step in step_results.items()
+                    if per_step and per_step[-1].get("node_displacements")
+                }
+                if final_fields:
+                    po_arrays = pushover_displacement_arrays(mesh, final_fields)
+                    self._append_static_case_labels(arrays, po_arrays.pop("static_case_labels"))
+                    arrays.update(po_arrays)
+                self._append_analysis_type(arrays, "pushover")
+
+        # ── IDA (single-record run) + its retained transient history ──
+        # The numerical ladder / collapse scalars and the collapse-rung transient
+        # block are persisted alongside the regenerable curve, so a reload can
+        # rebuild the IDA view and its history without re-running the analysis.
+        ida = collected.get("ida")
+        if ida:
+            from ..io.npz_writer import (
+                _merge_ida_transient,
+                collect_ida_transient_arrays,
+                collect_single_ida_arrays,
+            )
+
+            arrays.update(collect_single_ida_arrays(ida))
+            self._append_analysis_type(arrays, "ida")
+            ida_transient = collect_ida_transient_arrays(ida)
+            if ida_transient:
+                _merge_ida_transient(arrays, ida_transient)
+                self._append_analysis_type(arrays, "transient")
+        return arrays
+
+    @staticmethod
+    def _append_analysis_type(arrays: dict, name: str) -> None:
+        """Append *name* to ``analysis_types``, creating it when absent."""
+        import numpy as np
+
+        existing = arrays.get("analysis_types")
+        if existing is not None and len(existing):
+            arrays["analysis_types"] = np.concatenate(
+                [np.asarray(existing), np.array([name], dtype=str)]
+            )
+        else:
+            arrays["analysis_types"] = np.array([name], dtype=str)
+
+    @staticmethod
+    def _append_static_case_labels(arrays: dict, labels: Any) -> None:
+        """Append *labels* to ``static_case_labels``, creating it when absent."""
+        import numpy as np
+
+        existing = arrays.get("static_case_labels")
+        if existing is not None and len(existing):
+            arrays["static_case_labels"] = np.concatenate(
+                [np.asarray(existing), np.asarray(labels)]
+            )
+        else:
+            arrays["static_case_labels"] = labels
+
+    def _ida_result_label(self) -> str:
+        """The label the registered IDA figure used — the run's IDA result label.
+
+        The figure view and the saved ``figures.json`` payload must derive the
+        same key, so the label is read back from the completed run's IDA step
+        (``name`` parameter) rather than re-defaulting to ``"IDA"``.
+        """
+        if self.last_run is not None:
+            for result in self.last_run.results:
+                if getattr(result, "kind", None) == "ida":
+                    return getattr(result, "label", "IDA") or "IDA"
+        return "IDA"
+
+    def _project_tables(self) -> dict:
+        """Collect ``{key: Table}`` from every table view in the registry."""
+        tables = {}
+        for view in self.views.views():
+            if view.kind == TABLE:
+                table = self.views.table(view.key)
+                if table is not None:
+                    tables[view.key] = table
+        return tables
+
+    def _merge_results_view_arrays(self, arrays: dict) -> None:
+        """Merge static arrays from results views (``Analysis ▸ Run``, no recipe).
+
+        Falls back to the registered results repositories when the recipe run
+        produced no ``CASES`` payload, so a project can be saved from either path.
+        """
+        seen = set()
+        for view in self.views.views():
+            if view.kind == RESULTS:
+                repository = self.views.results(view.key)
+                if repository is not None and id(repository) not in seen:
+                    seen.add(id(repository))
+                    arrays.update(repository.raw())
