@@ -302,6 +302,10 @@ class StepContext:
         cancel: Zero-argument predicate — ``True`` asks the run to stop at the
             next step boundary.  Wired to the GUI worker's flag.
         log: One-line sink for progress, wired to the GUI message log.
+        progress: Optional fine-grained progress callback
+            ``(index, name, total)`` — a solve verb reports each case *before*
+            it solves, so a GUI can drive a determinate bar.  ``None`` when no
+            listener is attached.
         pipeline_log: Optional structured
             :class:`~fea_toolkit.io.log.PipelineLog` for analysis events —
             distinct from *log* (the one-line progress sink).
@@ -322,6 +326,7 @@ class StepContext:
     results: dict = field(default_factory=dict)
     cancel: Callable[[], bool] = _never_cancel
     log: Callable[[str], None] = _discard
+    progress: Optional[Callable[[int, str, int], None]] = None
     pipeline_log: Optional["PipelineLog"] = None
     opensees_python: Optional[str] = None
     cancelled: bool = False

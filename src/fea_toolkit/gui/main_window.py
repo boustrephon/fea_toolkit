@@ -3809,6 +3809,10 @@ class MainWindow(QMainWindow):
                 if reporter[0] is not None:
                     reporter[0](index, len(recipe), f"{verb}:{status}")
 
+            def on_progress(index, name, total):
+                if reporter[0] is not None:
+                    reporter[0](index, total, f"case:{name}")
+
             run = run_recipe(
                 recipe,
                 model_data,
@@ -3816,6 +3820,7 @@ class MainWindow(QMainWindow):
                 cancel=should_cancel,
                 pipeline_log=pipeline_log,
                 on_step=on_step,
+                on_progress=on_progress,
                 opensees_python=opensees_python,
                 named_selections=named_snapshot,
             )
@@ -3824,21 +3829,35 @@ class MainWindow(QMainWindow):
         _freeze_gc_once()
         worker = TaskWorker(task, parent=self)
         reporter[0] = worker.report_progress
-        worker.progress.connect(self._on_recipe_step_progress)
+        worker.progress.connect(self._on_recipe_progress)
         worker.succeeded.connect(self._recipe_finished)
         worker.failed.connect(self._preprocess_failed)
         worker.finished.connect(self._preprocess_ended)
         self._worker = worker
         worker.start()
 
-    def _on_recipe_step_progress(self, index: int, _total: int, label: str) -> None:
-        """Update the Recipe panel's Status column for the step reporting in.
+    def _on_recipe_progress(self, index: int, total: int, label: str) -> None:
+        """Update the UI for a worker progress event — a step's status or a case.
+
+        The recipe worker multiplexes two streams over its one progress signal:
+        a step boundary is ``"<verb>:<status>"`` (updates the Recipe panel's
+        Status column), and a solve reporting the case it is about to run is
+        ``"case:<name>"`` (drives the determinate bar and a live log line).
 
         Args:
-            index: Zero-based step position in the recipe.
-            _total: The number of steps (unused — the panel already knows it).
-            label: ``"<verb>:<status>"``, as encoded by the run's ``on_step``.
+            index: For a step event, the zero-based step position; for a case
+                event, the 1-based case position.
+            total: For a step event, the number of steps (unused); for a case
+                event, the number of cases.
+            label: ``"<verb>:<status>"`` or ``"case:<name>"``.
         """
+        if label.startswith("case:"):
+            case_name = label[len("case:") :]
+            self._progress.setRange(0, max(int(total), 1))
+            self._progress.setValue(int(index))
+            if case_name:
+                self.log(f"Solving {case_name} ({index}/{total}) \u2026")
+            return
         _verb, _sep, status = label.partition(":")
         self._recipe_panel.set_step_status(index, status or "running")
 

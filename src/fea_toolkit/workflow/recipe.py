@@ -492,6 +492,7 @@ def run_recipe(
     log: Any = None,
     pipeline_log: Any = None,
     on_step: Any = None,
+    on_progress: Any = None,
     opensees_python: Any = None,
     named_selections: Any = None,
 ) -> RecipeRun:
@@ -524,6 +525,11 @@ def run_recipe(
             ``"cancelled"``), so a GUI can show live per-step progress.  A
             callback exception is swallowed — a progress listener must never
             change a step's outcome.  It is called on the caller's thread.
+        on_progress: Optional fine-grained progress callback
+            ``(index, name, total)`` — stored on the
+            :class:`~fea_toolkit.workflow.steps.StepContext` so a solve verb can
+            report each case before it solves, driving a determinate bar.  Called
+            on the caller's thread; an exception is swallowed like *on_step*'s.
         opensees_python: Optional path to the interpreter that should run
             analysis out-of-process when this process cannot import
             ``openseespy`` (the "separate" build).  Stored on the
@@ -568,6 +574,8 @@ def run_recipe(
         # through the structured log so it shares one stream with the events
         # the analysis verbs emit (the GUI and the report both rely on this).
         context.log = lambda msg: pipeline_log.info("workflow", msg)
+    if on_progress is not None:
+        context.progress = on_progress
 
     # A caller-supplied topology counts as produced geometry, so a recipe may
     # start with an analysis step when run_recipe is handed an already-prepared

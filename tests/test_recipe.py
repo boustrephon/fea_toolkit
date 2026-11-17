@@ -1376,6 +1376,27 @@ class TestEndToEnd:
         arrays = run.results[-1].payload
         assert any(name.startswith("static/") for name in arrays)
 
+    def test_a_run_static_step_reports_each_case_before_it_solves(self):
+        """``run_recipe(..., on_progress=...)`` fires per case, 1-based."""
+        from examples.sample_model import make_sample_model
+
+        events: list = []
+        recipe = Recipe(
+            steps=[
+                Step("mesh"),
+                Step(
+                    "run_static",
+                    params={"cases": {"DEAD": {"DEAD": 1.0}, "WIND": {"WIND": 1.0}}},
+                ),
+            ]
+        )
+        run = run_recipe(
+            recipe, make_sample_model(), on_progress=lambda i, n, t: events.append((i, n, t))
+        )
+
+        assert run.cancelled is False
+        assert events == [(1, "DEAD", 2), (2, "WIND", 2)]
+
     def test_combine_without_solved_cases_fails_with_a_clear_message(self):
         with pytest.raises(StepError) as info:
             run_recipe(Recipe(steps=[Step("combine")]), _slab_model())

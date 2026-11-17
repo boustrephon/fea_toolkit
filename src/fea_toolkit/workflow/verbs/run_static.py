@@ -90,6 +90,7 @@ def run_static(context: StepContext, step: Step) -> list[StepResult]:
             config=params["config"] or None,
             raw_out=raw,
             should_cancel=context.cancel,
+            on_progress=context.progress,
         )
     else:
         from ...opensees.delegate import run_static_out_of_process
