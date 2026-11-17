@@ -51,8 +51,10 @@ class Session:
 
         The store, views, named selections, hidden set and last run all belong
         to the document currently open; :meth:`reset` empties them for a fresh
-        document.  The recipe is the user's workflow and persists across
-        documents, so it is deliberately left in place.
+        document.  The recipe is deliberately left in place: a recipe run that
+        switches documents calls ``reset()`` and then applies the run's
+        outcomes onto the recipe.  A user-initiated model open clears the
+        recipe separately (through the recipe panel).
         """
         self.store = None
         self.views = ViewRegistry()
