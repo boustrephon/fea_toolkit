@@ -138,6 +138,7 @@ class TestManifest:
     def test_verbs_are_listed_in_the_order_they_are_meant_to_run(self):
         assert list_verbs() == [
             "open",
+            "open_results",
             "save",
             "close",
             "select",

@@ -538,6 +538,7 @@ class ResultsPresenter:
                 source=f"Recipe: {label} \u00b7 {case}",
                 model=model,
                 parent=parent,
+                case=case,
                 activate=False,
             )
         self._log(f"{label}: {len(cases)} case(s) added as views.")
@@ -546,6 +547,52 @@ class ResultsPresenter:
             first = self._session.views.get(f"{_RESULTS_KEY_PREFIX}{cases[0]}")
             if first is not None:
                 self._show_view(first)
+        return cases
+
+    def open_results(self, label: str, arrays: dict) -> list:
+        """Register each case in a *file* archive as a view, keyed to the archive.
+
+        Unlike :meth:`show_results_archive` — which prefers the mesh a recipe
+        run was prepared from — a file archive's cases are keyed to the
+        archive's own geometry (``repository.as_model()``), and each view's key
+        is namespaced by *label* so two archives that share a case name do not
+        overwrite one another (re-opening the *same* archive still replaces, by
+        key).
+
+        Args:
+            label: The archive's provenance label (e.g. its file name), used both
+                in each view's source and as the key namespace.
+            arrays: The archive arrays — ``static_case_labels`` plus the
+                ``static/<case>/…`` blocks and the geometry arrays.
+
+        Returns:
+            The case labels registered, in archive order — empty when the
+            archive holds no case.
+        """
+        from ...io.results_repository import NpzResultsRepository
+
+        repository = NpzResultsRepository(arrays or {})
+        cases = list(repository.cases())
+        if not cases:
+            return []
+        model = repository.as_model()
+        for case in cases:
+            self._session.views.add_results(
+                f"{_RESULTS_KEY_PREFIX}{label}:{case}",
+                _case_view_name(case, repository.case_meta(case)),
+                repository,
+                source=f"{label} \u00b7 {case}",
+                model=model,
+                case=case,
+                activate=False,
+            )
+        self._log(f"{label}: {len(cases)} case(s) added as views.")
+        first = self._session.views.get(f"{_RESULTS_KEY_PREFIX}{label}:{cases[0]}")
+        if first is not None:
+            # The archive's geometry replaces the model's, so the model's hidden
+            # set no longer applies.
+            self._session.hidden_elem_ids.clear()
+            self._show_view(first)
         return cases
 
     def show_geometry_result(self, label: str, mesh_model: Any) -> None:

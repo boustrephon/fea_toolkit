@@ -16,7 +16,6 @@ from typing import Any, Optional
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QDockWidget, QFileDialog
 
-from .view_state import load_view_state
 from .worker import TaskWorker
 
 __all__ = ["RecipeController"]
@@ -429,33 +428,18 @@ class RecipeController:
 
         A document-lifecycle step (``open`` / ``close`` / ``build_model``)
         replaced or closed the worker's document; the window's store still shows
-        the previous one.  This replaces the store, restores the document's named
-        selections and saved view state, raises the viewport page and re-renders
-        — the same sequence ``File ▸ Open`` runs — so the results the recipe
-        produced register against the document the user is now looking at rather
-        than the stale one (P35 follow-up).
+        the previous one.  This delegates to the window's shared
+        :meth:`~fea_toolkit.gui.main_window.MainWindow._adopt_model` sequence — so
+        the results the recipe produced register against the document the user is
+        now looking at rather than the stale one (P35 follow-up) — keeping the
+        recipe (``clear_recipe=False``) rather than emptying it.
         """
-        # Preserve the outgoing model's view before switching, as ``open_path``
-        # does.
-        self._window._save_view_state()
-        self._window._remember_source(document.model_data, source=document.document_path)
-        self._window._session.named_selections = dict(document.named_selections)
-        # Restore the incoming document's saved visibility, matching
-        # ``open_path``: a saved hidden set is validated against the incoming
-        # model, and no saved state clears it so the previous document's
-        # exclusions do not leak across the switch.
-        state, notes = load_view_state(document.document_path)
-        for note in notes:
-            level = "info" if "is stale" in note else "warn"
-            self._window.log(note, level)
-        self._window._session.hidden_elem_ids = self._window._restore_hidden_elements(
-            state.get("hidden_elem_ids"), document.model_data
+        self._window._adopt_model(
+            document.model_data,
+            source=document.document_path,
+            named_selections=document.named_selections,
+            clear_recipe=False,
         )
-        # Adoption draws geometry, so raise the viewport page even if the user
-        # was looking at a table / figure view.
-        self._window._stack.setCurrentWidget(self._window._viewport_container)
-        self._window.show_model(document.model_data)
-        self._window._restore_camera(state.get("camera_position"))
 
     def _failed(self, message: str) -> None:
         """Report a recipe failure, flushing buffered diagnostics first.

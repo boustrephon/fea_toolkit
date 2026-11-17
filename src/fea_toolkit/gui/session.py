@@ -194,6 +194,7 @@ class Session:
                         source=source,
                         model=display_model,
                         parent=parent,
+                        case=case,
                         activate=False,
                     )
             elif kind == TABLE:

@@ -100,7 +100,6 @@ from .controllers.view_registry import (
     View,
     ViewRegistry,
     _case_of,
-    _case_view_name,
 )
 from .controllers.view_state import clear_view_state, load_view_state, save_view_state
 from .doc_links import DOCS_URL
@@ -3682,9 +3681,12 @@ class MainWindow(QMainWindow):
 
         Dialog-free so tests can drive it directly.  An archive carries its own
         display geometry, so this works with **no model open** — the views draw
-        the geometry the archive was written from — and the display model is
-        built once and shared by every case view, so a dozen cases cost one
-        model between them.
+        the geometry the archive was written from.  The ``open_results`` verb is
+        the single loader, called here synchronously (the archive needs no
+        model, so the worker's run guard is not involved); the
+        :meth:`~fea_toolkit.gui.controllers.results_presenter.ResultsPresenter.open_results`
+        fan-out then registers one view per case, keyed by the archive so two
+        archives sharing a case name do not overwrite each other.
 
         Args:
             path: Archive path (NPZ or HDF5).
@@ -3696,57 +3698,46 @@ class MainWindow(QMainWindow):
         from pathlib import Path
 
         from ..io.npz_reader import is_results_archive
-        from ..io.results_repository import NpzResultsRepository
+        from ..workflow.steps import CASES, Step, StepContext
+        from ..workflow.verbs.open_results import run_open_results
 
         self.log(f"Opening results {path} \u2026")
         try:
             if not is_results_archive(path):
                 self.log(f"{path} is not a results archive.", "error")
                 return False
-            repository = NpzResultsRepository(path)
-            cases = repository.cases()
-            model = repository.as_model()
+            context = StepContext(None, log=self.log)  # model_data unused by open_results
+            results = run_open_results(context, Step(verb="open_results", params={"path": path}))
         except Exception as exc:
             self.log(f"Failed to open results {path}: {exc}", "error")
             return False
 
         name = Path(path).name
-        keys = cases or [name]
-        for case in keys:
-            meta = repository.case_meta(case) if cases else {}
-            self._session.views.add_results(
-                f"results:{case}",
-                _case_view_name(case, meta),
-                repository,
-                source=f"{name} \u00b7 {case}",
-                model=model,
-                activate=False,
-            )
-        self.log(f"Opened {len(keys)} results view(s) from {name}.")
-
-        first = self._session.views.get(f"results:{keys[0]}")
-        if first is not None:
-            self._session.hidden_elem_ids.clear()
-            self._show_view(first, rebuild_tree=True)
+        arrays = None
+        opened = []
+        for result in results:
+            if result.kind == CASES:
+                arrays = result.payload
+                opened = self._results_presenter.open_results(name, arrays)
+        self.log(f"Opened {len(opened)} results view(s) from {name}.")
 
         # IDA (IK-2005 collapse) — register a figure view when the archive
-        # carries an ``ida`` block (schema v5).  Detected from the arrays the
-        # repository already holds, so an HDF5 archive never re-opens the NPZ
-        # reader (or logs its errors).
-        try:
-            from ..io.results_schema import ida_record_names
+        # carries an ``ida`` block (schema v5).
+        if arrays:
+            try:
+                from ..io.results_schema import ida_record_names
 
-            if ida_record_names(repository.to_arrays()):
-                from ..plotting.viz_ida import plot_ida_summary
+                if ida_record_names(arrays):
+                    from ..plotting.viz_ida import plot_ida_summary
 
-                figure = plot_ida_summary(repository.to_arrays())
-                if figure is not None:
-                    self._session.views.add_figure(
-                        "ida", "IDA collapse", figure, source=name, activate=False
-                    )
-                    self._rebuild_tree()
-        except Exception as exc:  # pragma: no cover - defensive
-            self.log(f"Could not build the IDA view: {exc}", "error")
+                    figure = plot_ida_summary(arrays)
+                    if figure is not None:
+                        self._session.views.add_figure(
+                            "ida", "IDA collapse", figure, source=name, activate=False
+                        )
+                        self._rebuild_tree()
+            except Exception as exc:  # pragma: no cover - defensive
+                self.log(f"Could not build the IDA view: {exc}", "error")
         return True
 
     def _on_export_image(self) -> None:
@@ -4005,43 +3996,74 @@ class MainWindow(QMainWindow):
         self.log(f"Opened project: {len(session.views)} view(s).")
         return True
 
-    def open_path(self, path: str) -> bool:
-        """Parse *path* and display it; return False on failure (no dialog).
+    def _adopt_model(
+        self, model: Any, *, source: str, named_selections: dict, clear_recipe: bool = False
+    ) -> None:
+        """Adopt *model* as the displayed document — the shared open/adopt sequence.
 
-        A saved document (a ``__document__`` envelope written by the ``save``
-        verb) is decoded through the envelope-aware loader so its named
-        selections are restored with the model, rather than the full envelope
-        being handed to the bare model decoder.
+        Preserves the outgoing model's view, wraps *model* in a fresh store (via
+        :meth:`_remember_source`), restores the document's named selections and
+        saved visibility, raises the viewport page and re-renders.  ``File ▸ Open``
+        passes ``clear_recipe=True`` (a fresh model starts an empty recipe); a
+        recipe run's document adoption passes ``False`` (the recipe just authored
+        survives).
 
-        Dialog-free so tests can drive it directly.
+        Args:
+            model: The ``SAPModelData`` / ``MeshModel`` to display.
+            source: Human-readable provenance (the file path, or ``""``).
+            named_selections: The document's ``{name: NamedSelection}`` store.
+            clear_recipe: Whether to empty the Recipe panel (a user-initiated
+                open does; a recipe-run adoption does not).
         """
-        from ..io.document import load_document
-
-        self.log(f"Opening {path} \u2026")
-        try:
-            model, selections = load_document(path)
-        except Exception as exc:
-            self.log(f"Failed to open {path}: {exc}", "error")
-            return False
         self._save_view_state()  # preserve the outgoing model's view before switching
-        self._remember_source(model, source=path)
-        # A newly opened model starts with an empty recipe: the workflow being
-        # authored belonged to the model just replaced.  Clearing the panel (the
-        # live editor) propagates the empty recipe to the session via ``changed``.
-        panel = self._recipe_controller.panel
-        if panel is not None:
-            panel.clear()
-        self._session.named_selections = selections
-        state, notes = load_view_state(path)
+        self._remember_source(model, source=source)
+        if clear_recipe:
+            panel = self._recipe_controller.panel
+            if panel is not None:
+                panel.clear()
+        self._session.named_selections = dict(named_selections)
+        state, notes = load_view_state(source)
         for note in notes:
             # A stale state (the model was re-edited) is an ordinary outcome, so
             # it is logged at info; anything else is a warning.
             level = "info" if "is stale" in note else "warn"
             self.log(note, level)
-        hidden = state.get("hidden_elem_ids")
-        self._session.hidden_elem_ids = self._restore_hidden_elements(hidden, model)
+        self._session.hidden_elem_ids = self._restore_hidden_elements(
+            state.get("hidden_elem_ids"), model
+        )
+        # Show the model in the viewport even if a table/figure page is active.
+        self._stack.setCurrentWidget(self._viewport_container)
         self.show_model(model)
         self._restore_camera(state.get("camera_position"))
+
+    def open_path(self, path: str) -> bool:
+        """Parse *path* and display it; return False on failure (no dialog).
+
+        A saved document (a ``__document__`` envelope written by the ``save``
+        verb) is decoded through the envelope-aware loader so its named
+        selections are restored with the model.  The ``open`` verb is the single
+        loader — invoked here synchronously (a model parse is fast and must not
+        go through the worker) — and :meth:`_adopt_model` then adopts the
+        document the verb produced.
+
+        Dialog-free so tests can drive it directly.
+        """
+        from ..workflow.steps import Step, StepContext
+        from ..workflow.verbs.open import run_open
+
+        self.log(f"Opening {path} \u2026")
+        try:
+            context = StepContext(None, log=self.log)
+            run_open(context, Step(verb="open", params={"path": path}))
+        except Exception as exc:
+            self.log(f"Failed to open {path}: {exc}", "error")
+            return False
+        self._adopt_model(
+            context.model_data,
+            source=path,
+            named_selections=dict(context.named_selections),
+            clear_recipe=True,
+        )
         return True
 
     def _on_zoom_fit(self) -> None:

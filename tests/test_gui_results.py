@@ -185,15 +185,15 @@ def test_the_archive_draws_without_a_model(window, tmp_path):
 
     assert len(frames) == 1
     assert len(nodes) == 2
-    assert window._model is window._session.views.source("results:DEAD")
+    assert window._model is window._session.views.source("results:results.npz:DEAD")
 
 
 def test_the_case_views_share_one_model(window, tmp_path):
     """A lens, not a copy: a dozen cases cost one display model between them."""
     window.open_results_path(str(_write_archive(tmp_path)))
 
-    assert window._session.views.source("results:DEAD") is window._session.views.source(
-        "results:COMB1"
+    assert window._session.views.source("results:results.npz:DEAD") is window._session.views.source(
+        "results:results.npz:COMB1"
     )
 
 
@@ -225,7 +225,7 @@ def test_a_case_from_another_combination_is_qualified(window, tmp_path):
     window.open_results_path(str(path))
 
     assert NpzResultsRepository(path).case_meta("COMB1")["group"] == "COMB1"
-    assert window._session.views.get("results:COMB1").name == "COMB1"
+    assert window._session.views.get("results:results.npz:COMB1").name == "COMB1"
 
 
 def test_a_file_that_is_not_a_results_archive_is_reported(window, tmp_path):

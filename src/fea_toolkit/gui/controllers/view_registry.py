@@ -59,6 +59,8 @@ class View:
             first figure) that a fan-out result (a mode shape, an RS direction, a
             pushover direction) belongs to.  ``None`` for a top-level view.
         selection: Optional ``Selection`` narrowing what the view shows.
+        case: The load case this results view stands for (``""`` otherwise) —
+            kept apart from :attr:`key` so the key can be namespaced per source.
     """
 
     key: str
@@ -75,6 +77,7 @@ class View:
     active: bool = False
     parent: Optional[str] = None
     selection: Any = None
+    case: str = ""
 
     @classmethod
     def from_header(
@@ -246,6 +249,7 @@ class ViewRegistry:
         *,
         parent: Optional[str] = None,
         activate: bool = True,
+        case: str = "",
     ) -> View:
         """Register a results view over *repository* — no ``ModelStore`` needed.
 
@@ -265,6 +269,8 @@ class ViewRegistry:
             parent: Key of the step's summary view this fan-out case belongs to
                 (``None`` to leave it top-level).
             activate: Make this the displayed view.
+            case: The load case the view stands for, carried on the view (and
+                returned by ``_case_of``) so the key is free to be namespaced.
 
         Returns:
             The registered view.
@@ -281,6 +287,7 @@ class ViewRegistry:
             n_frames_active=n_frames,
             n_shells=int(counts.get("n_shells", 0)),
             parent=parent,
+            case=case,
         )
         self._views[key] = view
         self._results[key] = repository
@@ -438,9 +445,10 @@ def _table_key(label: str) -> str:
 def _case_of(view: Optional[View]) -> str:
     """The load case a results view stands for (``""`` for any other view).
 
-    The case is carried in the view's key (``"results:DEAD"``), which is what
-    ``MainWindow.open_results_path`` registers; this is its inverse.
+    The case is carried on the view itself (:attr:`View.case`), not parsed out
+    of its key, so the key is free to be namespaced per source (see
+    ``ResultsPresenter.open_results``).
     """
-    if view is None or not view.key.startswith(_RESULTS_KEY_PREFIX):
+    if view is None:
         return ""
-    return view.key[len(_RESULTS_KEY_PREFIX) :]
+    return view.case

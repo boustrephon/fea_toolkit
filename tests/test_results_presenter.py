@@ -59,8 +59,10 @@ def test_case_view_name_qualifies_combination():
     assert _case_view_name("DEAD", None) == "DEAD"
 
 
-def test_case_of_reads_the_results_key_prefix():
-    results = View(key="results:DEAD", name="DEAD", kind="results", source="")
+def test_case_of_reads_the_view_case_field():
+    results = View(
+        key="results:results.npz:DEAD", name="DEAD", kind="results", source="", case="DEAD"
+    )
     table = View(key="table:modal", name="Modal", kind="table", source="")
     assert _case_of(results) == "DEAD"
     assert _case_of(table) == ""
@@ -121,3 +123,18 @@ def test_show_results_archive_empty_returns_no_cases():
 
     assert presenter.show_results_archive("Static", {}) == []
     assert shown == []
+
+
+def test_open_results_namespaces_keys_by_archive():
+    session = SimpleNamespace(views=ViewRegistry(), store=None, hidden_elem_ids=set())
+    log = _Log()
+    shown = []
+    presenter = _presenter(session, log, shown)
+    archive = {"static_case_labels": ["DEAD"]}
+
+    presenter.open_results("a.npz", archive)
+    presenter.open_results("b.npz", archive)
+
+    assert session.views.get("results:a.npz:DEAD") is not None
+    assert session.views.get("results:b.npz:DEAD") is not None
+    assert _case_of(session.views.get("results:a.npz:DEAD")) == "DEAD"
