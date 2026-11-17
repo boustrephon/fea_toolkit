@@ -95,22 +95,21 @@ def test_real_actions_enabled_placeholders_disabled(window):
     assert "Milestone 5" not in pushover.toolTip()
 
 
-def test_build_fema355c_action_is_enabled(window):
-    """File ▸ Build FEMA 355C model… is a live action (no loaded model required)."""
-    assert window._actions["file.build_fema355c"].isEnabled()
+def test_open_example_action_is_enabled(window):
+    """File ▸ Open example… is a live action (no loaded model required)."""
+    assert window._actions["file.open_example"].isEnabled()
 
 
-def test_build_fema355c_action_presets_a_recipe(window):
-    """File ▸ Build FEMA 355C model… presets a build_model + mesh recipe.
+def test_open_example_action_shows_the_chooser(window):
+    """File ▸ Open example… shows the modeless builders + benchmarks dialog.
 
-    The retired picker dialog is gone: its region / stories / design /
-    direction combos fold into the build_model step's parameters, edited in the
-    step dialog (rendered as dropdowns from the verb's choices).
+    The chooser replaced the persistent Benchmark Library dock and the retired
+    picker dialog: a builder / benchmark presets its ``build_model`` + ``mesh``
+    recipe through :meth:`MainWindow._open_example` (see
+    ``tests/test_gui_recipe.py``).
     """
-    window._actions["file.build_fema355c"].trigger()
-    recipe = window._recipe_panel.recipe
-    assert [step.verb for step in recipe.steps] == ["build_model", "mesh"]
-    assert recipe.steps[0].params["builder"] == "fema355c"
+    window._actions["file.open_example"].trigger()
+    assert window._example_dialog.isVisible()
 
 
 def test_show_is_graceful_without_an_interactive_viewport(window):

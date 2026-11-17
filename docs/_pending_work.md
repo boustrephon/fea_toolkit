@@ -846,15 +846,16 @@ against the paper if they want, or just use it as a trusted reference model.
 
 **Status: ✅ Landed 2026-11-16.**  The `build_model` verb, the structured
 catalogue + sync test, the builder mapping (`builder` / `builder_params`) and
-`benchmark_recipe(id)`, and the **Benchmark Library** dock (catalogue listed
-with tier/status badges; "Open" presets a `build_model` + `mesh` recipe) are
+`benchmark_recipe(id)`, and the **Open example…** chooser (the example builders
+then the catalogue listed with tier/status badges; "Open" presets a
+`build_model` + `mesh` recipe) are
 all in — the built model displays through the existing `document_reset` →
 `_adopt_document` path, so no `MODEL`-result branch is needed.  The two legacy dialogs
 (`benchmark_dialog.py` / `generic_frame_dialog.py`) are retired: their
 region/stories/design/direction and frame-code pickers folded into the
 `build_model` step's `choices` (rendered as dropdowns), the IK-2005 frame is
-opened from the panel, and FEMA 355C (supporting code, not a §3 row) is
-preset by *File ▸ Build FEMA 355C model…*.
+opened from the chooser, and FEMA 355C (supporting code, not a §3 row) is
+offered as a builder in the same *File ▸ Open example…* chooser.
 
 **Two decisions (settled 2026-11-16).**
 

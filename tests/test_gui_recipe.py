@@ -139,33 +139,47 @@ class TestDocumentAdoption:
         assert "no longer open" in window._message_log.toPlainText()
 
 
-class TestBenchmarkLibrary:
-    """The Benchmark Library panel presets a benchmark's recipe (P46)."""
+class TestExampleChooser:
+    """The "Open example" chooser presets a builder/benchmark recipe (P46)."""
 
-    def test_the_library_lists_every_benchmark(self, window):
+    def test_the_chooser_lists_builders_then_every_benchmark(self, window):
         from qtpy.QtCore import Qt
 
         from fea_toolkit.benchmarks.catalogue import BENCHMARK_ENTRIES
+        from fea_toolkit.workflow.verbs.build_model import BUILDER_TITLES
 
-        panel = window._benchmark_panel
-        assert panel._list.count() == len(BENCHMARK_ENTRIES)
+        panel = window._example_dialog.panel
+        ids = [
+            panel._list.item(i).data(Qt.ItemDataRole.UserRole) for i in range(panel._list.count())
+        ]
+        builders = [f"builder:{name}" for name in BUILDER_TITLES]
+        benchmark_ids = [entry.id for entry in BENCHMARK_ENTRIES]
+        assert ids == builders + benchmark_ids
         enabled = sum(
             1
             for i in range(panel._list.count())
             if panel._list.item(i).flags() & Qt.ItemFlag.ItemIsEnabled
         )
-        assert enabled == sum(1 for entry in BENCHMARK_ENTRIES if entry.builder is not None)
+        assert enabled == len(builders) + sum(
+            1 for entry in BENCHMARK_ENTRIES if entry.builder is not None
+        )
 
     def test_open_presets_a_build_model_plus_mesh_recipe(self, window):
-        window._open_benchmark_from_library("ik2005_generic_frame")
+        window._open_example("ik2005_generic_frame")
         recipe = window._recipe_panel.recipe
         assert [step.verb for step in recipe.steps] == ["build_model", "mesh"]
         assert recipe.steps[0].params["builder"] == "generic_frame"
 
+    def test_open_builder_presets_a_fema355c_recipe(self, window):
+        window._open_example("builder:fema355c")
+        recipe = window._recipe_panel.recipe
+        assert [step.verb for step in recipe.steps] == ["build_model", "mesh"]
+        assert recipe.steps[0].params == {"builder": "fema355c"}
+
     def test_open_emits_the_catalogue_id(self, window):
         from qtpy.QtCore import Qt
 
-        panel = window._benchmark_panel
+        panel = window._example_dialog.panel
         received: list = []
         panel.open_requested.connect(received.append)
         for i in range(panel._list.count()):
@@ -176,7 +190,7 @@ class TestBenchmarkLibrary:
         assert received == ["ik2005_generic_frame"]
 
     def test_open_rejects_an_unknown_benchmark(self, window):
-        window._open_benchmark_from_library("nope")
+        window._open_example("nope")
         assert "Could not open benchmark" in window._message_log.toPlainText()
 
 

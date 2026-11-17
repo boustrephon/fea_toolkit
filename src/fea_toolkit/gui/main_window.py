@@ -401,6 +401,9 @@ class MainWindow(QMainWindow):
         #: whose document was switched away while it was in flight (see
         #: :meth:`_recipe_store_is_current`).  ``None`` outside a run.
         self._recipe_starting_store: Any = None
+        #: The modeless "Open example" chooser (builders + benchmarks), built
+        #: eagerly in :meth:`_build_docks`.
+        self._example_dialog: Any = None
 
         self._create_viewport()
         self._create_actions()
@@ -1100,10 +1103,10 @@ class MainWindow(QMainWindow):
         a["file.open"] = self._real_action(
             "Open", self._on_open, shortcut="Ctrl+O", tip="Open a SAP2000 / ETABS model"
         )
-        a["file.build_fema355c"] = self._real_action(
-            "Build FEMA 355C model\u2026",
-            self._on_build_fema355c,
-            tip="Preset a FEMA 355C / SAC Phase 2 example model (build_model + mesh)",
+        a["file.open_example"] = self._real_action(
+            "Open example\u2026",
+            self._on_open_example,
+            tip="Open the example models and validated benchmarks (build_model + mesh)",
         )
         a["file.open_results"] = self._real_action(
             "Open results\u2026",
@@ -1431,7 +1434,7 @@ class MainWindow(QMainWindow):
 
         m = bar.addMenu("&File")
         m.addAction(a["file.open"])
-        m.addAction(a["file.build_fema355c"])
+        m.addAction(a["file.open_example"])
         m.addAction(a["file.open_results"])
         m.addAction(a["file.open_project"])
         m.addSeparator()
@@ -1697,7 +1700,7 @@ class MainWindow(QMainWindow):
         main.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         for key in (
             "file.open",
-            "file.build_fema355c",
+            "file.open_example",
             "file.save_results",
             None,
             "analysis.run",
@@ -1829,7 +1832,7 @@ class MainWindow(QMainWindow):
         self._log_dock.setWidget(self._message_log)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._log_dock)
         self._build_recipe_dock()
-        self._build_benchmark_dock()
+        self._build_example_dialog()
 
     def _build_recipe_dock(self) -> None:
         """Build the Recipe dock — the workflow as an ordered list of steps.
@@ -1848,41 +1851,55 @@ class MainWindow(QMainWindow):
         self._recipe_dock.setWidget(self._recipe_panel)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._recipe_dock)
 
-    def _build_benchmark_dock(self) -> None:
-        """Build the Benchmark Library dock — the validated example models.
+    def _build_example_dialog(self) -> None:
+        """Build the modeless "Open example" chooser (builders + benchmarks).
 
-        Lists the benchmark catalogue with tier/status badges; "open" presets the
-        benchmark's ``build_model`` + ``mesh`` recipe into the Recipe dock.  The
-        panel imports only the OpenSees-free catalogue, so it renders before a
-        model is open.
+        The chooser replaced the persistent Benchmark Library dock: choosing an
+        example is an *entry point* — used once to preset a ``build_model`` +
+        ``mesh`` recipe into the Recipe dock — not a workspace, so it should not
+        hold dock space beside the Model Tree and the Recipe dock
+        (``docs/gui_roadmap.md`` §1.1 reserves the left dock for the trees and
+        the inspector).
         """
-        from .views.benchmark_library_panel import BenchmarkLibraryPanel
+        from .views.benchmark_dialog import BenchmarkDialog
 
-        self._benchmark_panel = BenchmarkLibraryPanel(self)
-        self._benchmark_panel.open_requested.connect(self._open_benchmark_from_library)
-        self._benchmark_dock = QDockWidget("Benchmark Library", self)
-        self._benchmark_dock.setObjectName("dock_benchmarks")
-        self._benchmark_dock.setWidget(self._benchmark_panel)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._benchmark_dock)
+        self._example_dialog = BenchmarkDialog(self)
+        self._example_dialog.open_requested.connect(self._open_example)
 
-    def _open_benchmark_from_library(self, benchmark_id: str) -> None:
-        """Preset a benchmark's ``build_model`` + ``mesh`` recipe into the Recipe dock.
+    def _on_open_example(self) -> None:
+        """**File ▸ Open example…**: show the chooser dialog (modeless)."""
+        self._example_dialog.show()
+        self._example_dialog.raise_()
+        self._example_dialog.activateWindow()
 
-        One spelling of "open a benchmark" (anti-pattern 17): the panel emits the
-        catalogue id, and this presets the recipe the user then runs — the
-        user-choice ``build_model`` parameters (e.g. the frame code) are edited in
-        the step dialog, not re-picked in a bespoke dialog.
+    def _open_example(self, example_id: str) -> None:
+        """Preset the chosen example's ``build_model`` + ``mesh`` recipe.
+
+        One spelling of "open an example" (anti-pattern 17): a builder id
+        (``builder:<name>``) presets through
+        :func:`~fea_toolkit.benchmarks.catalogue.builder_recipe`, a catalogue id
+        through :func:`~fea_toolkit.benchmarks.catalogue.benchmark_recipe`.  The
+        user-choice ``build_model`` parameters (e.g. the frame code) are edited
+        in the step dialog, not re-picked in a bespoke dialog.
         """
-        from ..benchmarks.catalogue import benchmark_recipe
+        from ..benchmarks.catalogue import benchmark_recipe, builder_recipe
 
+        if example_id.startswith("builder:"):
+            builder = example_id[len("builder:") :]
+            self._recipe_panel.set_recipe(builder_recipe(builder))
+            self.log(
+                f"Preset recipe for {builder!r} (build_model + mesh). "
+                "Edit the step's parameters, then run."
+            )
+            return
         try:
-            recipe = benchmark_recipe(benchmark_id)
+            recipe = benchmark_recipe(example_id)
         except (KeyError, ValueError) as exc:
-            self.log(f"Could not open benchmark {benchmark_id!r}: {exc}", "error")
+            self.log(f"Could not open benchmark {example_id!r}: {exc}", "error")
             return
         self._recipe_panel.set_recipe(recipe)
         self.log(
-            f"Preset recipe for benchmark {benchmark_id!r} (build_model + mesh). "
+            f"Preset recipe for benchmark {example_id!r} (build_model + mesh). "
             "Edit the step's parameters, then run."
         )
 
@@ -4767,31 +4784,6 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(
                 self, "Open failed", f"Could not open:\n{path}\n\nSee the message log."
             )
-
-    def _on_build_fema355c(self) -> None:
-        """Preset a FEMA 355C ``build_model`` + ``mesh`` recipe into the Recipe dock.
-
-        FEMA 355C is supporting code, not a §3 catalogue row, so it has no
-        library-panel entry; this one menu item presets the recipe the user then
-        edits (region / stories / design / direction in the step dialog, rendered
-        as dropdowns from ``build_model``'s ``choices``) and runs — one spelling of
-        "build a FEMA 355C model" rather than the retired picker dialog.
-        """
-        from ..workflow import Recipe, Step
-
-        self._recipe_panel.set_recipe(
-            Recipe(
-                name="fema355c",
-                steps=[
-                    Step("build_model", params={"builder": "fema355c"}),
-                    Step("mesh"),
-                ],
-            )
-        )
-        self.log(
-            "Preset a FEMA 355C build_model + mesh recipe. "
-            "Edit region/stories/design/direction, then run."
-        )
 
     # ── Drag-and-drop ────────────────────────────────────────────────
 

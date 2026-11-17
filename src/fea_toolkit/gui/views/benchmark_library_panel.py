@@ -1,10 +1,12 @@
-"""The Benchmark Library panel — the catalogue of validated example models.
+"""The example chooser — the validated benchmarks and the example builders.
 
-Lists ``benchmarks/catalogue.py`` entries with their tier and status badge and
-lets a user *open* one: "open" emits ``open_requested`` with the catalogue id,
-which the main window turns into a preset recipe (``benchmark_recipe``).  The
-panel imports only the catalogue — which is OpenSees-free — so it renders
-before any model is open.
+Lists the ``build_model`` *builders* (from the verb, which owns their names and
+titles) first, then the ``benchmarks/catalogue.py`` entries with their tier and
+status badge.  Choosing one emits ``open_requested`` with a namespaced id —
+``builder:<name>`` for a builder, a plain catalogue id for a benchmark — which
+the main window turns into a preset recipe (``builder_recipe`` /
+``benchmark_recipe``).  The panel imports only the OpenSees-free catalogue and
+the verb's titles, so it renders before any model is open.
 
 A benchmark with no GUI builder (validated only in its test) is listed dimmed
 and cannot be opened — the "gray-for-missing" principle: every benchmark is
@@ -26,16 +28,17 @@ from qtpy.QtWidgets import (
 )
 
 from ...benchmarks.catalogue import BENCHMARK_ENTRIES, STATUS_BADGES
+from ...workflow.verbs.build_model import BUILDER_TITLES
 
 
 class BenchmarkLibraryPanel(QWidget):
-    """A scrollable list of the implemented benchmarks, with an Open action.
+    """A scrollable list of builders and benchmarks, with an Open action.
 
     Args:
         parent: Optional Qt parent widget.
     """
 
-    #: Emitted with a catalogue ``BenchmarkEntry.id`` when the user opens one.
+    #: Emitted with ``builder:<name>`` or a catalogue ``BenchmarkEntry.id``.
     open_requested = Signal(str)
 
     def __init__(self, parent: Optional[QWidget] = None):
@@ -63,8 +66,9 @@ class BenchmarkLibraryPanel(QWidget):
         layout.addLayout(button_row)
 
         hint = QLabel(
-            "Open presets a build_model + mesh recipe; edit the step's "
-            "parameters (e.g. the frame code), then run."
+            "Choose an example model or benchmark to preset a build_model + "
+            "mesh recipe; edit the step's parameters (e.g. the frame code), "
+            "then run."
         )
         hint.setWordWrap(True)
         hint.setObjectName("benchmark_library_hint")
@@ -72,6 +76,14 @@ class BenchmarkLibraryPanel(QWidget):
 
     def _reload(self) -> None:
         self._list.clear()
+        # The example builders first — a user starts from one of these, not
+        # from a validated benchmark.  The id is namespaced ``builder:`` so the
+        # opener can tell a builder from a benchmark.
+        for builder, title in BUILDER_TITLES.items():
+            item = QListWidgetItem(f"Build — {title}")
+            item.setData(Qt.ItemDataRole.UserRole, f"builder:{builder}")
+            item.setToolTip(title)
+            self._list.addItem(item)
         for entry in BENCHMARK_ENTRIES:
             badge = STATUS_BADGES.get(entry.status, "")
             item = QListWidgetItem(f"{badge}  {entry.tier}  {entry.title}")
