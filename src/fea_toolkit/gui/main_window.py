@@ -65,6 +65,7 @@ from ..io.model_loader import (
     TEXT_SUFFIXES,
 )
 from .app import APP_MISSION, APP_NAME
+from .controllers.analysis_controller import AnalysisController
 from .controllers.colour_by import (
     COLOUR_FIELDS,
     FIELD_LABELS,
@@ -3597,13 +3598,7 @@ class MainWindow(QMainWindow):
         from .views.step_dialog import StepDialog
 
         default_modal = resolve_default_modal_case(store.raw())
-        prefill: dict = {}
-        if verb == "modal" and default_modal:
-            prefill["name"] = default_modal
-        elif (
-            verb in ("response_spectrum", "pushover", "nonlinear_dynamic", "ida") and default_modal
-        ):
-            prefill["modal_case"] = default_modal
+        prefill = AnalysisController.preset_prefill(verb, default_modal)
 
         edited = StepDialog.edit(Step(verb=verb, params=prefill), self, store.raw())
         if edited is None:
@@ -4863,14 +4858,7 @@ class MainWindow(QMainWindow):
             self.log("An analysis is already running.", "warn")
             return False
 
-        from ..workflow import Step
-
-        steps = [
-            Step(verb="run_static", params={"cases": dict(cases), "config": dict(config or {})})
-        ]
-        if combinations:
-            steps.append(Step(verb="combine", params={"combinations": list(combinations)}))
-        steps.append(Step(verb="load_verification", params={"config": dict(config or {})}))
+        steps = AnalysisController.static_steps(cases, combinations, config)
         for step in steps:
             self._recipe_panel.add_step(
                 step.verb, step.selection, step.params, optional=step.optional
