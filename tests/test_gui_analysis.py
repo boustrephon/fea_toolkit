@@ -71,10 +71,10 @@ def _spin(window, timeout=60.0):
     from qtpy.QtCore import QCoreApplication
 
     deadline = time.monotonic() + timeout
-    while window._worker is not None and time.monotonic() < deadline:
+    while window._recipe_controller.worker is not None and time.monotonic() < deadline:
         QCoreApplication.processEvents()
         time.sleep(0.01)
-    assert window._worker is None, "a worker never finished"
+    assert window._recipe_controller.worker is None, "a worker never finished"
 
 
 def _preprocess(window):

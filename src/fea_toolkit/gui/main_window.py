@@ -14,7 +14,6 @@ the viewport, plus the node / shell display toggles.
 """
 
 import contextlib
-import gc
 import math
 from typing import Any, Optional
 
@@ -83,6 +82,7 @@ from .controllers.marquee import (
     segment_inside_rect,
 )
 from .controllers.project_controller import ProjectController
+from .controllers.recipe_controller import RecipeController
 from .controllers.results_presenter import ResultsPresenter
 from .controllers.selection import CATEGORY_GROUPS, CATEGORY_NOUNS, SelectionIndex, selection_set_op
 from .controllers.settings import (
@@ -103,7 +103,6 @@ from .controllers.view_registry import (
     _case_view_name,
 )
 from .controllers.view_state import clear_view_state, load_view_state, save_view_state
-from .controllers.worker import TaskWorker
 from .doc_links import DOCS_URL
 from .models.tree_model import ModelTreeModel
 from .render_backend import make_select_style
@@ -159,43 +158,6 @@ def _menu_header(text: str) -> QAction:
     action = QAction(text)
     action.setEnabled(False)
     return action
-
-
-#: Once-only guard for :func:`_freeze_gc_once`.  A one-element list rather than a
-#: bool, so marking it does not need a ``global`` rebind (ruff PLW0603).
-_GC_FROZEN: list = []
-
-
-def _freeze_gc_once() -> None:
-    """Put this process's live objects beyond the collector's reach, once.
-
-    The Preprocessor runs on a **worker thread**, and a collection triggered
-    there walks the whole heap -- including the PySide6/VTK objects the main
-    thread owns.  Shiboken's objects are not built to be traversed from another
-    thread: on macOS that surfaced as an intermittent segfault, reproducible in
-    ``tests/test_gui_views.py`` before this call existed, with the traceback
-    landing inside ``copy.deepcopy`` -- at the time the preprocessor's model
-    copy, and the largest allocation burst on that thread.
-
-    That deepcopy is gone (the Preprocessor is copy-on-write now, see
-    ``docs/dev_notes.md`` → *Copy-on-write replaces the model deepcopy*), and the
-    worker now holds the collector off for its whole task
-    (:meth:`~fea_toolkit.gui.controllers.worker.TaskWorker.run`), so no
-    collection runs there at all.  This freeze is still worth its one line: it
-    protects the Qt/VTK objects created *before* the first task — the window among
-    them — which a per-task hold cannot reach back to.
-
-    ``gc.freeze()`` moves everything alive *now* -- Qt, VTK, the window, the
-    renderer -- into the permanent generation, so no later collection looks at
-    it.  Objects created afterwards (the preprocessed topology and its
-    ``MeshModel``) stay collectable, which is what stops models from leaking.
-    """
-    if _GC_FROZEN:
-        return
-    import gc
-
-    _GC_FROZEN.append(True)
-    gc.freeze()
 
 
 def _entity_identity(entity: Any) -> tuple[Optional[str], Optional[str]]:
@@ -346,7 +308,6 @@ class MainWindow(QMainWindow):
         #: ``closeEvent`` can tell an unchanged view from one the user has moved.
         self._reset_view_baseline: Optional[tuple] = None
         self._default_styles: dict = {}  # interactor -> style, restored after Select mode
-        self._worker: Any = None
         self._policy, self._display, self._policy_notes = load_gui_settings()
         self._theme, self._theme_notes = load_theme_settings()
         self._cursor_timer: Optional[QTimer] = None
@@ -378,14 +339,7 @@ class MainWindow(QMainWindow):
             self._set_view_actions_enabled,
         )
         self._project_controller = ProjectController()
-        #: The window's named selections as they were when the recipe run started,
-        #: used to merge only what the run changed on completion (see
-        #: :meth:`_merge_recipe_named_selections`).  ``None`` outside a run.
-        self._recipe_named_snapshot: Optional[dict] = None
-        #: The store the recipe run was started against, used to reject a run
-        #: whose document was switched away while it was in flight (see
-        #: :meth:`_recipe_store_is_current`).  ``None`` outside a run.
-        self._recipe_starting_store: Any = None
+        self._recipe_controller = RecipeController(self)
         #: The modeless "Open example" chooser (builders + benchmarks), built
         #: eagerly in :meth:`_build_docks`.
         self._example_dialog: Any = None
@@ -463,7 +417,7 @@ class MainWindow(QMainWindow):
             self._session.views.add_geometry("unprocessed", "Unprocessed", model, source=source)
             # Let the recipe step dialog seed the ``run_static`` cases editor
             # from this model's own static cases.
-            panel = getattr(self, "_recipe_panel", None)
+            panel = self._recipe_controller.panel
             if panel is not None:
                 panel.set_model_data(model)
         elif isinstance(model, MeshModel):
@@ -1288,37 +1242,37 @@ class MainWindow(QMainWindow):
         # ── Recipe: the workflow as an ordered list of steps ──
         a["recipe.run"] = self._real_action(
             "Run recipe",
-            self._on_recipe_run,
+            self._recipe_controller.run,
             shortcut="Ctrl+Shift+R",
             tip="Run the recipe's steps in order, on a worker",
         )
         a["recipe.clear"] = self._real_action(
-            "Clear recipe", self._on_recipe_clear, tip="Empty the Recipe panel"
+            "Clear recipe", self._recipe_controller.clear, tip="Empty the Recipe panel"
         )
         a["recipe.open"] = self._real_action(
             "Open recipe\u2026",
-            self._on_recipe_open,
+            self._recipe_controller.open,
             tip="Read a recipe from a JSON file and show it in the panel",
         )
         a["recipe.save"] = self._real_action(
             "Save recipe\u2026",
-            self._on_recipe_save,
+            self._recipe_controller.save,
             tip="Write the Recipe panel's steps to a JSON file",
         )
         a["recipe.export"] = self._real_action(
             "Export as Python\u2026",
-            self._on_recipe_export,
+            self._recipe_controller.export,
             tip="Write the recipe as a runnable Python script",
         )
         a["recipe.command"] = self._real_action(
             "Command\u2026",
-            self._on_recipe_command,
+            self._recipe_controller.command,
             shortcut="Ctrl+K",
             tip="Compile a command string into a recipe step (verb + KEY=VALUE clauses)",
         )
         a["recipe.import"] = self._real_action(
             "Import script\u2026",
-            self._on_recipe_import,
+            self._recipe_controller.import_script,
             tip="Import a recipe's RECIPE = {...} literal from a Python script",
         )
         for key in ("recipe.run", "recipe.clear", "recipe.save", "recipe.export"):
@@ -1815,29 +1769,8 @@ class MainWindow(QMainWindow):
         self._log_dock.setObjectName("dock_messages")
         self._log_dock.setWidget(self._message_log)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._log_dock)
-        self._build_recipe_dock()
+        self._recipe_controller.build_dock()
         self._build_example_dialog()
-
-    def _build_recipe_dock(self) -> None:
-        """Build the Recipe dock — the workflow as an ordered list of steps.
-
-        It sits in the bottom area beside the Message Log, because running a
-        recipe is precisely what the log narrates.  ``RecipePanel`` needs Qt, so
-        it is imported here rather than at module scope (lazy-import policy).
-        """
-        from .views.recipe_panel import RecipePanel
-
-        self._recipe_panel = RecipePanel(self)
-        self._recipe_panel.changed.connect(self._set_recipe_actions_enabled)
-        # The panel is a *view* over the session's recipe (panel-as-view, P48
-        # option A'): once bound it edits ``session.recipe`` directly — the
-        # single object the window runs and saves — so there is no write-back.
-        self._recipe_panel.set_session(self._session)
-        self._recipe_panel.copied.connect(self.log)
-        self._recipe_dock = QDockWidget("Recipe", self)
-        self._recipe_dock.setObjectName("dock_recipe")
-        self._recipe_dock.setWidget(self._recipe_panel)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._recipe_dock)
 
     def _build_example_dialog(self) -> None:
         """Build the modeless "Open example" chooser (builders + benchmarks).
@@ -1874,7 +1807,7 @@ class MainWindow(QMainWindow):
 
         if example_id.startswith("builder:"):
             builder = example_id[len("builder:") :]
-            self._recipe_panel.set_recipe(builder_recipe(builder))
+            self._recipe_controller.panel.set_recipe(builder_recipe(builder))
             self.log(
                 f"Preset recipe for {builder!r} (build_model + mesh). "
                 "Edit the step's parameters, then run."
@@ -1885,7 +1818,7 @@ class MainWindow(QMainWindow):
         except (KeyError, ValueError) as exc:
             self.log(f"Could not open benchmark {example_id!r}: {exc}", "error")
             return
-        self._recipe_panel.set_recipe(recipe)
+        self._recipe_controller.panel.set_recipe(recipe)
         self.log(
             f"Preset recipe for benchmark {example_id!r} (build_model + mesh). "
             "Edit the step's parameters, then run."
@@ -1898,7 +1831,7 @@ class MainWindow(QMainWindow):
         strip; sizing them together keeps the viewport dominant.
         """
         height = max(60, int(self.height() * 0.2))
-        docks = [self._log_dock, self._recipe_dock]
+        docks = [self._log_dock, self._recipe_controller.dock]
         self.resizeDocks(docks, [height] * len(docks), Qt.Orientation.Vertical)
 
     # ── Status bar ──────────────────────────────────────────────────
@@ -3425,25 +3358,7 @@ class MainWindow(QMainWindow):
             label = "Splitting elements at joints and meshing areas"
         else:
             label = "Splitting elements at joints"
-        self._preset_step(edited, label)
-
-    def _preset_step(self, step: Any, label: str) -> None:
-        """Append *step* to the recipe and run it — the menu-preset pattern.
-
-        The Model-menu Mesh entry and the Analysis-menu analysis entries are all
-        presets over the recipe: compose a step in a dialog, append it, and run
-        the recipe, so an operation is a visible, editable step like any other.
-
-        Args:
-            step: The step to append and run.
-            label: What the Message Log should say is happening.
-        """
-        self._recipe_panel.add_step(step.verb, step.selection, step.params, optional=step.optional)
-        from ..workflow import step_to_command
-
-        self.log(f"command: {step_to_command(step)}")
-        self._pending_label = label
-        self._on_recipe_run()
+        self._recipe_controller.preset_step(edited, label)
 
     def _mesh_preset(self, config: dict, label: str) -> None:
         """Append a ``mesh`` step for *config* and run it — the non-interactive form.
@@ -3460,7 +3375,7 @@ class MainWindow(QMainWindow):
             return
         from ..workflow import Step
 
-        self._preset_step(Step(verb="mesh", params=config), label)
+        self._recipe_controller.preset_step(Step(verb="mesh", params=config), label)
 
     # ── Analysis presets (Analysis menu) ─────────────────────────────
 
@@ -3501,7 +3416,7 @@ class MainWindow(QMainWindow):
                 "warn",
             )
             return
-        if self._worker is not None and self._worker.isRunning():
+        if self._recipe_controller.is_running():
             self.log("An analysis is already running.", "warn")
             return
 
@@ -3522,7 +3437,7 @@ class MainWindow(QMainWindow):
         # wizard itself adds the modal step, that step (named *default_modal*)
         # is the precursor; otherwise an existing recipe modal step supplies the
         # name (a CUSTOM precursor must not be silently replaced by the source
-        # default) — matching _analysis_preset()/_ensure_modal_precursor().
+        # default) — matching _analysis_preset()/RecipeController.ensure_modal_precursor().
         from dataclasses import replace
 
         adds_modal = "modal" in verbs
@@ -3550,20 +3465,20 @@ class MainWindow(QMainWindow):
                 # will actually run.
                 if not modal_case:
                     modal_case = (
-                        default_modal if adds_modal else self._ensure_modal_precursor(default_modal)
+                        default_modal
+                        if adds_modal
+                        else self._recipe_controller.ensure_modal_precursor(default_modal)
                     )
                 if modal_case and step.params.get("modal_case", "") == default_modal:
                     step = replace(step, params={**step.params, "modal_case": modal_case})
-            self._recipe_panel.add_step(
-                step.verb, step.selection, step.params, optional=step.optional
-            )
+            self._recipe_controller.add_step(step)
             accepted += 1
             self.log(f"command: {step_to_command(step)}")
         if not accepted:
             self.log("Analysis wizard: no steps were accepted.", "info")
             return
-        self._pending_label = "Analysis wizard"
-        self._on_recipe_run()
+        self._recipe_controller.set_pending_label("Analysis wizard")
+        self._recipe_controller.run()
 
     def _analysis_preset(self, verb: str, label: str) -> None:
         """Compose an analysis step in a dialog, append it, and run the recipe.
@@ -3587,7 +3502,7 @@ class MainWindow(QMainWindow):
                 "warn",
             )
             return
-        if self._worker is not None and self._worker.isRunning():
+        if self._recipe_controller.is_running():
             self.log("An analysis is already running.", "warn")
             return
 
@@ -3604,446 +3519,14 @@ class MainWindow(QMainWindow):
         if verb in ("response_spectrum", "pushover", "nonlinear_dynamic", "ida"):
             from dataclasses import replace
 
-            selected = self._ensure_modal_precursor(default_modal)
+            selected = self._recipe_controller.ensure_modal_precursor(default_modal)
             # The precursor actually enabled may not carry *default_modal*'s name
             # (a recipe's own modal step wins when the model's case name is
             # absent), so realign the step's ``modal_case`` with it when the
             # dialog's prefill was accepted unchanged.
             if selected and edited.params.get("modal_case", "") == default_modal:
                 edited = replace(edited, params={**edited.params, "modal_case": selected})
-        self._preset_step(edited, label)
-
-    def _ensure_modal_precursor(self, default_name: str = "") -> str:
-        """Ensure an *enabled* ``modal`` step precedes the spectrum/pushover step.
-
-        ``response_spectrum`` and ``pushover`` declare
-        ``needs=("geometry", "modal")``, so a preset for either must run after a
-        modal step has produced the modal result.  A modal step that already ran
-        is unchecked (auto-"No" after a run), so it is re-enabled — and, through
-        the ``set_enabled`` cascade, its geometry precursor too — rather than
-        appending a duplicate.  When the recipe has no modal step, one is added
-        with ``name`` set to *default_name* (the model's modal case), so the
-        spectrum / pushover step's ``modal_case`` prefill resolves to the same
-        name.
-
-        With several modal steps, the one whose ``name`` matches *default_name*
-        is preferred (the model's modal case); only when none matches does the
-        first modal step stand in, so the returned name always matches the step
-        the run will actually execute.
-
-        Args:
-            default_name: The model's preferred modal-case name, or ``""``.
-
-        Returns:
-            The ``name`` of the modal step now enabled (or added), so the caller
-            can align the spectrum / pushover step's ``modal_case`` with it.
-        """
-        from ..workflow import STEP_SPECS
-
-        panel = self._recipe_panel
-        fallback = STEP_SPECS["modal"].params["name"].default
-
-        def _modal_name(step: Any) -> str:
-            return (step.params or {}).get("name") or fallback
-
-        chosen = None
-        for index, step in enumerate(panel.recipe.steps):
-            if step.verb != "modal":
-                continue
-            if chosen is None:
-                chosen = index
-            if default_name and _modal_name(step) == default_name:
-                chosen = index
-                break
-        if chosen is not None:
-            if not panel.recipe.steps[chosen].enabled:
-                panel.recipe.set_enabled(chosen, True)
-            return _modal_name(panel.recipe.steps[chosen])
-
-        name = default_name or fallback
-        panel.add_step("modal", params={"name": name} if name != fallback else None)
-        return name
-
-    def _on_recipe_run(self) -> None:
-        """**Recipe ▸ Run recipe**: run the panel's steps on a worker.
-
-        The recipe is snapshotted before the worker starts (through its own
-        serialisation), so editing the panel mid-run cannot change what is being
-        run.  The steps' log lines are collected and flushed on the GUI thread
-        once the run ends — a worker must not touch widgets.
-        """
-        from ..workflow import Recipe, run_recipe
-
-        store = self._session.store
-        if store is None:
-            self.log("Open a SAP2000 model before running a recipe.", "warn")
-            return
-        if not len(self._session.recipe):
-            self.log(
-                "The recipe has no steps \u2014 use Model \u25b8 Split elements / "
-                "Mesh areas, or add one from the Recipe menu.",
-                "warn",
-            )
-            return
-        if self._worker is not None and self._worker.isRunning():
-            self.log("A run is already in progress.", "warn")
-            return
-
-        recipe = Recipe.from_dict(self._session.recipe.to_dict())
-        model_data = store.raw()
-        from .controllers.settings import load_opensees_setting
-
-        opensees_python = load_opensees_setting()
-        starting_mesh = store.preprocessed()
-        messages: list = []
-        self._recipe_messages = messages
-        label = getattr(self, "_pending_label", None) or f"Running recipe ({len(recipe)} steps)"
-        self._pending_label = None
-
-        # One PipelineLog for the run: recipe progress (``context.log``) and the
-        # structured analysis events share it, and its sink collects them into
-        # ``messages`` for the GUI-thread flush in ``_recipe_finished``.
-        from ..io.log import PipelineLog, render_entry
-
-        pipeline_log = PipelineLog(verbose=True, collect=False, _stdout=False)
-
-        def _collect(entry: dict) -> None:
-            if entry["level"] != "DEBUG":
-                messages.append(render_entry(entry))
-
-        pipeline_log.add_sink(_collect)
-
-        self._set_model_actions_enabled(False)
-        self._progress.setRange(0, 0)  # busy: a recipe reports no fine-grained progress
-        self._progress.setVisible(True)
-        self._actions["analysis.stop"].setEnabled(True)
-        self.log(f"{label} \u2026")
-
-        # Per-step status flows back to the panel through the worker's existing
-        # ``progress`` signal (current=step index, label="<verb>:<status>"), so
-        # the Status column updates live without the worker touching widgets.
-        self._recipe_panel.reset_statuses()
-        reporter: list = [None]
-        # Snapshot the window's named selections on the GUI thread, so a recipe
-        # step referencing a GUI-authored selection resolves it without the
-        # worker touching the live store.  The snapshot is also kept on the
-        # window so the completion handler can merge back only what the run
-        # changed.  The store the run starts from is likewise remembered, so a
-        # run whose document was switched away while in flight is rejected.
-        named_snapshot = dict(self._session.named_selections)
-        self._recipe_named_snapshot = named_snapshot
-        self._recipe_starting_store = store
-
-        def task(should_cancel):
-            def on_step(index, verb, status):
-                if reporter[0] is not None:
-                    reporter[0](index, len(recipe), f"{verb}:{status}")
-
-            def on_progress(index, name, total):
-                if reporter[0] is not None:
-                    reporter[0](index, total, f"case:{name}")
-
-            run = run_recipe(
-                recipe,
-                model_data,
-                model=starting_mesh,
-                cancel=should_cancel,
-                pipeline_log=pipeline_log,
-                on_step=on_step,
-                on_progress=on_progress,
-                opensees_python=opensees_python,
-                named_selections=named_snapshot,
-            )
-            return run, messages
-
-        _freeze_gc_once()
-        worker = TaskWorker(task, parent=self)
-        reporter[0] = worker.report_progress
-        worker.progress.connect(self._on_recipe_progress)
-        worker.succeeded.connect(self._recipe_finished)
-        worker.failed.connect(self._preprocess_failed)
-        worker.finished.connect(self._preprocess_ended)
-        self._worker = worker
-        worker.start()
-
-    def _on_recipe_progress(self, index: int, total: int, label: str) -> None:
-        """Update the UI for a worker progress event — a step's status or a case.
-
-        The recipe worker multiplexes two streams over its one progress signal:
-        a step boundary is ``"<verb>:<status>"`` (updates the Recipe panel's
-        Status column), and a solve reporting the case it is about to run is
-        ``"case:<name>"`` (drives the determinate bar and a live log line).
-
-        Args:
-            index: For a step event, the zero-based step position; for a case
-                event, the 1-based case position.
-            total: For a step event, the number of steps (unused); for a case
-                event, the number of cases.
-            label: ``"<verb>:<status>"`` or ``"case:<name>"``.
-        """
-        if label.startswith("case:"):
-            case_name = label[len("case:") :]
-            self._progress.setRange(0, max(int(total), 1))
-            self._progress.setValue(int(index))
-            if case_name:
-                self.log(f"Solving {case_name} ({index}/{total}) \u2026")
-            return
-        _verb, _sep, status = label.partition(":")
-        self._recipe_panel.set_step_status(index, status or "running")
-
-    def _recipe_finished(self, payload: Any) -> None:
-        """Report what the recipe produced and register each result as a view.
-
-        A ``cases`` result carries the same in-memory archive the **Analysis ▸
-        Run** path serves, so it becomes one view per case, exactly as there —
-        a recipe's results are no longer merely a line in the log.  A
-        document-lifecycle step (``open`` / ``close`` / ``build_model``) is
-        adopted into the window first, so every result registers against the
-        document the user is now looking at; when the document is *not* replaced,
-        only the named selections the run changed are merged back, so selections
-        the user edited while it ran survive.  A run whose document was switched
-        away while in flight is rejected rather than applied to the document now
-        open.  Cancellation and failure stay distinct: a *cancelled* run
-        legitimately holds only the cases it solved before stopping, so no result
-        is reported as failed, and an empty one is left to the cancellation line
-        rather than called out as missing data.
-
-        Args:
-            payload: ``(RecipeRun, [log lines])`` from the worker.
-        """
-        from ..workflow import CASES, FIGURE, TABLE
-        from ..workflow.steps import IDA, MODAL, NLD, PUSHOVER, RS, SESSION
-
-        run, messages = payload
-        # A run started for one document must not install its mesh, selections or
-        # results onto a document the user switched to while it was in flight
-        # (``open_path`` replaced ``self._session.store``): reject the stale run's
-        # outcomes rather than affecting the document now open.
-        if not self._recipe_store_is_current():
-            self.log(
-                "Recipe run finished for a document that is no longer open; "
-                "its outcomes were discarded.",
-                "warn",
-            )
-            return
-        # A document-lifecycle step (``open`` / ``close`` / ``build_model``)
-        # replaced or closed the working document; adopt it *before* registering
-        # the results below, so a meshing/analysis result attaches to the
-        # document the user now sees rather than the stale one (P35 follow-up).
-        if run.document_reset:
-            self._adopt_document(run.document)
-        elif run.document is not None:
-            # The document itself was not replaced, but a ``select`` step (or any
-            # verb that mutates the document's named selections) left the store
-            # in place while changing the selection mapping — merge only the
-            # entries the run changed back into the window's store, so selections
-            # the user added or edited while the run was in flight survive (the
-            # run's snapshot cannot see them), without re-adopting the unchanged
-            # model store.
-            self._merge_recipe_named_selections(run.document)
-        self._session.last_run = run
-        # Persist each step's outcome onto the recipe (a step that ran "ok" is
-        # unchecked), so the run state survives save → reopen.
-        self._recipe_panel.apply_run_outcomes(run.step_status)
-        for message in messages:
-            self.log(message)
-        for result in run.results:
-            if result.kind == "geometry":
-                self._results_presenter.show_geometry_result(result.label, result.payload)
-            elif result.kind == SESSION:
-                # The document was already adopted up-front (``document_reset``);
-                # a SESSION result here just records the lifecycle event for the
-                # log — ``open``/``close``/``save`` carry their path, ``close``
-                # carries none.
-                if result.payload:
-                    self.log(f"{result.label}: {result.payload}")
-                else:
-                    self.log(result.label)
-            elif result.kind == CASES:
-                added = self._results_presenter.show_results_result(result.label, result.payload)
-                if not added and not run.cancelled:
-                    self.log(f"{result.label}: the run produced no results.", "warn")
-            elif result.kind == MODAL:
-                self._results_presenter.show_modal_result(result.label, result.payload)
-            elif result.kind == PUSHOVER:
-                self._results_presenter.show_pushover_result(result.label, result.payload)
-            elif result.kind == RS:
-                self._results_presenter.show_rs_result(result.label, result.payload)
-            elif result.kind == NLD:
-                self._results_presenter.show_nonlinear_dynamic_result(result.label, result.payload)
-            elif result.kind == IDA:
-                self._results_presenter.show_ida_result(result.label, result.payload)
-            elif result.kind == TABLE:
-                self._results_presenter.show_table_result(result.label, result.payload)
-            elif result.kind == FIGURE:
-                self._results_presenter.show_figure_result(result.label, result.payload)
-        for index, verb, message in run.failures:
-            self.log(f"Step {index} ({verb}) failed and is optional \u2014 {message}", "warn")
-        if run.cancelled:
-            self.log("The recipe was cancelled.", "warn")
-        self._set_analysis_actions_enabled()
-
-    def _recipe_store_is_current(self) -> bool:
-        """Whether the recipe run's document is still the one the window shows.
-
-        ``open_path`` (and ``open_project_path`` / the benchmark openers) replace
-        ``self._session.store`` through :meth:`_remember_source`, so a run started for one
-        document must not apply its recovered mesh, named selections or results
-        to a document the user switched to while it was in flight.  When no run
-        is being tracked (``_recipe_starting_store`` is ``None`` — the tests drive
-        the completion handlers directly), there is nothing to guard and the
-        store is treated as current.
-        """
-        return (
-            self._recipe_starting_store is None
-            or self._session.store is self._recipe_starting_store
-        )
-
-    def _merge_recipe_named_selections(self, document: Any) -> None:
-        """Adopt only the named selections a recipe run actually changed.
-
-        The run operates on a snapshot of the window's selections taken when it
-        started; merging the whole ``document.named_selections`` back would
-        clobber selections the user added or edited through
-        :meth:`_on_name_selection` while the run was in flight (the snapshot
-        predates those edits).  Only entries whose value differs from that
-        starting snapshot are applied, so the run's ``select`` steps land while
-        the user's concurrent edits to *other* keys survive.  A key the recipe
-        changed and the user also edited during the run resolves in the recipe's
-        favour: its ``select`` step is the explicit, completed operation the run
-        was asked to perform.
-        """
-        snapshot = self._recipe_named_snapshot or {}
-        for name, value in document.named_selections.items():
-            if name not in snapshot or snapshot[name] != value:
-                self._session.named_selections[name] = value
-
-    def _adopt_document(self, document: Any) -> None:
-        """Adopt the document a recipe run ended with into the window.
-
-        A document-lifecycle step (``open`` / ``close`` / ``build_model``)
-        replaced or closed the worker's document; the window's ``_session.store`` still
-        shows the previous one.
-        This replaces the store, restores the document's named selections and
-        saved view state, raises the viewport page and re-renders — the same
-        sequence ``File ▸ Open`` runs — so the results the recipe produced
-        register against the document the user is now looking at rather than the
-        stale one (P35 follow-up).
-        """
-        # Preserve the outgoing model's view before switching, as ``open_path``
-        # does.
-        self._save_view_state()
-        self._remember_source(document.model_data, source=document.document_path)
-        self._session.named_selections = dict(document.named_selections)
-        # Restore the incoming document's saved visibility, matching
-        # ``open_path``: a saved hidden set is validated against the incoming
-        # model, and no saved state clears it so the previous document's
-        # exclusions do not leak across the switch.
-        state, notes = load_view_state(document.document_path)
-        for note in notes:
-            level = "info" if "is stale" in note else "warn"
-            self.log(note, level)
-        self._session.hidden_elem_ids = self._restore_hidden_elements(
-            state.get("hidden_elem_ids"), document.model_data
-        )
-        # Adoption draws geometry, so raise the viewport page even if the user
-        # was looking at a table / figure view.
-        self._stack.setCurrentWidget(self._viewport_container)
-        self.show_model(document.model_data)
-        self._restore_camera(state.get("camera_position"))
-
-    def _preprocess_failed(self, message: str) -> None:
-        """Report a recipe failure, flushing buffered diagnostics first.
-
-        The pipeline messages collected by ``_collect`` on the worker thread are
-        flushed here (on the GUI thread) before the error, so the diagnostics that
-        led up to the failure appear before it — matching the success path's flush
-        in :meth:`_recipe_finished`.  A non-optional ``StepError`` carries the
-        partial run state, so the steps that completed before the failure are
-        still committed (unchecked, like a successful run) instead of being
-        re-run next time.  It also carries the document state: a completed
-        ``open`` / ``close`` / ``build_model`` step may have replaced the
-        document before the failing step, so that state is adopted before the
-        lifecycle steps are committed — otherwise the window would keep showing
-        the pre-recipe document while the recipe recorded the switch as done.  A
-        document that was *not* replaced still merges the named selections the
-        completed steps changed, and a run whose document was switched away while
-        in flight is rejected rather than applied to the document now open.
-        """
-        for pending in getattr(self, "_recipe_messages", None) or []:
-            self.log(pending)
-        self._recipe_messages = None
-        error = getattr(self._worker, "error", None)
-        step_status = getattr(error, "step_status", None)
-        document = getattr(error, "document", None)
-        document_reset = getattr(error, "document_reset", False)
-        # A run started for one document must not install its recovered mesh or
-        # document state onto a document the user switched to while it was in
-        # flight (``open_path`` replaced ``self._session.store``): reject the stale
-        # recovery state and outcomes rather than affecting the document now open.
-        if not self._recipe_store_is_current():
-            self.log(
-                "Recipe failed for a document that is no longer open; "
-                "its recovered state was discarded.",
-                "warn",
-            )
-        else:
-            # A completed ``open`` / ``close`` / ``build_model`` step may have
-            # replaced the document before the failing step; adopt it first so the
-            # lifecycle steps are only committed against the document the window now
-            # shows.
-            if document_reset and document is not None:
-                self._adopt_document(document)
-            elif document is not None:
-                # The document was not replaced, but a completed ``select`` step
-                # may have changed its named selections before the failing step —
-                # merge only what the run changed (mirroring ``_recipe_finished``)
-                # so the completed ``select`` step's work is retained without
-                # clobbering selections the user edited while the run was in
-                # flight.
-                self._merge_recipe_named_selections(document)
-            # A completed ``mesh`` step's topology has no view to register on the
-            # failure path, but a retry of the analysis step needs it in the store —
-            # record it (mirroring ``show_geometry_result`` on the success path) so
-            # the committed mesh step need not re-run.
-            if (
-                document is not None
-                and getattr(document, "model", None) is not None
-                and self._session.store is not None
-            ):
-                self._session.store.set_preprocessed(document.model)
-            if step_status:
-                if document_reset and document is None:
-                    # The document changed but the error carried no state to adopt —
-                    # keep the lifecycle steps retryable rather than marking them
-                    # complete against a window that still shows the old document.
-                    from ..workflow.registry import STEP_SPECS
-
-                    step_status = [
-                        (index, verb, status)
-                        for index, verb, status in step_status
-                        if not (
-                            STEP_SPECS.get(verb) is not None and STEP_SPECS[verb].resets_document
-                        )
-                    ]
-                self._recipe_panel.apply_run_outcomes(step_status)
-        self.log(f"Recipe failed: {message}", "error")
-
-    def _preprocess_ended(self) -> None:
-        """Restore the UI once the worker has stopped, successfully or not.
-
-        The collection here is the other half of the worker's ``gc.disable()``
-        (:mod:`fea_toolkit.gui.controllers.worker`): cycles created while the
-        task ran are reclaimed on the **GUI thread**, where traversing the
-        PySide6/VTK objects the window owns is safe.
-        """
-        self._worker = None
-        self._progress.setVisible(False)
-        self._progress.setRange(0, 100)
-        self._actions["analysis.stop"].setEnabled(False)
-        self._set_model_actions_enabled(self._session.store is not None)
-        self._set_analysis_actions_enabled()
-        gc.collect()
+        self._recipe_controller.preset_step(edited, label)
 
     def _set_model_actions_enabled(self, enabled: bool) -> None:
         """Enable the preprocessing actions — they need a parsed source model.
@@ -4066,7 +3549,7 @@ class MainWindow(QMainWindow):
         """
         store = self._session.store
         mesh = store.preprocessed() if store is not None else None
-        running = self._worker is not None and self._worker.isRunning()
+        running = self._recipe_controller.is_running()
         enabled = mesh is not None and not running
         for key in (
             "analysis.run",
@@ -4092,108 +3575,6 @@ class MainWindow(QMainWindow):
             )
         else:
             action.setToolTip("Solve the model's linear static cases or combinations")
-
-    def _set_recipe_actions_enabled(self) -> None:
-        """Enable the recipe actions that the panel's contents allow.
-
-        Everything except *Run* is meaningful only with a step to act on, so an
-        empty recipe leaves them greyed rather than letting a click do nothing.
-        """
-        if not hasattr(self, "_recipe_panel"):
-            return
-        # Reads the panel (not ``session.recipe``): this is a ``changed``
-        # handler, so it must see the live editor's contents — which, under
-        # panel-as-view, *is* ``session.recipe``.
-        has_steps = len(self._recipe_panel.recipe) > 0
-        for key in ("recipe.run", "recipe.clear", "recipe.save", "recipe.export"):
-            self._actions[key].setEnabled(has_steps)
-
-    # ── Recipe files ────────────────────────────────────────────────
-
-    def _on_recipe_clear(self) -> None:
-        """**Recipe ▸ Clear recipe**: empty the panel."""
-        self._recipe_panel.clear()
-        self.log("Recipe cleared.")
-
-    def _on_recipe_save(self) -> None:
-        """**Recipe ▸ Save recipe…**: write the panel's steps to a JSON file."""
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save recipe", "recipe.json", "Recipe JSON (*.json)"
-        )
-        if not path:
-            return
-        try:
-            self._session.recipe.to_json(path)
-        except OSError as exc:
-            self.log(f"Could not write {path}: {exc}", "error")
-            return
-        self.log(f"Saved recipe: {path}")
-
-    def _on_recipe_open(self) -> None:
-        """**Recipe ▸ Open recipe…**: read a recipe and show it in the panel."""
-        from ..workflow import Recipe
-
-        path, _ = QFileDialog.getOpenFileName(self, "Open recipe", "", "Recipe JSON (*.json)")
-        if not path:
-            return
-        try:
-            recipe = Recipe.from_json(path)
-        except (OSError, ValueError) as exc:
-            self.log(f"Could not read {path}: {exc}", "error")
-            return
-        self._recipe_panel.set_recipe(recipe)
-        self.log(f"Opened recipe: {path} ({len(recipe)} steps)")
-
-    def _on_recipe_export(self) -> None:
-        """**Recipe ▸ Export as Python…**: write the recipe as a runnable script."""
-        from pathlib import Path
-
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Export recipe as Python", "recipe.py", "Python (*.py)"
-        )
-        if not path:
-            return
-        try:
-            Path(path).write_text(self._session.recipe.to_python(), encoding="utf-8")
-        except OSError as exc:
-            self.log(f"Could not write {path}: {exc}", "error")
-            return
-        self.log(f"Exported recipe: {path}")
-
-    def _on_recipe_command(self) -> None:
-        """**Recipe ▸ Command…** (Ctrl+K): compile a command string into a step.
-
-        The palette reuses the recipe editor's selection grammar; on accept the
-        compiled step is appended and echoed to the log so the session stays
-        replayable.
-        """
-        from ..workflow import step_to_command
-        from .views.command_palette import get_step
-
-        mesh = self._session.store.preprocessed() if self._session.store is not None else None
-        initial = {"geometry"} if mesh is not None else ()
-        step = get_step(self, list(self._session.recipe), initial=initial)
-        if step is None:
-            return
-        self._recipe_panel.add_step(step.verb, step.selection, step.params, optional=step.optional)
-        self.log(f"command: {step_to_command(step)}")
-
-    def _on_recipe_import(self) -> None:
-        """**Recipe ▸ Import script…**: read a recipe's RECIPE literal from a script."""
-        from pathlib import Path
-
-        from ..workflow import Recipe
-
-        path, _ = QFileDialog.getOpenFileName(self, "Import recipe script", "", "Python (*.py)")
-        if not path:
-            return
-        try:
-            recipe = Recipe.from_python(Path(path).read_text(encoding="utf-8"))
-        except (OSError, ValueError, SyntaxError) as exc:
-            self.log(f"Could not import {path}: {exc}", "error")
-            return
-        self._recipe_panel.set_recipe(recipe)
-        self.log(f"Imported recipe: {path} ({len(recipe)} steps)")
 
     # ── Handlers ────────────────────────────────────────────────────
 
@@ -4607,7 +3988,7 @@ class MainWindow(QMainWindow):
         self._session = session
 
         manifest = bundle["manifest"] or {}
-        panel = getattr(self, "_recipe_panel", None)
+        panel = self._recipe_controller.panel
         if panel is not None:
             panel.set_session(session)
             panel.set_recipe(session.recipe)
@@ -4647,7 +4028,7 @@ class MainWindow(QMainWindow):
         # A newly opened model starts with an empty recipe: the workflow being
         # authored belonged to the model just replaced.  Clearing the panel (the
         # live editor) propagates the empty recipe to the session via ``changed``.
-        panel = getattr(self, "_recipe_panel", None)
+        panel = self._recipe_controller.panel
         if panel is not None:
             panel.clear()
         self._session.named_selections = selections
@@ -4780,7 +4161,7 @@ class MainWindow(QMainWindow):
                 "warn",
             )
             return
-        if self._worker is not None and self._worker.isRunning():
+        if self._recipe_controller.is_running():
             self.log("An analysis is already running.", "warn")
             return
 
@@ -4835,17 +4216,12 @@ class MainWindow(QMainWindow):
                 "warn",
             )
             return False
-        if self._worker is not None and self._worker.isRunning():
+        if self._recipe_controller.is_running():
             self.log("An analysis is already running.", "warn")
             return False
 
         steps = AnalysisController.static_steps(cases, combinations, config)
-        for step in steps:
-            self._recipe_panel.add_step(
-                step.verb, step.selection, step.params, optional=step.optional
-            )
-        self._pending_label = "Static analysis"
-        self._on_recipe_run()
+        self._recipe_controller.run_steps(steps, "Static analysis")
         return True
 
     def _on_analysis_stop(self) -> None:
@@ -4855,9 +4231,10 @@ class MainWindow(QMainWindow):
         recipe run ends between steps, and a static solve ends between cases
         rather than mid-solve.
         """
-        if self._worker is None or not self._worker.isRunning():
+        worker = self._recipe_controller.worker
+        if worker is None or not worker.isRunning():
             return
-        self._worker.cancel()
+        worker.cancel()
         self._actions["analysis.stop"].setEnabled(False)
         self.log("Stop requested \u2014 the run ends at the next case boundary.", "warn")
 
@@ -4875,11 +4252,12 @@ class MainWindow(QMainWindow):
             self._mouse_filter = None
         for _interactor, _interaction, mouse_filter in getattr(self, "_secondary_interactions", []):
             _interactor.removeEventFilter(mouse_filter)
-        if self._worker is not None and self._worker.isRunning():
+        if self._recipe_controller.is_running():
             # Preprocessing is atomic, so this only gives it a grace period
             # rather than interrupting it mid-call.
-            self._worker.cancel()
-            self._worker.wait(3000)
+            worker = self._recipe_controller.worker
+            worker.cancel()
+            worker.wait(3000)
         if self._quad is not None:
             for interactor in self._quad.interactors:
                 with contextlib.suppress(Exception):

@@ -49,10 +49,10 @@ def _await(window, timeout=60.0):
     from qtpy.QtCore import QCoreApplication
 
     deadline = time.monotonic() + timeout
-    while window._worker is not None and time.monotonic() < deadline:
+    while window._recipe_controller.worker is not None and time.monotonic() < deadline:
         QCoreApplication.processEvents()
         time.sleep(0.01)
-    assert window._worker is None, "the recipe worker never finished"
+    assert window._recipe_controller.worker is None, "the recipe worker never finished"
 
 
 class TestSessionRecipeOwnership:
@@ -65,11 +65,11 @@ class TestSessionRecipeOwnership:
     """
 
     def test_the_session_and_panel_share_one_recipe_after_load(self, window):
-        assert window._session.recipe is window._recipe_panel.recipe
+        assert window._session.recipe is window._recipe_controller.panel.recipe
 
     def test_an_in_place_edit_stays_on_the_shared_object(self, window):
-        window._recipe_panel.add_step("mesh")
-        assert window._session.recipe is window._recipe_panel.recipe
+        window._recipe_controller.panel.add_step("mesh")
+        assert window._session.recipe is window._recipe_controller.panel.recipe
         assert len(window._session.recipe) == 1
         assert window._session.recipe.steps[0].verb == "mesh"
 
@@ -77,28 +77,28 @@ class TestSessionRecipeOwnership:
         from fea_toolkit.workflow import Recipe
 
         replacement = Recipe()
-        window._recipe_panel.set_recipe(replacement)
+        window._recipe_controller.panel.set_recipe(replacement)
         assert window._session.recipe is replacement
-        assert window._session.recipe is window._recipe_panel.recipe
+        assert window._session.recipe is window._recipe_controller.panel.recipe
 
     def test_a_clear_resyncs_the_session(self, window):
-        window._recipe_panel.add_step("mesh")
-        window._recipe_panel.clear()
-        assert window._session.recipe is window._recipe_panel.recipe
+        window._recipe_controller.panel.add_step("mesh")
+        window._recipe_controller.panel.clear()
+        assert window._session.recipe is window._recipe_controller.panel.recipe
         assert len(window._session.recipe) == 0
 
     def test_opening_a_new_model_clears_the_recipe(self, window):
         from pathlib import Path
 
-        window._recipe_panel.add_step("mesh")
+        window._recipe_controller.panel.add_step("mesh")
         assert len(window._session.recipe) == 1
 
         fixture = Path(__file__).parent / "fixtures" / "sample.s2k"
         assert window.open_path(str(fixture)) is True
 
         assert len(window._session.recipe) == 0
-        assert window._session.recipe is window._recipe_panel.recipe
-        assert window._recipe_panel._table.rowCount() == 0
+        assert window._session.recipe is window._recipe_controller.panel.recipe
+        assert window._recipe_controller.panel._table.rowCount() == 0
 
 
 class TestDocumentAdoption:
@@ -116,7 +116,7 @@ class TestDocumentAdoption:
             document_reset=True,
             results=[StepResult(kind="session", label="Opened document", payload=path)],
         )
-        window._recipe_finished((run, []))
+        window._recipe_controller._finished((run, []))
         assert window._session.store.raw() is opened
         assert window._source_label == path
 
@@ -131,7 +131,7 @@ class TestDocumentAdoption:
             document_reset=False,
             results=[StepResult(kind="session", label="Saved document", payload=path)],
         )
-        window._recipe_finished((run, []))
+        window._recipe_controller._finished((run, []))
         assert window._session.store.raw() is before
 
     def test_a_select_only_run_merges_only_changed_selections(self, window):
@@ -143,7 +143,7 @@ class TestDocumentAdoption:
 
         core = NamedSelection(name="core", selection=Selection(sections=["COL"]))
         other = NamedSelection(name="other", selection=Selection(sections=["BEAM"]))
-        window._recipe_named_snapshot = {"core": core, "other": other}
+        window._recipe_controller._recipe_named_snapshot = {"core": core, "other": other}
         # The user edits "other" while the run is in flight.
         other_edited = NamedSelection(name="other", selection=Selection(sections=["SLAB"]))
         window._session.named_selections = {"core": core, "other": other_edited}
@@ -156,7 +156,7 @@ class TestDocumentAdoption:
             ),
             document_reset=False,
         )
-        window._recipe_finished((run, []))
+        window._recipe_controller._finished((run, []))
 
         assert (
             window._session.named_selections["core"] == core_changed
@@ -170,7 +170,7 @@ class TestDocumentAdoption:
         from fea_toolkit.workflow.steps import DocumentState
 
         starting_store = window._session.store
-        window._recipe_starting_store = starting_store
+        window._recipe_controller._recipe_starting_store = starting_store
         # The user switches documents while the run is in flight.
         window._remember_source(make_sample_model())
         new_store = window._session.store
@@ -180,7 +180,7 @@ class TestDocumentAdoption:
             document=DocumentState(model_data=starting_store.raw()),
             document_reset=True,
         )
-        window._recipe_finished((run, []))
+        window._recipe_controller._finished((run, []))
 
         # The stale run's document was not adopted — B's store is untouched.
         assert window._session.store is new_store
@@ -214,13 +214,13 @@ class TestExampleChooser:
 
     def test_open_presets_a_build_model_plus_mesh_recipe(self, window):
         window._open_example("ik2005_generic_frame")
-        recipe = window._recipe_panel.recipe
+        recipe = window._recipe_controller.panel.recipe
         assert [step.verb for step in recipe.steps] == ["build_model", "mesh"]
         assert recipe.steps[0].params["builder"] == "generic_frame"
 
     def test_open_builder_presets_a_fema355c_recipe(self, window):
         window._open_example("builder:fema355c")
-        recipe = window._recipe_panel.recipe
+        recipe = window._recipe_controller.panel.recipe
         assert [step.verb for step in recipe.steps] == ["build_model", "mesh"]
         assert recipe.steps[0].params == {"builder": "fema355c"}
 
@@ -251,7 +251,7 @@ class TestModelPresets:
         )
         _await(window)
 
-        (step,) = window._recipe_panel.recipe.steps
+        (step,) = window._recipe_controller.panel.recipe.steps
         assert step.verb == "mesh"
         assert step.params == {"split_elements": True, "create_shells": False}
         assert window._model is not None  # the run still produced a topology
@@ -263,7 +263,7 @@ class TestModelPresets:
         )
         _await(window)
 
-        (step,) = window._recipe_panel.recipe.steps
+        (step,) = window._recipe_controller.panel.recipe.steps
         assert step.params.get("create_shells") is True
 
     def test_the_preset_registers_a_view_and_logs_the_summary(self, window):
@@ -284,7 +284,7 @@ class TestPanel:
     """The panel is a view over the recipe — edits reach the step."""
 
     def test_the_list_has_one_row_per_step(self, window):
-        panel = window._recipe_panel
+        panel = window._recipe_controller.panel
         panel.add_step("mesh")
         panel.add_step("run_static")
         assert panel._table.rowCount() == 2
@@ -293,7 +293,7 @@ class TestPanel:
     def test_an_edit_via_the_dialog_reaches_the_step(self, window, monkeypatch):
         from fea_toolkit.workflow import Step
 
-        panel = window._recipe_panel
+        panel = window._recipe_controller.panel
         panel.add_step("mesh")
         monkeypatch.setattr(
             "fea_toolkit.gui.views.step_dialog.StepDialog.edit",
@@ -307,7 +307,7 @@ class TestPanel:
         assert panel.recipe.steps[0].params["split_slabs_at_walls"] is True
 
     def test_an_optional_step_is_marked_in_the_list(self, window):
-        panel = window._recipe_panel
+        panel = window._recipe_controller.panel
         panel.add_step("mesh", optional=True)
         assert panel.recipe.steps[0].optional is True
         assert "(optional)" in panel._table.item(0, 1).text()
@@ -315,13 +315,13 @@ class TestPanel:
     def test_a_step_carries_the_selection_it_was_given(self, window):
         from fea_toolkit.model.selection import Selection
 
-        panel = window._recipe_panel
+        panel = window._recipe_controller.panel
         selection = Selection(sections=["brick wall"], element_types=["Area"])
         panel.add_step("scale_sections", selection)
         assert panel.recipe.steps[0].selection == selection
 
     def test_a_step_can_be_removed_and_reordered(self, window):
-        panel = window._recipe_panel
+        panel = window._recipe_controller.panel
         panel.add_step("mesh")
         panel.add_step("run_static")
         panel.move_selected(-1)
@@ -331,9 +331,9 @@ class TestPanel:
 
     def test_the_recipe_actions_follow_the_contents(self, window):
         assert window._actions["recipe.run"].isEnabled() is False
-        window._recipe_panel.add_step("mesh")
+        window._recipe_controller.panel.add_step("mesh")
         assert window._actions["recipe.run"].isEnabled() is True
-        window._recipe_panel.clear()
+        window._recipe_controller.panel.clear()
         assert window._actions["recipe.run"].isEnabled() is False
 
     def test_a_loaded_recipe_is_displayed(self, window):
@@ -342,14 +342,16 @@ class TestPanel:
         recipe = Recipe.from_dict(
             {"name": "t", "steps": [{"verb": "mesh", "params": {"split_slabs_at_walls": True}}]}
         )
-        window._recipe_panel.set_recipe(recipe)
-        assert window._recipe_panel._table.rowCount() == 1
-        assert window._recipe_panel.recipe.steps[0].params == {"split_slabs_at_walls": True}
+        window._recipe_controller.panel.set_recipe(recipe)
+        assert window._recipe_controller.panel._table.rowCount() == 1
+        assert window._recipe_controller.panel.recipe.steps[0].params == {
+            "split_slabs_at_walls": True
+        }
 
     def test_the_run_checkbox_controls_the_step_enabled_flag(self, window):
         from qtpy.QtWidgets import QCheckBox
 
-        panel = window._recipe_panel
+        panel = window._recipe_controller.panel
         panel.add_step("mesh")
         checkbox = panel._table.cellWidget(0, 0).findChild(QCheckBox)
         assert checkbox.isChecked() is True
@@ -359,7 +361,7 @@ class TestPanel:
     def test_checking_a_step_enables_its_precursors(self, window):
         from qtpy.QtWidgets import QCheckBox
 
-        panel = window._recipe_panel
+        panel = window._recipe_controller.panel
         panel.add_step("mesh")
         panel.add_step("modal")
         panel.add_step("response_spectrum")
@@ -372,7 +374,7 @@ class TestPanel:
         assert [step.enabled for step in panel.recipe] == [True, True, True]
 
     def test_apply_run_outcomes_persists_the_tick(self, window):
-        panel = window._recipe_panel
+        panel = window._recipe_controller.panel
         panel.add_step("mesh")
         panel.add_step("mesh")
         panel.apply_run_outcomes([(0, "mesh", "ok"), (1, "mesh", "ok")])
@@ -387,7 +389,7 @@ class TestRunOrder:
     """A recipe runs its steps in order, and the panel shows the workflow."""
 
     def test_a_two_step_recipe_runs_both(self, window):
-        panel = window._recipe_panel
+        panel = window._recipe_controller.panel
         panel.add_step("mesh", params={"create_shells": False})
         panel.add_step("mesh", params={"create_shells": True})
         window._actions["recipe.run"].trigger()
@@ -400,7 +402,7 @@ class TestRunOrder:
         ]
 
     def test_a_run_marks_each_step_with_a_success_tick(self, window):
-        panel = window._recipe_panel
+        panel = window._recipe_controller.panel
         panel.add_step("mesh", params={"create_shells": False})
         panel.add_step("mesh", params={"create_shells": True})
         window._actions["recipe.run"].trigger()
@@ -411,7 +413,7 @@ class TestRunOrder:
         assert panel._table.item(1, 2).text() == "\u2713"
 
     def test_an_empty_recipe_warns_rather_than_running(self, window):
-        window._on_recipe_run()
+        window._recipe_controller.run()
         assert "The recipe has no steps" in window._message_log.toPlainText()
 
 
@@ -424,7 +426,7 @@ class TestResultViews:
     """
 
     def test_a_solved_case_registers_a_results_view(self, window):
-        panel = window._recipe_panel
+        panel = window._recipe_controller.panel
         panel.add_step("mesh", params={"create_shells": False})
         panel.add_step("run_static", params={"cases": {"DEAD": {"DEAD": 1.0}}})
         window._actions["recipe.run"].trigger()
@@ -448,7 +450,7 @@ class TestResultViews:
                 entries=[LoadCombinationEntry(name="DEAD", factor=1.0, kind="case")],
             )
         }
-        panel = window._recipe_panel
+        panel = window._recipe_controller.panel
         panel.add_step("mesh", params={"create_shells": False})
         panel.add_step("run_static", params={"cases": {"DEAD": {"DEAD": 1.0}}})
         panel.add_step("combine", params={"combinations": ["GRAV"]})
@@ -479,13 +481,13 @@ class TestResultViews:
             run.results.append(StepResult(kind=CASES, label="Static cases", payload={}))
             return run
 
-        window._recipe_finished((empty_result(), []))
+        window._recipe_controller._finished((empty_result(), []))
         assert "the run produced no results" in window._message_log.toPlainText()
 
         window._message_log.clear()
         cancelled = empty_result()
         cancelled.cancelled = True
-        window._recipe_finished((cancelled, []))
+        window._recipe_controller._finished((cancelled, []))
 
         log = window._message_log.toPlainText()
         assert "The recipe was cancelled." in log
@@ -708,7 +710,7 @@ class TestTableAndFigureViews:
     """P30 phase C: a check's table and a chart's figure reach the viewport."""
 
     def test_a_check_registers_a_table_view(self, window):
-        panel = window._recipe_panel
+        panel = window._recipe_controller.panel
         panel.add_step("check_connectivity")
         window._actions["recipe.run"].trigger()
         _await(window)
@@ -962,7 +964,10 @@ def test_the_step_list_has_a_help_context_menu(window):
     """Right-click help is wired to the recipe step list."""
     from qtpy.QtCore import Qt
 
-    assert window._recipe_panel._table.contextMenuPolicy() == Qt.ContextMenuPolicy.CustomContextMenu
+    assert (
+        window._recipe_controller.panel._table.contextMenuPolicy()
+        == Qt.ContextMenuPolicy.CustomContextMenu
+    )
 
 
 def test_the_verb_help_dialog_shows_the_verbs_surface(qapp):

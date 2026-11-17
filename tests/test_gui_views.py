@@ -228,15 +228,15 @@ def test_preprocessing_freezes_the_gc_before_handing_work_to_the_worker(window, 
     The Preprocessor copies the model, and the GUI runs that on a worker thread;
     a collection triggered there would traverse the main thread's shiboken
     objects from the wrong thread.  ``gc.freeze()`` at the handoff is the fix --
-    see ``main_window._freeze_gc_once``.
+    see ``recipe_controller._freeze_gc_once``.
     """
-    from fea_toolkit.gui import main_window
+    from fea_toolkit.gui.controllers import recipe_controller
 
-    monkeypatch.setattr(main_window, "_GC_FROZEN", [])
+    monkeypatch.setattr(recipe_controller, "_GC_FROZEN", [])
 
     run_preprocess(window)
 
-    assert main_window._GC_FROZEN == [True]
+    assert recipe_controller._GC_FROZEN == [True]
 
 
 def test_opening_a_model_registers_the_unprocessed_view(window):

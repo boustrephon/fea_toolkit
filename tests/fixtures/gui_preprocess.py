@@ -28,7 +28,7 @@ def run_preprocess(window, action_key="model.split", timeout=30.0):
     config, label = PRESETS[action_key]
     window._mesh_preset(config, label)
     deadline = time.monotonic() + timeout
-    while window._worker is not None and time.monotonic() < deadline:
+    while window._recipe_controller.worker is not None and time.monotonic() < deadline:
         QCoreApplication.processEvents()
         time.sleep(0.01)
-    assert window._worker is None, "the preprocessing worker never finished"
+    assert window._recipe_controller.worker is None, "the preprocessing worker never finished"

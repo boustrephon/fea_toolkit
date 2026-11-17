@@ -38,10 +38,10 @@ def _spin(win, timeout=60.0):
     from qtpy.QtCore import QCoreApplication
 
     deadline = time.monotonic() + timeout
-    while win._worker is not None and time.monotonic() < deadline:
+    while win._recipe_controller.worker is not None and time.monotonic() < deadline:
         QCoreApplication.processEvents()
         time.sleep(0.01)
-    assert win._worker is None, "a worker never finished"
+    assert win._recipe_controller.worker is None, "a worker never finished"
 
 
 def test_command_action_is_live_and_enabled(window):

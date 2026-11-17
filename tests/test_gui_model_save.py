@@ -49,10 +49,10 @@ def _mesh(window):
         {"split_elements": True, "create_shells": False}, "Splitting elements at joints"
     )
     deadline = time.monotonic() + 60.0
-    while window._worker is not None and time.monotonic() < deadline:
+    while window._recipe_controller.worker is not None and time.monotonic() < deadline:
         QCoreApplication.processEvents()
         time.sleep(0.01)
-    assert window._worker is None, "the recipe worker never finished"
+    assert window._recipe_controller.worker is None, "the recipe worker never finished"
     assert window._session.store.preprocessed() is not None
 
 
