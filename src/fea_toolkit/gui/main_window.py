@@ -1829,12 +1829,10 @@ class MainWindow(QMainWindow):
 
         self._recipe_panel = RecipePanel(self)
         self._recipe_panel.changed.connect(self._set_recipe_actions_enabled)
-        # The panel is a *view* over the session's recipe, not a second owner:
-        # ``changed`` fires on every in-place edit and rebind, so this reference
-        # write-back keeps ``session.recipe`` and the panel's recipe the same
-        # object (``Recipe`` is mutated in place — no copy, no stale mirror).
-        self._recipe_panel.changed.connect(self._sync_recipe_to_session)
-        self._session.recipe = self._recipe_panel.recipe  # initial sync
+        # The panel is a *view* over the session's recipe (panel-as-view, P48
+        # option A'): once bound it edits ``session.recipe`` directly — the
+        # single object the window runs and saves — so there is no write-back.
+        self._recipe_panel.set_session(self._session)
         self._recipe_panel.copied.connect(self.log)
         self._recipe_dock = QDockWidget("Recipe", self)
         self._recipe_dock.setObjectName("dock_recipe")
@@ -4104,29 +4102,11 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "_recipe_panel"):
             return
         # Reads the panel (not ``session.recipe``): this is a ``changed``
-        # handler, so it must see the live editor's contents — the session is
-        # only rebinded by the *later* ``_sync_recipe_to_session`` connection.
+        # handler, so it must see the live editor's contents — which, under
+        # panel-as-view, *is* ``session.recipe``.
         has_steps = len(self._recipe_panel.recipe) > 0
         for key in ("recipe.run", "recipe.clear", "recipe.save", "recipe.export"):
             self._actions[key].setEnabled(has_steps)
-
-    def _sync_recipe_to_session(self) -> None:
-        """Point the session's recipe at the panel's live recipe.
-
-        The recipe panel is the de-facto owner while the user edits; this one
-        reference assignment (not a copy — ``Recipe`` is mutated in place) keeps
-        ``session.recipe is panel.recipe`` after every change, so save and run
-        read exactly what the panel shows.  Connected to
-        :attr:`~fea_toolkit.gui.views.recipe_panel.RecipePanel.changed`.
-
-        In-place edits (``add_step`` / ``remove_selected`` / ``move_selected`` /
-        ``reset_statuses`` / ``apply_run_outcomes``) mutate the shared object, so
-        they need no signal; the rebinds (``set_recipe`` / ``clear``) do emit
-        ``changed``, which is what carries this write-back.  Keep this the
-        *single* place the session's recipe is rebound, so a later move to a
-        panel-as-view design stays a delete-plus-repoint.
-        """
-        self._session.recipe = self._recipe_panel.recipe
 
     # ── Recipe files ────────────────────────────────────────────────
 
@@ -4629,6 +4609,7 @@ class MainWindow(QMainWindow):
         manifest = bundle["manifest"] or {}
         panel = getattr(self, "_recipe_panel", None)
         if panel is not None:
+            panel.set_session(session)
             panel.set_recipe(session.recipe)
         self._apply_display_values(manifest.get("display") or {})
 

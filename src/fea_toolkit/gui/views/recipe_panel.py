@@ -66,6 +66,7 @@ class RecipePanel(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
+        self._session: Any = None
         self._recipe = Recipe()
         self._selected = -1
         self._statuses: dict[int, str] = {}
@@ -148,8 +149,19 @@ class RecipePanel(QWidget):
 
     @property
     def recipe(self) -> Any:
-        """The recipe this panel is editing."""
+        """The recipe this panel is editing — the session's, once bound."""
+        if self._session is not None:
+            return self._session.recipe
         return self._recipe
+
+    def set_session(self, session: Any) -> None:
+        """Bind the panel to *session*, so the panel edits that session's recipe.
+
+        Once bound, :attr:`recipe` returns the session's recipe — the single
+        object the window runs and saves — so no write-back is needed.  ``None``
+        unbinds and falls back to the panel's own recipe (standalone tests).
+        """
+        self._session = session
 
     # ── Public API ───────────────────────────────────────────────────
 
@@ -159,7 +171,10 @@ class RecipePanel(QWidget):
         Args:
             recipe: The :class:`~fea_toolkit.workflow.Recipe` to display.
         """
-        self._recipe = recipe
+        if self._session is not None:
+            self._session.recipe = recipe
+        else:
+            self._recipe = recipe
         self._selected = 0 if len(recipe) else -1
         self._reload_list()
         self.changed.emit()
@@ -194,18 +209,18 @@ class RecipePanel(QWidget):
         Raises:
             ValueError: If the verb is unknown or a parameter is not declared.
         """
-        self._recipe.add(verb, selection, params, optional=optional)
-        self._selected = len(self._recipe) - 1
+        self.recipe.add(verb, selection, params, optional=optional)
+        self._selected = len(self.recipe) - 1
         self._reload_list()
         self.changed.emit()
         return self._selected
 
     def remove_selected(self) -> None:
         """Drop the selected step, if there is one."""
-        if not 0 <= self._selected < len(self._recipe):
+        if not 0 <= self._selected < len(self.recipe):
             return
-        del self._recipe.steps[self._selected]
-        self._selected = min(self._selected, len(self._recipe) - 1)
+        del self.recipe.steps[self._selected]
+        self._selected = min(self._selected, len(self.recipe) - 1)
         self._reload_list()
         self.changed.emit()
 
@@ -216,9 +231,9 @@ class RecipePanel(QWidget):
             delta: ``-1`` to move it earlier, ``+1`` to move it later.
         """
         target = self._selected + delta
-        if not (0 <= self._selected < len(self._recipe)) or not 0 <= target < len(self._recipe):
+        if not (0 <= self._selected < len(self.recipe)) or not 0 <= target < len(self.recipe):
             return
-        steps = self._recipe.steps
+        steps = self.recipe.steps
         steps[self._selected], steps[target] = steps[target], steps[self._selected]
         self._selected = target
         self._reload_list()
@@ -240,7 +255,7 @@ class RecipePanel(QWidget):
         edited = StepDialog.edit(step, self, self._model_data)
         if edited is None:
             return
-        self._recipe.steps[self._selected] = edited
+        self.recipe.steps[self._selected] = edited
         self._reload_list()
         self.changed.emit()
 
@@ -248,16 +263,16 @@ class RecipePanel(QWidget):
 
     def _selected_step(self) -> Optional[Any]:
         """The selected :class:`Step`, or ``None`` when nothing is selected."""
-        if 0 <= self._selected < len(self._recipe):
-            return self._recipe.steps[self._selected]
+        if 0 <= self._selected < len(self.recipe):
+            return self.recipe.steps[self._selected]
         return None
 
     def _reload_list(self) -> None:
         """Rebuild the step table from the recipe, keeping the selection."""
         self._statuses = {}  # the recipe changed; run status no longer applies
         self._table.blockSignals(True)
-        self._table.setRowCount(len(self._recipe))
-        for index, step in enumerate(self._recipe):
+        self._table.setRowCount(len(self.recipe))
+        for index, step in enumerate(self.recipe):
             label = f"{index + 1}. {step.verb}"
             if step.optional:
                 label += "  (optional)"
@@ -268,7 +283,7 @@ class RecipePanel(QWidget):
             self._table.setCellWidget(index, 0, self._make_run_toggle(index, step.enabled))
             self._refresh_status_cell(index)
         self._table.blockSignals(False)
-        if 0 <= self._selected < len(self._recipe):
+        if 0 <= self._selected < len(self.recipe):
             self._table.selectRow(self._selected)
         self._update_summary()
 
@@ -291,11 +306,11 @@ class RecipePanel(QWidget):
 
     def _on_run_toggled(self, index: int, checked: bool) -> None:
         """Apply a Run-checkbox change, cascading to precursors when checked."""
-        if not (0 <= index < len(self._recipe)):
+        if not (0 <= index < len(self.recipe)):
             return
-        if self._recipe.steps[index].enabled == checked:
+        if self.recipe.steps[index].enabled == checked:
             return
-        self._recipe.set_enabled(index, checked)
+        self.recipe.set_enabled(index, checked)
         self._reload_list()
         self.changed.emit()
 
@@ -317,9 +332,9 @@ class RecipePanel(QWidget):
 
         self._statuses = {}
         self._table.blockSignals(True)
-        for index, step in enumerate(self._recipe):
+        for index, step in enumerate(self.recipe):
             if step.status:
-                self._recipe.steps[index] = replace(step, status="")
+                self.recipe.steps[index] = replace(step, status="")
             self._refresh_status_cell(index)
         self._table.blockSignals(False)
 
@@ -331,7 +346,7 @@ class RecipePanel(QWidget):
             status: One of ``"running"``, ``"ok"``, ``"failed"``,
                 ``"cancelled"`` or ``"skipped"``.
         """
-        if not (0 <= index < len(self._recipe)):
+        if not (0 <= index < len(self.recipe)):
             return
         self._statuses[index] = status
         self._refresh_status_cell(index)
@@ -352,12 +367,12 @@ class RecipePanel(QWidget):
 
         changed = False
         for index, _verb, status in step_status:
-            if status == "skipped" or not (0 <= index < len(self._recipe)):
+            if status == "skipped" or not (0 <= index < len(self.recipe)):
                 continue
-            step = self._recipe.steps[index]
+            step = self.recipe.steps[index]
             enabled = False if status == "ok" else step.enabled
             if step.status != status or step.enabled != enabled:
-                self._recipe.steps[index] = replace(step, status=status, enabled=enabled)
+                self.recipe.steps[index] = replace(step, status=status, enabled=enabled)
                 changed = True
         if changed:
             self._reload_list()
@@ -370,7 +385,7 @@ class RecipePanel(QWidget):
         step's persisted ``status`` is shown, so a recipe re-opened after a run
         still carries its outcome glyph.
         """
-        status = self._statuses.get(index) or self._recipe.steps[index].status
+        status = self._statuses.get(index) or self.recipe.steps[index].status
         glyph, color = _STATUS_GLYPHS.get(status or "", ("", None))
         item = self._table.item(index, 2)
         if item is None:
@@ -401,7 +416,7 @@ class RecipePanel(QWidget):
         if item is None:
             return
         index = item.row()
-        if not (0 <= index < len(self._recipe)):
+        if not (0 <= index < len(self.recipe)):
             return
         self._table.selectRow(index)
         self._selected = index
@@ -420,14 +435,14 @@ class RecipePanel(QWidget):
 
     def _copy_step_command(self, index: int) -> None:
         """Copy the step's command-string spelling to the clipboard."""
-        step = self._recipe.steps[index]
+        step = self.recipe.steps[index]
         command = step_to_command(step)
         QGuiApplication.clipboard().setText(command)
         self.copied.emit(f"Copied step command: {command}")
 
     def _copy_step_python(self, index: int) -> None:
         """Copy the step as a Python ``RECIPE`` literal to the clipboard."""
-        step = self._recipe.steps[index]
+        step = self.recipe.steps[index]
         snippet = (
             "from fea_toolkit.workflow import Recipe\n\n"
             f"RECIPE = {pformat(Recipe(steps=[step]).to_dict(), width=88, sort_dicts=False)}\n"
@@ -437,7 +452,7 @@ class RecipePanel(QWidget):
 
     def _show_verb_help(self, index: int) -> None:
         """Open the read-only help dialog for the step's verb."""
-        verb = self._recipe.steps[index].verb
+        verb = self.recipe.steps[index].verb
         VerbHelpDialog(verb, STEP_SPECS[verb], self).exec()
 
 
