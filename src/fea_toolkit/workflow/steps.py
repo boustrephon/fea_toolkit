@@ -160,6 +160,15 @@ class ParamSpec:
         """
         if value is None and self.allow_none:
             return None
+        if self.choices is not None and isinstance(value, str):
+            # A choice parameter's value may arrive as its displayed text — a
+            # recipe authored by hand, or a value that round-tripped through a
+            # text form — so map it back to the matching choice before the type
+            # check, keeping an int-typed choice like ``n_stories`` an int.
+            for choice in self.choices:
+                if value == str(choice):
+                    value = choice
+                    break
         expected = self.type
         if expected is bool:
             if not isinstance(value, bool):

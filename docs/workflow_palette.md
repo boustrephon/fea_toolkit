@@ -44,8 +44,9 @@ parts, all about *input*:
 - `Selection` already owns the exact tokenizer the palette needs —
   `_scan_clauses(expr) -> (clauses, leftover)` with quoting, `NOT`, `z=LO:HI`.
   It is private; promote it, do not re-tokenize.
-- `ParamSpec.coerce` does not accept strings for `float`/`int`/`bool`, so a
-  palette's text values need an `ast.literal_eval` pass before `coerce`.
+- `ParamSpec.coerce` maps a string back to its declared choice when there is
+  one, but still rejects other strings for `float`/`int`/`bool`, so a palette's
+  free-text values need an `ast.literal_eval` pass before `coerce`.
 
 ## Shared foundation (the P31 ↔ P32 bridge)
 

@@ -755,6 +755,21 @@ class TestRecipeSerialisation:
         with pytest.raises(ValueError, match="must be a number"):
             Recipe.from_dict(data)
 
+    def test_a_choice_param_maps_its_displayed_text_back_to_the_choice(self):
+        """An int choice written as its displayed text validates as the int."""
+        from fea_toolkit.workflow.steps import validate_params
+        from fea_toolkit.workflow.verbs.build_model import BUILD_MODEL_PARAMS
+
+        params = validate_params(
+            "build_model",
+            BUILD_MODEL_PARAMS,
+            {"builder": "fema355c", "n_stories": "9", "building": "20"},
+        )
+        assert params["n_stories"] == 9
+        assert type(params["n_stories"]) is int
+        assert params["building"] == 20
+        assert type(params["building"]) is int
+
     def test_add_rejects_a_bad_parameter_where_the_mistake_was_made(self):
         with pytest.raises(ValueError, match="unknown parameter"):
             Recipe().add("mesh", params={"nope": 1})
