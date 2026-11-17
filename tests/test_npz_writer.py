@@ -136,13 +136,13 @@ def test_saving_an_assembled_dict_round_trips_it(tmp_path):
 
 
 def test_saving_what_a_repository_serves_round_trips_a_case(tmp_path):
-    """The GUI saves ``repository.raw()`` — that has to read back as a case."""
+    """A repository's bundle, written back out, has to read back as a case."""
     from fea_toolkit.io.npz_writer import results_arrays, save_results_arrays
 
     md = make_sample_model()
     repository = NpzResultsRepository(results_arrays(md, static_results=_static_results(md)))
 
-    path = save_results_arrays(str(tmp_path / "again.npz"), repository.raw())
+    path = save_results_arrays(str(tmp_path / "again.npz"), repository.to_arrays())
 
     assert NpzResultsRepository(path).cases() == ["DEAD"]
 

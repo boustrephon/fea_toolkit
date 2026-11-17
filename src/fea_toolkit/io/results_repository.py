@@ -20,6 +20,9 @@ The rules this interface encodes:
 2. A case's ``group`` / ``family`` / ``coords`` travel as **explicit columns**
    (:data:`~fea_toolkit.io.results_schema.CASE_META_KEYS`), not name-mangled keys.
 3. Backends stay optional and lazily imported: this module imports **numpy only**.
+4. Results are written through ``ResultsRepository.write()`` or
+   :func:`~fea_toolkit.io.npz_writer.save_results_arrays` — never by calling
+   ``np.savez`` from a consumer (enforced by ``tests/test_storage_seam.py``).
 """
 
 from abc import ABC, abstractmethod
@@ -223,9 +226,11 @@ def mesh_model_from_geometry(
 
 
 class ResultsRepository(ABC):
-    """Read-only access to one results archive, as NumPy arrays.
+    """Access to one results archive, as NumPy arrays.
 
-    Implementations must not require the caller to know the on-disk format.
+    Read-mostly, with a named bundle read (:meth:`to_arrays`) and a write
+    closure (:meth:`write`).  Implementations must not require the caller to
+    know the on-disk format.
     """
 
     @abstractmethod
@@ -504,6 +509,38 @@ class ResultsRepository(ABC):
             KeyError: If a requested column is not in the archive.
         """
 
+    @abstractmethod
+    def to_arrays(self) -> dict:
+        """The archive's full ``{name: ndarray}`` bundle, for writing it back.
+
+        The one legitimate reason to want the whole dict is to *write* it
+        (:meth:`write`) or to merge several archives into one.  Readers that
+        need a slice of it should keep using the named readers above
+        (:meth:`arrays_for`, :meth:`display_geometry`, :meth:`table`), which a
+        non-NPZ backend can also serve.
+        """
+
+    def write(self, path: str, *, name: Optional[str] = None) -> str:
+        """Serialise this repository's arrays to *path*.
+
+        The write half of the seam: hands the bundle to the shared NPZ writer,
+        so no caller reaches into :meth:`to_arrays` just to save it.  A future
+        HDF5 backend overrides this to write a named group instead of a flat
+        archive.
+
+        Args:
+            path: Output file path (``.npz``).
+            name: Reserved for the HDF5 backend — the named group to write
+                within the file.  The NPZ backend ignores it (one archive per
+                file).
+
+        Returns:
+            The absolute path written.
+        """
+        from .npz_writer import save_results_arrays
+
+        return save_results_arrays(path, self.to_arrays())
+
 
 class NpzResultsRepository(ResultsRepository):
     """``.npz`` / ``.h5`` backend, wrapping :mod:`fea_toolkit.io.npz_reader`.
@@ -601,12 +638,8 @@ class NpzResultsRepository(ResultsRepository):
         """The archive this repository reads (``""`` for a dict-backed one)."""
         return self._path
 
-    def raw(self) -> dict:
-        """The underlying ``{name: array}`` dict.
-
-        An escape hatch for code that has not been migrated yet — prefer the
-        named methods above, which are what a non-NPZ backend can also serve.
-        """
+    def to_arrays(self) -> dict:
+        """The underlying ``{name: array}`` dict this archive was read into."""
         return self._data
 
     def __len__(self) -> int:

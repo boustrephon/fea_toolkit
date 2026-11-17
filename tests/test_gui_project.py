@@ -348,7 +348,7 @@ def test_pushover_step_results_round_trip_through_the_bundle(tmp_path):
     bundle = read_project(tmp_path / "Pushover.fea")
     assert "Pushover+X-uniform" in bundle["results"].cases()
     assert bundle["results"].has_displacements("Pushover+X-uniform")
-    raw = bundle["results"].raw()
+    raw = bundle["results"].to_arrays()
     assert "pushover/+X/uniform/node_disp_x" in raw
     assert raw["pushover/+X/uniform/node_disp_x"].shape[0] == 2
 
@@ -563,7 +563,7 @@ def test_ida_transient_history_survives_a_bundle_round_trip(tmp_path):
     assert notes == []
 
     bundle = read_project(tmp_path / "ida.fea")
-    raw = bundle["results"].raw()
+    raw = bundle["results"].to_arrays()
     # The transient block survives, including the scale that produced it.
     assert "transient/ida_record/node_disp_x" in raw
     assert float(raw["transient/ida_record/transient_scale"]) == 0.5

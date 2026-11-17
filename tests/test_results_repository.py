@@ -577,3 +577,46 @@ def test_metadata_reads_a_file_level_array():
     assert repository.metadata("force_unit").tolist() == ["kN"]
     assert repository.metadata("no_such_meta") is None
     assert repository.metadata("no_such_meta", default="kN") == "kN"
+
+
+# ── The write side of the seam ──────────────────────────────────────
+
+
+def test_to_arrays_is_the_named_bundle_read(archive):
+    """The full ``{name: array}`` bundle is a named method, not an escape hatch."""
+    from fea_toolkit.io.results_repository import NpzResultsRepository
+
+    arrays = NpzResultsRepository(archive).to_arrays()
+
+    assert arrays["node_x"].tolist() == [0.0, 5.0, 10.0]
+    assert arrays["static/COMB1/fx_i"].tolist() == [1.0, 2.0]
+
+
+def test_to_arrays_round_trips_a_dict_backed_repository():
+    """A dict-backed repository hands back the very dict it was given."""
+    from fea_toolkit.io.results_repository import NpzResultsRepository
+
+    arrays = {"node_x": np.array([0.0, 1.0])}
+    assert NpzResultsRepository(arrays).to_arrays() is arrays
+
+
+def test_write_produces_a_loadable_archive(archive, tmp_path):
+    """``write()`` serialises through the shared writer, not an ad-hoc save."""
+    from fea_toolkit.io.results_repository import NpzResultsRepository
+
+    out = tmp_path / "copy.npz"
+    written = NpzResultsRepository(archive).write(str(out))
+
+    assert written == str(out.resolve())
+    reread = NpzResultsRepository(written)
+    assert reread.cases() == ["DEAD", "COMB1"]
+    assert reread.arrays_for("COMB1")["fx_i"].tolist() == [1.0, 2.0]
+
+
+def test_the_raw_escape_hatch_is_gone():
+    """The bundle read is named ``to_arrays``; there is no ``raw`` alias."""
+    from fea_toolkit.io.results_repository import NpzResultsRepository, ResultsRepository
+
+    assert hasattr(ResultsRepository, "to_arrays")
+    assert hasattr(ResultsRepository, "write")
+    assert not hasattr(NpzResultsRepository, "raw")

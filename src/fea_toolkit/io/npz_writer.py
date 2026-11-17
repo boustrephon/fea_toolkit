@@ -765,12 +765,14 @@ def save_results_arrays(path: str, arrays: dict[str, np.ndarray]) -> str:
     holds the arrays — the GUI's ``Analysis ▸ Run``, which registers them as
     views without writing anything — saves them through here when persistence is
     wanted (P27 / I4), so both paths share one save implementation.
+    ``ResultsRepository.write()`` is the repository-level convenience over this
+    function.
 
     Args:
         path: Output ``.npz`` file path.
         arrays: ``{name: ndarray}``, as :func:`results_arrays` returns it (or as
             a :class:`~fea_toolkit.io.results_repository.NpzResultsRepository`
-            serves it back through ``raw()``).
+            serves it back through ``to_arrays()``).
 
     Returns:
         Absolute path to the saved file.

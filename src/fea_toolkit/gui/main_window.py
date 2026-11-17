@@ -2668,7 +2668,7 @@ class MainWindow(QMainWindow):
 
         if not case.startswith("Pushover"):
             return []
-        raw = repository.raw()
+        raw = repository.to_arrays()
         rest = case[len("Pushover") :]
         if len(rest) >= 4 and rest[2] == "-":
             direction, load_type = rest[:2], rest[3:]
@@ -4925,10 +4925,10 @@ class MainWindow(QMainWindow):
         try:
             from ..io.results_schema import ida_record_names
 
-            if ida_record_names(repository.raw()):
+            if ida_record_names(repository.to_arrays()):
                 from ..plotting.viz_ida import plot_ida_summary
 
-                figure = plot_ida_summary(repository.raw())
+                figure = plot_ida_summary(repository.to_arrays())
                 if figure is not None:
                     self._session.views.add_figure(
                         "ida", "IDA collapse", figure, source=name, activate=False
@@ -4988,10 +4988,8 @@ class MainWindow(QMainWindow):
         if not path.lower().endswith(".npz"):
             path += ".npz"
 
-        from ..io.npz_writer import save_results_arrays
-
         try:
-            saved = save_results_arrays(path, repository.raw())
+            saved = repository.write(path)
         except Exception as exc:  # pragma: no cover - a filesystem failure
             self.log(f"Could not save results: {exc}", "error")
             return

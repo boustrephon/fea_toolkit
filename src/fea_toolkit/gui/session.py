@@ -453,4 +453,4 @@ class Session:
                 repository = self.views.results(view.key)
                 if repository is not None and id(repository) not in seen:
                     seen.add(id(repository))
-                    arrays.update(repository.raw())
+                    arrays.update(repository.to_arrays())
