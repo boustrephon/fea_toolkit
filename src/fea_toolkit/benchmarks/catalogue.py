@@ -66,7 +66,7 @@ class BenchmarkEntry:
     #: Fixed ``build_model`` defaults for the builder; the user-choice parameters
     #: (``building`` / ``code`` / ``region`` / ``stories`` / ``design``) take
     #: their ``build_model`` defaults and are edited in the step dialog.
-    builder_params: dict = field(default_factory=dict)
+    builder_params: dict[str, Any] = field(default_factory=dict, hash=False)
 
 
 BENCHMARK_ENTRIES: tuple[BenchmarkEntry, ...] = (
