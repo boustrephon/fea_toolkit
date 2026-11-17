@@ -119,3 +119,25 @@ def test_from_bundle_drops_hidden_ids_from_another_topology():
     session = Session.from_bundle(bundle)
 
     assert session.hidden_elem_ids == set()
+
+
+def test_to_bundle_round_trips_through_the_zip_codec(tmp_path):
+    from examples.sample_model import make_sample_model
+    from fea_toolkit.gui.project import read_project, write_project_zip
+    from fea_toolkit.io.model_store import InMemoryModelStore
+
+    session = Session()
+    model = make_sample_model()
+    session.store = InMemoryModelStore(model, source="model.s2k")
+    session.recipe.add("mesh")
+
+    bundle = session.to_bundle(name="sample", source_label="model.s2k")
+    zip_path = tmp_path / "session.zip"
+    write_project_zip(zip_path, **bundle)
+
+    restored = Session.from_bundle(read_project(zip_path))
+
+    assert restored.store is not None
+    assert [step.verb for step in restored.recipe] == ["mesh"]
+    assert restored.hidden_elem_ids == set()
+    assert restored.last_run is None
