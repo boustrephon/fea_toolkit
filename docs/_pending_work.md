@@ -1205,6 +1205,49 @@ real-backend probe pattern in `local/gui_pick_probe.py`).
 **Status.** **Optional** — no demand yet.  Do not schedule until click-target
 accuracy on large sections is reported as a real problem.
 
+#### P48 — Recipe-panel ownership: Option B → A′/A (decide later)
+
+Source: the Session refactor (R1, 2026-11-17) — the GUI's document state
+consolidated onto a Qt-free `gui/session.py` `Session` object (store / views /
+recipe / named selections / hidden set / last run) with `to_bundle` /
+`from_bundle` / `reset` round-tripping it.
+
+**What.** The recipe's *live* owner is still the `RecipePanel`; the session
+follows via a `changed` → `_sync_recipe_to_session` write-back (Option B).  The
+panel edits the session's recipe *in place*, and the two rebind points
+(`set_recipe` / `clear`) resync through the signal, so
+`session.recipe is panel.recipe` holds after every change.  Persistence/run
+reads go through `session.recipe`; `_set_recipe_actions_enabled` still reads the
+panel because it is a `changed` handler and must see the live editor.
+
+**Why it might be worth upgrading.** Option B's single-object invariant is held
+by *convention* (in-place edits share the object; only rebinds need the signal),
+not by construction.  A future panel method that rebinds without emitting
+`changed` would silently desynchronise `to_bundle()`.
+
+**Options** (both leave `Session` and its bundle methods untouched — the
+migration is a delete-plus-repoint):
+
+- **A′ (panel-as-view).** Give `RecipePanel` a session reference (or a
+  getter/setter); `panel.recipe` *returns* `session.recipe`; `add_step` /
+  `set_recipe` / `clear` operate on `session.recipe` directly; delete
+  `_sync_recipe_to_session` and its `connect`.  The panel can then no longer
+  diverge.
+- **A (in-place `set_recipe`).** Keep the panel decoupled; make `set_recipe` /
+  `clear` replace `steps[:]` / `name` *in place* instead of rebinding, and have
+  `Session.from_bundle` mutate `self.recipe.steps[:]` rather than rebinding.
+
+**When.** Natural home is R6 (when `RecipePanel` is re-homed under a
+`RecipeController`), or earlier if the "`changed` as correctness carrier" smell
+bites.  Keep the two disciplines B established — the sync lives in exactly one
+method, and `RecipePanel.set_recipe` / `recipe`'s public contract stays stable —
+so the later move stays small.
+
+**Where.** `gui/main_window.py` (`_sync_recipe_to_session` + the `changed`
+connect), `gui/views/recipe_panel.py`.
+
+**Status.** **Optional** — decide in R6.
+
 #### Closed items (README reconciliation, 2026-08-25)
 - **Deeper opstool result-post-processing integration** — closed as **no
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
