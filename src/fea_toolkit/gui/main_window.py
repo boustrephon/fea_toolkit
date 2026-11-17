@@ -2332,7 +2332,9 @@ class MainWindow(QMainWindow):
         """
         self._show_view(view)
 
-    def _show_view(self, view: View, *, rebuild_tree: bool = False) -> None:
+    def _show_view(
+        self, view: View, *, rebuild_tree: bool = False, reset_view: bool = False
+    ) -> None:
         """Render *view* — its source, through its selection — and report it.
 
         A geometry or results view draws the model into the viewport; a table or
@@ -2345,6 +2347,11 @@ class MainWindow(QMainWindow):
                 changed (the row's label is the name); a rebuild invalidates the
                 current index, so it is skipped for a plain switch — otherwise Qt
                 reports an empty selection and the Inspector is cleared again.
+            reset_view: Fit every viewport to the incoming geometry instead of
+                keeping the current cameras.  A plain view switch keeps the
+                cameras (``False``); opening a fresh project fits the viewports
+                so the outgoing project's secondary cameras are not restored,
+                and the caller then restores the primary camera it saved.
         """
         previous = self._views.active
         self._views.set_active(view.key)
@@ -2365,7 +2372,7 @@ class MainWindow(QMainWindow):
             self._stack.setCurrentWidget(self._viewport_container)
             self.show_model(
                 source,
-                reset_view=False,
+                reset_view=reset_view,
                 rebuild_tree=rebuild_tree,
                 selection=view.selection,
             )
@@ -5476,7 +5483,7 @@ class MainWindow(QMainWindow):
             views = self._views.views()
             active = views[0] if views else None
         if active is not None:
-            self._show_view(active, rebuild_tree=True)
+            self._show_view(active, rebuild_tree=True, reset_view=True)
             self._restore_camera(viewport.get("camera_position"))
 
         self.log(f"Opened project: {len(self._views)} view(s).")

@@ -146,6 +146,65 @@ def test_dropping_a_project_zip_reopens_the_model(window, tmp_path, monkeypatch)
     assert window._store is not None
 
 
+def test_opening_a_different_project_refits_secondary_viewports(window, tmp_path):
+    """Secondary viewports must not inherit the outgoing project's cameras.
+
+    A project open replaces the scene outright, so only the primary camera is
+    restored from the manifest; the front / top / side viewports are re-fit to
+    the incoming geometry rather than keeping the outgoing project's viewpoint.
+    """
+    import numpy as np
+
+    from examples.sample_model import make_sample_model
+    from fea_toolkit.gui.project import build_manifest, write_project_zip
+
+    def _flat(camera):
+        flat = []
+        for row in camera:
+            flat.extend(float(x) for x in row)
+        return np.array(flat)
+
+    # Show one model, then park a secondary viewport somewhere clearly wrong.
+    sap = make_sample_model()
+    window._remember_source(sap)
+    window.show_model(sap)
+    wrong = (
+        (1000.0, 1000.0, 1000.0),
+        (0.0, 0.0, 0.0),
+        (0.0, 0.0, 1.0),
+    )
+    window._quad.interactors[1].camera_position = wrong
+    assert np.allclose(_flat(window._quad.interactors[1].camera_position), _flat(wrong))
+
+    manifest = build_manifest(
+        name="session",
+        source_label="sample.s2k",
+        model_file="model.npz",
+        units=dict(sap.units),
+        recipe=None,
+        views=[],
+        active_view=None,
+        camera=None,
+        hidden_elem_ids=[],
+        display={},
+    )
+    zip_path = tmp_path / "session.zip"
+    write_project_zip(
+        zip_path,
+        manifest=manifest,
+        sap=sap,
+        mesh=None,
+        results_arrays={},
+        figures={},
+        tables={},
+        model_fmt="npz",
+    )
+    assert window.open_project_path(str(zip_path)) is True
+
+    restored = _flat(window._quad.interactors[1].camera_position)
+    assert not np.allclose(restored, _flat(wrong), rtol=1e-6, atol=1e-9)
+
+
 def test_tree_source_prefers_the_mesh(window):
     """The tree presents the mesh when one exists, else the raw model."""
     from examples.sample_model import make_sample_model
