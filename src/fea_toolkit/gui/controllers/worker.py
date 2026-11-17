@@ -72,7 +72,7 @@ class TaskWorker(QThread):
         """Emit :attr:`progress` — handed to a task that reports steps.
 
         A task that wants a determinate bar is given this as an ``on_progress``
-        callback (see :meth:`MainWindow._start_analysis`); a task that does not
+        callback (see :meth:`MainWindow._on_recipe_run`); a task that does not
         simply never calls it and the bar stays in busy mode.
         """
         self.progress.emit(int(current), int(total), str(label))

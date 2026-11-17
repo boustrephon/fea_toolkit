@@ -5611,13 +5611,16 @@ class MainWindow(QMainWindow):
     # ── Analysis (Analysis menu) ────────────────────────────────────
 
     def _on_analysis_run(self) -> None:
-        """**Analysis ▸ Run…**: pick cases, solve on a worker, register the views.
+        """**Analysis ▸ Run…**: pick cases, then run the static recipe.
 
         The listing is built Qt-free (``analysis.case_listing``) and handed to
         the dialog, which adds the per-case load multipliers; what comes back is
-        a set of static solves.  Nothing is written to disk — the in-memory
-        archive is registered as one view per case, so a result can be looked at
-        without an NPZ.  ``File ▸ Save results`` persists one when wanted.
+        a ``[run_static, combine, load_verification]`` recipe — one spelling of
+        "solve static cases and show the load/reaction summary", exactly what the
+        Recipe menu authors step by step.  Nothing is written to disk — the
+        in-memory archive is registered as one view per case, so a result can be
+        looked at without an NPZ.  ``File ▸ Save results`` persists one when
+        wanted.
         """
         store = self._store
         mesh = store.preprocessed() if store is not None else None
@@ -5640,32 +5643,35 @@ class MainWindow(QMainWindow):
         from .views.analysis_dialog import AnalysisDialog
 
         md = store.raw()
-        specs = {spec.name: spec for spec in list_combinations(md)}
         request = AnalysisDialog.get_request(
             list_static_cases(md, mesh),
-            list(specs.values()),
+            list_combinations(md),
             list_patterns(md),
             self,
         )
         if request is None:  # cancelled
             return
 
-        cases = request.cases
-        combos = {name: dict(specs[name].leaves) for name in request.combinations if name in specs}
-        self.run_analysis(cases, combos, config=request.config)
+        self.run_static_analysis(request.cases, request.combinations, config=request.config)
 
-    def run_analysis(
-        self, cases: dict, combinations: Optional[dict] = None, config: Optional[dict] = None
+    def run_static_analysis(
+        self, cases: dict, combinations: Optional[list] = None, config: Optional[dict] = None
     ) -> bool:
-        """Solve *cases* (and reduce *combinations*) on a worker — dialog-free.
+        """Solve *cases* (and reduce *combinations*) via the verbs — dialog-free.
 
         The entry point the dialog defers to, and that tests drive directly,
-        exactly as :meth:`open_results_path` is for ``File ▸ Open results``.
+        exactly as :meth:`open_results_path` is for ``File ▸ Open results``.  It
+        appends ``run_static``, ``combine`` (when combinations are named) and
+        ``load_verification`` steps and runs the recipe, so the static solve and
+        its reaction summary have one spelling — the verbs — rather than a
+        private ``run_case_set`` path beside the recipe.
 
         Args:
             cases: ``{case: {pattern: factor}}`` to solve.
-            combinations: ``{combination: {leaf_case: factor}}`` to reduce.
-            config: Optional ``AnalysisBuilder`` config overrides.
+            combinations: Combination names to reduce — resolved against the
+                model's definitions by the ``combine`` verb.
+            config: Optional ``AnalysisBuilder`` config overrides, applied to
+                both the solve and the summary's standalone re-solve fallback.
 
         Returns:
             ``True`` when the run started; ``False`` when it cannot yet (no
@@ -5683,201 +5689,35 @@ class MainWindow(QMainWindow):
         if self._worker is not None and self._worker.isRunning():
             self.log("An analysis is already running.", "warn")
             return False
-        self._start_analysis(
-            store.raw(), mesh, dict(cases), dict(combinations or {}), dict(config or {})
-        )
+
+        from ..workflow import Step
+
+        steps = [
+            Step(verb="run_static", params={"cases": dict(cases), "config": dict(config or {})})
+        ]
+        if combinations:
+            steps.append(Step(verb="combine", params={"combinations": list(combinations)}))
+        steps.append(Step(verb="load_verification", params={"config": dict(config or {})}))
+        for step in steps:
+            self._recipe_panel.add_step(
+                step.verb, step.selection, step.params, optional=step.optional
+            )
+        self._pending_label = "Static analysis"
+        self._on_recipe_run()
         return True
 
     def _on_analysis_stop(self) -> None:
-        """**Analysis ▸ Stop**: ask the worker to stop at its next case boundary.
+        """**Analysis ▸ Stop**: ask the worker to stop at its next step boundary.
 
         Cancellation is cooperative, exactly as the threading model requires: a
-        single ``run_static_analysis`` call is atomic, so the run ends *between*
-        cases rather than mid-solve.
+        recipe run ends between steps, and a static solve ends between cases
+        rather than mid-solve.
         """
         if self._worker is None or not self._worker.isRunning():
             return
         self._worker.cancel()
         self._actions["analysis.stop"].setEnabled(False)
         self.log("Stop requested \u2014 the run ends at the next case boundary.", "warn")
-
-    def _start_analysis(self, md: Any, mesh: Any, cases: dict, combos: dict, config: dict) -> None:
-        """Solve *cases* (and reduce *combos*) on a worker.
-
-        Args:
-            md: The parsed model — needed to reduce combinations.
-            mesh: The preprocessed model the cases are built from.
-            cases: ``{case: {pattern: factor}}`` to solve, in run order.
-            combos: ``{combination: {leaf_case: factor}}`` to reduce afterwards.
-            config: Optional ``AnalysisBuilder`` config overrides.
-        """
-        self.log(f"Running {len(cases)} case(s) and {len(combos)} combination(s) \u2026")
-        self._progress.setRange(0, 0)  # busy until the first case reports
-        self._progress.setValue(0)
-        self._progress.setVisible(True)
-        self._actions["analysis.stop"].setEnabled(True)
-        self._actions["analysis.run"].setEnabled(False)
-
-        # In the "separate" build (no bundled OpenSeesPy) the case set is solved
-        # out-of-process; the decision is made here (on the GUI thread) so the
-        # worker only runs the chosen path.  Cancellation and per-case progress
-        # do not cross the process boundary.
-        from ..opensees.runtime import opensees_available, resolve_opensees_python
-
-        delegate = not opensees_available()
-        opensees_python = None
-        if delegate:
-            opensees_python = load_opensees_setting()
-            self.log(
-                f"OpenSeesPy not bundled — delegating analysis to "
-                f"{resolve_opensees_python(opensees_python)}."
-            )
-
-        # The task reports progress through the worker's signal; the reporter is
-        # published in a one-element list because the worker does not exist yet
-        # where the task is defined.
-        reporter: list = []
-
-        def task(should_cancel: Any) -> dict:
-            if delegate:
-                from ..opensees.delegate import run_static_cases_out_of_process
-
-                return run_static_cases_out_of_process(
-                    sap=md,
-                    mesh=mesh,
-                    cases=cases,
-                    combinations=combos,
-                    config=config or None,
-                    opensees_python=opensees_python,
-                )
-            from ..analysis.linear import run_case_set
-
-            return run_case_set(
-                md,
-                mesh,
-                cases,
-                combinations=combos,
-                config=config or None,
-                should_cancel=should_cancel,
-                on_progress=lambda index, name, total: reporter[0](index, total, name),
-            )
-
-        _freeze_gc_once()
-        worker = TaskWorker(task, parent=self)
-        reporter.append(worker.report_progress)
-        worker.progress.connect(self._analysis_progress)
-        worker.succeeded.connect(self._analysis_finished)
-        worker.failed.connect(self._analysis_failed)
-        worker.finished.connect(self._analysis_ended)
-        self._worker = worker
-        worker.start()
-
-    def _analysis_progress(self, current: int, total: int, label: str = "") -> None:
-        """Show determinate progress, and log which case is being solved."""
-        self._progress.setRange(0, max(int(total), 1))
-        self._progress.setValue(int(current))
-        if label:
-            self.log(f"Solving {label} ({current}/{total}) \u2026")
-
-    def _analysis_finished(self, result: dict) -> None:
-        """Register the in-memory archive as one view per case and show the first.
-
-        The result is served through a ``NpzResultsRepository`` backed by the
-        array dict — never a file path — so the run's results can be viewed with
-        nothing written.  Re-running a case replaces its view (the same key),
-        while a different case adds one, so repeated runs do not pile up
-        (P27, refinement 2).
-        """
-        from ..io.results_repository import NpzResultsRepository
-
-        if result.get("cancelled"):
-            self.log("Analysis stopped before finishing.", "warn")
-        for name in result.get("failed") or []:
-            self.log(f"Case did not solve: {name}", "warn")
-        for name in result.get("unreduced") or []:
-            self.log(f"Combination not reduced (a required case is missing): {name}", "warn")
-
-        repository = NpzResultsRepository(result.get("arrays") or {})
-        cases = list(result.get("cases") or repository.cases())
-        if not cases:
-            self.log("The run produced no results.", "warn")
-            return
-
-        mesh = self._store.preprocessed() if self._store is not None else None
-        model = mesh if mesh is not None else repository.as_model()
-        for case in cases:
-            self._views.add_results(
-                f"{_RESULTS_KEY_PREFIX}{case}",
-                _case_view_name(case, repository.case_meta(case)),
-                repository,
-                source=f"Analysis run \u00b7 {case}",
-                model=model,
-                activate=False,
-            )
-
-        # ── Load/reaction summary table (driven from the solve) ─────
-        summaries = result.get("summaries") or []
-        if summaries and self._store is not None:
-            self._show_load_reaction_summary(self._store.raw(), summaries)
-
-        self.log(f"Run complete: {len(cases)} case(s) available as views.")
-
-        first = self._views.get(f"{_RESULTS_KEY_PREFIX}{cases[0]}")
-        if first is not None:
-            self._show_view(first, rebuild_tree=True)
-
-    def _show_load_reaction_summary(self, md: Any, summaries: list) -> None:
-        """Register the load/reaction summary table from a solve's summaries.
-
-        The per-case ``{case, applied, summed}`` entries the run already
-        produced are formatted (pandas-free) into one table view — no second
-        solve — mirroring the recipe ``load_verification`` step's output.
-        """
-        from ..analysis.linear import render_load_reaction_rows
-        from ..workflow.steps import Table
-
-        rows = render_load_reaction_rows(md, summaries)
-        if not rows:
-            return
-        columns = tuple(rows[0].keys())
-
-        def _cell(value):
-            if value is None:
-                return ""
-            if isinstance(value, bool):
-                return str(value)
-            if isinstance(value, float):
-                return f"{value:.1f}"
-            return str(value)
-
-        table = Table(
-            title="Load/reaction summary",
-            columns=columns,
-            rows=tuple(tuple(_cell(row[column]) for column in columns) for row in rows),
-        )
-        view = self._views.add_table(
-            _table_key(table.title), table.title, table, source="Analysis run"
-        )
-        self._show_view(view, rebuild_tree=True)
-
-    def _analysis_failed(self, message: str) -> None:
-        """Report a run failure, leaving the display alone."""
-        self.log(f"Analysis failed: {message}", "error")
-
-    def _analysis_ended(self) -> None:
-        """Restore the UI once the analysis worker has stopped.
-
-        The collection is the other half of the worker's ``gc.disable()``: cycles
-        created while the task ran are reclaimed on the GUI thread, where
-        traversing the PySide6/VTK objects the window owns is safe.
-        """
-        self._worker = None
-        self._progress.setVisible(False)
-        self._progress.setRange(0, 100)
-        self._progress.setValue(0)
-        self._actions["analysis.stop"].setEnabled(False)
-        self._set_analysis_actions_enabled()
-        gc.collect()
 
     # ── Teardown ────────────────────────────────────────────────────
 

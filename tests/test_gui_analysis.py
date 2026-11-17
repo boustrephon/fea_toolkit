@@ -133,8 +133,8 @@ def test_an_ida_result_registers_a_table_and_a_curve(window):
 
 
 def test_running_without_a_preprocessed_model_declines(window):
-    """``run_analysis`` refuses rather than preprocessing silently."""
-    assert window.run_analysis({"DEAD": {"DEAD": 1.0}}) is False
+    """``run_static_analysis`` refuses rather than preprocessing silently."""
+    assert window.run_static_analysis({"DEAD": {"DEAD": 1.0}}) is False
     assert "needs a preprocessed model" in window._message_log.toPlainText()
 
 
@@ -145,18 +145,20 @@ def test_a_run_registers_a_case_view_without_writing_a_file(window, tmp_path):
     """The whole point of I3: view a result, write nothing."""
     _preprocess(window)
 
-    assert window.run_analysis({"DEAD": {"DEAD": 1.0}}) is True
+    assert window.run_static_analysis({"DEAD": {"DEAD": 1.0}}) is True
     _spin(window)
 
     view = window._views.get("results:DEAD")
     assert view is not None
     assert window._views.results("results:DEAD") is not None
-    assert "Run complete" in window._message_log.toPlainText()
+    assert "Static cases" in window._message_log.toPlainText()
 
     # Nothing was written: no NPZ anywhere under the test's temp directory.
     assert list(tmp_path.rglob("*.npz")) == []
 
-    # …and the result is drawable, so the overlay toggles come alive.
+    # …and the result is drawable, so the overlay toggles come alive once the
+    # case view is shown (the recipe ends on the load/reaction summary table).
+    window._show_view(view)
     assert window._actions["results.deformed"].isEnabled() is True
     assert window._actions["file.save_results"].isEnabled() is True
 
@@ -165,9 +167,9 @@ def test_a_second_case_is_added_beside_the_first(window):
     """Different cases coexist; the same case replaces (keyed by case)."""
     _preprocess(window)
 
-    window.run_analysis({"DEAD": {"DEAD": 1.0}})
+    window.run_static_analysis({"DEAD": {"DEAD": 1.0}})
     _spin(window)
-    window.run_analysis({"WIND": {"WIND": 1.0}})
+    window.run_static_analysis({"WIND": {"WIND": 1.0}})
     _spin(window)
 
     assert window._views.get("results:DEAD") is not None
@@ -178,7 +180,7 @@ def test_a_run_registers_the_load_reaction_summary_table(window):
     """The run registers a load/reaction summary table beside the case views."""
     _preprocess(window)
 
-    assert window.run_analysis({"DEAD": {"DEAD": 1.0}}) is True
+    assert window.run_static_analysis({"DEAD": {"DEAD": 1.0}}) is True
     _spin(window)
 
     view = window._views.get("table:load/reaction-summary")
@@ -193,7 +195,7 @@ def test_a_run_registers_the_load_reaction_summary_table(window):
 def test_a_combination_is_reduced_to_its_own_view(window):
     _preprocess(window)
 
-    assert window.run_analysis({"DEAD": {"DEAD": 1.0}}, {"GRAV": {"DEAD": 1.2}}) is True
+    assert window.run_static_analysis({"DEAD": {"DEAD": 1.0}}, ["GRAV"]) is True
     _spin(window)
 
     assert window._views.get("results:DEAD") is not None
@@ -209,13 +211,14 @@ def test_save_results_writes_a_round_trippable_archive(window, tmp_path, monkeyp
     from fea_toolkit.io.results_repository import NpzResultsRepository
 
     _preprocess(window)
-    window.run_analysis({"DEAD": {"DEAD": 1.0}})
+    window.run_static_analysis({"DEAD": {"DEAD": 1.0}})
     _spin(window)
 
     target = tmp_path / "saved.npz"
     monkeypatch.setattr(
         QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(target), ""))
     )
+    window._show_view(window._views.get("results:DEAD"))
     window._on_save_results()
 
     assert target.exists()
