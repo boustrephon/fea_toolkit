@@ -81,6 +81,7 @@ from .controllers.marquee import (
     segment_hits_rect,
     segment_inside_rect,
 )
+from .controllers.results_presenter import ResultsPresenter
 from .controllers.selection import CATEGORY_GROUPS, CATEGORY_NOUNS, SelectionIndex, selection_set_op
 from .controllers.settings import (
     load_gui_settings,
@@ -89,7 +90,16 @@ from .controllers.settings import (
     save_display_settings,
     theme_stylesheet,
 )
-from .controllers.view_registry import FIGURE, GEOMETRY, RESULTS, TABLE, View, ViewRegistry
+from .controllers.view_registry import (
+    FIGURE,
+    GEOMETRY,
+    RESULTS,
+    TABLE,
+    View,
+    ViewRegistry,
+    _case_of,
+    _case_view_name,
+)
 from .controllers.view_state import clear_view_state, load_view_state, save_view_state
 from .controllers.worker import TaskWorker
 from .doc_links import DOCS_URL
@@ -199,39 +209,6 @@ def _entity_identity(entity: Any) -> tuple[Optional[str], Optional[str]]:
         if value:
             return attr, str(value)
     return None, None
-
-
-def _case_view_name(case: str, meta: dict) -> str:
-    """Display name for a results view: the case, qualified by its combination.
-
-    The unified schema records which combination a case was generated from; when
-    the two names differ the label says so, because the variants of one
-    combination would otherwise look identical in the tree.
-    """
-    group = meta.get("group") if meta else None
-    if group and group != case:
-        return f"{case} ({group})"
-    return case
-
-
-#: Prefix of a results view's key; the load-case label follows it.
-_RESULTS_KEY_PREFIX = "results:"
-
-
-def _table_key(label: str) -> str:
-    """The table view's key for a step *label* — the inverse of its registration."""
-    return f"table:{label.lower().replace(' ', '-')}"
-
-
-def _case_of(view: Optional[View]) -> str:
-    """The load case a results view stands for (``""`` for any other view).
-
-    The case is carried in the view's key (``"results:DEAD"``), which is what
-    :meth:`MainWindow.open_results_path` registers; this is its inverse.
-    """
-    if view is None or not view.key.startswith(_RESULTS_KEY_PREFIX):
-        return ""
-    return view.key[len(_RESULTS_KEY_PREFIX) :]
 
 
 def _model_file_format(path: str, chosen_filter: str) -> tuple[str, str]:
@@ -388,6 +365,16 @@ class MainWindow(QMainWindow):
         self._anim_times: list = []
         self._nld_frames: dict = {}
         self._nld_times: dict = {}
+        self._results_presenter = ResultsPresenter(
+            self._session,
+            self.log,
+            lambda view: self._show_view(view, rebuild_tree=True),
+            self.show_model,
+            self._nld_step_frames,
+            self._nld_frames,
+            self._nld_times,
+            self._set_view_actions_enabled,
+        )
         #: The window's named selections as they were when the recipe run started,
         #: used to merge only what the run changed on completion (see
         #: :meth:`_merge_recipe_named_selections`).  ``None`` outside a run.
@@ -2657,9 +2644,9 @@ class MainWindow(QMainWindow):
 
         A pushover results view carries its full
         ``pushover/<direction>/<load_type>/node_disp_*`` history (threaded through
-        :meth:`_show_pushover_result`); this turns it into ``[{node_id: (dx, dy,
-        dz)}]`` per recorded step so the animation can step through it.
-        Non-pushover cases return ``[]``.
+        ``ResultsPresenter.show_pushover_result``); this turns it into
+        ``[{node_id: (dx, dy, dz)}]`` per recorded step so the animation can step
+        through it.  Non-pushover cases return ``[]``.
         """
         import numpy as np
 
@@ -3867,7 +3854,7 @@ class MainWindow(QMainWindow):
             self.log(message)
         for result in run.results:
             if result.kind == "geometry":
-                self._show_geometry_result(result.label, result.payload)
+                self._results_presenter.show_geometry_result(result.label, result.payload)
             elif result.kind == SESSION:
                 # The document was already adopted up-front (``document_reset``);
                 # a SESSION result here just records the lifecycle event for the
@@ -3878,23 +3865,23 @@ class MainWindow(QMainWindow):
                 else:
                     self.log(result.label)
             elif result.kind == CASES:
-                added = self._show_results_result(result.label, result.payload)
+                added = self._results_presenter.show_results_result(result.label, result.payload)
                 if not added and not run.cancelled:
                     self.log(f"{result.label}: the run produced no results.", "warn")
             elif result.kind == MODAL:
-                self._show_modal_result(result.label, result.payload)
+                self._results_presenter.show_modal_result(result.label, result.payload)
             elif result.kind == PUSHOVER:
-                self._show_pushover_result(result.label, result.payload)
+                self._results_presenter.show_pushover_result(result.label, result.payload)
             elif result.kind == RS:
-                self._show_rs_result(result.label, result.payload)
+                self._results_presenter.show_rs_result(result.label, result.payload)
             elif result.kind == NLD:
-                self._show_nonlinear_dynamic_result(result.label, result.payload)
+                self._results_presenter.show_nonlinear_dynamic_result(result.label, result.payload)
             elif result.kind == IDA:
-                self._show_ida_result(result.label, result.payload)
+                self._results_presenter.show_ida_result(result.label, result.payload)
             elif result.kind == TABLE:
-                self._show_table_result(result.label, result.payload)
+                self._results_presenter.show_table_result(result.label, result.payload)
             elif result.kind == FIGURE:
-                self._show_figure_result(result.label, result.payload)
+                self._results_presenter.show_figure_result(result.label, result.payload)
         for index, verb, message in run.failures:
             self.log(f"Step {index} ({verb}) failed and is optional \u2014 {message}", "warn")
         if run.cancelled:
@@ -3970,537 +3957,6 @@ class MainWindow(QMainWindow):
         self.show_model(document.model_data)
         self._restore_camera(state.get("camera_position"))
 
-    def _show_table_result(self, label: str, table: Any) -> None:
-        """Register a check's ``table`` result as a view and show it.
-
-        The view key is derived from the step's label, so re-running the same
-        check replaces its view rather than piling one up per run.
-        """
-        if table is None:
-            self.log(f"{label}: nothing to show.", "warn")
-            return
-        key = _table_key(label)
-        name = getattr(table, "title", None) or label
-        view = self._session.views.add_table(key, name, table, source=f"Recipe: {label}")
-        self._show_view(view, rebuild_tree=True)
-        self.log(f"Added table view: {name}.")
-
-    def _show_figure_result(self, label: str, figure: Any) -> None:
-        """Register a chart's ``figure`` result as a view and show it."""
-        if figure is None:
-            self.log(f"{label}: the chart produced no figure.", "warn")
-            return
-        key = f"figure:{label.lower().replace(' ', '-')}"
-        view = self._session.views.add_figure(key, label, figure, source=f"Recipe: {label}")
-        self._show_view(view, rebuild_tree=True)
-        self.log(f"Added figure view: {label}.")
-
-    def _show_nonlinear_dynamic_result(self, label: str, payload: Any) -> None:
-        """Summarise a nonlinear-dynamic (time-history) result as a table.
-
-        The ``nonlinear_dynamic`` verb's payload is an
-        :class:`~fea_toolkit.analysis.base.AnalysisResult` whose ``data`` holds
-        the full transient (``times`` and the per-node displacement / velocity /
-        acceleration arrays) plus the peak reductions.  The peaks and the run's
-        convergence are distilled into a one-row table; the per-step
-        displacement history is stored for :meth:`_on_animate_toggled`.
-        """
-        from ..workflow.steps import Table
-
-        data = getattr(payload, "data", None) or {}
-        if not isinstance(data, dict):
-            self.log(f"{label}: the nonlinear-dynamic result has no data.", "warn")
-            return
-
-        def _num(key: str) -> str:
-            value = data.get(key)
-            try:
-                return f"{float(value):.4g}"
-            except (TypeError, ValueError):
-                return "\u2014"
-
-        def _int(key: str) -> str:
-            value = data.get(key)
-            try:
-                return str(int(value))
-            except (TypeError, ValueError):
-                return "\u2014"
-
-        rows = (
-            ("Peak displacement", _num("peak_displacement")),
-            ("Peak base shear", _num("peak_base_shear")),
-            ("Peak plastic rotation", _num("peak_plastic_rotation")),
-            ("Yielded hinges", _int("num_yielded_hinges")),
-            ("Dissipated energy", _num("max_dissipated_energy")),
-            ("Converged steps", _int("converged_steps")),
-            ("T1 / T2 (s)", f"{_num('period_1')} / {_num('period_2')}"),
-            ("Direction", str(data.get("direction", ""))),
-            ("Record", str(data.get("gm_file", ""))),
-        )
-        self._show_table_result(
-            label,
-            Table(title=label, columns=("Quantity", "Value"), rows=rows),
-        )
-        frames, times = self._nld_step_frames(payload)
-        if frames:
-            self._nld_frames[_table_key(label)] = frames
-            self._nld_times[_table_key(label)] = times
-            self.log(f"{label}: transient history stored for animation ({len(frames)} steps).")
-            # The table view is now animatable, so refresh the Results menu
-            # (it was greyed for a view with no displacement field).
-            self._set_view_actions_enabled()
-        else:
-            key = _table_key(label)
-            self._nld_frames.pop(key, None)
-            self._nld_times.pop(key, None)
-            self.log(f"{label}: no transient displacement history to animate.", "warn")
-            # A previous run of this label may have stored frames; refresh the
-            # Results menu so the now-unanimatable table is greyed correctly.
-            self._set_view_actions_enabled()
-
-    def _show_ida_result(self, label: str, payload: Any) -> None:
-        """Summarise an IDA run as a collapse table and an IDA-curve figure.
-
-        The ``ida`` verb's payload is the
-        :func:`~fea_toolkit.analysis.ida.run_ida` result dict — the intensity
-        ladder, per-rung drift ratios and convergence flags, and the collapse
-        intensity / criterion / bisection bracket.  The curve is plotted by
-        :func:`~fea_toolkit.plotting.viz_ida.plot_ida_curve` and the collapse
-        quantities distilled into a one-row table.
-        """
-        from ..workflow.steps import Table
-
-        data = payload if isinstance(payload, dict) else {}
-        if not data:
-            self.log(f"{label}: the IDA run produced no result.", "warn")
-            return
-
-        def _num(value: Any) -> str:
-            try:
-                return f"{float(value):.4g}"
-            except (TypeError, ValueError):
-                return "\u2014"
-
-        def _count(value: Any) -> str:
-            if value is None:
-                return "\u2014"
-            try:
-                return str(len(value))
-            except TypeError:
-                return "\u2014"
-
-        rows = (
-            ("Collapse intensity", _num(data.get("collapse_intensity"))),
-            ("Collapse criterion", str(data.get("collapse_criterion") or "\u2014")),
-            ("Rungs", _count(data.get("intensities"))),
-            ("Structure height", _num(data.get("structure_height"))),
-        )
-        self._show_table_result(
-            label,
-            Table(title=label, columns=("Quantity", "Value"), rows=rows),
-        )
-
-        from ..plotting.viz_ida import plot_ida_curve
-
-        figure = plot_ida_curve(data, title=label)
-        if figure is not None:
-            self._show_figure_result(f"{label} curve", figure)
-        else:
-            self.log(f"{label}: matplotlib unavailable \u2014 no IDA curve plotted.", "warn")
-
-    def _show_modal_result(self, label: str, payload: Any) -> None:
-        """Summarise a modal result as a table and one results view per mode.
-
-        The ``modal`` verb's payload is an
-        :class:`~fea_toolkit.analysis.base.AnalysisResult` whose ``data`` holds
-        ``{"modal": {…}, "shapes": {…}}``.  The periods / participation are
-        distilled into a table, and each mode shape becomes a ``results`` view
-        (deformed geometry) — one per mode, like a static case.
-        """
-        from ..workflow.steps import Table
-
-        data = getattr(payload, "data", None) or {}
-        modal = data.get("modal", data) if isinstance(data, dict) else {}
-        periods = list(modal.get("periods", []) or [])
-        if not periods:
-            self.log(f"{label}: the modal result has no converged modes.", "warn")
-            return
-        frequencies = list(modal.get("frequencies", []) or [])
-        props = modal.get("modal_props", {}) or {}
-        keys = ("partiMassRatiosMX", "partiMassRatiosMY", "partiMassRatiosMZ")
-        rows = []
-        for i, period in enumerate(periods):
-            freq = frequencies[i] if i < len(frequencies) else 0.0
-            ratios = []
-            for key in keys:
-                series = props.get(key) or []
-                ratios.append(float(series[i]) if i < len(series) else 0.0)
-            rows.append((str(i + 1), f"{period:.4f}", f"{freq:.4f}", *[f"{r:.2f}" for r in ratios]))
-        self._show_table_result(
-            label,
-            Table(
-                title=label,
-                columns=("Mode", "Period (s)", "Freq (Hz)", "Mx (%)", "My (%)", "Mz (%)"),
-                rows=tuple(rows),
-            ),
-        )
-
-        shapes = data.get("shapes")
-        if isinstance(shapes, dict) and shapes:
-            self._show_modal_shapes_views(label, shapes, parent=_table_key(label))
-
-    def _show_modal_shapes_views(
-        self, label: str, shapes: dict, parent: Optional[str] = None
-    ) -> None:
-        """Register one ``results`` view per mode shape, like a static case.
-
-        Each mode's eigenvector field (``{mode_index: {node_tag: (dx, dy, dz)}}``)
-        becomes a ``static/Mode-<i>/node_*`` case via
-        :func:`~fea_toolkit.gui.project.mode_shape_arrays`, then registers through
-        the same path a static case takes.  The mode views nest under *parent*
-        (the step's summary table) so they bundle rather than flood the tree.
-
-        Args:
-            label: The step's result label.
-            shapes: The per-mode eigenvector fields.
-            parent: Key of the view the mode views hang off.
-        """
-        from .project import mode_shape_arrays
-
-        mesh = self._session.store.preprocessed() if self._session.store is not None else None
-        if mesh is None:
-            self.log(f"{label}: no prepared mesh to draw the mode shapes against.", "warn")
-            return
-        arrays = mode_shape_arrays(mesh, shapes)
-        self._show_results_archive(label, arrays, parent=parent)
-
-    def _show_rs_result(self, label: str, payload: Any) -> None:
-        """Summarise a response-spectrum result as a table and a results view.
-
-        The ``response_spectrum`` verb's payload is an
-        :class:`~fea_toolkit.analysis.base.AnalysisResult` whose ``data`` holds
-        ``{"rs_result": {…}, "direction": …, "node_displacements": {…}}``.  The
-        combined base shear / moment scalars are distilled into a one-row table,
-        and the CQC combined displacement field becomes a ``results`` view — one
-        per direction, exactly like a static case — so the deformed shape is
-        inspectable rather than only logged.
-        """
-        from ..workflow.steps import Table
-
-        data = getattr(payload, "data", None)
-        if not isinstance(data, dict):
-            self.log(f"{label}: no response-spectrum data.", "warn")
-            return
-        rs = data.get("rs_result") or {}
-        direction = data.get("direction", "")
-        table = Table(
-            title=label,
-            columns=("Direction", "V CQC", "V SRSS", "V total", "M CQC", "M SRSS"),
-            rows=(
-                (
-                    str(direction),
-                    f"{float(rs.get('base_shear_cqc', 0.0)):.2f}",
-                    f"{float(rs.get('base_shear_srss', 0.0)):.2f}",
-                    f"{float(rs.get('base_shear_total', 0.0)):.2f}",
-                    f"{float(rs.get('base_moment_cqc', 0.0)):.2f}",
-                    f"{float(rs.get('base_moment_srss', 0.0)):.2f}",
-                ),
-            ),
-        )
-        self._show_table_result(label, table)
-
-        node_displacements = data.get("node_displacements")
-        if isinstance(node_displacements, dict) and node_displacements:
-            self._show_rs_results_view(
-                label, str(direction), node_displacements, parent=_table_key(label)
-            )
-
-    def _show_rs_results_view(
-        self,
-        label: str,
-        direction: str,
-        node_displacements: dict,
-        parent: Optional[str] = None,
-    ) -> None:
-        """Register the combined RS displacement field as a ``results`` view.
-
-        The field is keyed by OpenSees node tag, but the existing
-        :class:`~fea_toolkit.io.results_repository.NpzResultsRepository` reads
-        the static-shaped ``static/<case>/node_*`` layout, so the field is
-        marshalled into that shape over the mesh's own geometry (via
-        :func:`~fea_toolkit.gui.project.rs_displacement_arrays`) and registered
-        through the same path a static case takes.  The view nests under
-        *parent* (the step's summary table).
-
-        Args:
-            label: The step's result label.
-            direction: The spectrum direction this field combines.
-            node_displacements: ``{node_tag: (dx, dy, dz)}`` combined field.
-            parent: Key of the view the results view hangs off.
-        """
-        from .project import rs_displacement_arrays
-
-        mesh = self._session.store.preprocessed() if self._session.store is not None else None
-        if mesh is None:
-            self.log(
-                f"{label}: no prepared mesh to draw the {direction} displaced shape against.",
-                "warn",
-            )
-            return
-        arrays = rs_displacement_arrays(mesh, {direction: node_displacements})
-        self._show_results_archive(label, arrays, parent=parent)
-
-    def _show_pushover_result(self, label: str, payload: Any) -> None:
-        """Summarise a pushover run as a table, ADRS figures and deformed shapes.
-
-        The ``pushover`` verb's payload is an
-        :class:`~fea_toolkit.analysis.base.AnalysisResult` whose ``data`` maps each
-        push direction to its result dict, which carries the ADRS capacity curve
-        (``adrs``), the performance point (``pp``), the demand spectrum
-        (``spectrum``) and the per-step ``results`` (including ``lateral_load_type``).
-        A summary table lists each direction × load type; each also becomes an ADRS
-        figure, and (when steps were recorded) a ``results`` view of its final
-        converged deformed shape — nested under the table, direction-first.
-        """
-        from ..workflow.steps import Table
-
-        data = getattr(payload, "data", None) or {}
-        directions = sorted(data) if isinstance(data, dict) else []
-        if not directions:
-            self.log(f"{label}: the run produced no pushover directions.", "warn")
-            return
-        self.log(f"{label}: complete ({', '.join(directions)}).")
-
-        # ── Summary table: one row per direction × load type ────────
-        rows = []
-        for direction in directions:
-            entry = data.get(direction) or {}
-            results = entry.get("results") or {}
-            pp = entry.get("pp") or {}
-            load_type = (
-                results.get("lateral_load_type", "uniform")
-                if isinstance(results, dict)
-                else "uniform"
-            )
-            control = results.get("control_disp") or [] if isinstance(results, dict) else []
-            shear = results.get("base_shear") or [] if isinstance(results, dict) else []
-            max_disp = max((abs(v) for v in control), default=0.0)
-            max_shear = max((abs(v) for v in shear), default=0.0)
-            rows.append(
-                (
-                    str(direction),
-                    str(load_type),
-                    f"{max_disp:.4f}",
-                    f"{max_shear:.2f}",
-                    f"{float(pp.get('D_roof', 0.0)):.4f}",
-                    f"{float(pp.get('V_base', 0.0)):.2f}",
-                    f"{float(pp.get('mu', 0.0)):.2f}",
-                    str(bool(pp.get("converged", False))),
-                )
-            )
-        self._show_table_result(
-            label,
-            Table(
-                title=label,
-                columns=(
-                    "Direction",
-                    "Load type",
-                    "Max roof disp",
-                    "Max base shear",
-                    "PP D_roof",
-                    "PP V_base",
-                    "Ductility",
-                    "Converged",
-                ),
-                rows=tuple(rows),
-            ),
-        )
-        table_key = _table_key(label)
-
-        from ..plotting.viz_pushover import plot_capacity_spectrum
-        from .project import figure_identity
-
-        views = []
-        for direction in directions:
-            entry = data.get(direction) or {}
-            adrs = entry.get("adrs")
-            spectrum = entry.get("spectrum") or {}
-            periods = spectrum.get("T") or []
-            accels = spectrum.get("Sa") or []
-            if not adrs or not periods or len(periods) != len(accels):
-                continue
-            figure = plot_capacity_spectrum(
-                adrs,
-                periods,
-                accels,
-                performance_point=entry.get("pp"),
-                title=f"{label} — {direction}",
-            )
-            if figure is None:
-                continue
-            results = entry.get("results") or {}
-            load_type = (
-                results.get("lateral_load_type", "uniform")
-                if isinstance(results, dict)
-                else "uniform"
-            )
-            key, name = figure_identity(label, direction, load_type)
-            view = self._session.views.add_figure(
-                key,
-                name,
-                figure,
-                source=f"Recipe: {label}",
-                parent=table_key,
-                activate=False,
-            )
-            views.append(view)
-
-        # Per-(direction, load type) deformed-shape views (final recorded step),
-        # nested under the summary table — only when steps were recorded.  The full
-        # per-step history is threaded into the same archive so the "animate" toggle
-        # can step through it.
-        mesh = self._session.store.preprocessed() if self._session.store is not None else None
-        if mesh is not None:
-            from ..io.npz_writer import collect_pushover_arrays
-            from .project import pushover_displacement_arrays
-
-            final_fields = {}
-            step_by_pair = {}
-            results_by_pair = {}
-            for direction in directions:
-                entry = data.get(direction) or {}
-                results = entry.get("results") or {}
-                if not isinstance(results, dict):
-                    continue
-                load_type = results.get("lateral_load_type", "uniform")
-                step_results = results.get("step_results") or []
-                if step_results and step_results[-1].get("node_displacements"):
-                    pair = (direction, load_type)
-                    final_fields[pair] = step_results[-1]["node_displacements"]
-                    step_by_pair[pair] = step_results
-                    results_by_pair[pair] = results
-            if final_fields:
-                arrays = pushover_displacement_arrays(mesh, final_fields)
-                for (direction, load_type), per_step in step_by_pair.items():
-                    arrays.update(
-                        collect_pushover_arrays(
-                            mesh,
-                            per_step,
-                            direction=direction,
-                            load_type=load_type,
-                            pushover_results=results_by_pair.get((direction, load_type)),
-                        )
-                    )
-                self._show_results_archive(label, arrays, parent=table_key, show=False)
-
-        if views:
-            self._show_view(views[0], rebuild_tree=True)
-        self.log(f"{label}: added {len(views)} ADRS figure(s).")
-
-    def _show_results_result(self, label: str, arrays: Any) -> list:
-        """Register each case in a recipe's results archive as a view.
-
-        Both ``cases`` verbs — a solve and a combination reduction — hand back
-        an in-memory results archive, so this is the same path the **Analysis ▸
-        Run** results take.  See :meth:`_show_results_archive`.
-        """
-        return self._show_results_archive(label, arrays or {})
-
-    def _show_results_archive(
-        self, label: str, arrays: dict, parent: Optional[str] = None, *, show: bool = True
-    ) -> list:
-        """Register one ``results`` view per case in *arrays* and show the first.
-
-        A :class:`~fea_toolkit.io.results_repository.NpzResultsRepository` over
-        the array dict supplies the cases (``static_case_labels``); the mesh the
-        run was prepared from is what the results are keyed to, so it is
-        preferred, and an archive also carries its own display geometry, which is
-        what makes the view drawable with nothing else loaded.  Cases replace by
-        key, so re-running a recipe refreshes its views instead of piling them up.
-
-        Args:
-            label: The step's result label, recorded as the view's provenance.
-            arrays: The archive arrays — ``static_case_labels`` plus the
-                ``static/<case>/…`` blocks and the geometry arrays.
-            parent: Key of the step's summary view the case views nest under
-                (``None`` leaves them top-level).
-            show: Whether to display the first case after registering (a fan-out
-                step that keeps another view active, e.g. pushover's ADRS figure,
-                passes ``False``).
-
-        Returns:
-            The case labels registered, in archive order — empty when the
-            archive holds no case.
-        """
-        from ..io.results_repository import NpzResultsRepository
-
-        repository = NpzResultsRepository(arrays or {})
-        cases = list(repository.cases())
-        if not cases:
-            return []
-
-        mesh = self._session.store.preprocessed() if self._session.store is not None else None
-        model = mesh if mesh is not None else repository.as_model()
-        for case in cases:
-            self._session.views.add_results(
-                f"{_RESULTS_KEY_PREFIX}{case}",
-                _case_view_name(case, repository.case_meta(case)),
-                repository,
-                source=f"Recipe: {label} \u00b7 {case}",
-                model=model,
-                parent=parent,
-                activate=False,
-            )
-        self.log(f"{label}: {len(cases)} case(s) added as views.")
-
-        if show:
-            first = self._session.views.get(f"{_RESULTS_KEY_PREFIX}{cases[0]}")
-            if first is not None:
-                self._show_view(first, rebuild_tree=True)
-        return cases
-
-    def _show_geometry_result(self, label: str, mesh_model: Any) -> None:
-        """Report a geometry result, register it as a view and display it.
-
-        Splitting is *opt-in per element* in the model itself (SAP2000's
-        auto-mesh flags: ``AtJoints`` / ``AtFrames``), so a model that asks for
-        nothing is legitimately unchanged — say so rather than implying a
-        failure.
-
-        Args:
-            label: The result's display name, e.g. ``"Meshed"``.
-            mesh_model: The ``MeshModel`` the step produced.
-        """
-        elements = mesh_model.frame_elements.values()
-        children = sum(1 for elem in elements if getattr(elem, "parent_id", None))
-        parents = sum(1 for elem in elements if getattr(elem, "inactive", False))
-        if children or parents:
-            detail = f"{children} split sub-elements, {parents} superseded parents"
-        else:
-            detail = "no element requested splitting"
-        self.log(
-            f"Preprocessed: {len(mesh_model.frame_elements)} frame elements ({detail}), "
-            f"{len(mesh_model.area_elements)} area elements."
-        )
-        # Record the preprocessed model on the store, so Analysis ▸ Run uses the
-        # topology just displayed rather than preprocessing again (P27,
-        # refinement 1: preprocessing is a user action, never silent).
-        if self._session.store is not None:
-            self._session.store.set_preprocessed(mesh_model)
-        # The view *names* are the GUI's own convention: a split-only run is
-        # still "Processed" and a meshing run "Meshed", whatever the verb
-        # labelled its result.
-        if label == "Meshed":
-            key, name = "meshed", "Meshed"
-        else:
-            key, name = "processed", "Processed"
-        self._session.views.add_geometry(key, name, mesh_model, source=f"Recipe: {label}")
-        if self._session.hidden_elem_ids:
-            self._session.hidden_elem_ids.clear()
-            self.log("Preprocessing rebuilt the model; hidden elements were restored.")
-        self.show_model(mesh_model, reset_view=False)
-        self.log(f"Added view: {name}.")
-
     def _preprocess_failed(self, message: str) -> None:
         """Report a recipe failure, flushing buffered diagnostics first.
 
@@ -4553,7 +4009,7 @@ class MainWindow(QMainWindow):
                 self._merge_recipe_named_selections(document)
             # A completed ``mesh`` step's topology has no view to register on the
             # failure path, but a retry of the analysis step needs it in the store —
-            # record it (mirroring ``_show_geometry_result`` on the success path) so
+            # record it (mirroring ``show_geometry_result`` on the success path) so
             # the committed mesh step need not re-run.
             if (
                 document is not None

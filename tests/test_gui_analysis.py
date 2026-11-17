@@ -115,7 +115,7 @@ def test_ida_is_greyed_until_the_model_is_preprocessed(window):
 
 def test_an_ida_result_registers_a_table_and_a_curve(window):
     """The IDA result payload becomes a collapse table and an IDA-curve figure."""
-    window._show_ida_result(
+    window._results_presenter.show_ida_result(
         "IDA",
         {
             "intensities": [0.5, 1.0, 2.0],

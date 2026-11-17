@@ -407,3 +407,40 @@ class ViewRegistry:
 
     def __len__(self) -> int:
         return len(self._views)
+
+
+# ═══════════════════════════════════════════════════════════════
+# View-key helpers
+# ═══════════════════════════════════════════════════════════════
+
+#: Prefix of a results view's key; the load-case label follows it.
+_RESULTS_KEY_PREFIX = "results:"
+
+
+def _case_view_name(case: str, meta: dict) -> str:
+    """Display name for a results view: the case, qualified by its combination.
+
+    The unified schema records which combination a case was generated from; when
+    the two names differ the label says so, because the variants of one
+    combination would otherwise look identical in the tree.
+    """
+    group = meta.get("group") if meta else None
+    if group and group != case:
+        return f"{case} ({group})"
+    return case
+
+
+def _table_key(label: str) -> str:
+    """The table view's key for a step *label* — the inverse of its registration."""
+    return f"table:{label.lower().replace(' ', '-')}"
+
+
+def _case_of(view: Optional[View]) -> str:
+    """The load case a results view stands for (``""`` for any other view).
+
+    The case is carried in the view's key (``"results:DEAD"``), which is what
+    ``MainWindow.open_results_path`` registers; this is its inverse.
+    """
+    if view is None or not view.key.startswith(_RESULTS_KEY_PREFIX):
+        return ""
+    return view.key[len(_RESULTS_KEY_PREFIX) :]

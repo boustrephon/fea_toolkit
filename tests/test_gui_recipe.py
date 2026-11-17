@@ -461,7 +461,7 @@ class TestResultViews:
 
     def test_an_empty_archive_registers_no_view(self, window):
         """An archive with no case in it adds nothing — it does not invent a view."""
-        assert window._show_results_result("Static cases", {}) == []
+        assert window._results_presenter.show_results_result("Static cases", {}) == []
         assert window._session.views.get("results:") is None
 
     def test_a_cancelled_run_that_solved_nothing_is_not_a_failure(self, window):
@@ -517,7 +517,7 @@ class TestResultViews:
                 "node_displacements": field,
             },
         )
-        window._show_rs_result("Response spectrum (X)", payload)
+        window._results_presenter.show_rs_result("Response spectrum (X)", payload)
 
         view = window._session.views.get("results:RS-X")
         assert view is not None, "the RS result registered no deformed-shape view"
@@ -557,7 +557,7 @@ class TestResultViews:
                 "shapes": shapes,
             },
         )
-        window._show_modal_result("Modal", payload)
+        window._results_presenter.show_modal_result("Modal", payload)
 
         for key in ("results:Mode-1", "results:Mode-2"):
             view = window._session.views.get(key)
@@ -592,7 +592,7 @@ class TestResultViews:
                 "node_displacements": field,
             },
         )
-        window._show_rs_result("Response spectrum (X)", payload)
+        window._results_presenter.show_rs_result("Response spectrum (X)", payload)
 
         window._on_animate_toggled(True)
         assert window._anim_timer is not None
@@ -636,7 +636,7 @@ class TestResultViews:
                 "gm_file": "record.txt",
             },
         )
-        window._show_nonlinear_dynamic_result("Nonlinear dynamic", payload)
+        window._results_presenter.show_nonlinear_dynamic_result("Nonlinear dynamic", payload)
 
         key = "table:nonlinear-dynamic"
         assert len(window._nld_frames[key]) == n_steps
@@ -687,7 +687,7 @@ class TestResultViews:
                 "gm_file": "record.txt",
             },
         )
-        window._show_nonlinear_dynamic_result("Nonlinear dynamic", payload)
+        window._results_presenter.show_nonlinear_dynamic_result("Nonlinear dynamic", payload)
 
         # Trigger the toolbar toggle itself so the checked state is what a real
         # user action produces; the later uncheck must then reflect a
@@ -724,7 +724,7 @@ class TestTableAndFigureViews:
         from fea_toolkit.workflow import Table
 
         table = Table(title="Probe", columns=("a", "b"), rows=(("1", "2"), ("3", "4")))
-        window._show_table_result("Probe", table)
+        window._results_presenter.show_table_result("Probe", table)
 
         view = window._session.views.get("table:probe")
         assert view is not None and view.kind == "table"
@@ -739,7 +739,7 @@ class TestTableAndFigureViews:
 
         figure = Figure()
         figure.gca().plot([0.0, 1.0], [0.0, 1.0])
-        window._show_figure_result("Storey displacements", figure)
+        window._results_presenter.show_figure_result("Storey displacements", figure)
 
         view = window._session.views.get("figure:storey-displacements")
         assert view is not None and view.kind == "figure"
@@ -753,12 +753,14 @@ class TestTableAndFigureViews:
 
         from fea_toolkit.workflow import Table
 
-        window._show_table_result("Probe", Table(title="Probe", columns=("a",), rows=(("1",),)))
+        window._results_presenter.show_table_result(
+            "Probe", Table(title="Probe", columns=("a",), rows=(("1",),))
+        )
         assert window._tree_model.index_for("views", "Probe") is not None
 
         figure = Figure()
         figure.gca().plot([0.0, 1.0], [0.0, 1.0])
-        window._show_figure_result("Storey displacements", figure)
+        window._results_presenter.show_figure_result("Storey displacements", figure)
         assert window._tree_model.index_for("views", "Storey displacements") is not None
 
     def test_switching_figures_reuses_canvases(self, window):
@@ -770,9 +772,9 @@ class TestTableAndFigureViews:
         fig_b = Figure()
         fig_b.gca().plot([0.0, 1.0], [1.0, 0.0])
 
-        window._show_figure_result("Alpha", fig_a)
+        window._results_presenter.show_figure_result("Alpha", fig_a)
         canvas_a = window._figure_canvases["figure:alpha"]
-        window._show_figure_result("Beta", fig_b)
+        window._results_presenter.show_figure_result("Beta", fig_b)
         canvas_b = window._figure_canvases["figure:beta"]
 
         assert canvas_a is not canvas_b
@@ -781,7 +783,7 @@ class TestTableAndFigureViews:
         # Switching back must re-attach the *same* canvas, not wrap the figure in
         # a fresh one (re-embedding a figure re-runs its layout and inflates the
         # legend/markers).
-        window._show_figure_result("Alpha", fig_a)
+        window._results_presenter.show_figure_result("Alpha", fig_a)
         assert window._figure_canvases["figure:alpha"] is canvas_a
         assert window._figure_layout.count() == 1
 
@@ -796,12 +798,12 @@ class TestTableAndFigureViews:
 
         fig_a = Figure()
         fig_a.gca().plot([0.0, 1.0], [0.0, 1.0])
-        window._show_figure_result("Alpha", fig_a)
+        window._results_presenter.show_figure_result("Alpha", fig_a)
         canvas_a = window._figure_canvases["figure:alpha"]
 
         fig_b = Figure()
         fig_b.gca().plot([0.0, 1.0], [1.0, 0.0])
-        window._show_figure_result("Alpha", fig_b)
+        window._results_presenter.show_figure_result("Alpha", fig_b)
 
         canvas_b = window._figure_canvases["figure:alpha"]
         assert canvas_b is not canvas_a
@@ -849,7 +851,7 @@ class TestTableAndFigureViews:
                 },
             },
         )
-        window._show_pushover_result("Pushover", payload)
+        window._results_presenter.show_pushover_result("Pushover", payload)
 
         assert window._session.views.get("table:pushover") is not None, (
             "pushover registered no summary table"

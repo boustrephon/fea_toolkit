@@ -546,7 +546,7 @@ class TestHideSelection:
         slab_window._actions["view.hide_selected"].trigger()
         assert slab_window._session.hidden_elem_ids == {"Area:A1"}
 
-        slab_window._show_geometry_result("Meshed", _slab_model())
+        slab_window._results_presenter.show_geometry_result("Meshed", _slab_model())
 
         assert slab_window._session.hidden_elem_ids == set()
         assert "hidden elements were restored" in slab_window._message_log.toPlainText()
