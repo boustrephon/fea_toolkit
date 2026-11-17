@@ -464,9 +464,8 @@ class MainWindow(QMainWindow):
 
         self._source_label = source
         self._reset_view_baseline = None
-        self._session.store = None
+        self._session.reset()
         self._external_combinations: dict = {}
-        self._session.views = ViewRegistry()
         self._reset_session_display()
         if isinstance(model, SAPModelData):
             self._session.store = InMemoryModelStore(model, source=source)
@@ -2224,14 +2223,8 @@ class MainWindow(QMainWindow):
         # clear them so a stale nonlinear-dynamic result can never animate.
         self._nld_frames.clear()
         self._nld_times.clear()
-        # Named selections are authored against the model being replaced, so a
-        # stale store would resolve against the new document's elements — clear
-        # it, mirroring the ``open`` verb's replacement of the selection store.
-        self._session.named_selections.clear()
-        # The last recipe run belongs to the model being replaced; clear it so
-        # ``File ▸ Save project`` cannot persist that run's IDA ladder / transient
-        # history against the newly opened model.
-        self._session.last_run = None
+        # The session's named selections and last run were already cleared by
+        # ``_remember_source`` → ``Session.reset()``.
         self._set_toggle_checked("results.animate", False)
         self._set_toggle_checked("results.deformed", False)
         self._sync_force_toggles(False)

@@ -44,3 +44,17 @@ class Session:
     named_selections: dict[str, Any] = field(default_factory=dict)
     hidden_elem_ids: set[str] = field(default_factory=set)
     last_run: Any = None
+
+    def reset(self) -> None:
+        """Clear the document state, leaving the workflow recipe untouched.
+
+        The store, views, named selections, hidden set and last run all belong
+        to the document currently open; :meth:`reset` empties them for a fresh
+        document.  The recipe is the user's workflow and persists across
+        documents, so it is deliberately left in place.
+        """
+        self.store = None
+        self.views = ViewRegistry()
+        self.named_selections.clear()
+        self.hidden_elem_ids.clear()
+        self.last_run = None
