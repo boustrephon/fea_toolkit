@@ -87,6 +87,19 @@ class TestSessionRecipeOwnership:
         assert window._session.recipe is window._recipe_panel.recipe
         assert len(window._session.recipe) == 0
 
+    def test_opening_a_new_model_clears_the_recipe(self, window):
+        from pathlib import Path
+
+        window._recipe_panel.add_step("mesh")
+        assert len(window._session.recipe) == 1
+
+        fixture = Path(__file__).parent / "fixtures" / "sample.s2k"
+        assert window.open_path(str(fixture)) is True
+
+        assert len(window._session.recipe) == 0
+        assert window._session.recipe is window._recipe_panel.recipe
+        assert window._recipe_panel._table.rowCount() == 0
+
 
 class TestDocumentAdoption:
     """A document-lifecycle recipe (``open`` / ``close``) drives the window (P35)."""

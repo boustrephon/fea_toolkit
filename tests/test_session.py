@@ -27,6 +27,13 @@ def test_reset_clears_document_state():
 
 
 def test_reset_preserves_the_recipe():
+    """Reset clears the document state but keeps the workflow recipe.
+
+    A recipe run that adopts a new document (``_adopt_document``) calls
+    ``reset()`` and then applies the run's outcomes onto the recipe, so
+    ``reset()`` must not drop it — only a user-initiated ``open_path`` clears
+    the recipe (through the panel).
+    """
     session = Session()
     session.recipe.add("mesh")
 

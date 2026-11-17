@@ -5221,6 +5221,12 @@ class MainWindow(QMainWindow):
             return False
         self._save_view_state()  # preserve the outgoing model's view before switching
         self._remember_source(model, source=path)
+        # A newly opened model starts with an empty recipe: the workflow being
+        # authored belonged to the model just replaced.  Clearing the panel (the
+        # live editor) propagates the empty recipe to the session via ``changed``.
+        panel = getattr(self, "_recipe_panel", None)
+        if panel is not None:
+            panel.clear()
         self._session.named_selections = selections
         state, notes = load_view_state(path)
         for note in notes:
