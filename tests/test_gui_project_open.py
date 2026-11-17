@@ -224,7 +224,7 @@ def test_preferred_open_view_chooses_geometry(window):
     window._remember_source(make_sample_model())  # registers "unprocessed"
     window._session.views.add_geometry("meshed", "Meshed", make_sample_model(), source="")
 
-    view = window._preferred_open_view("results:Mode-2")
+    view = window._session._preferred_open_view("results:Mode-2")
     assert view is not None
     assert view.key == "meshed"
 
@@ -235,7 +235,7 @@ def test_preferred_open_view_falls_back_to_unprocessed(window):
 
     window._remember_source(make_sample_model())  # registers "unprocessed" only
 
-    view = window._preferred_open_view("results:Mode-2")
+    view = window._session._preferred_open_view("results:Mode-2")
     assert view is not None
     assert view.key == "unprocessed"
 
@@ -271,7 +271,7 @@ def test_backfill_mesh_load_metadata_restores_a_stale_mesh(window):
     mesh.response_spectrum_functions = {}
     mesh.stories = []
 
-    window._backfill_mesh_load_metadata(mesh, sap)
+    window._session._backfill_mesh_load_metadata(mesh, sap)
 
     assert set(mesh.load_cases) == {"DEAD"}
     assert set(mesh.load_combinations) == {"COMB1"}

@@ -13,11 +13,12 @@ Like :mod:`fea_toolkit.gui.models.model_index` and
 holds the *data* the window renders, never a widget.
 """
 
+import contextlib
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from ..workflow.recipe import Recipe
-from .controllers.view_registry import RESULTS, TABLE, ViewRegistry
+from .controllers.view_registry import FIGURE, GEOMETRY, RESULTS, TABLE, ViewRegistry
 
 __all__ = ["Session"]
 
@@ -118,6 +119,167 @@ class Session:
             "figures": figures,
             "tables": tables,
         }
+
+    @classmethod
+    def from_bundle(cls, bundle: dict) -> "Session":
+        """Rebuild a session from a project bundle, Qt-free.
+
+        Reconstructs the store, the registered views, the recipe and the hidden
+        set from the bundle :func:`~fea_toolkit.gui.project.read_project`
+        returned — nothing is re-run.  The named selections are not part of the
+        project bundle, so a reopened project starts with none (as before).
+
+        Args:
+            bundle: The ``read_project`` result (manifest + sap + mesh +
+                results + tables + figures).
+
+        Returns:
+            A new :class:`Session` ready for the window to re-attach its
+            viewport, tree and inspector.
+        """
+        from ..io.model_store import InMemoryModelStore
+        from ..workflow import Recipe
+        from .project import regenerate_figure
+
+        manifest = bundle["manifest"] or {}
+        sap = bundle["sap"]
+        mesh = bundle["mesh"]
+        repository = bundle["results"]
+        tables = bundle["tables"] or {}
+        figures = bundle["figures"] or {}
+
+        session = cls()
+        project = manifest.get("project") or {}
+        source_label = project.get("source_label", "")
+        if sap is not None:
+            session.store = InMemoryModelStore(sap, source=source_label)
+            session.views = ViewRegistry(session.store)
+            # A project always carries at least the raw "unprocessed" geometry
+            # view; add it up front, and the manifest's views register over it
+            # (replacing it by key when the project saved one).
+            session.views.add_geometry("unprocessed", "Unprocessed", sap, source=source_label)
+            if mesh is not None:
+                session._backfill_mesh_load_metadata(mesh, sap)
+                session.store.set_preprocessed(mesh)
+
+        geometry_sources = {"unprocessed": sap, "processed": mesh, "meshed": mesh}
+        # Results views render the archive's own geometry, which carries section
+        # *names* but not definitions, and no supports.  Attach the source
+        # model's sections and restraints so a results view colours and supports
+        # its elements exactly as the geometry views do.
+        display_model = (
+            repository.as_model(sections=sap.sections, restraints=sap.restraints)
+            if repository is not None and sap is not None
+            else None
+        )
+        for entry in manifest.get("views") or []:
+            kind = entry.get("kind")
+            key = entry.get("key")
+            name = entry.get("name")
+            source = entry.get("source", "")
+            parent = entry.get("parent")
+            if kind == GEOMETRY:
+                model = geometry_sources.get(key)
+                if model is not None:
+                    session.views.add_geometry(key, name, model, source=source, activate=False)
+            elif kind == RESULTS:
+                case = entry.get("case")
+                if repository is not None and case in repository.cases():
+                    session.views.add_results(
+                        f"results:{case}",
+                        name,
+                        repository,
+                        source=source,
+                        model=display_model,
+                        parent=parent,
+                        activate=False,
+                    )
+            elif kind == TABLE:
+                table = tables.get(entry.get("table_key", key))
+                if table is not None:
+                    session.views.add_table(
+                        key, name, table, source=source, parent=parent, activate=False
+                    )
+            elif kind == FIGURE:
+                figure_data = figures.get(entry.get("figure_key", key))
+                if figure_data:
+                    figure = regenerate_figure(figure_data)
+                    if figure is not None:
+                        session.views.add_figure(
+                            key, name, figure, source=source, parent=parent, activate=False
+                        )
+
+        recipe_dict = project.get("recipe")
+        if recipe_dict is not None:
+            with contextlib.suppress(Exception):
+                session.recipe = Recipe.from_dict(recipe_dict)
+
+        active = session._preferred_open_view(manifest.get("active_view"))
+        viewport = manifest.get("viewport") or {}
+        hidden_model = (
+            mesh
+            if mesh is not None and active is not None and active.key in ("processed", "meshed")
+            else sap
+        )
+        hidden = viewport.get("hidden_elem_ids")
+        if not isinstance(hidden, list):
+            session.hidden_elem_ids = set()
+        else:
+            ids = {str(ref) for ref in hidden}
+            drawable = session._drawable_element_ids(hidden_model)
+            session.hidden_elem_ids = ids if (not ids or ids <= drawable) else set()
+
+        return session
+
+    def _preferred_open_view(self, saved_key: Optional[str]) -> Optional[Any]:
+        """The view a reopened project shows first: geometry, not a results view.
+
+        A saved ``active_view`` is often a results view (the last mode the user
+        animated); reopening straight into it hides the model's supports, groups
+        and loads.  Prefer the geometry views — meshed/processed first, then
+        unprocessed — and fall back to the saved view (or ``None``).
+        """
+        for key in ("meshed", "processed", "unprocessed"):
+            view = self.views.get(key)
+            if view is not None:
+                return view
+        return self.views.get(saved_key) if saved_key else None
+
+    @staticmethod
+    def _backfill_mesh_load_metadata(mesh: Any, sap: Any) -> None:
+        """Copy SAP load definitions onto a disk-loaded mesh that lacks them.
+
+        A project saved before ``MeshModel`` carried ``load_cases`` /
+        ``load_combinations`` / ``response_spectrum_functions`` holds a mesh
+        with empty dicts.  Preprocessing never changes those definitions, so
+        backfill them from the raw model at open time — the Model Tree then
+        shows Load Cases, Load Combinations and Response Spectra without a
+        re-save.
+        """
+        for attr in (
+            "load_cases",
+            "load_combinations",
+            "response_spectrum_functions",
+            "shell_uniform_load_sets",
+            "shell_uniform_load_set_assignments",
+            "stories",
+        ):
+            source = getattr(sap, attr, None)
+            if source and not getattr(mesh, attr, None):
+                setattr(mesh, attr, source)
+
+    def _drawable_element_ids(self, model: Any) -> set[str]:
+        """Type-qualified ids of the elements *model* can draw.
+
+        Inactive (split/meshed) parents are skipped, so an id that is never
+        drawn cannot leak into the hidden set.
+        """
+        ids: set[str] = set()
+        for etype, attr in (("Frame", "frame_elements"), ("Area", "area_elements")):
+            for key, elem in (getattr(model, attr, {}) or {}).items():
+                if not getattr(elem, "inactive", False):
+                    ids.add(f"{etype}:{key}")
+        return ids
 
     def _project_results_arrays(self, collected: dict) -> dict:
         """Merge the collected static archive arrays with modal + RS + pushover

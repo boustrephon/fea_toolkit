@@ -55,3 +55,67 @@ def test_to_bundle_collects_the_session_into_a_project_payload():
     assert manifest["project"]["name"] == "sample"
     assert manifest["project"]["recipe"]["steps"][0]["verb"] == "mesh"
     assert manifest["viewport"]["hidden_elem_ids"] == ["Frame:1"]
+
+
+def test_from_bundle_reconstructs_geometry_views_recipe_and_hidden():
+    from examples.sample_model import make_sample_model
+
+    model = make_sample_model()
+    bundle = {
+        "manifest": {
+            "project": {
+                "name": "sample",
+                "source_label": "model.s2k",
+                "recipe": {
+                    "name": "r",
+                    "steps": [{"verb": "mesh", "params": {"split_slabs_at_walls": True}}],
+                },
+            },
+            "views": [
+                {
+                    "key": "unprocessed",
+                    "name": "Unprocessed",
+                    "kind": "geometry",
+                    "source": "model.s2k",
+                }
+            ],
+            "active_view": "unprocessed",
+            "viewport": {},
+            "display": {},
+        },
+        "sap": model,
+        "mesh": None,
+        "results": None,
+        "tables": {},
+        "figures": {},
+    }
+
+    session = Session.from_bundle(bundle)
+
+    assert session.store.raw() is model
+    assert [view.key for view in session.views.views()] == ["unprocessed"]
+    assert session.recipe.steps[0].verb == "mesh"
+    assert session.hidden_elem_ids == set()
+    assert session.last_run is None
+
+
+def test_from_bundle_drops_hidden_ids_from_another_topology():
+    from examples.sample_model import make_sample_model
+
+    model = make_sample_model()
+    bundle = {
+        "manifest": {
+            "project": {"name": "sample", "source_label": ""},
+            "views": [],
+            "viewport": {"hidden_elem_ids": ["Frame:definitely-missing"]},
+        },
+        "sap": model,
+        "mesh": None,
+        "results": None,
+        "tables": {},
+        "figures": {},
+    }
+
+    session = Session.from_bundle(bundle)
+
+    assert session.hidden_elem_ids == set()

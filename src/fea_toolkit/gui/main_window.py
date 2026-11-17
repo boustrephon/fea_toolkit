@@ -2249,43 +2249,6 @@ class MainWindow(QMainWindow):
         if intent.get("shell_forces") and self._actions["results.shell_forces"].isEnabled():
             self._on_shell_forces_toggled(True)
 
-    def _preferred_open_view(self, saved_key: Optional[str]) -> Optional[Any]:
-        """The view a reopened project shows first: geometry, not a results view.
-
-        A saved ``active_view`` is often a results view (the last mode the user
-        animated); reopening straight into it hides the model's supports, groups
-        and loads.  Prefer the geometry views — meshed/processed first, then
-        unprocessed — and fall back to the saved view (or ``None``).
-        """
-        for key in ("meshed", "processed", "unprocessed"):
-            view = self._session.views.get(key)
-            if view is not None:
-                return view
-        return self._session.views.get(saved_key) if saved_key else None
-
-    @staticmethod
-    def _backfill_mesh_load_metadata(mesh: Any, sap: Any) -> None:
-        """Copy SAP load definitions onto a disk-loaded mesh that lacks them.
-
-        A project saved before ``MeshModel`` carried ``load_cases`` /
-        ``load_combinations`` / ``response_spectrum_functions`` holds a mesh
-        with empty dicts.  Preprocessing never changes those definitions, so
-        backfill them from the raw model at open time — the Model Tree then
-        shows Load Cases, Load Combinations and Response Spectra without a
-        re-save.
-        """
-        for attr in (
-            "load_cases",
-            "load_combinations",
-            "response_spectrum_functions",
-            "shell_uniform_load_sets",
-            "shell_uniform_load_set_assignments",
-            "stories",
-        ):
-            source = getattr(sap, attr, None)
-            if source and not getattr(mesh, attr, None):
-                setattr(mesh, attr, source)
-
     def _update_units_label(self) -> None:
         """Show the model's unit system in the status bar."""
         from ..io.model_store import model_header
@@ -3242,19 +3205,6 @@ class MainWindow(QMainWindow):
         )
         self.log("Reset the view to defaults.")
 
-    def _drawable_element_ids(self, model: Any) -> set[str]:
-        """Type-qualified ids of the elements *model* can draw.
-
-        Inactive (split/meshed) parents are skipped, so an id that is never
-        drawn cannot leak into the hidden set.
-        """
-        ids: set[str] = set()
-        for etype, attr in (("Frame", "frame_elements"), ("Area", "area_elements")):
-            for key, elem in (getattr(model, attr, {}) or {}).items():
-                if not getattr(elem, "inactive", False):
-                    ids.add(f"{etype}:{key}")
-        return ids
-
     def _all_element_ids(self) -> set[str]:
         """Every ``Frame:``/``Area:`` id the displayed model can draw.
 
@@ -3263,7 +3213,7 @@ class MainWindow(QMainWindow):
         tell them apart on its own.  Inactive (split/meshed) parents are
         skipped, so an id that is never drawn cannot leak into the hidden set.
         """
-        return self._drawable_element_ids(self._model)
+        return self._session._drawable_element_ids(self._model)
 
     def _restore_hidden_elements(self, hidden: Any, model: Any) -> set[str]:
         """Restore a saved hidden set, dropping it when it names another topology.
@@ -3278,7 +3228,7 @@ class MainWindow(QMainWindow):
         if not isinstance(hidden, list):
             return set()
         ids = {str(ref) for ref in hidden}
-        if ids and not ids <= self._drawable_element_ids(model):
+        if ids and not ids <= self._session._drawable_element_ids(model):
             self.log(
                 f"Dropping {len(ids)} hidden element(s) saved for a different "
                 "(preprocessed) topology.",
@@ -5208,10 +5158,11 @@ class MainWindow(QMainWindow):
         Dialog-free so tests can drive it directly.  The model, results, tables
         and figures are read back from the bundle and re-registered as views — so
         nothing is re-run — and the active view, camera and hidden set are
-        restored from the manifest.
+        restored from the manifest.  The session itself is rebuilt Qt-free by
+        :meth:`Session.from_bundle`; this method only re-attaches the GUI
+        (recipe panel, display knobs, viewport camera).
         """
-        from ..workflow import Recipe
-        from .project import is_project, project_member_summary, read_project, regenerate_figure
+        from .project import is_project, project_member_summary, read_project
 
         self.log(f"Opening project {path} …")
         try:
@@ -5225,107 +5176,29 @@ class MainWindow(QMainWindow):
             self.log(f"Failed to open project {path}: {exc}", "error")
             return False
 
-        manifest = bundle["manifest"] or {}
-        sap = bundle["sap"]
-        mesh = bundle["mesh"]
-        repository = bundle["results"]
-        tables = bundle["tables"] or {}
-        figures = bundle["figures"] or {}
-
-        if sap is None:
+        if bundle.get("sap") is None:
             self.log("Project has no model stage; nothing to display.", "error")
             return False
 
-        project = manifest.get("project") or {}
-        source_label = project.get("source_label", "")
         self._save_view_state()
-        self._remember_source(sap, source=source_label)
-        if mesh is not None:
-            self._backfill_mesh_load_metadata(mesh, sap)
-            self._session.store.set_preprocessed(mesh)
+        session = Session.from_bundle(bundle)
+        self._session = session
 
-        geometry_sources = {"unprocessed": sap, "processed": mesh, "meshed": mesh}
-        # Results views render the archive's own geometry, which carries section
-        # *names* but not definitions, and no supports.  Attach the source
-        # model's sections and restraints so a results view colours and supports
-        # its elements exactly as the geometry views do.
-        display_model = (
-            repository.as_model(sections=sap.sections, restraints=sap.restraints)
-            if repository is not None
-            else None
-        )
-
-        for entry in manifest.get("views") or []:
-            kind = entry.get("kind")
-            key = entry.get("key")
-            name = entry.get("name")
-            source = entry.get("source", "")
-            parent = entry.get("parent")
-            if kind == GEOMETRY:
-                model = geometry_sources.get(key)
-                if model is not None:
-                    self._session.views.add_geometry(
-                        key, name, model, source=source, activate=False
-                    )
-            elif kind == RESULTS:
-                case = entry.get("case")
-                if repository is not None and case in repository.cases():
-                    self._session.views.add_results(
-                        f"results:{case}",
-                        name,
-                        repository,
-                        source=source,
-                        model=display_model,
-                        parent=parent,
-                        activate=False,
-                    )
-            elif kind == TABLE:
-                table = tables.get(entry.get("table_key", key))
-                if table is not None:
-                    self._session.views.add_table(
-                        key, name, table, source=source, parent=parent, activate=False
-                    )
-            elif kind == FIGURE:
-                figure_data = figures.get(entry.get("figure_key", key))
-                if figure_data:
-                    figure = regenerate_figure(figure_data)
-                    if figure is not None:
-                        self._session.views.add_figure(
-                            key, name, figure, source=source, parent=parent, activate=False
-                        )
-
-        recipe_dict = project.get("recipe")
-        if recipe_dict is not None:
-            panel = getattr(self, "_recipe_panel", None)
-            if panel is not None:
-                with contextlib.suppress(Exception):
-                    panel.set_recipe(Recipe.from_dict(recipe_dict))
-
-        viewport = manifest.get("viewport") or {}
-        active = self._preferred_open_view(manifest.get("active_view"))
-        # Validate hidden ids against the topology the restored view draws: the
-        # mesh when a processed/meshed view is preferred, the parsed model
-        # otherwise — so ids that are not drawable in that topology are rejected
-        # rather than silently re-hiding the wrong members.
-        hidden_model = (
-            mesh
-            if mesh is not None and active is not None and active.key in ("processed", "meshed")
-            else sap
-        )
-        self._session.hidden_elem_ids = self._restore_hidden_elements(
-            viewport.get("hidden_elem_ids"), hidden_model
-        )
-
+        manifest = bundle["manifest"] or {}
+        panel = getattr(self, "_recipe_panel", None)
+        if panel is not None:
+            panel.set_recipe(session.recipe)
         self._apply_display_values(manifest.get("display") or {})
 
+        active = session._preferred_open_view(manifest.get("active_view"))
         if active is None:
-            views = self._session.views.views()
+            views = session.views.views()
             active = views[0] if views else None
         if active is not None:
             self._show_view(active, rebuild_tree=True, reset_view=True)
-            self._restore_camera(viewport.get("camera_position"))
+            self._restore_camera((manifest.get("viewport") or {}).get("camera_position"))
 
-        self.log(f"Opened project: {len(self._session.views)} view(s).")
+        self.log(f"Opened project: {len(session.views)} view(s).")
         return True
 
     def open_path(self, path: str) -> bool:
