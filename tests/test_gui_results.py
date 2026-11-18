@@ -213,18 +213,28 @@ def test_preprocessing_stays_unavailable(window, tmp_path):
 
 
 def test_a_case_from_another_combination_is_qualified(window, tmp_path):
-    """Two variants of one combination must not look identical in the tree."""
+    """A case whose group differs from its name is qualified in the tree."""
     from fea_toolkit.io.results_repository import NpzResultsRepository
 
     path = _write_archive(tmp_path, cases=("COMB1",))
-    # The writer records the combination a case was generated from.
+    # The writer records the combination a case was generated from; here it
+    # differs from the case name, so the view name must say so.
     data = dict(np.load(path, allow_pickle=False))
-    data["static_case_group"] = np.array(["COMB1"], dtype=str)
+    data["static_case_group"] = np.array(["COMB2"], dtype=str)
     np.savez_compressed(path, **data)
 
     window.open_results_path(str(path))
 
-    assert NpzResultsRepository(path).case_meta("COMB1")["group"] == "COMB1"
+    assert NpzResultsRepository(path).case_meta("COMB1")["group"] == "COMB2"
+    assert window._session.views.get("results:results.npz:COMB1").name == "COMB1 (COMB2)"
+
+
+def test_a_case_from_its_own_group_keeps_the_plain_name(window, tmp_path):
+    """A case whose group equals its name shows the plain name, not a qualified one."""
+    path = _write_archive(tmp_path, cases=("COMB1",))
+
+    window.open_results_path(str(path))
+
     assert window._session.views.get("results:results.npz:COMB1").name == "COMB1"
 
 

@@ -55,6 +55,15 @@ class ResultsPresenter:
         self._times = times
         self._on_animatability_changed = on_animatability_changed
 
+    def set_session(self, session: Any) -> None:
+        """Re-point the presenter at *session* (e.g. after a project load).
+
+        The window replaces its whole ``Session`` object when it opens a
+        project, so the presenter must be re-bound before a recipe run registers
+        results — otherwise they would land in the discarded session.
+        """
+        self._session = session
+
     # ── Tables and figures ────────────────────────────────────────
 
     def show_table_result(self, label: str, table: Any) -> None:
@@ -495,6 +504,24 @@ class ResultsPresenter:
         """
         return self.show_results_archive(label, arrays or {})
 
+    @staticmethod
+    def _archive_matches_mesh(repository: Any, mesh: Any) -> bool:
+        """Whether *repository*'s embedded geometry is the same model as *mesh*.
+
+        A solve / combination / modal / RS / pushover result is keyed to the
+        session's own mesh, so its archive's node tags coincide with the mesh's;
+        an ``open_results`` step loads a *different* archive whose node tags do
+        not.  When they differ the archive's own geometry must be drawn, not the
+        session mesh's — without replacing the working model.
+        """
+        import numpy as np
+
+        archive_tags = repository.display_geometry().get("node_tag")
+        if archive_tags is None:
+            return True  # no embedded geometry: the session mesh is the only source
+        mesh_tags = [node.node_tag for node in mesh.nodes.values()]
+        return np.array_equal(np.asarray(archive_tags, dtype=int), np.asarray(mesh_tags, dtype=int))
+
     def show_results_archive(
         self, label: str, arrays: dict, parent: Optional[str] = None, *, show: bool = True
     ) -> list:
@@ -502,10 +529,12 @@ class ResultsPresenter:
 
         A :class:`~fea_toolkit.io.results_repository.NpzResultsRepository` over
         the array dict supplies the cases (``static_case_labels``); the mesh the
-        run was prepared from is what the results are keyed to, so it is
-        preferred, and an archive also carries its own display geometry, which is
-        what makes the view drawable with nothing else loaded.  Cases replace by
-        key, so re-running a recipe refreshes its views instead of piling them up.
+        run was prepared from is what the results are keyed to, so it is used
+        whenever the archive's node tags match it, and an archive also carries
+        its own display geometry — which is what makes the view drawable with
+        nothing else loaded, and what a different-model archive (``open_results``)
+        is drawn against rather than the session mesh.  Cases replace by key, so
+        re-running a recipe refreshes its views instead of piling them up.
 
         Args:
             label: The step's result label, recorded as the view's provenance.
@@ -529,7 +558,11 @@ class ResultsPresenter:
             return []
 
         mesh = self._session.store.preprocessed() if self._session.store is not None else None
-        model = mesh if mesh is not None else repository.as_model()
+        model = (
+            mesh
+            if mesh is not None and self._archive_matches_mesh(repository, mesh)
+            else repository.as_model()
+        )
         for case in cases:
             self._session.views.add_results(
                 f"{_RESULTS_KEY_PREFIX}{case}",

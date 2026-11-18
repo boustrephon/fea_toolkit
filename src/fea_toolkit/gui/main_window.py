@@ -2079,7 +2079,11 @@ class MainWindow(QMainWindow):
             processed = model
         self._inspector.set_processed_model(processed)
         if rebuild_tree:
-            self._tree_model.set_model(self._tree_store(model), self._session.views.views())
+            self._tree_model.set_model(
+                self._tree_store(model),
+                self._session.views.views(),
+                self._session.named_selections,
+            )
         if cameras is None:
             self._quad.apply_orientations()
         else:
@@ -2097,13 +2101,18 @@ class MainWindow(QMainWindow):
     def _tree_store(self, fallback: Any) -> Any:
         """The store the Model Tree reads — the session's, or a transient one.
 
-        The tree reads the session's store when one exists, so an HDF5-backed
-        store can serve collections without materialising a graph.  Otherwise a
-        transient in-memory store wraps *fallback* — a standalone results
-        archive's display model.
+        The tree reads the session's store when it supplies the geometry the
+        view currently displays (the raw model or its preprocessed mesh), so an
+        HDF5-backed store can serve collections without materialising a graph.
+        Otherwise a transient in-memory store wraps *fallback* — a standalone
+        results archive's display model — so tree nodes and ``index_for``
+        resolve against the geometry actually on screen.
         """
-        if self._session.store is not None:
-            return self._session.store
+        store = self._session.store
+        if store is not None and (
+            fallback is None or fallback is store.raw() or fallback is store.preprocessed()
+        ):
+            return store
         if fallback is None:
             return None
         from ..io.model_store import InMemoryModelStore
@@ -3979,6 +3988,12 @@ class MainWindow(QMainWindow):
         self._session = session
 
         manifest = bundle["manifest"] or {}
+        self._source_label = (manifest.get("project") or {}).get("source_label", "")
+        self._reset_view_baseline = None
+        # The presenter was constructed against the previous ``Session`` object;
+        # re-point it at the loaded one so recipe results and external archives
+        # register in the displayed project's session.
+        self._results_presenter.set_session(session)
         panel = self._recipe_controller.panel
         if panel is not None:
             panel.set_session(session)
@@ -4035,6 +4050,27 @@ class MainWindow(QMainWindow):
         self._stack.setCurrentWidget(self._viewport_container)
         self.show_model(model)
         self._restore_camera(state.get("camera_position"))
+
+    def _clear_document(self) -> None:
+        """Empty the displayed document (a recipe run ended in ``close``).
+
+        Resets the session to "no document" (via ``_remember_source(None)``,
+        which also clears the source label, the reset baseline, the external
+        combinations and the display toggles), then clears the viewport, the
+        tree and the inspector so the window shows nothing rather than the model
+        the recipe started from.
+        """
+        self._save_view_state()
+        self._remember_source(None, source="")
+        self._backend.clear()
+        self._viewer = None
+        self._model = None
+        self._selection_index = None
+        self._tree_model.set_model(None, [], {})
+        self._inspector.show_object(None)
+        self._set_model_actions_enabled(False)
+        self._set_analysis_actions_enabled()
+        self._set_view_actions_enabled()
 
     def open_path(self, path: str) -> bool:
         """Parse *path* and display it; return False on failure (no dialog).
