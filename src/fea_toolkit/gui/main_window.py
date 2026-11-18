@@ -476,7 +476,7 @@ class MainWindow(QMainWindow):
                 interactor,
                 policy=self._policy,
                 on_pick=self._make_pick_handler(index),
-                node_actors=lambda: self._backend.all_actors("nodes"),
+                node_actors=lambda plotter=interactor: self._backend.actors_in("nodes", plotter),
                 on_marquee=self._make_marquee_handler(index),
             )
             mouse_filter = install_mouse_filter(
@@ -3006,14 +3006,28 @@ class MainWindow(QMainWindow):
         draws (or skips) them from that state, but a re-render can be followed
         by other work — the results overlays, or a re-shown category — so this
         re-applies the button state to whatever actors exist, guaranteeing the
-        viewport cannot show a layer whose button is off.
+        viewport cannot show a layer whose button is off.  All seven categories
+        (the three skeletons plus their load glyphs, and the supports) are
+        applied in one batch, so the pass renders once rather than once per
+        category.
         """
         if self._backend is None:
             return
-        self._on_show_nodes(self._actions["view.show_nodes"].isChecked())
-        self._on_show_frames(self._actions["view.show_frames"].isChecked())
-        self._on_show_shells(self._actions["view.show_shells"].isChecked())
-        self._on_show_restraints(self._actions["view.show_restraints"].isChecked())
+        show_nodes = self._actions["view.show_nodes"].isChecked()
+        show_frames = self._actions["view.show_frames"].isChecked()
+        show_shells = self._actions["view.show_shells"].isChecked()
+        show_restraints = self._actions["view.show_restraints"].isChecked()
+        self._backend.set_categories_visible(
+            {
+                "nodes": show_nodes,
+                "loads_nodes": show_nodes,
+                "frames": show_frames,
+                "loads_frames": show_frames,
+                "shells": show_shells,
+                "loads_shells": show_shells,
+                "restraints": show_restraints,
+            }
+        )
 
     def _on_show_extruded(self, checked: bool) -> None:
         """Toggle extruded-solid frames; a geometry change, so re-render."""

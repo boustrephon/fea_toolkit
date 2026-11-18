@@ -175,27 +175,33 @@ class QtRenderBackend(PyVistaRenderer):
         self._active_viewport = plotter
         for category in _PER_VIEW_CATEGORIES:
             for actor in self._categories.get(category, []):
-                self._restrict_to_active_viewport(actor)
+                self._restrict_to_active_viewport(actor, render=False)
         with contextlib.suppress(Exception):
             self._plotter.render()
         self.render_mirrors()
 
-    def _restrict_to_active_viewport(self, actor: Any) -> None:
+    def _restrict_to_active_viewport(self, actor: Any, *, render: bool = True) -> None:
         """Keep *actor* (a per-view annotation) in the active viewport only.
 
         ``add_mesh`` dropped the actor into the primary plotter; remove it from
         every viewport and add it back to just the active one, so a support
         symbol or load glyph is not re-drawn in a pane it was not shown in —
         where, seen from a different camera, it would read as misplaced.
+
+        ``render=False`` defers the redraw so a bulk relocation (re-homing every
+        annotation when the active viewport changes) renders once at the end
+        rather than once per actor; initial glyph creation keeps the default
+        ``render=True``.  When the active viewport is unset, the actor is kept
+        in the primary plotter rather than dropped.
         """
-        target = self._active_viewport
+        target = self._active_viewport or self._plotter
         pickable = bool(actor.GetPickable())
         for plotter in self._all_viewports():
             with contextlib.suppress(Exception):
                 plotter.remove_actor(actor, render=False)
         if target is not None:
             with contextlib.suppress(Exception):
-                target.add_actor(actor, pickable=pickable)
+                target.add_actor(actor, pickable=pickable, render=render)
 
     def _add_actor(self, actor: Any, category: str) -> None:
         """Track *actor* and give every mirror viewport an independent copy.
@@ -238,14 +244,26 @@ class QtRenderBackend(PyVistaRenderer):
     def all_actors(self, category: str) -> list:
         """Primary actors of *category* plus their per-viewport mirror copies.
 
-        The picker's node list must cover every viewport: a click in a
-        secondary pane hits that pane's *copy* of the node cloud, so the pick
-        list has to name the copies as well as the primary actor.
+        The union of a category's actors across every viewport — the primary
+        actors plus one independent copy per mirror.  To scope a list to a
+        single viewport (a picker's node list), use :meth:`actors_in`.
         """
         actors = list(self._categories.get(category, ()))
         for _plotter, copy in self._mirror_copies.get(category, []):
             actors.append(copy)
         return actors
+
+    def actors_in(self, category: str, plotter: Any) -> list:
+        """Actors of *category* rendered in *plotter* (primary or a mirror).
+
+        The primary plotter owns the category's own actors; each mirror owns its
+        independent copies.  Used to give each viewport's picker only the node
+        cloud that viewport actually renders, so a pick in a secondary pane
+        resolves to an actor local to that pane.
+        """
+        if plotter is self._plotter:
+            return list(self._categories.get(category, ()))
+        return [copy for mirror, copy in self._mirror_copies.get(category, []) if mirror is plotter]
 
     def category_of_actor(self, actor: Any) -> Optional[str]:
         """Resolve *actor* to its render category, including mirror copies."""
@@ -275,13 +293,37 @@ class QtRenderBackend(PyVistaRenderer):
         super().clear_category(category)
         self.render_mirrors()
 
-    def set_category_visible(self, category: str, visible: bool) -> None:
-        """Show/hide a category in the primary and every mirror viewport."""
-        super().set_category_visible(category, visible)
+    def _apply_category_visibility(self, category: str, visible: bool) -> None:
+        """Set *category*'s visibility on the primary and every mirror, no render."""
+        for actor in self._categories.get(category, []):
+            with contextlib.suppress(Exception):
+                actor.SetVisibility(bool(visible))
         for _plotter, copy in self._mirror_copies.get(category, []):
             with contextlib.suppress(Exception):
                 copy.SetVisibility(bool(visible))
+
+    def _render_all(self) -> None:
+        """Render the primary plotter and every mirror, best effort."""
+        if self._plotter is not None:
+            with contextlib.suppress(Exception):
+                self._plotter.render()
         self.render_mirrors()
+
+    def set_category_visible(self, category: str, visible: bool) -> None:
+        """Show/hide a category in the primary and every mirror viewport."""
+        self._apply_category_visibility(category, visible)
+        self._render_all()
+
+    def set_categories_visible(self, visible: dict[str, bool]) -> None:
+        """Apply several categories' visibility, then render once.
+
+        The display-sync pass sets every skeleton category in one go — nodes,
+        frames, shells, restraints and their load glyphs — so a batch of
+        visibility changes costs one render, not one per category.
+        """
+        for category, value in visible.items():
+            self._apply_category_visibility(category, value)
+        self._render_all()
 
     def set_category_opacity(self, category: str, opacity: float) -> None:
         """Set a category's opacity in the primary and every mirror viewport."""
