@@ -1,8 +1,9 @@
 """The ``close`` verb — close the working document (optionally saving it).
 
-Drops the prepared topology, results and named selections, and the current
-document path; the parsed ``model_data`` stays in memory until an ``open`` step
-replaces it.
+Drops the prepared topology, results and named selections, the current
+document path and the parsed ``model_data``, so the run's final document state
+reports "no document" and a caller adopts an empty window rather than the model
+the recipe started from.
 """
 
 from typing import Any
@@ -53,5 +54,10 @@ def run_close(context: StepContext, step: Step) -> list[StepResult]:
     context.named_selections.clear()
     context.document_path = ""
     context.document_dirty = False
+    # The document is closed, so there is no working model left for a later
+    # step (or for the run's final ``DocumentState``) to adopt — a caller that
+    # adopts the document after a ``close`` must show an empty window, not the
+    # model the recipe started from.
+    context.model_data = None
     context.log("close: document closed")
     return [StepResult(kind=SESSION, label="Closed document", payload="")]

@@ -160,8 +160,15 @@ class RecipePanel(QWidget):
         Once bound, :attr:`recipe` returns the session's recipe — the single
         object the window runs and saves — so no write-back is needed.  ``None``
         unbinds and falls back to the panel's own recipe (standalone tests).
+        Binding or unbinding refreshes the rows synchronously and re-settles the
+        selection, so a caller (project loading, the dock builder) can hand the
+        panel a session and immediately show the right steps; the checkbox
+        callbacks then target the current session.
         """
         self._session = session
+        self._selected = 0 if len(self.recipe) else -1
+        self._reload_list()
+        self.changed.emit()
 
     # ── Public API ───────────────────────────────────────────────────
 
@@ -361,15 +368,20 @@ class RecipePanel(QWidget):
 
         Args:
             step_status: The ``(index, verb, status)`` tuples from
-                :class:`~fea_toolkit.workflow.recipe.RecipeRun.step_status`.
+                :class:`~fea_toolkit.workflow.recipe.RecipeRun.step_status`.  An
+                outcome whose ``verb`` no longer matches the step at ``index`` is
+                skipped — the recipe changed while the run was in flight, so a
+                stale outcome must not alter a different step.
         """
         from dataclasses import replace
 
         changed = False
-        for index, _verb, status in step_status:
+        for index, verb, status in step_status:
             if status == "skipped" or not (0 <= index < len(self.recipe)):
                 continue
             step = self.recipe.steps[index]
+            if step.verb != verb:
+                continue
             enabled = False if status == "ok" else step.enabled
             if step.status != status or step.enabled != enabled:
                 self.recipe.steps[index] = replace(step, status=status, enabled=enabled)

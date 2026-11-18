@@ -575,7 +575,14 @@ def run_recipe(
         # the analysis verbs emit (the GUI and the report both rely on this).
         context.log = lambda msg: pipeline_log.info("workflow", msg)
     if on_progress is not None:
-        context.progress = on_progress
+
+        def _progress(index: int, name: str, total: int) -> None:
+            # A progress listener must never change a step's outcome or stop the
+            # solve — swallow its failures, exactly like ``on_step``.
+            with contextlib.suppress(Exception):
+                on_progress(index, name, total)
+
+        context.progress = _progress
 
     # A caller-supplied topology counts as produced geometry, so a recipe may
     # start with an analysis step when run_recipe is handed an already-prepared

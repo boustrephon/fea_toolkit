@@ -56,6 +56,10 @@ class RecipeController:
         self._recipe_named_snapshot: Optional[dict] = None
         #: The store the run was started against, used to reject a stale run.
         self._recipe_starting_store: Any = None
+        #: The recipe serialised when the run started, used to reject a
+        #: completion whose step outcomes no longer line up with the edited
+        #: recipe (a stale outcome must not alter a new recipe's steps).
+        self._recipe_starting_recipe: Optional[dict] = None
         #: What the run's log line should say is happening, set by presets.
         self._pending_label: Optional[str] = None
 
@@ -188,10 +192,6 @@ class RecipeController:
         """
         from ...workflow import Recipe, run_recipe
 
-        store = self._window._session.store
-        if store is None:
-            self._window.log("Open a SAP2000 model before running a recipe.", "warn")
-            return
         if not len(self._window._session.recipe):
             self._window.log(
                 "The recipe has no steps \u2014 use Model \u25b8 Split elements / "
@@ -204,11 +204,22 @@ class RecipeController:
             return
 
         recipe = Recipe.from_dict(self._window._session.recipe.to_dict())
-        model_data = store.raw()
+        store = self._window._session.store
+        if store is None:
+            # A document-independent recipe (``build_model`` / ``open`` /
+            # ``open_results`` / ``close`` first) supplies or clears its own
+            # document, so it may run with no model open; start from nothing.
+            if not self._recipe_can_start_without_model(recipe):
+                self._window.log("Open a SAP2000 model before running a recipe.", "warn")
+                return
+            model_data = None
+            starting_mesh = None
+        else:
+            model_data = store.raw()
+            starting_mesh = store.preprocessed()
         from .settings import load_opensees_setting
 
         opensees_python = load_opensees_setting()
-        starting_mesh = store.preprocessed()
         messages: list = []
         self._recipe_messages = messages
         label = self._pending_label or f"Running recipe ({len(recipe)} steps)"
@@ -247,6 +258,7 @@ class RecipeController:
         named_snapshot = dict(self._window._session.named_selections)
         self._recipe_named_snapshot = named_snapshot
         self._recipe_starting_store = store
+        self._recipe_starting_recipe = recipe.to_dict()
 
         def task(should_cancel):
             def on_step(index, verb, status):
@@ -353,8 +365,16 @@ class RecipeController:
             self._merge_named_selections(run.document)
         self._window._session.last_run = run
         # Persist each step's outcome onto the recipe (a step that ran "ok" is
-        # unchecked), so the run state survives save → reopen.
-        self._recipe_panel.apply_run_outcomes(run.step_status)
+        # unchecked), so the run state survives save → reopen.  Only when the
+        # recipe is still the one the run started from — an edited recipe would
+        # otherwise have its steps altered by a stale completion.
+        if self._recipe_is_current():
+            self._recipe_panel.apply_run_outcomes(run.step_status)
+        else:
+            self._window.log(
+                "Recipe changed while the run was in flight; step outcomes were discarded.",
+                "warn",
+            )
         for message in messages:
             self._window.log(message)
         presenter = self._window._results_presenter
@@ -391,6 +411,40 @@ class RecipeController:
         if run.cancelled:
             self._window.log("The recipe was cancelled.", "warn")
         self._window._set_analysis_actions_enabled()
+
+    @staticmethod
+    def _recipe_can_start_without_model(recipe: Any) -> bool:
+        """Whether *recipe* can run with no model open.
+
+        A recipe whose first enabled step supplies (``open`` / ``build_model``)
+        or clears (``close``) the document — or loads a results archive
+        (``open_results``), which carries its own geometry — needs no existing
+        model.  Any other first step (``mesh``, ``run_static``, …) requires one.
+        """
+        from ...workflow import STEP_SPECS
+
+        for step in recipe.steps:
+            if not getattr(step, "enabled", True):
+                continue
+            spec = STEP_SPECS.get(getattr(step, "verb", ""))
+            if spec is None:
+                return False
+            return spec.resets_document or getattr(step, "verb", "") == "open_results"
+        return False
+
+    def _recipe_is_current(self) -> bool:
+        """Whether the panel's recipe is still the one the run was started from.
+
+        ``apply_run_outcomes`` writes ``(index, verb, status)`` against the
+        *current* recipe, so a completion whose recipe the user edited while the
+        run was in flight must not be applied.  When no run is being tracked
+        (``_recipe_starting_recipe`` is ``None`` — the tests drive the completion
+        handlers directly), there is nothing to guard and the recipe is treated
+        as current.
+        """
+        if self._recipe_starting_recipe is None:
+            return True
+        return self._window._session.recipe.to_dict() == self._recipe_starting_recipe
 
     def _store_is_current(self) -> bool:
         """Whether the recipe run's document is still the one the window shows.
@@ -434,6 +488,11 @@ class RecipeController:
         now looking at rather than the stale one (P35 follow-up) — keeping the
         recipe (``clear_recipe=False``) rather than emptying it.
         """
+        if document.model_data is None:
+            # The run ended in ``close``: adopt an empty document (session and
+            # viewport cleared) rather than passing ``None`` into ``_adopt_model``.
+            self._window._clear_document()
+            return
         self._window._adopt_model(
             document.model_data,
             source=document.document_path,
@@ -492,7 +551,13 @@ class RecipeController:
                             STEP_SPECS.get(verb) is not None and STEP_SPECS[verb].resets_document
                         )
                     ]
-                self._recipe_panel.apply_run_outcomes(step_status)
+                if self._recipe_is_current():
+                    self._recipe_panel.apply_run_outcomes(step_status)
+                else:
+                    self._window.log(
+                        "Recipe changed while the run was in flight; step outcomes were discarded.",
+                        "warn",
+                    )
         self._window.log(f"Recipe failed: {message}", "error")
 
     def _ended(self) -> None:
