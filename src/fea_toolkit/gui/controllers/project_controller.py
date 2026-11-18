@@ -10,7 +10,7 @@ bundle themselves — and the round-trip is unit-testable without a running GUI.
 """
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from ..session import Session
 
@@ -23,7 +23,7 @@ class ProjectController:
     def save(
         self,
         session: Session,
-        path: str | Path,
+        path: Union[str, Path],
         *,
         name: str,
         source_label: str,
@@ -53,7 +53,7 @@ class ProjectController:
         )
         return write_project_zip(Path(path), **bundle)
 
-    def load(self, path: str | Path) -> tuple[Session, dict]:
+    def load(self, path: Union[str, Path]) -> tuple[Session, dict]:
         """Rebuild a session (and its manifest) from the archive at *path*.
 
         Args:
@@ -74,14 +74,14 @@ class ProjectController:
         return Session.from_bundle(bundle), bundle
 
     @staticmethod
-    def is_project(path: str | Path) -> bool:
+    def is_project(path: Union[str, Path]) -> bool:
         """``True`` when *path* is a recognised project archive or directory."""
         from ..project import is_project
 
         return is_project(path)
 
     @staticmethod
-    def member_summary(path: str | Path) -> list[str]:
+    def member_summary(path: Union[str, Path]) -> list[str]:
         """One human-readable line per member of the project archive at *path*."""
         from ..project import project_member_summary
 
