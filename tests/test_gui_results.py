@@ -220,6 +220,23 @@ def test_toggling_the_skeleton_back_on_draws_it_again_after_a_switch(window, tmp
     assert all(a.GetVisibility() == 0 for a in window._backend.actors("frames"))
 
 
+def test_sync_display_toggles_reasserts_the_button_state(window, tmp_path):
+    """``_sync_display_toggles`` hides a category its button says is off."""
+    window.open_results_path(str(_write_archive(tmp_path)))
+    frame = window._backend.actors("frames")[0]
+    assert frame.GetVisibility()
+
+    window._actions["view.show_frames"].setChecked(False)
+    assert not frame.GetVisibility()
+
+    # A re-render that ignored the button re-shows the actor; the sync must
+    # hide it again so the viewport cannot drift from the buttons.
+    frame.SetVisibility(True)
+    assert frame.GetVisibility()
+    window._sync_display_toggles()
+    assert not frame.GetVisibility()
+
+
 def test_the_archive_draws_without_a_model(window, tmp_path):
     """Self-contained: the view renders the geometry the archive carries."""
     window.open_results_path(str(_write_archive(tmp_path)))

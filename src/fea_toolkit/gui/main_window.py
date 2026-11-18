@@ -2096,6 +2096,14 @@ class MainWindow(QMainWindow):
         self._set_analysis_actions_enabled()
         self._set_view_actions_enabled()
         self._reapply_results_overlay(results_intent)
+        # Re-assert the model-skeleton visibility from the buttons as the last
+        # step of a (re-)render.  ``show_model`` already draws the skeleton
+        # according to the toggles, but a view switch also re-draws the results
+        # overlays and any path that re-shows a category afterwards would leave
+        # the viewport showing a beam / shell / node layer its button says is
+        # off.  Forcing the visibility back here keeps the display following
+        # the buttons across a case or mode change.
+        self._sync_display_toggles()
         self.log("Displayed model geometry.")
 
     def _tree_store(self, fallback: Any) -> Any:
@@ -2989,6 +2997,23 @@ class MainWindow(QMainWindow):
         """Show or hide the frame-element overlay (and the loads on those frames)."""
         self._backend.set_category_visible("frames", checked)
         self._backend.set_category_visible("loads_frames", checked)
+
+    def _sync_display_toggles(self) -> None:
+        """Force the model-skeleton categories to match the display buttons.
+
+        The **View ▸ Display** toggles are the single source of truth for
+        whether nodes, beams, shells and supports are shown.  :meth:`show_model`
+        draws (or skips) them from that state, but a re-render can be followed
+        by other work — the results overlays, or a re-shown category — so this
+        re-applies the button state to whatever actors exist, guaranteeing the
+        viewport cannot show a layer whose button is off.
+        """
+        if self._backend is None:
+            return
+        self._on_show_nodes(self._actions["view.show_nodes"].isChecked())
+        self._on_show_frames(self._actions["view.show_frames"].isChecked())
+        self._on_show_shells(self._actions["view.show_shells"].isChecked())
+        self._on_show_restraints(self._actions["view.show_restraints"].isChecked())
 
     def _on_show_extruded(self, checked: bool) -> None:
         """Toggle extruded-solid frames; a geometry change, so re-render."""
