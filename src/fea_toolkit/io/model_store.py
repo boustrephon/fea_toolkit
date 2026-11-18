@@ -187,11 +187,23 @@ class ModelStore(ABC):
         with empty dicts.  Preprocessing never changes those definitions, so
         backfill them from the raw model at open time — the Model Tree then
         shows Load Cases, Load Combinations and Response Spectra without a
-        re-save.
+        re-save.  Mapping-valued collections merge **per definition**: a
+        definition the mesh already has (even one that differs from the raw
+        model's) is left untouched, and only a missing definition is restored.
+        List-valued collections (``stories``) are backfilled only when empty.
         """
         for name in _BACKFILL_COLLECTIONS:
             source = getattr(self.raw(), name, None)
-            if source and not getattr(mesh_model, name, None):
+            if not source:
+                continue
+            target = getattr(mesh_model, name, None)
+            if isinstance(source, dict):
+                if not isinstance(target, dict):
+                    target = {}
+                    setattr(mesh_model, name, target)
+                for key, value in source.items():
+                    target.setdefault(key, value)
+            elif not target:
                 setattr(mesh_model, name, source)
 
 

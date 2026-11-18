@@ -187,7 +187,7 @@ def test_collection_rejects_an_unknown_name():
 
 
 def test_backfill_mesh_load_metadata_copies_only_missing_definitions():
-    """Backfill restores the load definitions a stale mesh is missing."""
+    """Backfill restores missing definitions and leaves existing (differing) ones."""
     from examples.sample_model import make_sample_model
     from fea_toolkit.io.model_store import InMemoryModelStore
     from fea_toolkit.model.sap_data import LoadCase
@@ -195,11 +195,17 @@ def test_backfill_mesh_load_metadata_copies_only_missing_definitions():
 
     sap = make_sample_model()
     sap.load_cases = {
-        "DEAD": LoadCase("DEAD", "LinStatic", "Prog Det", "DEAD", "Prog Det", "Non-Composite")
+        "DEAD": LoadCase("DEAD", "LinStatic", "Prog Det", "DEAD", "Prog Det", "Non-Composite"),
+        "WIND": LoadCase("WIND", "LinStatic", "Prog Det", "WIND", "Prog Det", "Non-Composite"),
     }
     mesh = preprocess_model(sap)
-    mesh.load_cases = {}
+    # The mesh already carries a DEAD definition that differs from the source's
+    # (a different case type) — backfill must not overwrite it — and is missing
+    # WIND, which backfill must restore.
+    existing = LoadCase("DEAD", "Nonlinear", "Prog Det", "DEAD", "Prog Det", "Non-Composite")
+    mesh.load_cases = {"DEAD": existing}
 
     InMemoryModelStore(sap).backfill_mesh_load_metadata(mesh)
 
-    assert set(mesh.load_cases) == {"DEAD"}
+    assert mesh.load_cases["DEAD"] is existing  # unchanged, even though it differs
+    assert set(mesh.load_cases) == {"DEAD", "WIND"}  # missing definition restored
