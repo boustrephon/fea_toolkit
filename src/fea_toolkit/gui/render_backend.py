@@ -83,6 +83,25 @@ def make_select_style(button: str) -> Any:
     return _SelectStyle()
 
 
+#: Decoration categories that render only in the **active** viewport.  These
+#: are the non-pickable annotation glyphs anchored to the model — the selection
+#: cue, support symbols, text labels and applied-load glyphs.  Mirroring them
+#: into the other three projections would re-draw the same symbol at a
+#: different angle, where it reads as misplaced.  The model skeleton (frames /
+#: shells), the pickable node markers and the results overlays (deformed shape,
+#: force flags) stay shared across the quad view.
+_PER_VIEW_CATEGORIES = frozenset(
+    {
+        "highlights",
+        "restraints",
+        "annotations",
+        "loads_nodes",
+        "loads_frames",
+        "loads_shells",
+    }
+)
+
+
 class QtRenderBackend(PyVistaRenderer):
     """Render backend that draws into a ``pyvistaqt.QtInteractor``.
 
@@ -101,15 +120,16 @@ class QtRenderBackend(PyVistaRenderer):
             visibility / opacity change on an actor updates every view at
             once, and the scene is held in memory once.  Used by the quad view
             (iso / front / top / side) so one render feeds four viewports.
-            The selection highlight is the one exception: it stays in the
-            active viewport (see :meth:`set_highlight_viewport`).
+            Annotation glyphs — the selection highlight, support symbols,
+            labels and applied-load glyphs — are the exception: they stay in
+            the active viewport (see :meth:`set_active_viewport`).
     """
 
     def __init__(self, plotter: Any = None, mirrors: Optional[list] = None) -> None:
         super().__init__(plotter=plotter)
         self._mirrors: list = []
-        #: The viewport the selection highlight renders into — the active view.
-        self._highlight_plotter: Any = plotter
+        #: The viewport annotation glyphs render into — the active view.
+        self._active_viewport: Any = plotter
         if mirrors:
             self.set_mirrors(mirrors)
 
@@ -134,32 +154,33 @@ class QtRenderBackend(PyVistaRenderer):
             viewports.append(plotter)
         return viewports
 
-    def set_highlight_viewport(self, plotter: Any) -> None:
-        """Route the selection highlight to *plotter* (the active viewport).
+    def set_active_viewport(self, plotter: Any) -> None:
+        """Route the annotation glyphs to *plotter* (the active viewport).
 
-        Called when the active view changes: existing highlight actors are
-        re-homed to the new viewport, so a selection already on screen follows
-        the pane the user is now working in rather than staying in the pane
-        they picked it from.
+        Called when the active view changes: every existing per-view annotation
+        actor is re-homed to the new viewport, so a symbol already on screen
+        follows the pane the user is now working in rather than staying in the
+        pane they last clicked.
         """
-        if plotter is self._highlight_plotter:
+        if plotter is self._active_viewport:
             return
-        self._highlight_plotter = plotter
-        for actor in self._categories.get("highlights", []):
-            self._restrict_to_highlight_viewport(actor)
+        self._active_viewport = plotter
+        for category in _PER_VIEW_CATEGORIES:
+            for actor in self._categories.get(category, []):
+                self._restrict_to_active_viewport(actor)
         with contextlib.suppress(Exception):
             self._plotter.render()
         self.render_mirrors()
 
-    def _restrict_to_highlight_viewport(self, actor: Any) -> None:
-        """Keep *actor* (a selection highlight) in the active viewport only.
+    def _restrict_to_active_viewport(self, actor: Any) -> None:
+        """Keep *actor* (a per-view annotation) in the active viewport only.
 
         ``add_mesh`` dropped the actor into the primary plotter; remove it from
-        every viewport and add it back to just the active one, so a selected
-        element is not re-drawn as a yellow tube in a pane it was not selected
-        in — where, seen from a different camera, it would look misplaced.
+        every viewport and add it back to just the active one, so a support
+        symbol or load glyph is not re-drawn in a pane it was not shown in —
+        where, seen from a different camera, it would read as misplaced.
         """
-        target = self._highlight_plotter
+        target = self._active_viewport
         pickable = bool(actor.GetPickable())
         for plotter in self._all_viewports():
             with contextlib.suppress(Exception):
@@ -178,14 +199,13 @@ class QtRenderBackend(PyVistaRenderer):
         beneath was stolen by the decoration.  The actor's own flag is passed
         back so ``SetPickable(False)`` survives the mirror.
 
-        The selection highlight is the one exception to mirroring: it belongs to
-        the **active** viewport alone (the pane the user clicked in), so a
-        selected element is not re-drawn as a yellow tube in the other three
-        panes.
+        Annotation glyphs are the one exception to mirroring: they belong to the
+        **active** viewport alone (the pane the user clicked in), so a support
+        symbol or load glyph is not re-drawn in the other three panes.
         """
         super()._add_actor(actor, category)
-        if category == "highlights":
-            self._restrict_to_highlight_viewport(actor)
+        if category in _PER_VIEW_CATEGORIES:
+            self._restrict_to_active_viewport(actor)
             return
         pickable = bool(actor.GetPickable())
         for plotter in self._mirrors:

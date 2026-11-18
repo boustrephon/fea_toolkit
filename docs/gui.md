@@ -286,10 +286,13 @@ central area and the other three are hidden — and **View ▸ Single view**
   orientation through iso / front / top / side.
 * **Camera sync** — the four views share a focal point: orbiting or zooming one
   re-aims the others at the same world point while each keeps its own direction.
-* **The selection highlight is per-view.**  The yellow tube / blue sphere /
-  orange slab is drawn in the **active** viewport only, never mirrored into the
-  other three — a member picked in the front view is highlighted there, not
-  re-drawn over a different projection where it would read as misplaced.
+* **Annotation glyphs are per-view.**  The selection highlight (yellow tube /
+  blue sphere / orange slab), the support symbols, the text labels and the
+  applied-load glyphs are drawn in the **active** viewport only, never mirrored
+  into the other three — a support shown in the front view stays there rather
+  than being re-drawn over a different projection where it would read as
+  misplaced.  The model skeleton, the node markers and the results overlays
+  (deformed shape, force flags) stay shared across the four views.
 * **View ▸ Zoom to fit** / **Reset view** reorient every viewport — **Reset
   view** also puts iso / front / top / side back.
 

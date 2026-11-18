@@ -100,6 +100,46 @@ def test_activating_another_viewport_moves_the_highlight(window):
         assert actor not in list(interactor.renderer.actors.values())
 
 
+def test_restraint_glyphs_stay_in_the_active_viewport(window):
+    """Support symbols render in the active view, not the other three."""
+    restraints = window._backend.actors("restraints")
+    assert restraints, "no support symbols were drawn"
+
+    for actor in restraints:
+        assert actor in list(window._interactor.renderer.actors.values())
+        for interactor in window._quad.interactors[1:]:
+            assert actor not in list(interactor.renderer.actors.values())
+
+
+def test_load_and_label_glyphs_also_stay_in_the_active_viewport(window):
+    """Every per-view annotation category renders in the active view only."""
+    import pyvista as pv
+
+    backend = window._backend
+    for category in ("annotations", "loads_nodes", "loads_frames", "loads_shells"):
+        actor = pv.Actor()
+        backend._add_actor(actor, category)
+        assert actor in list(window._interactor.renderer.actors.values())
+        for interactor in window._quad.interactors[1:]:
+            assert actor not in list(interactor.renderer.actors.values())
+
+
+def test_node_markers_stay_shared_across_the_viewports(window):
+    """Node markers stay mirrored — they are the pickable node layer.
+
+    Unlike the non-pickable annotation glyphs, the node cloud must remain in
+    every viewport so a node can be picked in whichever pane the user clicks
+    (``docs/dev_notes.md`` → *PyVista picking contract*).
+    """
+    node_actors = window._backend.actors("nodes")
+    assert node_actors, "no node markers were drawn"
+
+    for interactor in window._quad.interactors[1:]:
+        renderer_actors = list(interactor.renderer.actors.values())
+        for actor in node_actors:
+            assert actor in renderer_actors
+
+
 def test_camera_action_targets_the_active_viewport(window):
     """View ▸ Camera ▸ Top reorients the active viewport (the primary, initially)."""
     quad = window._quad
