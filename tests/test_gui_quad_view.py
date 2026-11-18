@@ -38,21 +38,27 @@ def test_default_orientations_are_iso_front_top_side(window):
     assert [quad.orientation(i) for i in range(4)] == ["iso", "xz", "xy", "yz"]
 
 
-def test_the_scene_is_mirrored_to_every_viewport(window):
-    """One rendered scene — the same actor is present in all four renderers."""
+def test_the_scene_is_copied_to_every_viewport(window):
+    """One rendered scene — each viewport holds its own copy, no shared actor."""
     frame_actors = window._backend.actors("frames")
     assert frame_actors
-    for interactor in window._quad.interactors[1:]:
-        renderer_actors = list(interactor.renderer.actors.values())
-        assert frame_actors[0] in renderer_actors
+    primary_frame = frame_actors[0]
+    primary_bounds = primary_frame.GetMapper().GetBounds()
+
+    copies = window._backend._mirror_copies.get("frames", [])
+    assert len(copies) == len(window._quad.interactors) - 1
+    for interactor, copy in copies:
+        assert copy is not primary_frame
+        assert copy.GetMapper().GetBounds() == primary_bounds
+        assert copy in list(interactor.renderer.actors.values())
 
 
-def test_mirroring_preserves_a_non_pickable_actor(window):
-    """A non-pickable decoration stays non-pickable after being mirrored.
+def test_copying_preserves_a_non_pickable_actor(window):
+    """A non-pickable decoration stays non-pickable after being copied.
 
     PyVista's ``Plotter.add_actor`` defaults to ``pickable=True``, which
-    silently re-enables picking on the **shared** actor — so the click aimed at
-    the element beneath is stolen by the overlay (``docs/dev_notes.md`` →
+    silently re-enables picking on a copied actor — so the click aimed at the
+    element beneath would be stolen by the overlay (``docs/dev_notes.md`` →
     *PyVista picking contract*).  ``QtRenderBackend._add_actor`` must pass the
     actor's own flag back, or single-click selection resolves to the wrong
     element.
@@ -65,10 +71,10 @@ def test_mirroring_preserves_a_non_pickable_actor(window):
     backend._add_actor(actor, "test_overlay")
 
     assert actor.GetPickable() == 0
-    # The same (still non-pickable) actor is mirrored into every secondary view.
-    for interactor in window._quad.interactors[1:]:
-        renderer_actors = list(interactor.renderer.actors.values())
-        assert actor in renderer_actors
+    copies = backend._mirror_copies.get("test_overlay", [])
+    assert len(copies) == len(window._quad.interactors) - 1
+    for _plotter, copy in copies:
+        assert copy.GetPickable() == 0
 
 
 def test_selection_highlight_stays_in_the_active_viewport(window):
@@ -124,20 +130,40 @@ def test_load_and_label_glyphs_also_stay_in_the_active_viewport(window):
             assert actor not in list(interactor.renderer.actors.values())
 
 
-def test_node_markers_stay_shared_across_the_viewports(window):
-    """Node markers stay mirrored — they are the pickable node layer.
+def test_node_markers_are_copied_to_every_viewport(window):
+    """Node markers reach every viewport as independent copies.
 
-    Unlike the non-pickable annotation glyphs, the node cloud must remain in
-    every viewport so a node can be picked in whichever pane the user clicks
-    (``docs/dev_notes.md`` → *PyVista picking contract*).
+    The node cloud stays pickable in every pane, but each pane owns its own
+    copy of the actor so screen-space point sizing is computed per camera
+    rather than shared across four of them.
     """
     node_actors = window._backend.actors("nodes")
     assert node_actors, "no node markers were drawn"
+    primary_bounds = {tuple(a.GetMapper().GetBounds()) for a in node_actors}
 
-    for interactor in window._quad.interactors[1:]:
-        renderer_actors = list(interactor.renderer.actors.values())
-        for actor in node_actors:
-            assert actor in renderer_actors
+    copies = window._backend._mirror_copies.get("nodes", [])
+    assert len(copies) == len(node_actors) * (len(window._quad.interactors) - 1)
+    for _interactor, copy in copies:
+        assert tuple(copy.GetMapper().GetBounds()) in primary_bounds
+
+
+def test_a_secondary_viewport_pick_resolves_via_the_copy(window):
+    """A pick in a secondary pane resolves its copy to the right category."""
+    frame_actors = window._backend.actors("frames")
+    assert frame_actors
+    assert window._backend.category_of_actor(frame_actors[0]) == "frames"
+
+    copies = window._backend._mirror_copies.get("frames", [])
+    assert copies
+    for _interactor, copy in copies:
+        assert window._backend.category_of_actor(copy) == "frames"
+
+
+def test_all_actors_covers_every_viewport_for_picking(window):
+    """``all_actors`` returns the primary actor plus one copy per mirror."""
+    node_actors = window._backend.actors("nodes")
+    assert node_actors
+    assert len(window._backend.all_actors("nodes")) == len(node_actors) * 4
 
 
 def test_camera_action_targets_the_active_viewport(window):

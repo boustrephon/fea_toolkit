@@ -476,7 +476,7 @@ class MainWindow(QMainWindow):
                 interactor,
                 policy=self._policy,
                 on_pick=self._make_pick_handler(index),
-                node_actors=lambda: self._backend.actors("nodes"),
+                node_actors=lambda: self._backend.all_actors("nodes"),
                 on_marquee=self._make_marquee_handler(index),
             )
             mouse_filter = install_mouse_filter(

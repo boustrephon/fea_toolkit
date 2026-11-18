@@ -85,11 +85,11 @@ def make_select_style(button: str) -> Any:
 
 #: Decoration categories that render only in the **active** viewport.  These
 #: are the non-pickable annotation glyphs anchored to the model — the selection
-#: cue, support symbols, text labels and applied-load glyphs.  Mirroring them
-#: into the other three projections would re-draw the same symbol at a
-#: different angle, where it reads as misplaced.  The model skeleton (frames /
-#: shells), the pickable node markers and the results overlays (deformed shape,
-#: force flags) stay shared across the quad view.
+#: cue, support symbols, text labels and applied-load glyphs.  Copying them into
+#: the other three projections would re-draw the same symbol at a different
+#: angle, where it reads as misplaced.  Every other category is rendered as an
+#: independent **copy** in each viewport, so the four panes never share a
+#: ``vtkActor`` (see :meth:`_add_actor`).
 _PER_VIEW_CATEGORIES = frozenset(
     {
         "highlights",
@@ -115,14 +115,15 @@ class QtRenderBackend(PyVistaRenderer):
         plotter: A live ``pyvistaqt.QtInteractor`` (or any ``pyvista.Plotter``)
             to render into.
         mirrors: Optional list of additional plotters that show the *same*
-            scene.  The backend renders into *plotter* and mirrors every actor
-            into these, sharing the same ``vtkActor`` objects — so a
-            visibility / opacity change on an actor updates every view at
-            once, and the scene is held in memory once.  Used by the quad view
-            (iso / front / top / side) so one render feeds four viewports.
-            Annotation glyphs — the selection highlight, support symbols,
-            labels and applied-load glyphs — are the exception: they stay in
-            the active viewport (see :meth:`set_active_viewport`).
+            scene.  The backend renders into *plotter* and gives each mirror an
+            independent copy of every actor (same geometry, fresh mapper), so
+            the four panes never share a ``vtkActor`` -- screen-space
+            properties such as point size stay correct in every view, and the
+            geometry is still held once.  Used by the quad view (iso / front /
+            top / side) so one render feeds four viewports.  Annotation glyphs
+            -- the selection highlight, support symbols, labels and
+            applied-load glyphs -- are the exception: they stay in the active
+            viewport (see :meth:`set_active_viewport`).
     """
 
     def __init__(self, plotter: Any = None, mirrors: Optional[list] = None) -> None:
@@ -130,6 +131,13 @@ class QtRenderBackend(PyVistaRenderer):
         self._mirrors: list = []
         #: The viewport annotation glyphs render into — the active view.
         self._active_viewport: Any = plotter
+        #: ``category -> [(mirror_plotter, copy_actor), …]`` — the independent
+        #: copies mirrored into the secondary viewports, keyed by category so
+        #: a category clear or visibility change reaches them too.
+        self._mirror_copies: dict[str, list[tuple[Any, Any]]] = {}
+        #: ``id(copy_actor) -> category`` — reverse lookup so a pick in a
+        #: secondary viewport (which returns a copy) resolves to its category.
+        self._copy_category: dict[int, str] = {}
         if mirrors:
             self.set_mirrors(mirrors)
 
@@ -190,18 +198,22 @@ class QtRenderBackend(PyVistaRenderer):
                 target.add_actor(actor, pickable=pickable)
 
     def _add_actor(self, actor: Any, category: str) -> None:
-        """Track *actor* and add it to every mirror viewport too.
+        """Track *actor* and give every mirror viewport an independent copy.
 
         PyVista's ``Plotter.add_actor`` defaults to ``pickable=True`` and calls
-        ``actor.SetPickable(True)`` — so mirroring a *non-pickable* actor (an
-        overlay, an extruded-solid decoration) through it silently re-enabled
-        picking on the **shared** actor, and a click aimed at the element
-        beneath was stolen by the decoration.  The actor's own flag is passed
-        back so ``SetPickable(False)`` survives the mirror.
+        ``actor.SetPickable(True)`` — so copying a *non-pickable* actor (an
+        overlay, an extruded-solid decoration) through it would silently
+        re-enable picking on the copy.  The actor's own flag is passed back so
+        ``SetPickable(False)`` survives the copy.
 
-        Annotation glyphs are the one exception to mirroring: they belong to the
-        **active** viewport alone (the pane the user clicked in), so a support
-        symbol or load glyph is not re-drawn in the other three panes.
+        Each mirror gets its **own** actor (a deep copy with a fresh mapper) so
+        the four panes never share a ``vtkActor``: screen-space properties such
+        as a node marker's point size are computed per renderer, and sharing
+        one actor across four cameras made those render in the wrong place.
+
+        Annotation glyphs are the exception: they belong to the **active**
+        viewport alone (the pane the user clicked in), so a support symbol or
+        load glyph is not re-drawn in the other three panes.
         """
         super()._add_actor(actor, category)
         if category in _PER_VIEW_CATEGORIES:
@@ -210,10 +222,42 @@ class QtRenderBackend(PyVistaRenderer):
         pickable = bool(actor.GetPickable())
         for plotter in self._mirrors:
             with contextlib.suppress(Exception):
-                plotter.add_actor(actor, pickable=pickable)
+                copy = actor.copy(deep=True)
+                plotter.add_actor(copy, pickable=pickable)
+                self._mirror_copies.setdefault(category, []).append((plotter, copy))
+                self._copy_category[id(copy)] = category
+
+    def _drop_mirror_copies(self, entries: list[tuple[str, list[tuple[Any, Any]]]]) -> None:
+        """Remove the given ``(category, [(plotter, copy), …])`` mirror copies."""
+        for _category, pairs in entries:
+            for plotter, copy in pairs:
+                with contextlib.suppress(Exception):
+                    plotter.remove_actor(copy, render=False)
+                self._copy_category.pop(id(copy), None)
+
+    def all_actors(self, category: str) -> list:
+        """Primary actors of *category* plus their per-viewport mirror copies.
+
+        The picker's node list must cover every viewport: a click in a
+        secondary pane hits that pane's *copy* of the node cloud, so the pick
+        list has to name the copies as well as the primary actor.
+        """
+        actors = list(self._categories.get(category, ()))
+        for _plotter, copy in self._mirror_copies.get(category, []):
+            actors.append(copy)
+        return actors
+
+    def category_of_actor(self, actor: Any) -> Optional[str]:
+        """Resolve *actor* to its render category, including mirror copies."""
+        category = self._copy_category.get(id(actor))
+        if category is not None:
+            return category
+        return super().category_of_actor(actor)
 
     def clear(self) -> None:
         """Remove every actor from the primary *and* the mirror viewports."""
+        self._drop_mirror_copies(list(self._mirror_copies.items()))
+        self._mirror_copies = {}
         for actor in self._actors:
             for plotter in self._mirrors:
                 with contextlib.suppress(Exception):
@@ -223,6 +267,7 @@ class QtRenderBackend(PyVistaRenderer):
 
     def clear_category(self, category: str) -> None:
         """Remove one overlay from the primary and every mirror viewport."""
+        self._drop_mirror_copies([(category, self._mirror_copies.pop(category, []))])
         for actor in self._categories.get(category, []):
             for plotter in self._mirrors:
                 with contextlib.suppress(Exception):
@@ -231,13 +276,19 @@ class QtRenderBackend(PyVistaRenderer):
         self.render_mirrors()
 
     def set_category_visible(self, category: str, visible: bool) -> None:
-        """Show/hide a category; the shared actors update every viewport."""
+        """Show/hide a category in the primary and every mirror viewport."""
         super().set_category_visible(category, visible)
+        for _plotter, copy in self._mirror_copies.get(category, []):
+            with contextlib.suppress(Exception):
+                copy.SetVisibility(bool(visible))
         self.render_mirrors()
 
     def set_category_opacity(self, category: str, opacity: float) -> None:
-        """Set a category's opacity; the shared actors update every viewport."""
+        """Set a category's opacity in the primary and every mirror viewport."""
         super().set_category_opacity(category, opacity)
+        for _plotter, copy in self._mirror_copies.get(category, []):
+            with contextlib.suppress(Exception):
+                copy.GetProperty().SetOpacity(float(opacity))
         self.render_mirrors()
 
     def show(self) -> None:

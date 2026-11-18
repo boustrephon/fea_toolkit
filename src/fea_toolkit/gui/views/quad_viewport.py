@@ -5,12 +5,14 @@ grid of four :class:`~fea_toolkit.gui.render_backend.MainThreadQtInteractor`s,
 each locked to a canonical orientation.  The **primary** viewport (top-left,
 isometric) renders the scene through one
 :class:`~fea_toolkit.gui.render_backend.QtRenderBackend`; the other three are
-*mirror* plotters of that backend, so the scene exists once in memory and every
-actor is shared — a visibility / opacity change therefore updates all four
-views at once.  Annotation glyphs — the selection highlight, support symbols,
-labels and applied-load glyphs — are the exception: they render only in the
-**active** viewport (the pane the user last clicked in), so a support symbol or
-yellow selection tube does not bleed into the other three panes.
+*mirror* plotters of that backend, so the scene's geometry exists once in
+memory and each viewport gets its own copy of every actor — the four panes
+never share a ``vtkActor``, which keeps screen-space properties (a node
+marker's point size) correct in every view.  Annotation glyphs — the selection
+highlight, support symbols, labels and applied-load glyphs — are the
+exception: they render only in the **active** viewport (the pane the user last
+clicked in), so a support symbol or yellow selection tube does not bleed into
+the other three panes.
 
 Camera semantics:
 

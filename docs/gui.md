@@ -269,10 +269,12 @@ stays vertical** while you orbit:
 
 The central area is a **2×2 grid of viewports** — **Isometric**, **Front (XZ)**,
 **Top (XY)** and **Side (YZ)** — that all show the **same scene**.  The scene is
-rendered once and mirrored into the other three viewports (the same actors, so a
-show/hide or opacity change updates every view at once).  `gui/views/quad_viewport.py`
-owns the grid; the primary (isometric) viewport is the one the rest of the window
-and its tests refer to as the interactor.
+rendered once and each viewport gets its **own copy** of every actor (the same
+geometry, a fresh mapper per view), so the four panes never share a
+``vtkActor`` — this keeps screen-space properties (a node marker's point size)
+correct in every projection.  `gui/views/quad_viewport.py` owns the grid; the
+primary (isometric) viewport is the one the rest of the window and its tests
+refer to as the interactor.
 
 By default the window opens in **single view** — the active viewport fills the
 central area and the other three are hidden — and **View ▸ Single view**
