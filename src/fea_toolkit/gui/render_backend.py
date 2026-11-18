@@ -101,11 +101,15 @@ class QtRenderBackend(PyVistaRenderer):
             visibility / opacity change on an actor updates every view at
             once, and the scene is held in memory once.  Used by the quad view
             (iso / front / top / side) so one render feeds four viewports.
+            The selection highlight is the one exception: it stays in the
+            active viewport (see :meth:`set_highlight_viewport`).
     """
 
     def __init__(self, plotter: Any = None, mirrors: Optional[list] = None) -> None:
         super().__init__(plotter=plotter)
         self._mirrors: list = []
+        #: The viewport the selection highlight renders into — the active view.
+        self._highlight_plotter: Any = plotter
         if mirrors:
             self.set_mirrors(mirrors)
 
@@ -119,6 +123,51 @@ class QtRenderBackend(PyVistaRenderer):
             with contextlib.suppress(Exception):
                 plotter.render()
 
+    def _all_viewports(self) -> list:
+        """The primary and mirror plotters, deduplicated, primary first."""
+        viewports: list = []
+        seen: set = set()
+        for plotter in [self._plotter, *self._mirrors]:
+            if plotter is None or id(plotter) in seen:
+                continue
+            seen.add(id(plotter))
+            viewports.append(plotter)
+        return viewports
+
+    def set_highlight_viewport(self, plotter: Any) -> None:
+        """Route the selection highlight to *plotter* (the active viewport).
+
+        Called when the active view changes: existing highlight actors are
+        re-homed to the new viewport, so a selection already on screen follows
+        the pane the user is now working in rather than staying in the pane
+        they picked it from.
+        """
+        if plotter is self._highlight_plotter:
+            return
+        self._highlight_plotter = plotter
+        for actor in self._categories.get("highlights", []):
+            self._restrict_to_highlight_viewport(actor)
+        with contextlib.suppress(Exception):
+            self._plotter.render()
+        self.render_mirrors()
+
+    def _restrict_to_highlight_viewport(self, actor: Any) -> None:
+        """Keep *actor* (a selection highlight) in the active viewport only.
+
+        ``add_mesh`` dropped the actor into the primary plotter; remove it from
+        every viewport and add it back to just the active one, so a selected
+        element is not re-drawn as a yellow tube in a pane it was not selected
+        in — where, seen from a different camera, it would look misplaced.
+        """
+        target = self._highlight_plotter
+        pickable = bool(actor.GetPickable())
+        for plotter in self._all_viewports():
+            with contextlib.suppress(Exception):
+                plotter.remove_actor(actor, render=False)
+        if target is not None:
+            with contextlib.suppress(Exception):
+                target.add_actor(actor, pickable=pickable)
+
     def _add_actor(self, actor: Any, category: str) -> None:
         """Track *actor* and add it to every mirror viewport too.
 
@@ -128,8 +177,16 @@ class QtRenderBackend(PyVistaRenderer):
         picking on the **shared** actor, and a click aimed at the element
         beneath was stolen by the decoration.  The actor's own flag is passed
         back so ``SetPickable(False)`` survives the mirror.
+
+        The selection highlight is the one exception to mirroring: it belongs to
+        the **active** viewport alone (the pane the user clicked in), so a
+        selected element is not re-drawn as a yellow tube in the other three
+        panes.
         """
         super()._add_actor(actor, category)
+        if category == "highlights":
+            self._restrict_to_highlight_viewport(actor)
+            return
         pickable = bool(actor.GetPickable())
         for plotter in self._mirrors:
             with contextlib.suppress(Exception):

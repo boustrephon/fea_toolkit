@@ -7,7 +7,9 @@ isometric) renders the scene through one
 :class:`~fea_toolkit.gui.render_backend.QtRenderBackend`; the other three are
 *mirror* plotters of that backend, so the scene exists once in memory and every
 actor is shared — a visibility / opacity change therefore updates all four
-views at once.
+views at once.  The selection highlight is the one exception: it renders only
+in the **active** viewport (the pane the user last clicked in), so a yellow
+selection tube does not bleed into the other three panes.
 
 Camera semantics:
 
@@ -147,13 +149,19 @@ class QuadViewport(QWidget):
         return self._interactors[self._active_index]
 
     def set_active(self, index: int) -> None:
-        """Make viewport *index* the active one and announce it."""
+        """Make viewport *index* the active one and announce it.
+
+        The selection highlight follows the active viewport, so picking in a
+        pane keeps its yellow tube in that pane rather than mirroring it into
+        the other three.
+        """
         if not 0 <= index < len(self._interactors):
             return
         if index == self._active_index:
             return
         self._active_index = index
         self._refresh_active_captions()
+        self._backend.set_highlight_viewport(self._interactors[index])
         self.view_activated.emit(index)
 
     def _refresh_active_captions(self) -> None:

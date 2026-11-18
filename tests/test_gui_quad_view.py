@@ -71,6 +71,35 @@ def test_mirroring_preserves_a_non_pickable_actor(window):
         assert actor in renderer_actors
 
 
+def test_selection_highlight_stays_in_the_active_viewport(window):
+    """A selection highlight renders in the active view, not the other three."""
+    import pyvista as pv
+
+    backend = window._backend
+    actor = pv.Actor()
+    backend._add_actor(actor, "highlights")
+
+    assert actor in list(window._interactor.renderer.actors.values())
+    for interactor in window._quad.interactors[1:]:
+        assert actor not in list(interactor.renderer.actors.values())
+
+
+def test_activating_another_viewport_moves_the_highlight(window):
+    """Switching the active view re-homes an existing selection highlight."""
+    import pyvista as pv
+
+    backend = window._backend
+    actor = pv.Actor()
+    backend._add_actor(actor, "highlights")
+    assert actor in list(window._interactor.renderer.actors.values())
+
+    window._quad.set_active(2)
+    target = window._quad.interactors[2]
+    assert actor in list(target.renderer.actors.values())
+    for interactor in [window._quad.interactors[i] for i in (0, 1, 3)]:
+        assert actor not in list(interactor.renderer.actors.values())
+
+
 def test_camera_action_targets_the_active_viewport(window):
     """View ▸ Camera ▸ Top reorients the active viewport (the primary, initially)."""
     quad = window._quad
