@@ -66,7 +66,9 @@ def test_copying_preserves_a_non_pickable_actor(window):
     import pyvista as pv
 
     backend = window._backend
-    actor = pv.Actor()
+    mesh = pv.PolyData(np.array([[0.0, 0.0, 0.0]]))
+    actor = pv.Actor(mapper=pv.DataSetMapper())
+    actor.mapper.dataset = mesh
     actor.SetPickable(False)
     backend._add_actor(actor, "test_overlay")
 
@@ -159,8 +161,8 @@ def test_a_secondary_viewport_pick_resolves_via_the_copy(window):
         assert window._backend.category_of_actor(copy) == "frames"
 
 
-def test_all_actors_covers_every_viewport_for_picking(window):
-    """``all_actors`` returns the primary actor plus one copy per mirror."""
+def test_all_actors_returns_primary_plus_every_mirror_copy(window):
+    """``all_actors`` is the union of a category's actors across every viewport."""
     node_actors = window._backend.actors("nodes")
     assert node_actors
     assert len(window._backend.all_actors("nodes")) == len(node_actors) * 4

@@ -214,7 +214,9 @@ def test_toggling_the_skeleton_back_on_draws_it_again_after_a_switch(window, tmp
     # The user's workaround: re-enable the button, then switch again.
     window._actions["view.show_frames"].setChecked(True)
     assert window._select_entity_in_tree("views", "DEAD") is True
-    assert window._backend.actors("frames"), "the skeleton was not re-drawn with the button on"
+    frame_actors = window._backend.actors("frames")
+    assert frame_actors, "the skeleton was not re-drawn with the button on"
+    assert all(a.GetVisibility() == 1 for a in frame_actors), "re-drawn frames are not visible"
 
     window._actions["view.show_frames"].setChecked(False)
     assert all(a.GetVisibility() == 0 for a in window._backend.actors("frames"))
@@ -235,6 +237,23 @@ def test_sync_display_toggles_reasserts_the_button_state(window, tmp_path):
     assert frame.GetVisibility()
     window._sync_display_toggles()
     assert not frame.GetVisibility()
+
+
+def test_the_shell_skeleton_follows_its_button(window, tmp_path):
+    """Unchecking Show shells hides the area elements, not just the button.
+
+    Mirrors ``test_sync_display_toggles_reasserts_the_button_state`` for the
+    area-element category, which the frame-only ``_write_archive`` never
+    exercises.
+    """
+    window.open_results_path(str(_write_shell_archive(tmp_path)))
+    shells = window._backend.actors("shells")
+    assert shells, "the archive's shell did not render"
+    assert all(a.GetVisibility() for a in shells)
+
+    window._actions["view.show_shells"].setChecked(False)
+
+    assert not any(a.GetVisibility() for a in window._backend.actors("shells"))
 
 
 def test_the_archive_draws_without_a_model(window, tmp_path):
