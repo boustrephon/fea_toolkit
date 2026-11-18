@@ -45,6 +45,11 @@ class Session:
     named_selections: dict[str, Any] = field(default_factory=dict)
     hidden_elem_ids: set[str] = field(default_factory=set)
     last_run: Any = None
+    #: The serialized figure payload a project bundle carried on load, retained
+    #: so a reopened project can be re-saved without re-running an analysis (a
+    #: reopened session has ``last_run`` unset, so :meth:`to_bundle` cannot
+    #: rebuild the pushover / IDA figures from a run).
+    _retained_figures: dict = field(default_factory=dict, repr=False)
 
     def reset(self) -> None:
         """Clear the document state, leaving the workflow recipe untouched.
@@ -90,10 +95,10 @@ class Session:
         collected = collect_project_results(
             self.last_run.results if self.last_run is not None else []
         )
-        if not collected["static_arrays"]:
-            self._merge_results_view_arrays(collected["static_arrays"])
+        self._merge_results_view_arrays(collected["static_arrays"])
 
-        figures = project_mod.figures_payload(collected["pushover"])
+        figures = dict(self._retained_figures)
+        figures.update(project_mod.figures_payload(collected["pushover"]))
         if collected.get("ida"):
             figures.update(
                 project_mod.ida_figure_payload(collected["ida"], label=self._ida_result_label())
@@ -151,6 +156,7 @@ class Session:
         figures = bundle["figures"] or {}
 
         session = cls()
+        session._retained_figures = dict(figures)
         project = manifest.get("project") or {}
         source_label = project.get("source_label", "")
         if sap is not None:
@@ -188,7 +194,7 @@ class Session:
                 case = entry.get("case")
                 if repository is not None and case in repository.cases():
                     session.views.add_results(
-                        f"results:{case}",
+                        key or f"results:{case}",
                         name,
                         repository,
                         source=source,
@@ -385,16 +391,25 @@ class Session:
 
     @staticmethod
     def _append_static_case_labels(arrays: dict, labels: Any) -> None:
-        """Append *labels* to ``static_case_labels``, creating it when absent."""
+        """Append *labels* to ``static_case_labels``, without duplicating.
+
+        ``labels`` may be ``None`` (nothing to add).  The case-label array is
+        rebuilt as a string array so appending a merged repository's labels and
+        a re-derived modal / RS / pushover label never produces a duplicate.
+        """
         import numpy as np
 
-        existing = arrays.get("static_case_labels")
-        if existing is not None and len(existing):
-            arrays["static_case_labels"] = np.concatenate(
-                [np.asarray(existing), np.asarray(labels)]
-            )
-        else:
-            arrays["static_case_labels"] = labels
+        existing_value = arrays.get("static_case_labels")
+        existing = list(existing_value) if existing_value is not None else []
+        seen = {str(label) for label in existing}
+        if labels is not None:
+            for label in labels:
+                text = str(label)
+                if text not in seen:
+                    existing.append(label)
+                    seen.add(text)
+        if existing:
+            arrays["static_case_labels"] = np.array([str(label) for label in existing], dtype=str)
 
     def _ida_result_label(self) -> str:
         """The label the registered IDA figure used — the run's IDA result label.
@@ -420,10 +435,15 @@ class Session:
         return tables
 
     def _merge_results_view_arrays(self, arrays: dict) -> None:
-        """Merge static arrays from results views (``Analysis ▸ Run``, no recipe).
+        """Merge the registered results views' static arrays into *arrays*.
 
-        Falls back to the registered results repositories when the recipe run
-        produced no ``CASES`` payload, so a project can be saved from either path.
+        A recipe run registers one ``results`` view per case, and re-running
+        replaces by key.  Merging every distinct repository additively — a case
+        block only when absent, and its label appended without duplicating —
+        means a project saved after **separate** runs keeps the cases from every
+        run, not only ``last_run``'s.  Geometry and file-level arrays come from
+        the first repository that supplies them (identical across runs of one
+        model).
         """
         seen = set()
         for view in self.views.views():
@@ -431,4 +451,8 @@ class Session:
                 repository = self.views.results(view.key)
                 if repository is not None and id(repository) not in seen:
                     seen.add(id(repository))
-                    arrays.update(repository.to_arrays())
+                    repo_arrays = repository.to_arrays()
+                    self._append_static_case_labels(arrays, repo_arrays.get("static_case_labels"))
+                    for key, value in repo_arrays.items():
+                        if key != "static_case_labels":
+                            arrays.setdefault(key, value)

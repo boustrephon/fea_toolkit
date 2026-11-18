@@ -457,11 +457,12 @@ def views_payload(views: list) -> list:
     """Build the manifest ``views`` array from the registry's views.
 
     Each entry carries the display fields plus the pointer a loader needs to
-    recover the payload: a ``case`` for results views (recovered from the key
-    suffix), a ``table_key`` for table views and a ``figure_key`` for figure
-    views.  ``order`` preserves registration order so a reload lists them in the
-    order they appeared, and ``parent`` records the view's parent key so nested
-    views rebuild their hierarchy on reload.
+    recover the payload: a ``case`` for results views (read from ``View.case``,
+    so a namespaced key is never parsed back), a ``table_key`` for table views
+    and a ``figure_key`` for figure views.  ``order`` preserves registration
+    order so a reload lists them in the order they appeared, and ``parent``
+    records the view's parent key so nested views rebuild their hierarchy on
+    reload.
 
     Args:
         views: ``ViewRegistry.views()`` — the views in registration order.
@@ -480,7 +481,7 @@ def views_payload(views: list) -> list:
             "parent": view.parent,
         }
         if view.kind == "results":
-            entry["case"] = view.key.split(":", 1)[1] if ":" in view.key else view.key
+            entry["case"] = view.case
         elif view.kind == "table":
             entry["table_key"] = view.key
         elif view.kind == "figure":

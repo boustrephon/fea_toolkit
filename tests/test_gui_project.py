@@ -102,7 +102,13 @@ def _pushover_step() -> StepResult:
 def _views() -> list:
     return [
         View(key="meshed", name="Meshed", kind=GEOMETRY, source="Preprocessor"),
-        View(key="results:DEAD", name="DEAD", kind=RESULTS, source="Recipe: Static · DEAD"),
+        View(
+            key="results:DEAD",
+            name="DEAD",
+            kind=RESULTS,
+            source="Recipe: Static · DEAD",
+            case="DEAD",
+        ),
         View(key="table:modal", name="Modal", kind=TABLE, source="Recipe: Modal"),
         View(
             key="figure:pushover-plusx-uniform",
