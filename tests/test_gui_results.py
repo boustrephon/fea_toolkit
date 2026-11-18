@@ -177,6 +177,49 @@ def test_visibility_toggles_survive_a_case_switch(window, tmp_path):
     assert window._actions["view.show_frames"].isChecked() is False
 
 
+def test_the_hidden_model_stays_hidden_across_a_case_switch(window, tmp_path):
+    """The model skeleton stays off across a view switch, not just the buttons.
+
+    The user's workflow: show a deformed shape, hide nodes / beams / shells to
+    see it, then switch load case (or mode).  The skeleton must not reappear —
+    its visibility follows the buttons, so an unchecked button means no model
+    actors are drawn, and the deformed overlay is the only thing that redraws.
+    """
+    window.open_results_path(str(_write_archive(tmp_path, with_displacement=True)))
+    window._actions["results.deformed"].setChecked(True)
+    window._actions["view.show_nodes"].setChecked(False)
+    window._actions["view.show_frames"].setChecked(False)
+    window._actions["view.show_shells"].setChecked(False)
+
+    assert window._select_entity_in_tree("views", "COMB1") is True
+
+    assert window._backend.actors("nodes") == []
+    assert window._backend.actors("frames") == []
+    assert window._backend.actors("shells") == []
+    assert window._backend.actors("deformed"), "the deformed overlay should survive"
+
+
+def test_toggling_the_skeleton_back_on_draws_it_again_after_a_switch(window, tmp_path):
+    """A hidden skeleton is re-drawn by a view switch once its button is on.
+
+    Turning the button on does not re-render on its own — :meth:`show_model`
+    is what draws the skeleton — so the round-trip is: button on → switch view
+    → skeleton drawn → button off → hidden.
+    """
+    window.open_results_path(str(_write_archive(tmp_path, with_displacement=True)))
+    window._actions["view.show_frames"].setChecked(False)
+    assert window._select_entity_in_tree("views", "COMB1") is True
+    assert window._backend.actors("frames") == []
+
+    # The user's workaround: re-enable the button, then switch again.
+    window._actions["view.show_frames"].setChecked(True)
+    assert window._select_entity_in_tree("views", "DEAD") is True
+    assert window._backend.actors("frames"), "the skeleton was not re-drawn with the button on"
+
+    window._actions["view.show_frames"].setChecked(False)
+    assert all(a.GetVisibility() == 0 for a in window._backend.actors("frames"))
+
+
 def test_the_archive_draws_without_a_model(window, tmp_path):
     """Self-contained: the view renders the geometry the archive carries."""
     window.open_results_path(str(_write_archive(tmp_path)))
