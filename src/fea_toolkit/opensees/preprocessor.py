@@ -520,6 +520,24 @@ class Preprocessor:
         # the untouched graph is not duplicated (see the helper).
         md = _copy_for_preprocessing(model_data)
 
+        # ── Refuse link elements (fail loudly) ────────────────────
+        # Link objects (connections / isolators / dampers) are parsed into
+        # ``link_connectivity`` but not yet emitted as OpenSees elements.
+        # Dropping their nodes would silently leave the structure unsupported
+        # (a singular matrix), so refuse to preprocess rather than return a
+        # model that has quietly lost its link-only nodes — see
+        # ``docs/_pending_work.md`` P49.
+        link_connectivity = getattr(md, "link_connectivity", None) or []
+        if link_connectivity:
+            ids = sorted({link.link_id for link in link_connectivity})
+            preview = ", ".join(ids[:5]) + (" …" if len(ids) > 5 else "")
+            raise NotImplementedError(
+                "The model contains link element(s) "
+                f"({preview}) which fea_toolkit does not yet convert to "
+                "OpenSees.  Refusing to preprocess rather than silently drop "
+                "their nodes (which would leave the structure unsupported)."
+            )
+
         # Apply material defaults (SI → model units) so the MeshModel always
         # carries fully-populated materials.  Idempotent — the parser may
         # already have applied them.  Single source of truth:
@@ -954,6 +972,19 @@ class Preprocessor:
                 orphan_nodes[nid] = md.nodes.pop(nid)
         if orphan_nodes:
             pass  # kept for visualisation
+
+        # A restraint referencing a node that was just removed would otherwise
+        # survive into the MeshModel and, later, the OpenSees domain as a fix
+        # on a non-existent node — the structure would solve as if unsupported.
+        # Filter it out and warn: a support node that is being dropped is always
+        # a modelling error, never a silent no-op.
+        for nid in [nid for nid in md.restraints if nid not in md.nodes]:
+            self._log.warning(
+                "preprocessor",
+                f"restraint on removed node {nid!r} was dropped — the node is "
+                "referenced by no surviving element (see the orphan-node pass)",
+            )
+            del md.restraints[nid]
 
         # ── 9b. Hinge-eligible segmentation (route-agnostic topology) ──
         # One ordered segment list per member, cut at hinge-eligible points

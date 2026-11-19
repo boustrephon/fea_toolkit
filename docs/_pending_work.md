@@ -10,7 +10,7 @@ category: [planning]
 ## Strategy — the next steps
 
 > This log is the single source of truth for pending work; this section is the
-> *sequencing layer* over it (maintained 2026-11-16).  The standalone plan
+> *sequencing layer* over it (maintained 2026-11-20).  The standalone plan
 > documents are historical records — `analysis_builder_migration_plan.md`,
 > `csm_test_model_plan.md`, `deprecation_plan.md` and `linting_fix_plan.md`
 > are ✅ complete and tagged `category: [archive]` (P9's Phase 3 triage resolved 2026-10-11 — baseline renewed,
@@ -55,7 +55,8 @@ batch precedes the physics tranche: ~~**P46** (benchmark library panel, below)~~
 ~~the P35 `SESSION`-result follow-up~~ ✅, ~~per-verb doc/DOI links~~ ✅,
 ~~drag-and-drop NPZ/H5 results~~ ✅, ~~the mission-statement / `llm_guide` GUI
 docs~~ ✅, and ~~the quad-view milestone~~ ✅.  **Then — physics / feature gaps:**
-P6b, P7 (fibre patches, Python-native NLD), then P19 / P23 / P25.
+P6b, P7 (fibre patches, Python-native NLD), then P19 / P23 / P25, and P49
+(link-element support — currently rejected at preprocess, see the entry).
 
 **Opportunistic — Tier 4.**  ~~P9 (linting Phase 3 triage)~~ ✅ **resolved
 2026-10-11** — fresh `npx pyright src/` baseline recorded, no new real bugs,
@@ -1252,6 +1253,31 @@ connect), `gui/views/recipe_panel.py`.
 returns `session.recipe`, and `_sync_recipe_to_session` plus its `changed`
 connect are deleted.  The window rebinds the panel wherever it reassigns the
 session (`_build_recipe_dock`, `open_project_path`).
+
+#### P49 — Link (connection / isolator / damper) element support
+Source: GitHub issue #3 — "Link objects are ignored: link-only nodes are dropped
+while their restraints are kept, producing an unsupported (singular) model".
+
+**What.** Link objects are parsed only as *connectivity*
+(`CONNECTIVITY - LINK` → `SAPModelData.link_connectivity`), not as elements.
+`Preprocessor.run` now **refuses** to preprocess a model that carries any link
+(`NotImplementedError`) rather than silently dropping the link-only nodes, and
+the orphan pass drops any restraint that references a removed node with a
+warning.  What is still missing is the real conversion: parse
+`LINK PROPERTY ASSIGNMENTS` + `LINK PROPERTY DEFINITIONS 01/02 - LINEAR`, carry
+the links through the MeshModel, and emit the matching OpenSees element
+(`twoNodeLink` / `zeroLength`).  Linear links map cleanly (`TransKE` → spring
+stiffness, `Fixed=Yes` → fully restrained DOF); nonlinear isolators (rubber,
+friction-pendulum, gap/hook dampers) need their own material laws and are a
+separate tranche.
+
+**Outline steps.** 1) ✅ **done** — parse `CONNECTIVITY - LINK` into
+`link_connectivity` and register the table; refuse link-bearing models in
+`Preprocessor.run`; filter dangling restraints.  2) add `LinkProperty` +
+`link_assignments` to the data model and parse `LINK PROPERTY ASSIGNMENTS` /
+`LINK PROPERTY DEFINITIONS 01/02`.  3) retain link-endpoint nodes and emit
+`twoNodeLink`/`zeroLength` in `AnalysisBuilder` (update `typings/openseespy`
+stubs).  4) extend the pushover/RS/modal runners to honour link elements.
 
 #### Closed items (README reconciliation, 2026-08-25)
 - **Deeper opstool result-post-processing integration** — closed as **no

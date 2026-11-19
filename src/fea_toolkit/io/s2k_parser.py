@@ -27,6 +27,7 @@ from ..model.sap_data import (
     GravityLoad,
     Group,
     JointLoad,
+    LinkElement,
     LoadCase,
     LoadCombination,
     LoadCombinationEntry,
@@ -46,6 +47,26 @@ from ..model.sap_data import (
 from ._table_text import parse_table_file, read_file_with_encodings
 
 # from ..model.geometry import get_SAP_vecxz
+
+#: Numeric ``Dir`` codes in the frame-load tables are member-local axes
+#: (1/2/3); global directions are spelled ``X``/``Y``/``Z`` (gravity is
+#: ``Gravity``).  The toolkit normalises the numeric forms to its
+#: ``LocalX``/``LocalY``/``LocalZ`` vocabulary at parse time so the load
+#: appliers have one spelling to handle.
+FRAME_LOCAL_DIR_MAP: dict[int, str] = {1: "LocalX", 2: "LocalY", 3: "LocalZ"}
+
+
+def _normalise_frame_dir(direction: Any) -> str:
+    """Normalise a frame-load ``Dir`` value to the toolkit vocabulary.
+
+    Numeric local directions (1/2/3) map to ``LocalX``/``LocalY``/``LocalZ``;
+    every other spelling (``X``, ``Y``, ``Z``, ``Gravity``, ``Projected``,
+    ``LocalY``, …) passes through unchanged as a string.
+    """
+    d = str(direction).strip()
+    if d.isdigit():
+        return FRAME_LOCAL_DIR_MAP.get(int(d), d)
+    return d
 
 
 class SAP2000Parser:
@@ -197,6 +218,7 @@ class SAP2000Parser:
         sections = self._get_sections_with_material_properties()
         frame_elements = self._get_frame_elements()
         area_elements = self._get_area_elements()
+        link_connectivity = self._get_link_connectivity()
         frame_assignments = self._get_frame_assignments()
         area_assignments = self._get_area_assignments()
         groups = self._get_groups()
@@ -267,6 +289,7 @@ class SAP2000Parser:
             sections=sections,
             frame_elements=frame_elements,
             area_elements=area_elements,
+            link_connectivity=link_connectivity,
             frame_assignments=frame_assignments,
             area_assignments=area_assignments,
             groups=groups,
@@ -686,6 +709,28 @@ class SAP2000Parser:
             if joint and cname:
                 assignments[joint] = cname
         return assignments
+
+    def _get_link_connectivity(self) -> list[LinkElement]:
+        """Parse ``CONNECTIVITY - LINK`` into link-endpoint records.
+
+        Only connectivity is captured — link *properties* are not parsed yet
+        (the toolkit cannot emit link elements).  The Preprocessor uses this
+        list to refuse to preprocess a link-bearing model rather than silently
+        drop the link-only nodes.
+        """
+        links: list[LinkElement] = []
+        for rec in self._raw_tables.get("CONNECTIVITY - LINK", []):
+            link_id = str(rec.get("Link", "")).strip()
+            if not link_id:
+                continue
+            links.append(
+                LinkElement(
+                    link_id=link_id,
+                    node_i=str(rec.get("JointI", "")),
+                    node_j=str(rec.get("JointJ", "")),
+                )
+            )
+        return links
 
     def _get_frame_elements(self) -> dict[str, FrameElement]:
         elements = {}
@@ -2070,11 +2115,8 @@ class SAP2000Parser:
         column logs a warning instead of silently reading 0.0.
         """
         loads = []
-        dir_map = {1: "LocalX", 2: "LocalY", 3: "LocalZ"}
         for rec in self._raw_tables.get("FRAME LOADS - POINT", []):
-            direction = str(rec.get("Dir", "Gravity")).strip()
-            if direction.isdigit():
-                direction = dir_map.get(int(direction), direction)
+            direction = _normalise_frame_dir(rec.get("Dir", "Gravity"))
             value = 0.0
             value_key = None
             # Moment rows carry their value in a moment column (``M`` /
@@ -2130,7 +2172,7 @@ class SAP2000Parser:
                 FrameDistributedLoad(
                     pattern=rec.get("LoadPat", ""),
                     frame_id=str(rec.get("Frame", "")),
-                    direction=rec.get("Dir", "Gravity"),
+                    direction=_normalise_frame_dir(rec.get("Dir", "Gravity")),
                     load_type=rec.get("Type", "Force"),
                     shape=shape,
                     val_a=float(val_a),
@@ -2144,10 +2186,8 @@ class SAP2000Parser:
             )
 
         # Open-structure wind loads (local coordinate directions)
-        DIR_MAP = {1: "LocalX", 2: "LocalY", 3: "LocalZ"}
         for rec in self._raw_tables.get("FRAME LOADS - OPEN STRUCTURE WIND", []):
-            dir_num = int(rec.get("Dir", 2))
-            direction = DIR_MAP.get(dir_num, "LocalY")
+            direction = _normalise_frame_dir(rec.get("Dir", 2))
             shape = "Uniform"
             val_a = rec.get("FOverLA", 0.0)
             val_b = rec.get("FOverLB", 0.0)

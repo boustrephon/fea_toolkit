@@ -16,6 +16,8 @@ deepcopy*.
 
 import copy
 
+import pytest
+
 from fea_toolkit.model.geometry import mesh_area_elements
 from fea_toolkit.model.sap_data import (
     AreaElement,
@@ -23,6 +25,7 @@ from fea_toolkit.model.sap_data import (
     FrameElement,
     FrameEndOffset,
     Group,
+    LinkElement,
     LoadCase,
     LoadCombination,
     LoadCombinationEntry,
@@ -383,3 +386,46 @@ def test_point_loads_redistribute_onto_split_children():
     assert child.frame_id == "F1-1"  # rdist 0.75 falls in the second child
     assert abs(child.rdist - 0.5) < 1e-9  # (0.75 - 0.5) / 0.5
     assert child.parent_load_id == authored[0].load_id
+
+
+def test_preprocess_rejects_link_connectivity():
+    """A model carrying any link refuses to preprocess (fail loudly)."""
+    md = SAPModelData(
+        nodes={},
+        restraints={},
+        materials={},
+        sections={},
+        frame_elements={},
+        area_elements={},
+        frame_assignments={},
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
+        link_connectivity=[LinkElement(link_id="ISO_1", node_i="1", node_j="2")],
+    )
+    with pytest.raises(NotImplementedError, match="link element"):
+        Preprocessor({}).run(md)
+
+
+def test_preprocess_drops_a_restraint_on_a_removed_node():
+    """A restraint referencing a node with no element must not survive."""
+    md = SAPModelData(
+        nodes={
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=0.0, y=0.0, z=0.0),
+            "3": Node(node_id="3", node_tag=3, x=0.0, y=0.0, z=10.0),
+        },
+        # Node 1 is restrained but referenced by no frame/area/joint load.
+        restraints={"1": Restraint([1, 1, 1, 1, 1, 1])},
+        materials={},
+        sections={},
+        frame_elements={"F": FrameElement(elem_id="F", elem_tag=10, node_i="2", node_j="3")},
+        area_elements={},
+        frame_assignments={},
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
+    )
+    mesh = Preprocessor({}).run(md)
+    assert "1" in mesh.orphan_nodes
+    assert "1" not in mesh.restraints

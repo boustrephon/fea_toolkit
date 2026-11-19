@@ -126,7 +126,7 @@ registry below.  Three things about how they are matched:
 
 *Generated from `src/fea_toolkit/io/table_registry.py` — do not edit by hand.  Regenerate with `python docs/_generate_parser_tables.py`.*
 
-### Handled (46 exact names)
+### Handled (47 exact names)
 
 - `AREA AUTO MESH ASSIGNMENTS`
 - `AREA EDGE CONSTRAINT ASSIGNMENTS`
@@ -141,6 +141,7 @@ registry below.  Three things about how they are matched:
 - `COMBINATION DEFINITIONS`
 - `CONNECTIVITY - AREA`
 - `CONNECTIVITY - FRAME`
+- `CONNECTIVITY - LINK`
 - `FRAME AUTO MESH ASSIGNMENTS`
 - `FRAME END LENGTH OFFSETS`
 - `FRAME END OFFSET ASSIGNMENTS`

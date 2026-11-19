@@ -206,6 +206,35 @@ TABLE:  "FRAME LOADS - POINT"
     assert md.frame_point_loads[1].value == 250.0
 
 
+def test_parse_frame_distributed_loads_normalise_direction(tmp_path):
+    """Numeric local ``Dir`` in FRAME LOADS - DISTRIBUTED maps to LocalX/Y/Z."""
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "FRAME LOADS - DISTRIBUTED"
+   Frame=1   LoadPat=Live   CoordSys=Local   Type=Force   Dir=2   DistType=RelDist   RelDistA=0   RelDistB=1   AbsDistA=0   AbsDistB=1000   FOverLA=-10   FOverLB=-10
+   Frame=2   LoadPat=Live   CoordSys=Local   Type=Force   Dir=LocalY   DistType=RelDist   RelDistA=0   RelDistB=1   AbsDistA=0   AbsDistB=1000   FOverLA=-10   FOverLB=-10
+"""
+    s2k = tmp_path / "test_dist_dir.s2k"
+    s2k.write_text(content)
+    md = SAP2000Parser(s2k).parse().get_model_data()
+    assert [ld.direction for ld in md.frame_dist_loads] == ["LocalY", "LocalY"]
+
+
+def test_parse_link_connectivity(tmp_path):
+    """CONNECTIVITY - LINK is parsed into SAPModelData.link_connectivity."""
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "CONNECTIVITY - LINK"
+   Link=ISO_1   JointI=1   JointJ=2
+   Link=ISO_2   JointI=3   JointJ=4
+"""
+    s2k = tmp_path / "test_link.s2k"
+    s2k.write_text(content)
+    md = SAP2000Parser(s2k).parse().get_model_data()
+    assert [(link.link_id, link.node_i, link.node_j) for link in md.link_connectivity] == [
+        ("ISO_1", "1", "2"),
+        ("ISO_2", "3", "4"),
+    ]
+
+
 def test_parse_area_section_properties(tmp_path):
     """Parse AREA SECTION PROPERTIES into ShellSection objects."""
     content = """File test.s2k was saved on m/d/yy at h:mm:ss
