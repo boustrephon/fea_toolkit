@@ -7,6 +7,8 @@ Run as::
     python -m fea_toolkit plot_mesh --details  # signatures and docstrings
     python -m fea_toolkit plot_mesh --source   # definition source, still lazy
     python -m fea_toolkit --version            # toolkit version, then exit
+    python -m fea_toolkit run recipe.json --model model.json
+                                               # run a workflow recipe headless
 
 The default listing is deliberately *lazy*: it reads the declared
 ``__all__`` / ``_LAZY_IMPORTS`` metadata and classifies each name by parsing
@@ -14,6 +16,11 @@ source with :mod:`ast`, so it never imports ``openseespy`` or ``pyvista``.
 ``--details`` opts into importing each name for exact signatures and
 docstrings; ``--source`` stays lazy by reading the definition from the module
 source instead.
+
+The ``run`` subcommand is the exception to the lazy rule — and only when it is
+actually invoked: it imports the model loader and the recipe runner inside the
+handler, so the default listing stays cheap while ``run`` can load OpenSees.
+See ``docs/recipe_cli.md``.
 
 Because ``--details`` is the one mode that imports names, it can also hit a
 name whose optional backend is not installed.  That failure is reported
@@ -406,16 +413,97 @@ def _format_details(rows: list[tuple[str, str, str]]) -> str:
     return "\n\n".join(blocks)
 
 
+def _run_recipe(argv: list[str]) -> int:
+    """Run a workflow recipe against a model file (the ``run`` subcommand).
+
+    The heavy imports live here — not at module scope — so the default lazy
+    listing still loads no OpenSeesPy or PyVista.  Returns the process exit
+    code: ``0`` on a clean run, ``1`` on a failed/cancelled run, ``2`` on a
+    usage or input error.
+    """
+    parser = argparse.ArgumentParser(
+        prog="python -m fea_toolkit run",
+        description=(
+            "Load a model file (any load_model_data format — .s2k/.e2k/.f2k/"
+            ".$sf, raw-table or model-codec .json) and run a recipe of workflow "
+            "steps against it, e.g. 'mesh' → 'run_static' → 'save_results' → "
+            "'report'."
+        ),
+    )
+    parser.add_argument("recipe", help="Path to a recipe JSON file.")
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Model file to load as the working document (required).",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print each step's completion status.",
+    )
+    args = parser.parse_args(argv)
+
+    from fea_toolkit.io.model_loader import load_model_data
+    from fea_toolkit.workflow.recipe import Recipe, run_recipe
+    from fea_toolkit.workflow.steps import StepError
+
+    if not args.model:
+        print("error: --model PATH is required to run a recipe", file=sys.stderr)
+        return 2
+
+    try:
+        model_data = load_model_data(args.model)
+    except (OSError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        recipe = Recipe.from_json(args.recipe)
+    except (OSError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    def _log(message: str) -> None:
+        print(message)
+
+    try:
+        run = run_recipe(recipe, model_data, log=_log)
+    except StepError as exc:
+        for index, verb, status in exc.step_status or []:
+            print(f"  step {index} ({verb}): {status}", file=sys.stderr)
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    if args.verbose:
+        for index, verb, status in run.step_status:
+            print(f"[{index}] {verb}: {status}")
+    for index, verb, message in run.failures:
+        print(f"warning: step {index} ({verb}) failed (optional): {message}", file=sys.stderr)
+    return 0 if (not run.failures and not run.cancelled) else 1
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     """Entry point for ``python -m fea_toolkit``.
+
+    The ``run`` subcommand (headless recipe runner) is dispatched before the
+    listing parser; everything else is the lazy public-API listing.
 
     Args:
         argv: Optional argument list (defaults to ``sys.argv[1:]``).
 
     Returns:
-        Process exit code: ``0`` on success; ``2`` when ``name`` matches no
-        public name (argparse usage errors also exit ``2``).
+        Process exit code: ``0`` on success; ``1`` when a recipe step fails or
+        the run is cancelled; ``2`` when ``name`` matches no public name, the
+        recipe/model is unreadable, or a usage error (argparse usage errors
+        also exit ``2``).
     """
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] == "run":
+        return _run_recipe(argv[1:])
+
     parser = argparse.ArgumentParser(
         prog="python -m fea_toolkit",
         description=(

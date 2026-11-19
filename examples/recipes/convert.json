@@ -1,0 +1,6 @@
+{
+  "name": "convert",
+  "steps": [
+    {"verb": "save", "params": {"path": "model.json"}}
+  ]
+}

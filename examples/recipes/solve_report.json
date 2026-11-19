@@ -1,0 +1,9 @@
+{
+  "name": "solve_report",
+  "steps": [
+    {"verb": "mesh", "params": {}},
+    {"verb": "run_static", "params": {}},
+    {"verb": "save_results", "params": {"path": "results.npz"}},
+    {"verb": "report", "params": {}}
+  ]
+}
