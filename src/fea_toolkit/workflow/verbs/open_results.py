@@ -146,17 +146,16 @@ def run_open_results(context: StepContext, step: Step) -> list[StepResult]:
         if payload:
             case_results[case] = payload
 
-    # Opening an archive replaces the session's results wholesale: the cases are
-    # the newly opened archive's (never merged with a previous archive's), and a
-    # prior solve's non-static results (``static_summaries``, modal, RS, …) are
-    # stale.  Only the archive's force convention is retained for the re-save.
-    context.case_results = case_results
-    context.results.clear()
-    context.results["forces_coordinate_system"] = force_convention
-
+    # Rebuild the display geometry and the minimal model *before* touching the
+    # session's state.  ``as_model`` reconstructs the mesh from the archive's
+    # geometry arrays and can fail on a malformed archive; a failed
+    # reconstruction must leave the prior context intact rather than
+    # half-replaced (cases/results already swapped but model/model_data not).
+    model = None
+    model_data = None
     if case_results:
-        context.model = repository.as_model()
-        context.model_data = SAPModelData(
+        model = repository.as_model()
+        model_data = SAPModelData(
             nodes={},
             restraints={},
             materials={},
@@ -173,6 +172,17 @@ def run_open_results(context: StepContext, step: Step) -> list[StepResult]:
                 "T": "C",
             },
         )
+
+    # Opening an archive replaces the session's results wholesale: the cases are
+    # the newly opened archive's (never merged with a previous archive's), and a
+    # prior solve's non-static results (``static_summaries``, modal, RS, …) are
+    # stale.  Only the archive's force convention is retained for the re-save.
+    context.case_results = case_results
+    context.results.clear()
+    context.results["forces_coordinate_system"] = force_convention
+    if model is not None:
+        context.model = model
+        context.model_data = model_data
 
     context.log(f"open_results: loaded {path} ({len(repository.cases())} case(s))")
     return [StepResult(kind=CASES, label="Opened results", payload=repository.to_arrays())]
