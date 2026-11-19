@@ -33,7 +33,9 @@ def run_save_results(context: StepContext, step: Step) -> list[StepResult]:
         context: The run's working state.  ``case_results`` must hold the cases
             a previous ``run_static`` (optionally ``combine``) step solved, or
             an ``open_results`` step loaded; ``model`` and ``model_data`` supply
-            the display geometry and unit labels.
+            the display geometry and unit labels, and
+            ``results["forces_coordinate_system"]`` (set by ``open_results``)
+            optionally carries the archive's end-force convention to write back.
         step: The step to run.  ``params["path"]`` is the output path.
 
     Returns:
@@ -54,10 +56,17 @@ def run_save_results(context: StepContext, step: Step) -> list[StepResult]:
 
     from ...io.npz_writer import results_arrays, save_results_arrays
 
+    # An ``open_results`` step stores the archive's end-force convention under
+    # ``results["forces_coordinate_system"]``; re-write the same convention so
+    # unchanged component arrays are never re-labelled.  ``results_arrays``
+    # only writes "local" archives, so a non-local archive is refused here
+    # rather than silently saved with a mismatched convention.
+    force_convention = context.results.get("forces_coordinate_system") or "local"
     arrays = results_arrays(
         context.model_data,
         static_results=dict(context.case_results),
         mesh_model=context.model,
+        forces_coordinate_system=force_convention,
     )
     written = save_results_arrays(path, arrays)
     context.log(f"save_results: wrote {written}")

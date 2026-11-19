@@ -6,12 +6,15 @@ the GUI's ``File ▸ Open results…`` — registers one view per case through t
 same fan-out a static solve uses.  The archive carries its own display geometry,
 so this verb needs no source model.
 
-Beyond the ``CASES`` result, it rebuilds the per-case payloads a downstream
-``report`` / ``save_results`` step reads (:attr:`StepContext.case_results`), a
-display-only ``MeshModel`` (:attr:`StepContext.model`) and a minimal
-``SAPModelData`` carrying the archive's unit labels
-(:attr:`StepContext.model_data`), so an archive-only recipe can report and
-re-save the archive without the ``.s2k`` it came from.
+Beyond the ``CASES`` result, it **replaces** the per-case payloads a downstream
+``report`` / ``save_results`` step reads (:attr:`StepContext.case_results` — the
+archive's cases, shell resultants included, never merged with a previously
+opened archive's), rebuilds a display-only ``MeshModel``
+(:attr:`StepContext.model`) and a minimal ``SAPModelData`` carrying the
+archive's unit labels (:attr:`StepContext.model_data`), clears the prior solve's
+non-static ``results`` and retains the archive's ``forces_coordinate_system`` —
+so an archive-only recipe can report and re-save the archive without the
+``.s2k`` it came from.
 """
 
 from typing import Any
@@ -19,6 +22,12 @@ from typing import Any
 from ..steps import CASES, ParamSpec, Step, StepContext, StepResult, validate_params
 
 __all__ = ["OPEN_RESULTS_PARAMS", "run_open_results"]
+
+#: Membrane + bending shell resultants, spelled out (not derived from the schema
+#: names) — the same rule as
+#: :data:`fea_toolkit.io.results_repository._SHELL_COMPONENTS`, so the two lists
+#: fail loudly side by side if the schema renames one.
+_SHELL_COMPONENTS = ("fx", "fy", "fxy", "mx", "my", "mxy")
 
 OPEN_RESULTS_PARAMS: dict[str, ParamSpec] = {
     "path": ParamSpec(default="", type=str, help="Path to the results archive (required)."),
@@ -32,17 +41,25 @@ def run_open_results(context: StepContext, step: Step) -> list[StepResult]:
     run's context is updated so a later ``report`` / ``save_results`` step can
     consume the archive without a source model:
 
-    * ``case_results`` — the archive's static cases as ``{case: payload}`` in
-      the same shape a static solve fills (``nodal_displacements`` keyed by node
-      id, ``element_forces`` as the component-keyed ``fx_i`` … ``mz_j`` arrays);
+    * ``case_results`` — **replaced** with the archive's static cases as
+      ``{case: payload}`` in the same shape a static solve fills
+      (``nodal_displacements`` keyed by node id, ``element_forces`` as the
+      component-keyed ``fx_i`` … ``mz_j`` arrays, and ``shell_forces`` as
+      ``{area_id: {fx … mxy, elem_tag, sec_name}}`` when the archive carries
+      shell resultants) — never merged with a previously opened archive's cases;
     * ``model`` — a display-only ``MeshModel`` rebuilt from the archive geometry;
     * ``model_data`` — a minimal ``SAPModelData`` carrying the archive's unit
-      labels, so consumers can read ``md.units``.
+      labels, so consumers can read ``md.units``;
+    * ``results`` — cleared of a prior solve's entries (``static_summaries``,
+      ``modal``, ``rs``, …), then carrying the archive's
+      ``forces_coordinate_system`` so a later ``save_results`` step writes the
+      same convention back.
 
     Args:
         context: The run's working state — its ``case_results``, ``model`` and
             ``model_data`` are replaced with the archive-derived equivalents
-            when the archive holds static cases.
+            when the archive holds static cases, and its ``results`` are cleared
+            (retaining only the archive's ``forces_coordinate_system``).
         step: The step to run.  ``params`` carry ``path``.
 
     Returns:
@@ -71,6 +88,45 @@ def run_open_results(context: StepContext, step: Step) -> list[StepResult]:
 
     repository = NpzResultsRepository(path)
 
+    # The archive's end-force coordinate convention, retained so a later
+    # save_results step re-writes the same convention instead of defaulting to
+    # "local" and mismatching unchanged component arrays (e.g. global forces on
+    # inclined members).  ``results_arrays`` only writes "local" archives, so a
+    # non-local archive is refused at save time rather than silently mislabelled.
+    force_convention = "local" if repository.forces_are_local() else "global"
+
+    def _shell_resultants(arrays: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        """Rebuild ``{area_id: {component, elem_tag, sec_name}}`` from a case's arrays.
+
+        The archive stores the per-case shell block as flat, self-indexed arrays
+        (``shell_sap_id`` / ``shell_*`` / ``shell_elem_tag`` / ``shell_sec_name``);
+        ``save_results`` re-serialises them through
+        ``_collect_case_shell_forces``, which reads the dict-of-dicts shape
+        ``extract_static_shell_forces`` produces.  Rebuilding that shape here —
+        rather than via
+        :meth:`~fea_toolkit.io.results_repository.ResultsRepository.shell_forces`,
+        which drops ``elem_tag`` / ``sec_name`` — keeps the round-trip lossless.
+        """
+        ids = arrays.get("shell_sap_id")
+        if ids is None:
+            return {}
+        resultants: dict[str, dict[str, Any]] = {}
+        for index, area_id in enumerate(np.asarray(ids).ravel()):
+            entry: dict[str, Any] = {}
+            for component in _SHELL_COMPONENTS:
+                values = arrays.get(f"shell_{component}")
+                if values is not None and index < len(values):
+                    entry[component] = float(values[index])
+            tags = arrays.get("shell_elem_tag")
+            if tags is not None and index < len(tags):
+                entry["elem_tag"] = int(tags[index])
+            names = arrays.get("shell_sec_name")
+            if names is not None and index < len(names):
+                entry["sec_name"] = str(names[index])
+            if entry:
+                resultants[str(area_id)] = entry
+        return resultants
+
     # Rebuild the per-case payloads a downstream report / save_results step
     # reads, in the shape a static solve fills, so an archive-only recipe can
     # be reported and re-saved without a source model.
@@ -84,9 +140,19 @@ def run_open_results(context: StepContext, step: Step) -> list[StepResult]:
         forces = {name: arrays[name] for name in STATIC_FORCE_ARRAYS if name in arrays}
         if forces:
             payload["element_forces"] = forces
+        shell_forces = _shell_resultants(arrays)
+        if shell_forces:
+            payload["shell_forces"] = shell_forces
         if payload:
             case_results[case] = payload
-    context.case_results.update(case_results)
+
+    # Opening an archive replaces the session's results wholesale: the cases are
+    # the newly opened archive's (never merged with a previous archive's), and a
+    # prior solve's non-static results (``static_summaries``, modal, RS, …) are
+    # stale.  Only the archive's force convention is retained for the re-save.
+    context.case_results = case_results
+    context.results.clear()
+    context.results["forces_coordinate_system"] = force_convention
 
     if case_results:
         context.model = repository.as_model()

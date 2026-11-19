@@ -292,8 +292,10 @@ class StepContext:
             never mutated.
         model: The prepared topology, once a meshing step has produced one.
         case_results: ``{case name: payload}`` solved so far — the raw results a
-            :mod:`fea_toolkit.workflow.verbs.combine` step reduces.  Keys are
-            merged, never replaced, so several analysis steps can contribute.
+            :mod:`fea_toolkit.workflow.verbs.combine` step reduces.  Analysis
+            steps merge new cases in without replacing existing ones, so several
+            can contribute; an ``open_results`` step replaces the whole mapping
+            with the opened archive's cases.
         results: Non-static analysis results keyed by a stable name — the modal
             result under ``"modal"``, the response-spectrum result under
             ``"rs"``, and so on.  This is the hand-off between an analysis verb

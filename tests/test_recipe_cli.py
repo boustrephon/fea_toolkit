@@ -195,7 +195,7 @@ def test_open_results_feeds_report_and_save_results(tmp_path):
     # Report the archive without a source model.
     logged: list = []
     report = Recipe(steps=[Step("open_results", params={"path": str(solved)}), Step("report")])
-    run = run_recipe(report, make_sample_model(), log=logged.append)
+    run = run_recipe(report, None, log=logged.append)
     assert run.results[-1].kind == "session"
     assert "Case DEAD" in run.results[-1].payload
 
@@ -207,7 +207,7 @@ def test_open_results_feeds_report_and_save_results(tmp_path):
             Step("save_results", params={"path": str(resaved)}),
         ]
     )
-    run_recipe(resave, make_sample_model())
+    run_recipe(resave, None)
     assert resaved.exists()
 
     from fea_toolkit.io.results_repository import NpzResultsRepository
