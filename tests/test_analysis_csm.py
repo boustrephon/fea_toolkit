@@ -1860,6 +1860,52 @@ def test_issue1_local_distributed_load_applies_full_magnitude(tmp_path, directio
         ops.wipe()
 
 
+def test_dispbeamcolumn_partial_span_load_not_dropped(tmp_path):
+    """A non-uniform load on a fiber ``dispBeamColumn`` is not silently dropped.
+
+    ``dispBeamColumn`` rejects partial-span ``-beamUniform`` loads (emitting
+    ``DispBeamColumn3d::addLoad() -- load type unknown`` and applying nothing),
+    so a triangular 0→10 ``LocalY`` load on a 1000 mm cantilever must fall back
+    to statically-equivalent nodal loads.  The base reaction must be the full
+    5000 N resultant (not 0), validated against support reactions.
+    """
+    import openseespy.opensees as ops
+
+    from fea_toolkit.io.s2k_parser import SAP2000Parser
+
+    content = _cantilever_s2k(
+        'TABLE:  "LOAD PATTERN DEFINITIONS"\n'
+        "   LoadPat=Live   DesignType=Live   SelfWtMult=0\n"
+        'TABLE:  "LOAD CASE DEFINITIONS"\n'
+        "   Case=Live   Type=LinStatic   InitialCond=Zero\n"
+        'TABLE:  "CASE - STATIC 1 - LOAD ASSIGNMENTS"\n'
+        "   Case=Live   LoadType=LoadPattern   LoadName=Live   ScaleFactor=1\n"
+        'TABLE:  "FRAME LOADS - DISTRIBUTED"\n'
+        "   Frame=1   LoadPat=Live   CoordSys=Local   Type=Force   Dir=LocalY   DistType=RelDist   RelDistA=0   RelDistB=1   AbsDistA=0   AbsDistB=1000   FOverLA=0   FOverLB=10\n"
+    )
+    s2k = tmp_path / "disp_partial.s2k"
+    s2k.write_text(content)
+    md = SAP2000Parser(s2k).parse().get_model_data()
+    try:
+        mm = preprocess_model(md, {"element_type": "dispBeamColumn"})
+        ab = AnalysisBuilder(
+            mm,
+            {
+                "element_type": "dispBeamColumn",
+                "create_fiber_sections": True,
+                "use_elastic_sections": False,
+            },
+        )
+        ab.build_domain()
+        res = ab.run_static_analysis(pattern_scales={"Live": 1.0})
+        fx = sum(r["fx"] for r in res["reactions"].values())
+        # Triangular 0→10 N/mm over 1000 mm in LocalY (+X for a +Z column) is a
+        # 5000 N total lateral resultant; the fixed base reacts with -5000 N.
+        assert fx == pytest.approx(-5000.0)
+    finally:
+        ops.wipe()
+
+
 def test_issue2_build_once_manual_recipe_does_not_accumulate(tmp_path):
     """GitHub issue #2: manual remove_load_patterns/create_loads stays at 1x."""
     import openseespy.opensees as ops

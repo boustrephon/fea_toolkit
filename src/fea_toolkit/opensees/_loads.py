@@ -10,6 +10,7 @@ import openseespy.opensees as ops
 
 from ..model.geometry import (
     area_load_direction,
+    beam_load_to_nodal_loads,
     beam_moment_to_nodal_moments,
     get_local_axes,
     polygon_area_3d,
@@ -258,6 +259,27 @@ class LoadMixin:
                 result[eid] = self._stack_gravity_axial(eid)
         return result
 
+    def _rejects_partial_span_eleload(self) -> bool:
+        """True when the current domain's beam-columns drop partial-span eleLoad.
+
+        ``dispBeamColumn`` (the default fiber pushover element) silently drops
+        any ``-beamUniform`` load carrying partial-span ``a b`` arguments
+        (``DispBeamColumn3d::addLoad() -- load type unknown``) and applies
+        nothing, so partial-span and non-uniform distributed *force* loads must
+        fall back to statically-equivalent nodal loads.  Every other beam-column
+        element type the builder emits (``elasticBeamColumn``,
+        ``forceBeamColumn``, ``nonlinearBeamColumn``) accepts them.
+
+        The element type is read from the most recent ``build_domain()``
+        overrides (``_last_build_overrides``), because ``build_domain()``
+        restores ``self.config["element_type"]`` after the fiber rebuild.
+        """
+        overrides = getattr(self, "_last_build_overrides", None) or {}
+        elem_type = overrides.get("element_type") or self.config.get(
+            "element_type", "elasticBeamColumn"
+        )
+        return elem_type == "dispBeamColumn"
+
     def _create_loads(
         self,
         pattern_scales: Optional[dict[str, float]] = None,
@@ -468,7 +490,44 @@ class LoadMixin:
                 wx_b = g_local[0] * wb
 
                 is_uniform = abs(wa - wb) < 1e-12
-                if is_uniform and abs(aL) < 1e-12 and abs(bL - 1.0) < 1e-12:
+                is_full_span = abs(aL) < 1e-12 and abs(bL - 1.0) < 1e-12
+
+                # ``dispBeamColumn`` (the default fiber pushover element)
+                # silently drops partial-span ``-beamUniform`` loads, so apply
+                # the statically-equivalent nodal pair instead — preserving the
+                # correct resultant (verified against support reactions).
+                if self._rejects_partial_span_eleload() and not (is_uniform and is_full_span):
+                    _L = math.sqrt((nj.x - ni.x) ** 2 + (nj.y - ni.y) ** 2 + (nj.z - ni.z) ** 2)
+                    nodal = beam_load_to_nodal_loads(
+                        ld,
+                        elem,
+                        {
+                            elem.node_i: (ni.x, ni.y, ni.z),
+                            elem.node_j: (nj.x, nj.y, nj.z),
+                        },
+                        _L,
+                    )
+                    n_i = {k: v * scale for k, v in nodal["i"].items()}
+                    n_j = {k: v * scale for k, v in nodal["j"].items()}
+                    ops.load(
+                        ni.node_tag,
+                        n_i["fx"],
+                        n_i["fy"],
+                        n_i["fz"],
+                        n_i["mx"],
+                        n_i["my"],
+                        n_i["mz"],
+                    )
+                    ops.load(
+                        nj.node_tag,
+                        n_j["fx"],
+                        n_j["fy"],
+                        n_j["fz"],
+                        n_j["mx"],
+                        n_j["my"],
+                        n_j["mz"],
+                    )
+                elif is_uniform and is_full_span:
                     ops.eleLoad("-ele", tag, "-type", "-beamUniform", wy_a, wz_a, wx_a)
                 elif is_uniform:
                     ops.eleLoad("-ele", tag, "-type", "-beamUniform", wy_a, wz_a, wx_a, aL, bL)

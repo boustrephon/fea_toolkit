@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Optional
 import numpy as np
 import openseespy.opensees as ops
 
-from ..model.geometry import beam_moment_to_nodal_moments, get_local_axes
+from ..model.geometry import beam_load_to_nodal_loads, beam_moment_to_nodal_moments, get_local_axes
 from ..model.sap_data import ShellSection
 from ..utils import g_from_units
 from ._runner_static import _normalise_frame_response
@@ -500,7 +500,36 @@ class PushoverRunnerMixin:
                     continue
 
                 is_uniform = abs(wa - wb) < 1e-12
-                if is_uniform and abs(aL) < 1e-12 and abs(bL - 1.0) < 1e-12:
+                is_full_span = abs(aL) < 1e-12 and abs(bL - 1.0) < 1e-12
+
+                # ``dispBeamColumn`` (the default fiber pushover element)
+                # silently drops partial-span ``-beamUniform`` loads, so apply
+                # the statically-equivalent nodal pair instead — preserving the
+                # correct resultant (verified against support reactions).
+                if self._rejects_partial_span_eleload() and not (is_uniform and is_full_span):
+                    _L = math.sqrt(
+                        (nd_j.x - nd_i.x) ** 2 + (nd_j.y - nd_i.y) ** 2 + (nd_j.z - nd_i.z) ** 2
+                    )
+                    nodal = beam_load_to_nodal_loads(
+                        ld,
+                        elem,
+                        {
+                            elem.node_i: (nd_i.x, nd_i.y, nd_i.z),
+                            elem.node_j: (nd_j.x, nd_j.y, nd_j.z),
+                        },
+                        _L,
+                    )
+                    for nd, comp in ((nd_i, nodal["i"]), (nd_j, nodal["j"])):
+                        ops.load(
+                            nd.node_tag,
+                            comp["fx"],
+                            comp["fy"],
+                            comp["fz"],
+                            comp["mx"],
+                            comp["my"],
+                            comp["mz"],
+                        )
+                elif is_uniform and is_full_span:
                     ops.eleLoad("-ele", ops_tag, "-type", "-beamUniform", wy_a, wz_a, wx_a)
                 elif is_uniform:
                     ops.eleLoad("-ele", ops_tag, "-type", "-beamUniform", wy_a, wz_a, wx_a, aL, bL)

@@ -581,10 +581,15 @@ def beam_load_to_nodal_loads(
 ) -> dict[str, dict[str, float]]:
     """Convert a distributed beam load into statically equivalent nodal loads.
 
-    This is a fallback for geometric transformations that do **not** support
-    ``eleLoad`` (notably ``Corotational`` in 3D, per the OpenSees documentation).
-    The load is projected onto the element's local axes and the fixed-end forces
-    are computed assuming a prismatic beam.
+    Used as a fallback where ``eleLoad`` cannot be applied directly: geometric
+    transformations that do **not** support ``eleLoad`` (notably
+    ``Corotational`` in 3D, per the OpenSees documentation) and
+    ``dispBeamColumn`` elements, which silently drop partial-span
+    ``-beamUniform`` loads.  The load is projected onto the element's local
+    axes — global directions (``Gravity``/``X``/``Y``/``Z``) through the
+    local-axis transform, and the parser-normalised local spellings
+    (``LocalX``/``LocalY``/``LocalZ``) as-is — and the fixed-end forces are
+    computed assuming a prismatic beam.
 
     Args:
         load: The distributed load definition.
@@ -607,7 +612,10 @@ def beam_load_to_nodal_loads(
     vec_y = np.cross(vec_z, vec_x_norm)
     vec_y = vec_y / np.linalg.norm(vec_y)
 
-    # Determine global direction of the load (SAP2000 convention)
+    # Determine the load direction in the element's local frame (SAP2000
+    # convention).  Global directions (``X``/``Y``/``Z``/``Gravity``) are
+    # projected onto the local axes; the parser-normalised local spellings
+    # (``LocalX``/``LocalY``/``LocalZ``) are already local 1/2/3 components.
     if load.direction == "Gravity":
         global_dir = np.array([0.0, 0.0, -1.0])
     elif load.direction == "X":
@@ -619,13 +627,28 @@ def beam_load_to_nodal_loads(
     else:
         global_dir = np.array([0.0, 0.0, -1.0])
 
+    if load.direction == "LocalX":
+        local_dir = np.array([1.0, 0.0, 0.0])
+    elif load.direction == "LocalY":
+        local_dir = np.array([0.0, 1.0, 0.0])
+    elif load.direction == "LocalZ":
+        local_dir = np.array([0.0, 0.0, 1.0])
+    else:
+        local_dir = np.array(
+            [
+                float(np.dot(global_dir, vec_x)),
+                float(np.dot(global_dir, vec_y)),
+                float(np.dot(global_dir, vec_z)),
+            ]
+        )
+
     # Project intensities onto local axes
-    wx_a = load.val_a * float(np.dot(global_dir, vec_x))
-    wy_a = load.val_a * float(np.dot(global_dir, vec_y))
-    wz_a = load.val_a * float(np.dot(global_dir, vec_z))
-    wx_b = load.val_b * float(np.dot(global_dir, vec_x))
-    wy_b = load.val_b * float(np.dot(global_dir, vec_y))
-    wz_b = load.val_b * float(np.dot(global_dir, vec_z))
+    wx_a = load.val_a * float(local_dir[0])
+    wy_a = load.val_a * float(local_dir[1])
+    wz_a = load.val_a * float(local_dir[2])
+    wx_b = load.val_b * float(local_dir[0])
+    wy_b = load.val_b * float(local_dir[1])
+    wz_b = load.val_b * float(local_dir[2])
 
     # Partial-span parameters (clamped to [0, 1])
     aL = max(0.0, min(1.0, load.rdist_a))

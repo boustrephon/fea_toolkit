@@ -191,6 +191,40 @@ class TestBeamLoadToNodalLoads:
         # Asymmetric load → unequal end forces
         assert abs(result["i"]["fz"]) != abs(result["j"]["fz"])
 
+    def test_local_y_direction(self):
+        """LocalY load on a horizontal X element resolves to the local 2-axis.
+
+        For a beam along +X the local 2-axis is +Z (up), so a positive
+        ``LocalY`` load is upward — never the gravity fallback (downward).
+        """
+        load = FrameDistributedLoad(
+            pattern="DEAD",
+            frame_id="1",
+            direction="LocalY",
+            load_type="Force",
+            shape="Uniform",
+            val_a=10000.0,
+            val_b=10000.0,
+            rdist_a=0.0,
+            rdist_b=1.0,
+            dist_a=0.0,
+            dist_b=5.0,
+        )
+        elem = FrameElement(
+            elem_id="1",
+            elem_tag=1,
+            node_i="1",
+            node_j="2",
+            angle=0.0,
+        )
+        node_coords = {"1": (0.0, 0.0, 0.0), "2": (5.0, 0.0, 0.0)}
+        result = beam_load_to_nodal_loads(load, elem, node_coords, length=5.0)
+
+        total_fz = result["i"]["fz"] + result["j"]["fz"]
+        assert abs(total_fz - 50000.0) < 1.0  # positive = upward (+Z)
+        assert abs(result["i"]["fx"]) < 1.0
+        assert abs(result["i"]["fy"]) < 1.0
+
 
 class TestBeamMomentToNodalMoments:
     """Tests for beam_moment_to_nodal_moments()."""
