@@ -236,6 +236,33 @@ TABLE:  "CONNECTIVITY - LINK"
     ]
 
 
+def test_parse_link_connectivity_grounded(tmp_path):
+    """A single-joint (grounded) link with no ``JointJ`` is retained.
+
+    SAP2000 omits the ``JointJ`` column for a link connected to ground, so
+    the link must survive parsing (with ``node_j=""``) and still reach the
+    Preprocessor's NotImplementedError rather than being silently dropped
+    (which would leave the link-only node unsupported).
+    """
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "CONNECTIVITY - LINK"
+   Link=GAP1   JointI=1
+   Link=ISO_2   JointI=3   JointJ=4
+"""
+    s2k = tmp_path / "test_link_grounded.s2k"
+    s2k.write_text(content)
+    md = SAP2000Parser(s2k).parse().get_model_data()
+    assert [(link.link_id, link.node_i, link.node_j) for link in md.link_connectivity] == [
+        ("GAP1", "1", ""),
+        ("ISO_2", "3", "4"),
+    ]
+
+    from fea_toolkit.opensees.preprocessor import Preprocessor
+
+    with pytest.raises(NotImplementedError):
+        Preprocessor({}).run(md)
+
+
 def test_parse_area_section_properties(tmp_path):
     """Parse AREA SECTION PROPERTIES into ShellSection objects."""
     content = """File test.s2k was saved on m/d/yy at h:mm:ss
@@ -1320,6 +1347,34 @@ def test_rigid_diaphragms_false_disables_detected_levels(tmp_path):
         assert n == 0  # explicit opt-out — even though levels were detected
     finally:
         ops.wipe()
+
+
+def test_restrained_diaphragm_only_node_survives_orphan_filter(tmp_path):
+    """A restrained node referenced only by a DIAPHRAGM constraint is kept.
+
+    Joint 3 is a diaphragm-only node (no frame element references it) but is
+    connected to the active column-top joints 1/2 through the rigidDiaphragm
+    MPC.  Restraining it and then dropping it as an orphan would silently
+    discard its support, so the orphan filter must retain the node and its
+    restraint.
+    """
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+
+    data = _diaphragm_constraint_s2k_data()
+    data["JOINT RESTRAINT ASSIGNMENTS"] = [
+        {"Joint": 3, "U1": True, "U2": True, "U3": True, "R1": True, "R2": True, "R3": True},
+    ]
+    json_path = tmp_path / "diaphragm_restrained.json"
+    json_path.write_text(json.dumps(data))
+
+    md = SAP2000Parser.from_json(json_path).get_model_data()
+    mm = preprocess_model(md, {"split_elements": False, "verbose": False})
+
+    # Joint 3 is diaphragm-only but restrained — it must survive and keep its
+    # support rather than being discarded by the orphan-node pass.
+    assert "3" in mm.nodes
+    assert "3" in mm.restraints
+    assert mm.restraints["3"].dofs[2] == 1  # vertical DOF retained
 
 
 # ============================================================================
