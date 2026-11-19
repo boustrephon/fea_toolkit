@@ -48,6 +48,7 @@ from ..model.sap_data import (
     LayeredShellSection,
     NDMaterial,
     Node,
+    Restraint,
     SAPModelData,
     ShellFiberLayer,
     ShellSection,
@@ -1716,6 +1717,26 @@ class Preprocessor:
         # Remove duplicate nodes
         for dup in remap:
             md.nodes.pop(dup, None)
+
+        # A merged-away mesh node may carry a propagated restraint (see
+        # ``model.geometry_mesh._propagate_edge_restraints``) that its surviving
+        # protected node does not.  Transfer it so a supported mesh node
+        # coincident with an unrestrained frame/area node does not silently lose
+        # its support (the orphan-node restraint filter below would otherwise
+        # drop the dangling restraint with a warning and the structure would
+        # solve as if unsupported).
+        for dup, survivor in remap.items():
+            dup_restraint = md.restraints.pop(dup, None)
+            if dup_restraint is None:
+                continue
+            sur_restraint = md.restraints.get(survivor)
+            if sur_restraint is None:
+                md.restraints[survivor] = Restraint(dofs=list(dup_restraint.dofs))
+                continue
+            # Coincident nodes are the same physical point: fix any DOF either
+            # side fixes, so no merged-away support is lost.
+            merged = [a | b for a, b in zip(sur_restraint.dofs, dup_restraint.dofs)]
+            md.restraints[survivor] = Restraint(dofs=merged)
 
     def _subdivide_shells_in_model_data(self, md):
         """N×N subdivision of shell elements at the model-data level."""
