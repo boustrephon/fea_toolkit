@@ -161,3 +161,28 @@ def test_replay_rejects_bad_history_shape():
     materials = {1: ("Steel01", (400e3, 2.0e8, 0.01))}
     with pytest.raises(ValueError, match="n_step, 4"):
         replay_fiber_section(patches, materials, [[0.0, 0.0, 0.0]], J=1.0)
+
+
+def test_replay_with_nondefault_section_tag():
+    """A non-default ``sec_tag`` must not be misused as the transfTag.
+
+    Regression: ``replay_fiber_section`` used to pass ``sec_tag`` as the
+    ``dispBeamColumn`` transfTag (the 4th positional argument), which only
+    worked because the default ``sec_tag=1`` coincided with the hardcoded
+    ``geomTransf`` tag.  A non-default section tag must still build a valid
+    element (transfTag stays ``1``) and reproduce the direct recording.
+    """
+    import openseespy.opensees as ops
+
+    _version = tuple(int(p) for p in str(ops.pyversion()).split(".")[:2])
+    if _version < (3, 8):
+        pytest.skip("bit-exact fiber replay requires OpenSeesPy >= 3.8.0.0")
+
+    patches, materials, J, deform_history, direct_stress, direct_strain = _build_and_push()
+
+    # sec_tag=7 is deliberately != the geomTransf tag (1).
+    result = replay_fiber_section(patches, materials, deform_history, J, sec_tag=7)
+
+    assert result["n_fiber"] == direct_stress.shape[1]
+    np.testing.assert_allclose(result["strain"], direct_strain, rtol=1e-9, atol=1e-12)
+    np.testing.assert_allclose(result["stress"], direct_stress, rtol=1e-8, atol=1e-2)

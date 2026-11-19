@@ -111,7 +111,9 @@ def replay_fiber_section(
         # [ε, κ_z, κ_y, φ] = [ux, rz, ry, rx] with unit length.
         ops.geomTransf("Linear", 1, 0, 0, 1)
         ops.beamIntegration("Lobatto", 10001, sec_tag, 1)  # single IP (midspan)
-        ops.element("dispBeamColumn", elem_tag, 1, 2, sec_tag, 10001)
+        # dispBeamColumn is (tag, iNode, jNode, transfTag, integrationTag): the
+        # transfTag is the geomTransf above (1), not the section tag.
+        ops.element("dispBeamColumn", elem_tag, 1, 2, 1, 10001)
 
         # Reference zero load so the static analysis has a load vector.
         ops.timeSeries("Linear", 1)
