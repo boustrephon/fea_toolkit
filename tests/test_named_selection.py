@@ -336,11 +336,11 @@ def test_save_does_not_reset_the_document(tmp_path):
     assert run.document.document_path == path
 
 
-def test_close_resets_the_document_but_keeps_the_model():
+def test_close_resets_the_document_and_clears_the_model():
     from fea_toolkit.workflow import Recipe, Step, run_recipe
 
     model = make_sample_model()
     run = run_recipe(Recipe(steps=[Step("close")]), model)
     assert run.document_reset is True
     assert run.document.document_path == ""
-    assert run.document.model_data is model
+    assert run.document.model_data is None
