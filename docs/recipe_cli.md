@@ -68,13 +68,16 @@ while writing `results.npz` beside it.
 ## The CLI
 
 ```
-python -m fea_toolkit run RECIPE [--model PATH] [--verbose]
+python -m fea_toolkit run RECIPE [--model PATH] [--output PATH] [--verbose]
 ```
 
 * `RECIPE` — a recipe JSON file (see [Authoring a recipe](#authoring-a-recipe)).
 * `--model PATH` — the model file to load as the working document.  Any
   `load_model_data` format: `.s2k` / `.e2k` / `.f2k` / `.$sf`, a raw-table
   `.json`, or a model-codec `.json`.
+* `--output PATH` — override the output path of the recipe's `save_results`
+  step(s) — the results archive (`.npz`) to write.  Lets a batch loop give each
+  model a distinct archive instead of overwriting one fixed path.
 * `--verbose` — also print each step's completion status.
 
 Exit codes are honest, so a shell loop can batch over many models:
@@ -87,7 +90,8 @@ Exit codes are honest, so a shell loop can batch over many models:
 
 ```bash
 for m in models/*.e2k; do
-  python -m fea_toolkit run solve.json --model "$m" || echo "FAILED: $m"
+  python -m fea_toolkit run solve.json --model "$m" \
+    --output "results_$(basename "$m" .e2k).npz" || echo "FAILED: $m"
 done
 ```
 
@@ -151,18 +155,22 @@ defines; pass `cases` to restrict or name them explicitly:
 {"verb": "run_static", "params": {"cases": {"DEAD": {"DEAD": 1.0}}}}
 ```
 
-### Meshing: split frames by default, mesh areas on request
+### Meshing: split frames and mesh areas by default
 
-The `mesh` verb's defaults split frames at their joints (required for analysis)
-but leave the heavier options off unless asked:
+The `mesh` verb's defaults split frames at their joints and mesh area elements
+into shells; only the heavier options (`split_slabs_at_walls`,
+`panel_zone_model`, `detect_stories`) stay off unless asked:
 
 ```json
 {"verb": "mesh", "params": {"create_shells": false, "split_slabs_at_walls": true}}
 ```
 
-`create_shells` meshes area elements into shells (on by default — a no-op for a
-frame-only model); `split_slabs_at_walls`, `panel_zone_model` and the rest are
-off unless set.  See `workflow/verbs/mesh.py` for the full parameter surface.
+That example is **not** the default — it explicitly disables shell meshing
+(`create_shells: false`, the sensible choice for a frame-only model with no
+areas) while enabling slab splitting at wall lines.  `create_shells` itself is
+**on by default**: meshing area elements into shells is a no-op for a
+frame-only model; `split_slabs_at_walls`, `panel_zone_model` and `detect_stories`
+are off unless set.  See `workflow/verbs/mesh.py` for the full parameter surface.
 
 ## Why not a new "solver" command?
 
