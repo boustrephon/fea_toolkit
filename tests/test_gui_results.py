@@ -256,6 +256,38 @@ def test_the_shell_skeleton_follows_its_button(window, tmp_path):
     assert not any(a.GetVisibility() for a in window._backend.actors("shells"))
 
 
+def test_sync_display_toggles_hides_shells_in_every_pane(window, tmp_path):
+    """``_sync_display_toggles`` re-hides a shell its button says is off, in both
+    the primary and the Front pane — not just the direct toggle handler."""
+    window.open_results_path(str(_write_shell_archive(tmp_path)))
+    shells = window._backend.actors("shells")
+    assert shells, "the archive's shell did not render"
+
+    front = window._quad.interactors[1]
+    front_copies = [
+        copy
+        for plotter, copy in window._backend._mirror_copies.get("shells", [])
+        if plotter is front
+    ]
+    assert front_copies, "the shell was not mirrored into the Front pane"
+
+    window._actions["view.show_shells"].setChecked(False)
+    assert not any(a.GetVisibility() for a in shells)
+    assert not any(a.GetVisibility() for a in front_copies)
+
+    # Simulate a re-render that ignored the button: re-show the actors, then
+    # let the sync pass re-assert the off state in every pane.
+    for actor in [*shells, *front_copies]:
+        actor.SetVisibility(True)
+    assert all(a.GetVisibility() for a in shells)
+    assert all(a.GetVisibility() for a in front_copies)
+
+    window._sync_display_toggles()
+
+    assert not any(a.GetVisibility() for a in window._backend.actors("shells"))
+    assert not any(a.GetVisibility() for a in front_copies)
+
+
 def test_the_archive_draws_without_a_model(window, tmp_path):
     """Self-contained: the view renders the geometry the archive carries."""
     window.open_results_path(str(_write_archive(tmp_path)))

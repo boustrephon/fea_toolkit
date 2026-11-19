@@ -151,6 +151,18 @@ _COLOURABLE_GROUPS = frozenset(
     {"materials", "sections", "stories", "frame_elements", "area_elements"}
 )
 
+#: Skeleton render category -> its load-glyph category.  The load glyphs drawn
+#: on a skeleton (node loads on the node markers, frame loads on the frame
+#: elements, shell loads on the area elements) follow its visibility, so the
+#: two are toggled together.  Shared by the direct toggle handlers and
+#: :meth:`MainWindow._sync_display_toggles` so the association lives in one
+#: place.
+_SKELETON_LOAD_GLYPHS = {
+    "nodes": "loads_nodes",
+    "frames": "loads_frames",
+    "shells": "loads_shells",
+}
+
 
 def _menu_header(text: str) -> QAction:
     """A disabled menu action used as a section heading in a menu."""
@@ -2983,20 +2995,32 @@ class MainWindow(QMainWindow):
         action.setChecked(checked)
         action.blockSignals(False)
 
+    def _apply_skeleton_visibility(self, category: str, visible: bool) -> None:
+        """Apply *visible* to a skeleton category and its load glyphs in one batch.
+
+        Args:
+            category: The skeleton render category (``"nodes"``, ``"frames"`` or
+                ``"shells"``).
+            visible: The visibility to apply to both the skeleton and its load
+                glyphs.
+        """
+        glyph = _SKELETON_LOAD_GLYPHS.get(category)
+        targets = {category: visible}
+        if glyph is not None:
+            targets[glyph] = visible
+        self._backend.set_categories_visible(targets)
+
     def _on_show_nodes(self, checked: bool) -> None:
         """Show or hide the node-marker overlay (and the loads on those nodes)."""
-        self._backend.set_category_visible("nodes", checked)
-        self._backend.set_category_visible("loads_nodes", checked)
+        self._apply_skeleton_visibility("nodes", checked)
 
     def _on_show_shells(self, checked: bool) -> None:
         """Show or hide the area-element overlay (and the loads on those areas)."""
-        self._backend.set_category_visible("shells", checked)
-        self._backend.set_category_visible("loads_shells", checked)
+        self._apply_skeleton_visibility("shells", checked)
 
     def _on_show_frames(self, checked: bool) -> None:
         """Show or hide the frame-element overlay (and the loads on those frames)."""
-        self._backend.set_category_visible("frames", checked)
-        self._backend.set_category_visible("loads_frames", checked)
+        self._apply_skeleton_visibility("frames", checked)
 
     def _sync_display_toggles(self) -> None:
         """Force the model-skeleton categories to match the display buttons.
@@ -3017,17 +3041,15 @@ class MainWindow(QMainWindow):
         show_frames = self._actions["view.show_frames"].isChecked()
         show_shells = self._actions["view.show_shells"].isChecked()
         show_restraints = self._actions["view.show_restraints"].isChecked()
-        self._backend.set_categories_visible(
-            {
-                "nodes": show_nodes,
-                "loads_nodes": show_nodes,
-                "frames": show_frames,
-                "loads_frames": show_frames,
-                "shells": show_shells,
-                "loads_shells": show_shells,
-                "restraints": show_restraints,
-            }
-        )
+        visible: dict[str, bool] = {
+            "nodes": show_nodes,
+            "frames": show_frames,
+            "shells": show_shells,
+            "restraints": show_restraints,
+        }
+        for skeleton, glyph in _SKELETON_LOAD_GLYPHS.items():
+            visible[glyph] = visible[skeleton]
+        self._backend.set_categories_visible(visible)
 
     def _on_show_extruded(self, checked: bool) -> None:
         """Toggle extruded-solid frames; a geometry change, so re-render."""
