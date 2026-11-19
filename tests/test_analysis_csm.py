@@ -1802,3 +1802,136 @@ def test_build_once_manual_recipe_does_not_accumulate():
         assert abs(fx_totals[0]) == pytest.approx(1.0e5)
     finally:
         ops.wipe()
+
+
+def _cantilever_s2k(extra_tables: str) -> str:
+    """The issue-repro scaffold: a fixed-base 1000 mm +Z steel cantilever (N/mm/C)."""
+    return (
+        "File repro.s2k was saved on m/d/yy at h:mm:ss\n"
+        'TABLE:  "PROGRAM CONTROL"\n'
+        '   ProgramName=SAP2000   Version=26   CurrUnits="N, mm, C"\n'
+        'TABLE:  "MATERIAL PROPERTIES 01 - GENERAL"\n'
+        "   Material=STEEL   Type=Steel   SymType=Isotropic\n"
+        'TABLE:  "MATERIAL PROPERTIES 02 - BASIC MECHANICAL PROPERTIES"\n'
+        "   Material=STEEL   UnitWeight=0.0   UnitMass=0.0   E1=2.0E+05   G12=7.7E+04   U12=0.3\n"
+        'TABLE:  "FRAME SECTION PROPERTIES 01 - GENERAL"\n'
+        '   SectionName=SEC1   Shape="I/Wide Flange"   Material=STEEL   t3=200   t2=100   tf=10   tw=8   Area=3080   I33=1.5E+07   I22=2.0E+06   TorsConst=1.0E+06\n'
+        'TABLE:  "JOINT COORDINATES"\n'
+        "   Joint=1   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=0   Z=0\n"
+        "   Joint=2   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=0   Z=1000\n"
+        'TABLE:  "JOINT RESTRAINT ASSIGNMENTS"\n'
+        "   Joint=1   U1=Yes   U2=Yes   U3=Yes   R1=Yes   R2=Yes   R3=Yes\n"
+        'TABLE:  "CONNECTIVITY - FRAME"\n'
+        "   Frame=1   JointI=1   JointJ=2   IsCurved=No\n"
+        'TABLE:  "FRAME SECTION ASSIGNMENTS"\n'
+        "   Frame=1   AnalSect=SEC1\n" + extra_tables
+    )
+
+
+@pytest.mark.parametrize("direction", ["2", "LocalY"])
+def test_issue1_local_distributed_load_applies_full_magnitude(tmp_path, direction):
+    """GitHub issue #1: a numeric/local Dir distributed load must not be zeroed."""
+    import openseespy.opensees as ops
+
+    from fea_toolkit.io.s2k_parser import SAP2000Parser
+
+    content = _cantilever_s2k(
+        'TABLE:  "LOAD PATTERN DEFINITIONS"\n'
+        "   LoadPat=Live   DesignType=Live   SelfWtMult=0\n"
+        'TABLE:  "LOAD CASE DEFINITIONS"\n'
+        "   Case=Live   Type=LinStatic   InitialCond=Zero\n"
+        'TABLE:  "CASE - STATIC 1 - LOAD ASSIGNMENTS"\n'
+        "   Case=Live   LoadType=LoadPattern   LoadName=Live   ScaleFactor=1\n"
+        'TABLE:  "FRAME LOADS - DISTRIBUTED"\n'
+        f"   Frame=1   LoadPat=Live   CoordSys=Local   Type=Force   Dir={direction}   DistType=RelDist   RelDistA=0   RelDistB=1   AbsDistA=0   AbsDistB=1000   FOverLA=-10   FOverLB=-10\n"
+    )
+    s2k = tmp_path / "issue1.s2k"
+    s2k.write_text(content)
+    md = SAP2000Parser(s2k).parse().get_model_data()
+    assert md.frame_dist_loads[0].direction == "LocalY"
+    try:
+        mm = preprocess_model(md, {"element_type": "elasticBeamColumn"})
+        ab = AnalysisBuilder(mm, {"element_type": "elasticBeamColumn"})
+        ab.build_domain()
+        res = ab.run_static_analysis(pattern_scales={"Live": 1.0})
+        fx = sum(r["fx"] for r in res["reactions"].values())
+        assert fx == pytest.approx(10000.0)
+    finally:
+        ops.wipe()
+
+
+def test_issue2_build_once_manual_recipe_does_not_accumulate(tmp_path):
+    """GitHub issue #2: manual remove_load_patterns/create_loads stays at 1x."""
+    import openseespy.opensees as ops
+
+    from fea_toolkit.io.s2k_parser import SAP2000Parser
+
+    content = _cantilever_s2k(
+        'TABLE:  "LOAD PATTERN DEFINITIONS"\n'
+        "   LoadPat=P1   DesignType=Live   SelfWtMult=0\n"
+        "   LoadPat=P2   DesignType=Live   SelfWtMult=0\n"
+        'TABLE:  "LOAD CASE DEFINITIONS"\n'
+        "   Case=P1   Type=LinStatic   InitialCond=Zero\n"
+        "   Case=P2   Type=LinStatic   InitialCond=Zero\n"
+        'TABLE:  "CASE - STATIC 1 - LOAD ASSIGNMENTS"\n'
+        "   Case=P1   LoadType=LoadPattern   LoadName=P1   ScaleFactor=1\n"
+        "   Case=P2   LoadType=LoadPattern   LoadName=P2   ScaleFactor=1\n"
+        'TABLE:  "FRAME LOADS - DISTRIBUTED"\n'
+        "   Frame=1   LoadPat=P1   CoordSys=Global   Type=Force   Dir=Z   DistType=RelDist   RelDistA=0   RelDistB=1   AbsDistA=0   AbsDistB=1000   FOverLA=-10   FOverLB=-10\n"
+        "   Frame=1   LoadPat=P2   CoordSys=Global   Type=Force   Dir=Z   DistType=RelDist   RelDistA=0   RelDistB=1   AbsDistA=0   AbsDistB=1000   FOverLA=-10   FOverLB=-10\n"
+    )
+    s2k = tmp_path / "issue2.s2k"
+    s2k.write_text(content)
+    md = SAP2000Parser(s2k).parse().get_model_data()
+    mm = preprocess_model(md, {"element_type": "elasticBeamColumn"})
+    try:
+        fresh = []
+        for pat in ("P1", "P2"):
+            ab = AnalysisBuilder(mm, {"element_type": "elasticBeamColumn"})
+            ab.build_domain()
+            res = ab.run_static_analysis(pattern_scales={pat: 1.0})
+            fresh.append(sum(r["fz"] for r in res["reactions"].values()))
+            ops.wipe()
+        ab = AnalysisBuilder(mm, {"element_type": "elasticBeamColumn"})
+        ab.build_domain()
+        manual = []
+        for pat in ("P1", "P2"):
+            ab.remove_load_patterns()
+            ab.create_loads({pat: 1.0})
+            res = ab.run_static_analysis(rebuild=False)
+            manual.append(sum(r["fz"] for r in res["reactions"].values()))
+        assert fresh == pytest.approx([10000.0, 10000.0])
+        assert manual == pytest.approx([10000.0, 10000.0])
+    finally:
+        ops.wipe()
+
+
+def test_issue3_link_only_node_is_rejected(tmp_path):
+    """GitHub issue #3: a link-only node is rejected, not silently dropped."""
+    from fea_toolkit.io.s2k_parser import SAP2000Parser
+
+    content = (
+        "File repro_link.s2k was saved on m/d/yy at h:mm:ss\n"
+        'TABLE:  "PROGRAM CONTROL"\n'
+        '   ProgramName=SAP2000   Version=26   CurrUnits="N, mm, C"\n'
+        'TABLE:  "JOINT COORDINATES"\n'
+        "   Joint=1   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=0   Z=0\n"
+        "   Joint=2   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=0   Z=0\n"
+        "   Joint=3   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=0   Z=1000\n"
+        'TABLE:  "JOINT RESTRAINT ASSIGNMENTS"\n'
+        "   Joint=1   U1=Yes   U2=Yes   U3=Yes   R1=Yes   R2=Yes   R3=Yes\n"
+        'TABLE:  "CONNECTIVITY - FRAME"\n'
+        "   Frame=1   JointI=2   JointJ=3\n"
+        'TABLE:  "CONNECTIVITY - LINK"\n'
+        "   Link=ISO_1   JointI=1   JointJ=2\n"
+        'TABLE:  "LINK PROPERTY ASSIGNMENTS"\n'
+        "   Link=ISO_1   LinkProp=ISO_LIN   LinkFDProp=None   PropMod=1\n"
+    )
+    s2k = tmp_path / "issue3.s2k"
+    s2k.write_text(content)
+    md = SAP2000Parser(s2k).parse().get_model_data()
+    assert [(link.link_id, link.node_i, link.node_j) for link in md.link_connectivity] == [
+        ("ISO_1", "1", "2")
+    ]
+    with pytest.raises(NotImplementedError, match="link element"):
+        preprocess_model(md, {})
