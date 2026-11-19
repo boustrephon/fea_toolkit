@@ -955,6 +955,14 @@ class Preprocessor:
         # group master, and dropping them would silently drop the body.
         for _name, _body_ids, _dof_flags in rigid_body_components:
             referenced.update(_body_ids)
+        # Joint nodes referenced only by a DIAPHRAGM constraint (no element of
+        # their own) must be retained — the rigidDiaphragm MPC ties them to the
+        # group, and dropping a *restrained* one would silently discard its
+        # support (the orphan-node pass below would otherwise remove the node
+        # and the restraint filter would follow with a warning).  Mirrors the
+        # BODY-constraint retention above.
+        for _z, _diaph_ids in diaphragm_components:
+            referenced.update(_diaph_ids)
         # Opening (void) corner nodes are moved to ``orphan_nodes`` rather than
         # kept in ``nodes``, so no OpenSees-domain consumer can accidentally
         # create them; ``net_area`` resolves opening vertices from both
