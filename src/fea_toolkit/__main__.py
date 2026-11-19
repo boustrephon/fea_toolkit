@@ -437,6 +437,14 @@ def _run_recipe(argv: list[str]) -> int:
         help="Model file to load as the working document (required).",
     )
     parser.add_argument(
+        "--output",
+        default=None,
+        help=(
+            "Override the output path of the recipe's save_results step(s) — "
+            "the results archive (.npz) to write."
+        ),
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Print each step's completion status.",
@@ -462,6 +470,13 @@ def _run_recipe(argv: list[str]) -> int:
     except (OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+
+    if args.output:
+        # A batch loop gives each model a distinct archive by overriding the
+        # save_results step's path, rather than authoring one recipe per model.
+        for step in recipe.steps:
+            if step.verb == "save_results":
+                step.params["path"] = args.output
 
     def _log(message: str) -> None:
         print(message)

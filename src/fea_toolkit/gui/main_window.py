@@ -3776,7 +3776,7 @@ class MainWindow(QMainWindow):
             if not is_results_archive(path):
                 self.log(f"{path} is not a results archive.", "error")
                 return False
-            context = StepContext(None, log=self.log)  # model_data unused by open_results
+            context = StepContext(None, log=self.log)  # open_results rebuilds model_data/model
             results = run_open_results(context, Step(verb="open_results", params={"path": path}))
         except Exception as exc:
             self.log(f"Failed to open results {path}: {exc}", "error")

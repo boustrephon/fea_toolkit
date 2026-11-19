@@ -146,3 +146,70 @@ def test_shipped_preset_recipes_load():
     for name in ("solve.json", "solve_report.json", "convert.json"):
         recipe = Recipe.from_json(str(recipes_dir / name))
         assert recipe.steps, f"{name} should declare steps"
+
+
+def test_run_subcommand_output_overrides_save_results_path(tmp_path):
+    from examples.sample_model import make_sample_model
+    from fea_toolkit.io.model_codec import model_to_json
+
+    model = tmp_path / "model.json"
+    model.write_text(model_to_json(make_sample_model()), encoding="utf-8")
+    default_npz = tmp_path / "default.npz"
+    recipe = tmp_path / "recipe.json"
+    recipe.write_text(
+        json.dumps(
+            {
+                "name": "solve",
+                "steps": [
+                    {"verb": "mesh", "params": {}},
+                    {"verb": "run_static", "params": {"cases": {"DEAD": {"DEAD": 1.0}}}},
+                    {"verb": "save_results", "params": {"path": str(default_npz)}},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    out_npz = tmp_path / "custom.npz"
+
+    from fea_toolkit.__main__ import main
+
+    assert main(["run", str(recipe), "--model", str(model), "--output", str(out_npz)]) == 0
+    assert out_npz.exists()
+    assert not default_npz.exists()
+
+
+def test_open_results_feeds_report_and_save_results(tmp_path):
+    from examples.sample_model import make_sample_model
+
+    solved = tmp_path / "solved.npz"
+    solve = Recipe(
+        steps=[
+            Step("mesh"),
+            Step("run_static", params={"cases": {"DEAD": {"DEAD": 1.0}}}),
+            Step("save_results", params={"path": str(solved)}),
+        ]
+    )
+    run_recipe(solve, make_sample_model())
+    assert solved.exists()
+
+    # Report the archive without a source model.
+    logged: list = []
+    report = Recipe(steps=[Step("open_results", params={"path": str(solved)}), Step("report")])
+    run = run_recipe(report, make_sample_model(), log=logged.append)
+    assert run.results[-1].kind == "session"
+    assert "Case DEAD" in run.results[-1].payload
+
+    # Re-save the archive through the verb — a second, distinct archive.
+    resaved = tmp_path / "resaved.npz"
+    resave = Recipe(
+        steps=[
+            Step("open_results", params={"path": str(solved)}),
+            Step("save_results", params={"path": str(resaved)}),
+        ]
+    )
+    run_recipe(resave, make_sample_model())
+    assert resaved.exists()
+
+    from fea_toolkit.io.results_repository import NpzResultsRepository
+
+    assert "DEAD" in NpzResultsRepository(str(resaved)).cases()

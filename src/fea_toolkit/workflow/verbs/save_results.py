@@ -2,9 +2,9 @@
 
 Wraps :func:`~fea_toolkit.io.npz_writer.results_arrays` +
 :func:`~fea_toolkit.io.npz_writer.save_results_arrays`: it assembles the
-in-memory archive from the cases solved so far and writes it to ``.npz``, so a
-run can solve and stop, or solve then persist — the write is its own step, not
-part of the solve.
+in-memory archive from the cases available so far (a solve's, or an
+``open_results`` step's) and writes it to ``.npz``, so a run can solve and stop,
+or solve then persist — the write is its own step, not part of the solve.
 
 A results archive is the *display/exchange* form (geometry + displacements +
 member forces), not the model: re-open it with ``open_results`` or the GUI's
@@ -31,9 +31,9 @@ def run_save_results(context: StepContext, step: Step) -> list[StepResult]:
 
     Args:
         context: The run's working state.  ``case_results`` must hold the cases
-            a previous ``run_static`` (and optionally ``combine``) step solved;
-            ``model`` and ``model_data`` supply the display geometry and unit
-            labels.
+            a previous ``run_static`` (optionally ``combine``) step solved, or
+            an ``open_results`` step loaded; ``model`` and ``model_data`` supply
+            the display geometry and unit labels.
         step: The step to run.  ``params["path"]`` is the output path.
 
     Returns:

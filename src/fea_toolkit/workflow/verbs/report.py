@@ -1,9 +1,10 @@
-"""The ``report`` verb — render the solved cases as a plain-text report.
+"""The ``report`` verb — render the solved static cases as a plain-text report.
 
 Delegates to :func:`~fea_toolkit.analysis.report_text.render_static_text_report`
 so the formatting lives in exactly one pure place; the verb only gathers the
-solved cases and their applied/reaction summaries and hands them over.  The
-report is written to the run's log (stdout under a batch CLI) and returned as a
+cases a solve — or an ``open_results`` step — produced, plus any applied/reaction
+summaries, and hands them over.  The report is written to the run's log (stdout
+under a batch CLI) and returned as a
 :data:`~fea_toolkit.workflow.steps.SESSION` result, so it is a side-effect step
 — like ``save`` — rather than a view.  Static-only for now.
 """
@@ -19,9 +20,10 @@ def run_report(context: StepContext, step: Step) -> list[StepResult]:
     """Render a plain-text report of the solved static cases.
 
     Args:
-        context: The run's working state.  ``case_results`` holds the solved
-            cases; ``results["static_summaries"]`` the applied/reaction
-            summaries a ``run_static`` step recorded.
+        context: The run's working state.  ``case_results`` holds the cases a
+            ``run_static`` (or ``combine``) solve produced, or an
+            ``open_results`` step loaded; ``results["static_summaries"]`` the
+            applied/reaction summaries a ``run_static`` step recorded.
         step: The step to run — no parameters.
 
     Returns:
