@@ -33,6 +33,22 @@ python examples/basic_usage.py /path/to/model.s2k
 | `wall_pushover_fsam_layered.py` | **Documented-failure reproduction** — FSAM-in-LayeredShell (ShellNLDKGQ) pushover on a 4 m × 3 m × 0.3 m wall. Does **not** converge by design (near-singular stiffness: the raw FSAM nD material is fed to LayeredShell without a `PlateFromPlaneStress` wrapper — see `docs/mvlem_wall_analysis.md` §4.3); run only to reproduce the failure. Optional `--tcl` / `--py` export of the failing model for offline inspection; pass `--no-expect-failure` to validate a repaired model directly (treats convergence as the expected outcome). | None (self-contained) |
 | `wall_layered_nonlinear.py` | **Non-runnable placeholder** — documents the validated non-linear layered-shell recipe (ConcreteS + J2PlateFibre in a LayeredShell/ShellMITC4 stack), the alternative to the failing FSAM path, and ships the config skeleton; `main()` prints the recipe and runs no FEA. Promotion to a working example is tracked in `docs/_pending_work.md`. | None (self-contained) |
 | `view_model.py` | **Unified viewer** — view a model or a saved results archive. Given a `.s2k`, or a pre-parsed `.json` (a `SAP2000Parser.to_json()` raw-table cache or a `model_codec` snapshot), it parses/loads, builds, runs the requested analysis (`mesh`, `static`, `modal`, `rs`, `pushover`, `interactive`) and displays it; given a `.npz` it displays the archived results directly, with no solver run. (A `MeshModel` snapshot is already meshed, so it is offered with `--result mesh` only.) The `mesh` view also accepts `--zlim LO HI` (storey band), `--labels` (frame IDs), `--node-labels` (node IDs), `--highlight-section NAME...` (red vs. dimmed), `--highlight-constraint NAME...` (the joints of a SAP2000 constraint group — BODY, DIAPHRAGM, EQUAL, … — drawn red) and `--select "KEY=VALUE..."` (overdraw a `Selection` in yellow: wide lines over frames, dots over nodes; keys `type`, `section`, `material`, `group`, `constraint`, `id`, `z` — so `--select "constraint=Fix"` selects those same joints through the general Selection path). Every PyVista window it opens is titled `PyVista - <input file name>` (base name only, replaceable with `--title TITLE`) so a screen full of windows still says which model / archive each one is. | `.s2k` / `.json` / `.npz` / `--sample` |
+| `build_portal_frame.py` | **Model authoring** — the *authoring* half of the two-artifact workflow: builds a planar 3D portal frame (GB hot-rolled H-beams, WX wind load) and dumps it as model-codec JSON. The *solve* half is the recipe runner (`python -m fea_toolkit run solve.json --model …`) — see `docs/recipe_cli.md`. | None (self-contained) |
+
+## Recipe CLI (headless batch)
+
+`examples/recipes/` ships preset recipe JSON files for the headless runner —
+`python -m fea_toolkit run RECIPE --model model.json`:
+
+| Preset | Steps | Stops after |
+|---|---|---|
+| `convert.json` | `save` | convert a text model → the toolkit's JSON snapshot |
+| `solve.json` | `mesh → run_static → save_results` | write an NPZ results archive |
+| `solve_report.json` | `mesh → run_static → save_results → report` | also print a plain-text report |
+
+The full workflow — author a model, run a recipe, emit an NPZ the GUI can open —
+is documented in `docs/recipe_cli.md`.
+
 
 
 ## Sample model

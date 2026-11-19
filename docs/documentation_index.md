@@ -40,6 +40,11 @@ for automated cross-referencing.
   Tags: `llm`, `guidance`, `modeling`, `nonlinear`, `element-choice`, `hinge`, `steel`, `damping`, `units`
   Related: [LLM & AI Assistant Guide](llm_guide.md) · [SAC Trilinear Hinge — Four Modelling Approaches](sac_trilinear_hinge_approaches.md) · [SAC 3-Story Nonlinear Benchmark (T4)](sac_nonlinear_benchmark.md) · [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Units Workflow (kN·m·s → kip·in Limit-State Analysis)](units_conversion.md)
 
+- [Recipe CLI — Headless Batch Runs](recipe_cli.md) — ✅ Complete
+  > The headless recipe runner: python -m fea_toolkit run. Load any model file (.s2k/.e2k/.f2k/.json), run a recipe of workflow steps, and emit a results archive (NPZ), a model snapshot (JSON) or a plain-text report — with no GUI.
+  Tags: `cli`, `recipe`, `workflow`, `batch`, `npz`, `report`, `headless`
+  Related: [Workflow Authoring — Steps and Recipes](workflow_authoring.md) · [Load Cases and Combinations](load_cases_and_combinations.md) · [Unified Results Schema](results_schema.md) · [JSON Serialization: Raw Tables vs Model Codec](json_serialization.md) · [Desktop GUI](gui.md) · [Analysis Helpers](analysis.md)
+
 - [SAP IDs vs OpenSees Tags](sap_ids_vs_tags.md) — ✅ Complete
   > The two distinct identifier systems (SAP2000 string IDs vs OpenSees integer tags), who creates each, NPZ storage conventions, and common pitfalls.
   Tags: `identifiers`, `sap2000`, `opensees`, `reference`, `architecture`
@@ -500,6 +505,7 @@ Tags across all documentation files:
 - **`asce41`** — [capacity.md](capacity.md)
 - **`attributes`** — [rhino_attributes.md](rhino_attributes.md)
 - **`backbone`** — [shear_failure_modelling.md](shear_failure_modelling.md)
+- **`batch`** — [recipe_cli.md](recipe_cli.md)
 - **`beam-column-joint`** — [benchmark_register.md](benchmark_register.md)
 - **`beam-with-hinges`** — [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`beams`** — [element_classification.md](element_classification.md)
@@ -522,7 +528,7 @@ Tags across all documentation files:
 - **`ci`** — [ground_motion_data.md](ground_motion_data.md)
 - **`classification`** — [element_classification.md](element_classification.md)
 - **`cleanup`** — [deprecation_plan.md](deprecation_plan.md), [linting_fix_plan.md](linting_fix_plan.md)
-- **`cli`** — [model_review.md](model_review.md)
+- **`cli`** — [model_review.md](model_review.md), [recipe_cli.md](recipe_cli.md)
 - **`closed-form`** — [cantilever_benchmark.md](cantilever_benchmark.md), [shear_building_benchmark.md](shear_building_benchmark.md)
 - **`clough`** — [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`codes`** — [capacity.md](capacity.md)
@@ -594,6 +600,7 @@ Tags across all documentation files:
 - **`guidance`** — [modeling_guidance.md](modeling_guidance.md)
 - **`guide`** — [llm_guide.md](llm_guide.md)
 - **`hdf5`** — [model_stage_file.md](model_stage_file.md), [project_bundle.md](project_bundle.md), [report_generation.md](report_generation.md)
+- **`headless`** — [recipe_cli.md](recipe_cli.md)
 - **`hinge`** — [imk_deterioration_model.md](imk_deterioration_model.md), [imk_member_classification.md](imk_member_classification.md), [modeling_guidance.md](modeling_guidance.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`hinges`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md)
 - **`html-export`** — [viewer.md](viewer.md)
@@ -651,7 +658,7 @@ Tags across all documentation files:
 - **`nonlinear`** — [element_properties_config.md](element_properties_config.md), [modeling_guidance.md](modeling_guidance.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [opensees_modeling_sources.md](opensees_modeling_sources.md), [pushover_analysis.md](pushover_analysis.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`nonlinear-dynamic`** — [benchmark_register.md](benchmark_register.md), [ground_motion_data.md](ground_motion_data.md), [imk_deterioration_model.md](imk_deterioration_model.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md)
 - **`notes`** — [dev_notes.md](dev_notes.md)
-- **`npz`** — [model_stage_file.md](model_stage_file.md), [project_bundle.md](project_bundle.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
+- **`npz`** — [model_stage_file.md](model_stage_file.md), [project_bundle.md](project_bundle.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [recipe_cli.md](recipe_cli.md), [results_schema.md](results_schema.md)
 - **`nuitka`** — [build_nuitka.md](build_nuitka.md)
 - **`offsets`** — [member_offsets.md](member_offsets.md)
 - **`openings`** — [shell_openings.md](shell_openings.md)
@@ -683,13 +690,13 @@ Tags across all documentation files:
 - **`qt`** — [gui_roadmap.md](gui_roadmap.md)
 - **`rc`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`rc-frame`** — [benchmark_roadmap.md](benchmark_roadmap.md), [duong_benchmark.md](duong_benchmark.md)
-- **`recipe`** — [workflow_authoring.md](workflow_authoring.md), [workflow_palette.md](workflow_palette.md)
+- **`recipe`** — [recipe_cli.md](recipe_cli.md), [workflow_authoring.md](workflow_authoring.md), [workflow_palette.md](workflow_palette.md)
 - **`refactor`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`reference`** — [builder_reference.md](builder_reference.md), [mander_confinement_validation.md](mander_confinement_validation.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`references`** — [opensees_modeling_sources.md](opensees_modeling_sources.md)
 - **`release`** — [versioning.md](versioning.md)
 - **`releases`** — [member_releases.md](member_releases.md)
-- **`report`** — [pipeline_logging.md](pipeline_logging.md)
+- **`report`** — [pipeline_logging.md](pipeline_logging.md), [recipe_cli.md](recipe_cli.md)
 - **`reporter`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`reporting`** — [report_generation.md](report_generation.md)
 - **`research`** — [cft_confinement_plan.md](cft_confinement_plan.md)
@@ -761,7 +768,7 @@ Tags across all documentation files:
 - **`walls`** — [element_classification.md](element_classification.md)
 - **`warranty`** — [licence.md](licence.md)
 - **`wind`** — [model_review.md](model_review.md)
-- **`workflow`** — [layered_analysis_workflow.md](layered_analysis_workflow.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [workflow.md](workflow.md), [workflow_authoring.md](workflow_authoring.md), [workflow_palette.md](workflow_palette.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
+- **`workflow`** — [layered_analysis_workflow.md](layered_analysis_workflow.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [recipe_cli.md](recipe_cli.md), [workflow.md](workflow.md), [workflow_authoring.md](workflow_authoring.md), [workflow_palette.md](workflow_palette.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`xara`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [tcl_export.md](tcl_export.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md), [xara_pushover_workflow.md](xara_pushover_workflow.md), [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`yaml-config`** — [report_generation.md](report_generation.md)
 - **`yield-point`** — [csm_bilinearization.md](csm_bilinearization.md)
