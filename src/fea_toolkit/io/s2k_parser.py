@@ -62,10 +62,20 @@ def _normalise_frame_dir(direction: Any) -> str:
     Numeric local directions (1/2/3) map to ``LocalX``/``LocalY``/``LocalZ``;
     every other spelling (``X``, ``Y``, ``Z``, ``Gravity``, ``Projected``,
     ``LocalY``, …) passes through unchanged as a string.
+
+    The CSI tokeniser coerces ``Dir=2`` to an ``int`` and ``Dir=2.0`` to a
+    ``float``, so both spellings are integer-valued numerically.  Any
+    integer-valued numeric spelling (``2``, ``2.0``, ``"2"``, ``"2.0"``) maps
+    to the same direction as the integer form instead of falling through as an
+    unsupported token.
     """
     d = str(direction).strip()
-    if d.isdigit():
-        return FRAME_LOCAL_DIR_MAP.get(int(d), d)
+    try:
+        value = float(d)
+        if value.is_integer():
+            return FRAME_LOCAL_DIR_MAP.get(int(value), d)
+    except (ValueError, OverflowError):
+        pass
     return d
 
 

@@ -212,11 +212,12 @@ def test_parse_frame_distributed_loads_normalise_direction(tmp_path):
 TABLE:  "FRAME LOADS - DISTRIBUTED"
    Frame=1   LoadPat=Live   CoordSys=Local   Type=Force   Dir=2   DistType=RelDist   RelDistA=0   RelDistB=1   AbsDistA=0   AbsDistB=1000   FOverLA=-10   FOverLB=-10
    Frame=2   LoadPat=Live   CoordSys=Local   Type=Force   Dir=LocalY   DistType=RelDist   RelDistA=0   RelDistB=1   AbsDistA=0   AbsDistB=1000   FOverLA=-10   FOverLB=-10
+   Frame=3   LoadPat=Live   CoordSys=Local   Type=Force   Dir=2.0   DistType=RelDist   RelDistA=0   RelDistB=1   AbsDistA=0   AbsDistB=1000   FOverLA=-10   FOverLB=-10
 """
     s2k = tmp_path / "test_dist_dir.s2k"
     s2k.write_text(content)
     md = SAP2000Parser(s2k).parse().get_model_data()
-    assert [ld.direction for ld in md.frame_dist_loads] == ["LocalY", "LocalY"]
+    assert [ld.direction for ld in md.frame_dist_loads] == ["LocalY", "LocalY", "LocalY"]
 
 
 def test_parse_link_connectivity(tmp_path):
