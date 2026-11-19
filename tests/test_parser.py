@@ -1377,6 +1377,41 @@ def test_restrained_diaphragm_only_node_survives_orphan_filter(tmp_path):
     assert mm.restraints["3"].dofs[2] == 1  # vertical DOF retained
 
 
+def test_unrestrained_diaphragm_only_node_is_dropped(tmp_path):
+    """An element-less, unrestrained node referenced only by a DIAPHRAGM
+    constraint is an orphan: ``rigidDiaphragm`` couples only the in-plane
+    DOFs (ux, uy, rz), so keeping such a node would leave uz/rx/ry free and
+    singular the domain."""
+    _md, mm = _parse_diaphragm_s2k(tmp_path)
+    # Joints 3 and 6 are diaphragm-only (no frame element) and unrestrained,
+    # so the orphan-node pass drops them; the frame joints survive.
+    assert "3" not in mm.nodes
+    assert "6" not in mm.nodes
+    assert {"1", "2", "4", "5"} <= set(mm.nodes)
+
+
+def test_disabled_diaphragm_drops_restrained_diaphragm_only_node(tmp_path):
+    """``rigid_diaphragms: False`` disables the diaphragm MPC, so a node kept
+    only by the diaphragm has nothing to tie it to the model.  It is dropped
+    (with its restraint) rather than left as a fixed but disconnected point."""
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+
+    data = _diaphragm_constraint_s2k_data()
+    data["JOINT RESTRAINT ASSIGNMENTS"] = [
+        {"Joint": 3, "U1": True, "U2": True, "U3": True, "R1": True, "R2": True, "R3": True},
+    ]
+    json_path = tmp_path / "diaphragm_disabled_restrained.json"
+    json_path.write_text(json.dumps(data))
+
+    md = SAP2000Parser.from_json(json_path).get_model_data()
+    mm = preprocess_model(
+        md, {"split_elements": False, "verbose": False, "rigid_diaphragms": False}
+    )
+
+    assert "3" not in mm.nodes
+    assert "3" not in mm.restraints
+
+
 # ============================================================================
 # BODY-constraint MPC emission — ops call spy
 # ============================================================================

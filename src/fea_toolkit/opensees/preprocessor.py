@@ -956,13 +956,20 @@ class Preprocessor:
         for _name, _body_ids, _dof_flags in rigid_body_components:
             referenced.update(_body_ids)
         # Joint nodes referenced only by a DIAPHRAGM constraint (no element of
-        # their own) must be retained — the rigidDiaphragm MPC ties them to the
-        # group, and dropping a *restrained* one would silently discard its
-        # support (the orphan-node pass below would otherwise remove the node
-        # and the restraint filter would follow with a warning).  Mirrors the
-        # BODY-constraint retention above.
-        for _z, _diaph_ids in diaphragm_components:
-            referenced.update(_diaph_ids)
+        # their own) are retained **only when the diaphragm will actually be
+        # applied and the node carries a restraint**.  The rigidDiaphragm MPC
+        # couples the in-plane DOFs (ux, uy, rz), leaving uz/rx/ry free, so an
+        # unrestrained, element-less node would be singular — drop it with the
+        # other orphans.  A *restrained* one must be kept so its support is
+        # not silently discarded (the orphan-node pass below would otherwise
+        # remove the node and the restraint filter would follow with a
+        # warning).  Mirrors the BODY-constraint retention above (a BODY tie
+        # is full-DOF, so its nodes are always retained).
+        if self.config.get("rigid_diaphragms", None) is not False:
+            for _z, _diaph_ids in diaphragm_components:
+                for _nid in _diaph_ids:
+                    if _nid in md.restraints:
+                        referenced.add(_nid)
         # Opening (void) corner nodes are moved to ``orphan_nodes`` rather than
         # kept in ``nodes``, so no OpenSees-domain consumer can accidentally
         # create them; ``net_area`` resolves opening vertices from both
