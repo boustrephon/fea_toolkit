@@ -75,11 +75,14 @@ class LinkElement:
     elements to OpenSees; this class exists so the parser can surface their
     presence and the Preprocessor can refuse to silently drop their nodes
     (see ``docs/_pending_work.md`` P49).
+
+    A single-joint (grounded) link has no end J — SAP2000 omits the
+    ``JointJ`` column for such links, so ``node_j`` is the empty string.
     """
 
     link_id: str  # SAP2000 label (e.g. "ISO_1")
     node_i: str  # SAP2000 joint label at end I
-    node_j: str  # SAP2000 joint label at end J
+    node_j: str = ""  # SAP2000 joint label at end J (empty for a grounded link)
 
 
 @dataclass
@@ -2594,10 +2597,6 @@ class SAPModelData:
     groups: dict[str, Group]
     frame_auto_mesh: dict[str, dict[str, Any]]  # frame_id -> auto mesh settings
     frame_end_offsets: dict[str, FrameEndOffset] = field(default_factory=dict)
-    # Link (connection / isolator) connectivity — parsed but not yet emitted
-    # to OpenSees; the Preprocessor refuses to preprocess a model that has
-    # any rather than silently dropping their nodes (see P49).
-    link_connectivity: list[LinkElement] = field(default_factory=list)
     # Frame end releases keyed by frame ID (frames with no release are absent).
     frame_releases: dict[str, FrameRelease] = field(default_factory=dict)
     area_mesh: dict[str, AreaMesh] = field(default_factory=dict)
@@ -2671,6 +2670,12 @@ class SAPModelData:
     source: str = ""
     # Default units used for all coordinates and section properties
     units: dict[str, str] = field(default_factory=lambda: {"F": "N", "L": "m", "T": "C"})
+    # Link (connection / isolator) connectivity — parsed but not yet emitted
+    # to OpenSees; the Preprocessor refuses to preprocess a model that has
+    # any rather than silently dropping their nodes (see P49).  Kept last so
+    # the positional order of ``frame_releases`` and every later field is
+    # unchanged (this field was added after ``frame_end_offsets``).
+    link_connectivity: list[LinkElement] = field(default_factory=list)
 
     @property
     def opening_area_ids(self) -> set[str]:
