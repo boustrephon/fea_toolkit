@@ -8,8 +8,8 @@ function (see :mod:`fea_toolkit.workflow.verbs`), reading the manifest does not
 load OpenSees, so a form can be rendered before a model is even open.
 
 The registration order below is the order the verbs make sense in —
-prepare properties, prepare topology, solve, reduce — and is the order a menu
-should offer them.
+prepare properties, prepare topology, solve, reduce, emit — and is the order a
+menu should offer them.
 """
 
 from typing import Any
@@ -47,10 +47,12 @@ from .verbs import (
     OPEN_PARAMS,
     OPEN_RESULTS_PARAMS,
     PUSHOVER_PARAMS,
+    REPORT_PARAMS,
     RS_PARAMS,
     RUN_STATIC_PARAMS,
     SAVE_MODEL_PARAMS,
     SAVE_PARAMS,
+    SAVE_RESULTS_PARAMS,
     SCALE_SECTIONS_PARAMS,
     SELECT_PARAMS,
     SELF_WEIGHT_PARAMS,
@@ -74,9 +76,11 @@ from .verbs import (
     run_open,
     run_open_results,
     run_pushover,
+    run_report,
     run_response_spectrum,
     run_save,
     run_save_model,
+    run_save_results,
     run_scale_sections,
     run_select,
     run_static,
@@ -328,6 +332,24 @@ STEP_SPECS: dict[str, StepSpec] = {
         needs=("cases",),
         help="Reduce the solved cases into load combinations.",
         docs=("load_combinations.md", "load_cases_and_combinations.md"),
+    ),
+    "save_results": StepSpec(
+        verb="save_results",
+        run=run_save_results,
+        params=SAVE_RESULTS_PARAMS,
+        kind=SESSION,
+        needs=("cases",),
+        help="Write the solved cases to a .npz results archive.",
+        docs=("results_schema.md", "load_cases_and_combinations.md"),
+    ),
+    "report": StepSpec(
+        verb="report",
+        run=run_report,
+        params=REPORT_PARAMS,
+        kind=SESSION,
+        needs=("cases",),
+        help="Render the solved static cases as a plain-text report.",
+        docs=("recipe_cli.md",),
     ),
     "chart": StepSpec(
         verb="chart",

@@ -162,6 +162,8 @@ class TestManifest:
             "nonlinear_dynamic",
             "ida",
             "combine",
+            "save_results",
+            "report",
             "chart",
         ]
 
