@@ -442,9 +442,24 @@ class LoadMixin:
 
                 vx, vy, vz = self.get_local_axes(elem)
                 T = np.column_stack([vx, vy, vz])
-                dir_map = {"Gravity": (0, 0, -1), "X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1)}
-                gx, gy, gz = dir_map.get(ld.direction, (0, 0, 0))
-                g_local = np.linalg.solve(T, np.array([gx, gy, gz]))
+                local_map = {
+                    "LocalX": (1.0, 0.0, 0.0),
+                    "LocalY": (0.0, 1.0, 0.0),
+                    "LocalZ": (0.0, 0.0, 1.0),
+                }
+                if ld.direction in local_map:
+                    # Local directions are already in the element frame.
+                    g_local = np.array(local_map[ld.direction])
+                    gx, gy, gz = T @ g_local
+                else:
+                    dir_map = {
+                        "Gravity": (0, 0, -1),
+                        "X": (1, 0, 0),
+                        "Y": (0, 1, 0),
+                        "Z": (0, 0, 1),
+                    }
+                    gx, gy, gz = dir_map.get(ld.direction, (0, 0, 0))
+                    g_local = np.linalg.solve(T, np.array([gx, gy, gz]))
                 wy_a = g_local[1] * wa
                 wz_a = g_local[2] * wa
                 wx_a = g_local[0] * wa

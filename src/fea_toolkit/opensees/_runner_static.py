@@ -76,13 +76,16 @@ class StaticRunnerMixin:
         When *pattern_scales* is ``None`` (default), the existing domain
         is analysed as-is.
 
-        When *rebuild* is ``False`` and *pattern_scales* is provided, the
-        domain is **not** rebuilt — the caller has already built it and
-        applied its diaphragms / edge constraints, and is re-using it for
-        multiple **linear** cases.  Only this case's loads are created (via
-        ``_create_loads``, which skips the diaphragm re-application), the
-        pseudo-time is reset, and the analysis objects are wiped so the next
-        solve starts from a clean state.
+        When *rebuild* is ``False``, the domain is **not** rebuilt — the
+        caller has already built it and applied its diaphragms / edge
+        constraints, and is re-using it for multiple **linear** cases.  When
+        *pattern_scales* is provided, only this case's loads are created (via
+        ``_create_loads``, which skips the diaphragm re-application); when it
+        is ``None``, the loads were supplied out-of-band (e.g. via
+        ``create_loads`` after ``remove_load_patterns``).  In both cases the
+        pseudo-time is reset and the analysis objects are wiped so the next
+        solve starts from a clean state (without the reset a ``Linear``
+        time-series accumulates the previous case's load factor).
 
         Returns:
             Dict with ``"nodal_displacements"`` (``{node_id: [dx,dy,dz,rx,ry,rz]}``)
@@ -116,14 +119,17 @@ class StaticRunnerMixin:
             else:
                 # Build-once path (linear cases): the domain already exists, so
                 # swap in only this case's loads.  ``_create_loads`` skips the
-                # diaphragm re-application ``create_loads`` performs;
-                # ``setTime(0)`` resets the pseudo-time so the Linear
-                # time-series does not accumulate the previous case's load
-                # factor; ``wipeAnalysis`` clears the analysis objects so the
-                # solver below can be re-created.
+                # diaphragm re-application ``create_loads`` performs.
                 self._create_loads(pattern_scales=pattern_scales)
-                ops.setTime(0.0)
-                ops.wipeAnalysis()
+
+        if not rebuild:
+            # Build-once path (linear cases), whether the loads were supplied
+            # here or out-of-band: ``setTime(0)`` resets the pseudo-time so the
+            # Linear time-series does not accumulate the previous case's load
+            # factor; ``wipeAnalysis`` clears the analysis objects so the
+            # solver below can be re-created.
+            ops.setTime(0.0)
+            ops.wipeAnalysis()
 
         sol_cfg = self.config
         sd = self.PUSHOVER_SOLVER_DEFAULTS

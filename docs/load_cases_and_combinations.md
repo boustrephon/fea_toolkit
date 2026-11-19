@@ -118,12 +118,15 @@ OpenSees domain per case`** otherwise.
 ### What `rebuild=False` does — the `wipeAnalysis` contract
 
 `run_static_analysis(..., rebuild=False)` is the per-case half.  It does **not**
-call `build_domain()`; instead it (1) `_create_loads(pattern_scales=…)` — this
-case's loads only, skipping the diaphragm re-application `create_loads`
-performs; (2) `ops.setTime(0.0)`; (3) `ops.wipeAnalysis()`, then re-creates the
-analysis objects in the solver setup that follows.  `run_static_cases`
-additionally calls `AnalysisBuilder.remove_load_patterns()` before each case
-**and** in a `finally`, so a failed case cannot leak its loads into the next.
+call `build_domain()`; when `pattern_scales` is given it (1)
+`_create_loads(pattern_scales=…)` — this case's loads only, skipping the
+diaphragm re-application `create_loads` performs; when `pattern_scales` is
+`None` the loads were already supplied out-of-band (the manual
+`remove_load_patterns()` → `create_loads(…)` recipe).  Either way it then
+(2) `ops.setTime(0.0)`; (3) `ops.wipeAnalysis()`, and re-creates the analysis
+objects in the solver setup that follows.  `run_static_cases` additionally
+calls `AnalysisBuilder.remove_load_patterns()` before each case **and** in a
+`finally`, so a failed case cannot leak its loads into the next.
 
 Steps (2) and (3) exist because of the OpenSees `wipeAnalysis` contract, which
 differs from `wipe`:

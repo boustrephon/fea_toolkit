@@ -158,7 +158,7 @@ the "Package tree (abbreviated)" section below for the full subpackage list
 | **Brace Buckling (Approach A)** | ✅ Implemented | Subdivided element with imperfection + `Corotational`. |
 | **Brace Buckling (Approach B)** | ✅ Implemented | Truss + `Hysteretic` material — robust for pushover. |
 | **Brace Fatigue** | ✅ Implemented | `Fatigue` material wrapper for cyclic degradation. |
-| **Load Handling** | ✅ Complete | Supports uniform and linear/trapezoidal distributed loads with global direction (gravity, X, Y, Z); projects onto local axes using `get_SAP_vecxz`; handles split loads. |
+| **Load Handling** | ✅ Complete | Supports uniform and linear/trapezoidal distributed loads in global (gravity, X, Y, Z) and member-local (LocalX/LocalY/LocalZ) directions; projects global directions onto local axes using `get_SAP_vecxz`; handles split loads. |
 | **Parent‑Child Tracking** | ✅ Complete | Each split element stores `parent_id`, `child_ids`, `t_locations`; inactive flag prevents building of parent. |
 | **Unit Conversion** | ✅ Complete | `SectionLibrary` converts lengths, areas, inertias between `in` and `mm` based on catalogue metadata. |
 | **Rhino 3-D Export** | ✅ Complete | Full Rhino 8 module (`fea_toolkit.rhino`): centreline geometry (points/lines/Breps) and lightweight Extrusion solids (I/Box/Pipe/Channel/Rect/Circular) with section-based layers, FEA metadata (UserStrings), SAP group → Rhino group mapping, and joint colour-coding by restraint. See [`docs/rhino_export.md`](docs/rhino_export.md). |

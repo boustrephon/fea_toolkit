@@ -1756,3 +1756,49 @@ class TestRSBaseReactionsTwoStage:
         # Column headers should contain the force unit, not '?'
         for col in df.columns:
             assert "?" not in col, f"Column '{col}' contains '?'"
+
+
+def test_local_direction_distributed_load_is_applied():
+    """A LocalY distributed load is projected onto the element, not zeroed."""
+    import openseespy.opensees as ops
+
+    from examples.sample_model import make_sample_model
+
+    md = make_sample_model()
+    md.frame_dist_loads[0].direction = "LocalY"
+    try:
+        mm = preprocess_model(md, {"element_type": "elasticBeamColumn", "split_elements": False})
+        ab = AnalysisBuilder(mm, {"element_type": "elasticBeamColumn"})
+        ab.build_domain()
+        ab.create_loads({"WIND": 1.0})
+        totals = ab._dist_load_totals["WIND"]
+        mag = math.hypot(totals["fx"], totals["fy"], totals["fz"])
+        # 1e4 N/m over a 10 m member — the load must not be silently dropped.
+        assert mag == pytest.approx(1.0e5)
+    finally:
+        ops.wipe()
+
+
+def test_build_once_manual_recipe_does_not_accumulate():
+    """remove_load_patterns/create_loads + rebuild=False stays at 1x per case."""
+    import openseespy.opensees as ops
+
+    from examples.sample_model import make_sample_model
+
+    md = make_sample_model()
+    mm = preprocess_model(md, {"element_type": "elasticBeamColumn", "split_elements": False})
+    b = AnalysisBuilder(mm, {"element_type": "elasticBeamColumn"})
+    b.build_domain()
+    try:
+        fx_totals = []
+        for _ in range(2):
+            b.remove_load_patterns()
+            b.create_loads({"WIND": 1.0})
+            res = b.run_static_analysis(rebuild=False)
+            fx_totals.append(sum(r["fx"] for r in res["reactions"].values()))
+        # Equal across cases (not k× the k-th case) and equal to the applied
+        # 1e5 N lateral load (not 2e5).
+        assert fx_totals[0] == pytest.approx(fx_totals[1])
+        assert abs(fx_totals[0]) == pytest.approx(1.0e5)
+    finally:
+        ops.wipe()
