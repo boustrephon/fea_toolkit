@@ -78,6 +78,12 @@ markers = [
 ]
 filterwarnings = [
     "ignore::UserWarning:pyvista.jupyter.notebook",
+    # trame_vtk (a PyVista dependency) still calls vtkCellArray.GetData(), which
+    # VTK 9.6 deprecated in favour of GetOffsetsArray()/GetConnectivityArray().
+    # This upstream noise is triggered through plotter.export_html(); nothing in
+    # fea_toolkit calls GetData() itself, so the only real fix is a trame_vtk
+    # upgrade.
+    "ignore:Call to deprecated method GetData:DeprecationWarning:trame_vtk",
 ]
 
 [tool.ruff]
