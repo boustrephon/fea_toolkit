@@ -1788,8 +1788,8 @@ def test_build_once_manual_recipe_does_not_accumulate():
     md = make_sample_model()
     mm = preprocess_model(md, {"element_type": "elasticBeamColumn", "split_elements": False})
     b = AnalysisBuilder(mm, {"element_type": "elasticBeamColumn"})
-    b.build_domain()
     try:
+        b.build_domain()
         fx_totals = []
         for _ in range(2):
             b.remove_load_patterns()
