@@ -570,7 +570,7 @@ def element(elem_type: str, tag: int, *args: Any) -> None:
         element('forceBeamColumn', tag, iNode, jNode, transfTag, integrationTag)
 
         # Displacement-based beam-column
-        element('dispBeamColumn', tag, iNode, jNode, numIntPts, secTag, transfTag)
+        element('dispBeamColumn', tag, iNode, jNode, transfTag, integrationTag)
 
         # Nonlinear beam-column (simplified, npts integration points)
         element('nonlinearBeamColumn', tag, iNode, jNode, numIntPts, secTag, transfTag)
@@ -641,7 +641,7 @@ def geomTransf(transf_type: str, tag: int, *args: Any) -> None:
 # ============================================================================
 
 def beamIntegration(integration_type: str, tag: int, *args: Any) -> None:
-    """Define beam integration (for forceBeamColumn elements).
+    """Define beam integration (for forceBeamColumn and dispBeamColumn elements).
 
     Common forms::
 
