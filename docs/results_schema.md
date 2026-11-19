@@ -184,6 +184,29 @@ at the storage seam, and the older plotting readers
 > required force arrays; it does not write the explicit `*_local` aliases
 > (the metadata flag makes them derivable).  See ``docs/model_review.md``.
 
+**Shell (area) resultants (per case):**
+
+Membrane + bending resultants per unit width, recorded for the areas a static
+case actually analysed.  The block is **self‑indexed** by its own
+`static/{case}/shell_sap_id`: it records **one row per analysed area**, and the
+ids are **unique within a case** — the producer
+``AnalysisBuilder.extract_static_shell_forces()`` keys its result dict by
+``area_sap_id``, so a case can never record the same area twice.  The block may
+be shorter than the geometry's ``N_shell`` when areas are loads‑only or
+inactive.
+
+| Array | Shape | dtype | Description |
+|---|---|---|---|
+| `static/{case}/shell_sap_id` | `(N_shell_result,)` | `str` | Original SAP2000 AreaID — unique within the case |
+| `static/{case}/shell_fx` | `(N_shell_result,)` | `float` | Membrane direct `Nx` (force/width) |
+| `static/{case}/shell_fy` | `(N_shell_result,)` | `float` | Membrane direct `Ny` (force/width) |
+| `static/{case}/shell_fxy` | `(N_shell_result,)` | `float` | Membrane shear `Nxy` (force/width) |
+| `static/{case}/shell_mx` | `(N_shell_result,)` | `float` | Bending `Mx` (moment/width) |
+| `static/{case}/shell_my` | `(N_shell_result,)` | `float` | Bending `My` (moment/width) |
+| `static/{case}/shell_mxy` | `(N_shell_result,)` | `float` | Twisting `Mxy` (moment/width) |
+| `static/{case}/shell_elem_tag` | `(N_shell_result,)` | `int` | OpenSees element tag of the shell |
+| `static/{case}/shell_sec_name` | `(N_shell_result,)` | `str` | Section name |
+
 **Load case labels:**
 
 | Array | Shape | dtype | Description |

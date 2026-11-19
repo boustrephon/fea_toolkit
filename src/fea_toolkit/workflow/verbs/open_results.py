@@ -102,7 +102,10 @@ def run_open_results(context: StepContext, step: Step) -> list[StepResult]:
         (``shell_sap_id`` / ``shell_*`` / ``shell_elem_tag`` / ``shell_sec_name``);
         ``save_results`` re-serialises them through
         ``_collect_case_shell_forces``, which reads the dict-of-dicts shape
-        ``extract_static_shell_forces`` produces.  Rebuilding that shape here —
+        ``extract_static_shell_forces`` produces.  ``shell_sap_id`` is **unique
+        within a case** — one row per analysed area, because the producer keys
+        its result dict by ``area_sap_id`` — so keying the rebuilt dict by
+        ``area_id`` cannot overwrite a duplicate.  Rebuilding that shape here —
         rather than via
         :meth:`~fea_toolkit.io.results_repository.ResultsRepository.shell_forces`,
         which drops ``elem_tag`` / ``sec_name`` — keeps the round-trip lossless.

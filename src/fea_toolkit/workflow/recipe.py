@@ -510,7 +510,10 @@ def run_recipe(
     Args:
         recipe: The steps to run.
         model_data: The parsed model to prepare.  It is not mutated: a step that
-            edits properties works on a copy.
+            edits properties works on a copy.  May be ``None`` for an
+            archive-only recipe — one that starts with ``open_results`` — which
+            rebuilds ``model_data`` (and ``model``) from the archive rather than
+            a source model.
         model: An already-prepared topology to start from, if there is one.
         cancel: Zero-argument predicate; ``True`` stops the run at the next step
             boundary.  Defaults to "never cancelled".

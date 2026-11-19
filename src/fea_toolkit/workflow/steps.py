@@ -289,7 +289,9 @@ class StepContext:
     Attributes:
         model_data: The parsed model the recipe prepares.  A step that edits
             properties replaces this with a copy, so the caller's own model is
-            never mutated.
+            never mutated.  ``None`` until a model is provided or an
+            ``open_results`` step rebuilds it from the archive — an archive-only
+            recipe runs with no source model.
         model: The prepared topology, once a meshing step has produced one.
         case_results: ``{case name: payload}`` solved so far — the raw results a
             :mod:`fea_toolkit.workflow.verbs.combine` step reduces.  Analysis
