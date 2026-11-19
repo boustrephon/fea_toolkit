@@ -966,6 +966,14 @@ class LoadMixin:
         * ``[{name, nodes|selection}, ...]`` — explicit named groups (resolved
           to ``diaphragm_components`` by the Preprocessor).
         """
+        # Idempotency guard: ``create_loads`` re-enters this method on every
+        # load pass (and ``build_domain`` already applied diaphragms once), so
+        # a second application on the same OpenSees domain would emit duplicate
+        # ``rigidDiaphragm`` MPCs.  The flag is reset by ``build_domain``
+        # right after ``ops.wipe()`` destroys the previous domain's constraints.
+        if getattr(self, "_diaphragms_applied", False):
+            return 0
+
         levels = self.mesh_model.diaphragm_levels
         config_val = self.config.get("rigid_diaphragms", None)
         if config_val is False:
@@ -1089,6 +1097,7 @@ class LoadMixin:
                         exc,
                     )
                     continue
+        self._diaphragms_applied = True
         return applied
 
     def _apply_floor_ux_ties(self) -> int:

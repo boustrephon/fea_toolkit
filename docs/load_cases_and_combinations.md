@@ -128,6 +128,14 @@ objects in the solver setup that follows.  `run_static_cases` additionally
 calls `AnalysisBuilder.remove_load_patterns()` before each case **and** in a
 `finally`, so a failed case cannot leak its loads into the next.
 
+The manual recipe goes through `create_loads(…)`, so it does re-enter the
+diaphragm step — but `_apply_rigid_diaphragms()` is **idempotent**:
+`build_domain()` already applied the diaphragms once, and a `_diaphragms_applied`
+flag (set on the first application, reset only by the `ops.wipe()` inside
+`build_domain`) makes every later call short-circuit.  Repeated
+`remove_load_patterns()` → `create_loads(…)` passes therefore swap loads without
+ever duplicating a `rigidDiaphragm` MPC on the already-constrained domain.
+
 Steps (2) and (3) exist because of the OpenSees `wipeAnalysis` contract, which
 differs from `wipe`:
 

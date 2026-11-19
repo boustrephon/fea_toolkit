@@ -212,6 +212,11 @@ class AnalysisBuilder(
         self._area_element_types: dict[str, str] = dict(self.mesh_model.area_element_types)
         self._offset_rigid_links: list[tuple] = list(self.mesh_model.offset_rigid_links)
         self._edge_constraint_method: Optional[str] = None
+        # Whether rigid diaphragms have been applied to the current OpenSees
+        # domain.  Reset by ``build_domain`` after ``ops.wipe()``; read by
+        # ``_apply_rigid_diaphragms`` so ``create_loads`` never re-applies an
+        # already-constrained domain (see the build-once static-case recipe).
+        self._diaphragms_applied: bool = False
         # NOTE: mesh_model.edge_constraint_args is always [] today
         # (the Preprocessor stores detected pairs in detected_edge_pairs,
         # not constraint arguments).  The list is overwritten when
@@ -592,6 +597,9 @@ class AnalysisBuilder(
             self._last_static_results = None
             self._edge_constraint_method = None
             self._rigid_link_elems = {}
+            # ``ops.wipe()`` destroyed every SP/MP constraint, so the next
+            # ``_apply_rigid_diaphragms()`` must re-apply them.
+            self._diaphragms_applied = False
             # Reset skipped-material/section sets so supported materials
             # and sections can recover across rebuilds.
             self._skipped_nd_materials = set()
