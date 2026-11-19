@@ -1279,6 +1279,37 @@ separate tranche.
 `twoNodeLink`/`zeroLength` in `AnalysisBuilder` (update `typings/openseespy`
 stubs).  4) extend the pushover/RS/modal runners to honour link elements.
 
+#### P50 — Recover member-force / fiber demands for the dispBeamColumn distributed-load fallback
+Source: review of `opensees/_loads.py` / `opensees/_runner_pushover.py`
+(2026-11-20).
+
+**What.** `dispBeamColumn` (the default fiber pushover element) silently drops
+partial-span `-beamUniform` loads, so both load paths fall back to the
+statically-equivalent nodal pair (`beam_load_to_nodal_loads`).  That recovers
+the correct resultant (support reactions) but **not** the member's interior
+force diagram: the span is left unloaded, so mid-span moment and fiber demands
+are approximate.  The nodal pair is the equivalent load of a *fixed-end* beam,
+so it is only exact when the member ends are actually fixed.
+
+**Options (not yet chosen — do not implement without discussion).**
+1. **Element subdivision + full-span per-segment `-beamUniform`** — subdivide
+   the member (Preprocessor, frozen topology) and apply a piecewise-constant
+   `-beamUniform` per sub-element.  `dispBeamColumn` accepts full-span uniform
+   loads, so this recovers the force diagram to mesh resolution.  Cost: more
+   elements, and `rdist` positions must be re-mapped onto the children.
+2. **Switch the fiber pushover to `forceBeamColumn` / `nonlinearBeamColumn`**,
+   which accept partial-span `-beamUniform`, eliminating the fallback.  Cost:
+   force-based elements carry the conditioning risks in `.clinerules` §3.13.
+3. **Post-processing reconstruction** — keep the nodal fallback but add the
+   fixed-end force vector back to the reported `localForces` / section forces.
+   **This does not work for nonlinear elements that need the internal forces
+   during the analysis** (the domain still solves with nodal loads), so it is
+   deferred until that constraint is lifted.
+4. **Scope + document/warn** — use the fallback only where member-demand
+   fidelity is irrelevant and warn otherwise.
+
+The code comment at both fallback sites points here.
+
 #### Closed items (README reconciliation, 2026-08-25)
 - **Deeper opstool result-post-processing integration** — closed as **no
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB

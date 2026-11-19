@@ -496,6 +496,10 @@ class LoadMixin:
                 # silently drops partial-span ``-beamUniform`` loads, so apply
                 # the statically-equivalent nodal pair instead — preserving the
                 # correct resultant (verified against support reactions).
+                # KNOWN ISSUE (docs/_pending_work.md P50): this recovers the
+                # reactions but leaves the span unloaded, so the member's
+                # interior force diagram (mid-span moment, fiber demands) is
+                # only approximate for these loads.
                 if self._rejects_partial_span_eleload() and not (is_uniform and is_full_span):
                     _L = math.sqrt((nj.x - ni.x) ** 2 + (nj.y - ni.y) ** 2 + (nj.z - ni.z) ** 2)
                     nodal = beam_load_to_nodal_loads(
