@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Optional
 import numpy as np
 import openseespy.opensees as ops
 
-from ..model.geometry import get_local_axes
+from ..model.geometry import beam_moment_to_nodal_moments, get_local_axes
 from ..model.sap_data import ShellSection
 from ..utils import g_from_units
 from ._runner_static import _normalise_frame_response
@@ -438,6 +438,44 @@ class PushoverRunnerMixin:
                 nd_j = self.mesh_model.nodes.get(elem.node_j)
                 if nd_i is None or nd_j is None:
                     continue
+
+                # Distributed *moments* have no ``eleLoad`` form, so replace
+                # them with statically-equivalent nodal end moments — exactly as
+                # ``_create_loads`` does for gravity patterns.  Dispatch before
+                # the local-direction mapping below, so a moment value can never
+                # reach the transverse ``-beamUniform`` force path.
+                if getattr(ld, "load_type", "Force") == "Moment":
+                    _L = math.sqrt(
+                        (nd_j.x - nd_i.x) ** 2 + (nd_j.y - nd_i.y) ** 2 + (nd_j.z - nd_i.z) ** 2
+                    )
+                    nodal = beam_moment_to_nodal_moments(
+                        ld,
+                        elem,
+                        {
+                            elem.node_i: (nd_i.x, nd_i.y, nd_i.z),
+                            elem.node_j: (nd_j.x, nd_j.y, nd_j.z),
+                        },
+                        _L,
+                    )
+                    if nodal is None:
+                        logger.warning(
+                            "Frame distributed moment on %s has non-moment direction %r — skipped.",
+                            ld.frame_id,
+                            ld.direction,
+                        )
+                        continue
+                    for nd, comp in ((nd_i, nodal["i"]), (nd_j, nodal["j"])):
+                        ops.load(
+                            nd.node_tag,
+                            0.0,
+                            0.0,
+                            0.0,
+                            comp["mx"],
+                            comp["my"],
+                            comp["mz"],
+                        )
+                    continue
+
                 axis = np.array([nd_j.x - nd_i.x, nd_j.y - nd_i.y, nd_j.z - nd_i.z])
                 try:
                     vx, vy, vz = get_local_axes(axis, getattr(elem, "angle", 0.0))
