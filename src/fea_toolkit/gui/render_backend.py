@@ -169,6 +169,9 @@ class QtRenderBackend(PyVistaRenderer):
         actor is re-homed to the new viewport, so a symbol already on screen
         follows the pane the user is now working in rather than staying in the
         pane they last clicked.
+
+        Args:
+            plotter: The viewport the per-view annotation glyphs now render into.
         """
         if plotter is self._active_viewport:
             return
@@ -193,6 +196,11 @@ class QtRenderBackend(PyVistaRenderer):
         rather than once per actor; initial glyph creation keeps the default
         ``render=True``.  When the active viewport is unset, the actor is kept
         in the primary plotter rather than dropped.
+
+        Args:
+            actor: The per-view annotation actor to re-home.
+            render: When ``True`` (the default), re-render after moving *actor*;
+                ``False`` defers the redraw so a bulk relocation renders once.
         """
         target = self._active_viewport or self._plotter
         pickable = bool(actor.GetPickable())
@@ -242,11 +250,17 @@ class QtRenderBackend(PyVistaRenderer):
                 self._copy_category.pop(id(copy), None)
 
     def all_actors(self, category: str) -> list:
-        """Primary actors of *category* plus their per-viewport mirror copies.
+        """Primary actors of *category* plus any per-viewport mirror copies.
 
-        The union of a category's actors across every viewport — the primary
-        actors plus one independent copy per mirror.  To scope a list to a
-        single viewport (a picker's node list), use :meth:`actors_in`.
+        Mirrored categories — the model skeleton, node markers and results
+        overlays — return the primary actors plus one independent copy per
+        mirror.  Active-only categories (:data:`_PER_VIEW_CATEGORIES`) are never
+        mirrored, so they contribute their original actor once, even in a quad
+        view.  To scope a list to a single viewport (a picker's node list), use
+        :meth:`actors_in`.
+
+        Args:
+            category: The render category to list across every viewport.
         """
         actors = list(self._categories.get(category, ()))
         for _plotter, copy in self._mirror_copies.get(category, []):
@@ -254,13 +268,25 @@ class QtRenderBackend(PyVistaRenderer):
         return actors
 
     def actors_in(self, category: str, plotter: Any) -> list:
-        """Actors of *category* rendered in *plotter* (primary or a mirror).
+        """Actors of *category* rendered in *plotter*; empty when none match.
 
-        The primary plotter owns the category's own actors; each mirror owns its
-        independent copies.  Used to give each viewport's picker only the node
-        cloud that viewport actually renders, so a pick in a secondary pane
-        resolves to an actor local to that pane.
+        Mirrored categories (``"nodes"``, the skeleton, results overlays) live
+        in the primary plotter with an independent copy per mirror, so a
+        mirror's viewport returns only its own copies.  Active-only categories
+        (:data:`_PER_VIEW_CATEGORIES`) render in the effective active viewport
+        alone, so they return their tracked actors only when *plotter* is that
+        viewport — using the same primary fallback as relocation — and an empty
+        list for every other viewport.
+
+        Args:
+            category: The render category to look up.
+            plotter: The viewport to scope the lookup to.
         """
+        if category in _PER_VIEW_CATEGORIES:
+            target = self._active_viewport or self._plotter
+            if plotter is target:
+                return list(self._categories.get(category, ()))
+            return []
         if plotter is self._plotter:
             return list(self._categories.get(category, ()))
         return [copy for mirror, copy in self._mirror_copies.get(category, []) if mirror is plotter]
@@ -315,11 +341,16 @@ class QtRenderBackend(PyVistaRenderer):
         self._render_all()
 
     def set_categories_visible(self, visible: dict[str, bool]) -> None:
-        """Apply several categories' visibility, then render once.
+        """Apply several categories' visibility, then render every viewport once.
 
         The display-sync pass sets every skeleton category in one go — nodes,
         frames, shells, restraints and their load glyphs — so a batch of
-        visibility changes costs one render, not one per category.
+        visibility changes costs one render per viewport (primary and mirrors),
+        not one render per category.
+
+        Args:
+            visible: ``{category: visibility}`` to apply to the primary actors
+                and, for mirrored categories, each viewport's copy.
         """
         for category, value in visible.items():
             self._apply_category_visibility(category, value)

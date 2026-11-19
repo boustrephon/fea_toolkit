@@ -162,10 +162,44 @@ def test_a_secondary_viewport_pick_resolves_via_the_copy(window):
 
 
 def test_all_actors_returns_primary_plus_every_mirror_copy(window):
-    """``all_actors`` is the union of a category's actors across every viewport."""
+    """``all_actors`` for a mirrored category is the union across every viewport."""
     node_actors = window._backend.actors("nodes")
     assert node_actors
     assert len(window._backend.all_actors("nodes")) == len(node_actors) * 4
+
+
+def test_front_picker_tracks_its_own_node_actors_and_follows_a_rebuild(window):
+    """The Front pane's picker sees its own node copy, never another pane's, and
+    re-resolves the node cloud after a scene rebuild."""
+    front = window._quad.interactors[1]  # Front (XZ)
+    _interactor, front_picker, _mouse_filter = window._secondary_interactions[0]
+    assert _interactor is front
+
+    own = front_picker._current_node_actors()
+    assert own, "the Front picker has no node actors"
+    own_ids = {id(actor) for actor in own}
+    front_ids = {id(actor) for actor in front.renderer.actors.values()}
+    assert own_ids <= front_ids, "the picker sees actors it does not render"
+
+    # Its own copy only — never the primary's actors, never the other panes'.
+    primary = window._backend.actors("nodes")
+    assert primary
+    assert own_ids.isdisjoint({id(actor) for actor in primary})
+    other_ids = {
+        id(actor)
+        for pane in [window._quad.interactors[i] for i in (0, 2, 3)]
+        for actor in pane.renderer.actors.values()
+    }
+    assert own_ids.isdisjoint(other_ids)
+
+    # A scene rebuild replaces the node cloud; the callable re-resolves it
+    # rather than pinning the stale actors.
+    window.show_model(window._model)
+    rebuilt = front_picker._current_node_actors()
+    assert rebuilt
+    rebuilt_ids = {id(actor) for actor in rebuilt}
+    assert rebuilt_ids.isdisjoint(own_ids), "the picker pinned the old node actors"
+    assert rebuilt_ids <= {id(actor) for actor in front.renderer.actors.values()}
 
 
 def test_camera_action_targets_the_active_viewport(window):
