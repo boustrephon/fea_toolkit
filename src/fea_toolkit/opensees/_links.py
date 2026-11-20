@@ -26,7 +26,13 @@ import numpy as np
 import openseespy.opensees as ops
 
 from ..model.geometry import get_local_axes
-from ..model.sap_data import DamperParams, GapParams, HookParams, WenParams
+from ..model.sap_data import (
+    DamperParams,
+    GapParams,
+    HookParams,
+    RubberIsolatorParams,
+    WenParams,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +68,14 @@ _DAMPER_UNSUPPORTED = frozenset(
 #: Steel02 (Giuffré–Menegotto-Pinto) transition-curvature defaults.
 _STEEL02_CR1 = 0.925
 _STEEL02_CR2 = 0.15
+
+#: Link types emitted as dedicated bearing elements (Phase 2b(ii)); the
+#: bearing couples the U2/U3 shear internally and takes Elastic materials for
+#: the axial / torsional / bending DOFs.
+_BEARING_TYPES = frozenset({"Rubber Isolator", "Friction Isolator"})
+
+#: Tag block for friction models (distinct from the link material block).
+_LINK_FRICTION_BASE = 710000
 
 
 def _is_per_dof_nonlinear(prop) -> bool:
@@ -197,6 +211,30 @@ def _hysteretic_one_sided_args(ke, open, side, extent=None):
     return [*pos, *neg, 1.0, 1.0, 0.0, 0.0, 0.0]
 
 
+def _rubber_bearing_params(prop):
+    """Return ``(kInit, qd, alpha1)`` for a Rubber Isolator's shear DOFs.
+
+    ``kInit`` / ``qd`` act on the coupled U2/U3 shear, so the U2 value is used
+    (U3 for an axisymmetric bearing is equal).  ``alpha1`` is the post-yield
+    stiffness ratio.
+    """
+    p = prop.nonlinear_params
+    k = p.k if isinstance(p, RubberIsolatorParams) else prop.ke
+    fy = p.fy if isinstance(p, RubberIsolatorParams) else [0.0] * 6
+    ratio = p.ratio if isinstance(p, RubberIsolatorParams) else 0.0
+    k_init = k[1] if k[1] > 0.0 else k[2]
+    qd = fy[1] if fy[1] > 0.0 else fy[2]
+    return k_init, qd, ratio
+
+
+def _emit_friction_model(frn_tag, p):
+    """Create the friction model for a Friction Isolator (Coulomb/VelDependent)."""
+    if p.mu_fast > 0.0 and p.rate > 0.0:
+        ops.frictionModel("VelDependent", frn_tag, p.mu, p.mu_fast, p.rate)
+    else:
+        ops.frictionModel("Coulomb", frn_tag, p.mu)
+
+
 class LinkMixin:
     """Emit link (connection / isolator / damper) elements."""
 
@@ -208,6 +246,7 @@ class LinkMixin:
         assigns = getattr(self.mesh_model, "link_assignments", None) or {}
         model = self.config.get("link_model", "elastic")
         wen_model = self.config.get("wen_model", "steel02")
+        rubber_model = self.config.get("rubber_model", "plasticity")
 
         try:
             max_ops_tag = max(ops.getEleTags(), default=0)
@@ -219,6 +258,7 @@ class LinkMixin:
         )
         next_tag = max(max_frame, max_ops_tag, max(self.frame_tag_map.values(), default=0)) + 1
         mat_cache: dict[tuple, int] = {}
+        friction_count = [0]
 
         for link in links:
             prop = props.get(assigns.get(link.link_id, ""))
@@ -228,7 +268,9 @@ class LinkMixin:
                 )
                 continue
             if model == "nonlinear" and not (
-                prop.link_type == "Linear" or _is_per_dof_nonlinear(prop)
+                prop.link_type == "Linear"
+                or _is_per_dof_nonlinear(prop)
+                or prop.link_type in _BEARING_TYPES
             ):
                 raise NotImplementedError(
                     f"link property {prop.name!r} is type {prop.link_type!r}; "
@@ -255,6 +297,21 @@ class LinkMixin:
                 if j_tag is None:
                     logger.warning("link %s references a missing node — skipped", link.link_id)
                     continue
+
+            if model == "nonlinear" and prop.link_type in _BEARING_TYPES:
+                self._create_bearing_element(
+                    link,
+                    prop,
+                    ni,
+                    j_tag,
+                    grounded,
+                    next_tag,
+                    mat_cache,
+                    rubber_model,
+                    friction_count,
+                )
+                next_tag += 1
+                continue
 
             mats, dirs = self._link_spring_mats(prop, mat_cache, model, wen_model)
             if not dirs:
@@ -421,6 +478,93 @@ class LinkMixin:
                 "ratio that is not parsed yet (plan §9)"
             )
         return None
+
+    def _create_bearing_element(
+        self, link, prop, ni, j_tag, grounded, next_tag, mat_cache, rubber_model, friction_count
+    ):
+        """Emit a bearing element for a Rubber/Friction Isolator link.
+
+        The bearing models the coupled U2/U3 shear internally and takes
+        ``Elastic`` materials for the axial (``-P``), torsional (``-T``) and
+        bending (``-My``/``-Mz``) DOFs.  ``iNode`` is the bottom (concave
+        sliding surface for an FP bearing), ``jNode`` the top (slider).
+        """
+        if grounded:
+            i_node, j_node = j_tag, ni  # j_tag is the coincident ground node
+        else:
+            i_node, j_node = ni, j_tag
+
+        aux = {
+            "P": self._bearing_aux_mat(prop, 0, mat_cache),
+            "T": self._bearing_aux_mat(prop, 3, mat_cache),
+            "My": self._bearing_aux_mat(prop, 4, mat_cache),
+            "Mz": self._bearing_aux_mat(prop, 5, mat_cache),
+        }
+
+        if prop.link_type == "Rubber Isolator":
+            k_init, qd, alpha1 = _rubber_bearing_params(prop)
+            if rubber_model == "boucwen":
+                args = [
+                    "elastomericBearingBoucWen",
+                    next_tag,
+                    i_node,
+                    j_node,
+                    k_init,
+                    qd,
+                    alpha1,
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.5,
+                    0.5,
+                ]
+            else:
+                args = [
+                    "elastomericBearingPlasticity",
+                    next_tag,
+                    i_node,
+                    j_node,
+                    k_init,
+                    qd,
+                    alpha1,
+                    0.0,
+                    0.0,
+                ]
+        else:  # Friction Isolator
+            p = prop.nonlinear_params
+            frn_tag = _LINK_FRICTION_BASE + friction_count[0]
+            friction_count[0] += 1
+            _emit_friction_model(frn_tag, p)
+            k_init = p.k[1] if p.k[1] > 0.0 else p.k[2]
+            args = [
+                "singleFPBearing",
+                next_tag,
+                i_node,
+                j_node,
+                frn_tag,
+                p.radius,
+                k_init,
+            ]
+
+        args += ["-P", aux["P"], "-T", aux["T"], "-My", aux["My"], "-Mz", aux["Mz"]]
+        orient = self._link_orient(link)
+        if orient is not None:
+            vx, vy = orient
+            args += ["-orient", *vx, *vy]
+        ops.element(*args)
+
+    def _bearing_aux_mat(self, prop, dof, mat_cache):
+        """Elastic material for a bearing's axial/torsional/bending DOF."""
+        if prop.fixed[dof]:
+            k = self._link_fixed_stiffness(prop)
+            return self._cached_mat(mat_cache, ("elastic", k), "Elastic", k)
+        k = prop.ke[dof]
+        if k > 0.0:
+            return self._cached_mat(mat_cache, ("elastic", k), "Elastic", k)
+        # Released DOF: a tiny (but non-zero) stiffness, so the bearing
+        # element's internal 1/k never divides by zero — physically ~free.
+        tiny = max((v for v in prop.ke if v > 0.0), default=1.0) * 1.0e-6
+        return self._cached_mat(mat_cache, ("elastic", tiny), "Elastic", tiny)
 
     @staticmethod
     def _link_fixed_stiffness(prop) -> float:

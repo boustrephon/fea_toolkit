@@ -373,3 +373,48 @@ def test_nonlinear_per_dof_links_build():
         assert len(ops.getEleTags()) == 4  # one twoNodeLink per link
     finally:
         ops.wipe()
+
+
+# ── Phase 2b(ii): bearing elements (isolators) ─────────────────────────
+
+
+def test_rubber_bearing_params():
+    """The rubber bearing helper extracts (kInit, qd, alpha1) from the shear DOFs."""
+    from fea_toolkit.model.sap_data import LinkProperty, RubberIsolatorParams
+    from fea_toolkit.opensees._links import _rubber_bearing_params
+
+    prop = LinkProperty(
+        name="R",
+        link_type="Rubber Isolator",
+        ke=[0.0] * 6,
+        nonlinear_params=RubberIsolatorParams(
+            k=[0.0, 5000.0, 5000.0, 0.0, 0.0, 0.0], fy=[0.0, 50.0, 50.0, 0.0, 0.0, 0.0], ratio=0.1
+        ),
+    )
+    assert _rubber_bearing_params(prop) == (5000.0, 50.0, 0.1)
+
+
+def test_emit_friction_model_coulomb_vs_veldependent(monkeypatch):
+    """Coulomb is used unless mu_fast/rate are present, then VelDependent."""
+    import fea_toolkit.opensees._links as links_mod
+    from fea_toolkit.model.sap_data import FrictionIsolatorParams
+
+    calls = []
+    monkeypatch.setattr(links_mod.ops, "frictionModel", lambda *a: calls.append(a))
+
+    links_mod._emit_friction_model(1, FrictionIsolatorParams(mu=0.06))
+    assert calls == [("Coulomb", 1, 0.06)]
+
+    calls.clear()
+    links_mod._emit_friction_model(2, FrictionIsolatorParams(mu=0.05, mu_fast=0.16, rate=0.6))
+    assert calls == [("VelDependent", 2, 0.05, 0.16, 0.6)]
+
+
+# Note: a static shear-push behaviour test for the bearing elements is deferred
+# to P2d (benchmark tests).  The ``elastomericBearing*`` / ``singleFPBearing``
+# elements are numerically sensitive (OpenSees wiki: "the element can be
+# sensitive numerically … smaller time step recommended") and need the
+# reference dynamic models (gravity + mass + ground motion), not a one-DOF
+# static rig.  The emitter's parameters are pinned by
+# ``test_rubber_bearing_params`` / ``test_emit_friction_model_*`` above and by
+# ``test_bearing_links_build`` in ``tests/test_analysis_csm.py``.

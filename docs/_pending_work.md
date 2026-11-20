@@ -1270,35 +1270,37 @@ effective stiffness for *all* link types, so elastic static / modal / RS
 analyses work for linear and isolator links alike.
 
 **Remaining (Phase 2).** The plan lives in
-[`docs/nonlinear_link_plan.md`](nonlinear_link_plan.md).  **P2a (parse) and
-P2b(i) (per-DOF emitters) are done**: `link_model: "nonlinear"` now emits
-Gap/Hook (one-sided `Hysteretic`), Plastic (Wen) (`Steel02` by default,
-`Hysteretic` via `wen_model`), and the damper subtypes with a clean 1:1
-(`Viscous`/`Parallel`).  **Still raising `NotImplementedError`** until
-P2b(ii)/2e: Rubber/Friction Isolator (bearing elements), the bilinear/friction
-damper subtypes (post-yield ratio / μ not parsed), multilinear, and T/C-FP.
+[`docs/nonlinear_link_plan.md`](nonlinear_link_plan.md).  **P2a (parse), P2b(i)
+(per-DOF emitters) and P2b(ii) (bearing elements) are done**: `link_model:
+"nonlinear"` now emits Gap/Hook (one-sided `Hysteretic`), Plastic (Wen)
+(`Steel02` by default, `Hysteretic` via `wen_model`), the damper subtypes with a
+clean 1:1 (`Viscous`/`Parallel`), Rubber Isolator (`elastomericBearing*`) and
+Friction Isolator (`singleFPBearing` + `Coulomb`/`VelDependent`).  **Still
+raising `NotImplementedError`** until P2c/P2e: the bilinear/friction damper
+subtypes (post-yield ratio / μ not parsed), multilinear, T/C-FP and triple-FP.
 **Decisions (recorded in the plan):** D1–D3 the one-sided / backbone family
 (Gap, Hook, bilinear, multilinear, friction dampers) uses a single `Hysteretic`
 backbone with neutral pinch/damage — not `ENT`/`ElasticPPGap`/`ElasticPP`;
 **D10** Plastic (Wen) defaults to `Steel02` (smooth, explicit `Fy`, `R0`↔`n`),
 with `Hysteretic` as the opt-in sharp-bilinear alternative and `BoucWen`
 rejected (no explicit `Fy`); D4 friction isolator starts `Coulomb`,
-`VelDependent` later; D6 scope items 1–4, benchmarks/stretch as follow-up.  The
-`Hysteretic` neutral defaults carry a **one-time cyclic check**, to be exposed
-as a **workflow verb** so a generated model's script re-runs it (plan §7,
-D7/D8).  `tests/test_link_nonlinear.py` pins the compression-only backbone to
-`ENT`, the tension-only backbone to `ElasticPP` (monotonic, D9), the `Steel02`
-smooth yield, and the neutral-defaults cyclic check.  Link *local axes* are
-parsed; a non-axis-aligned `CoordDir2` is not yet honoured (stretch).
+`VelDependent` when `mu_fast`/`rate` present; D6 scope items 1–4,
+benchmarks/stretch as follow-up.  The `Hysteretic` neutral defaults carry a
+**one-time cyclic check**, to be exposed as a **workflow verb** so a generated
+model's script re-runs it (plan §7, D7/D8).  `tests/test_link_nonlinear.py`
+pins the compression-only backbone to `ENT`, the tension-only backbone to
+`ElasticPP` (monotonic, D9), the `Steel02` smooth yield, the neutral-defaults
+cyclic check, and the bearing/friction-model emitter args.  Link *local axes*
+are parsed; a non-axis-aligned `CoordDir2` is not yet honoured (stretch).
 
 **Outline steps.** 1) ✅ parse connectivity (incl. grounded links).  2) ✅
 `LinkProperty` + `link_assignments` + parse `LINK PROPERTY ASSIGNMENTS` /
 `01 - GENERAL` / `02 - LINEAR`.  3) ✅ retain link nodes + emit
 `twoNodeLink`/`zeroLength` in `AnalysisBuilder`.  4) ✅ P2a parse the `03+`
 tables + E2K tokens into `nonlinear_params` sub-dataclasses.  5) ✅ P2b(i) emit
-per-DOF nonlinear materials (Gap/Hook/Wen/dampers).  6) ☐ P2b(ii) bearing
-elements + P2c dispatch/warnings + P2d check verb (see
-`docs/nonlinear_link_plan.md`).
+per-DOF nonlinear materials (Gap/Hook/Wen/dampers).  6) ✅ P2b(ii) emit bearing
+elements (rubber/FP isolators).  7) ☐ P2c dispatch/warnings + P2d check verb
+(see `docs/nonlinear_link_plan.md`).
 
 #### P50 — Recover member-force / fiber demands for the dispBeamColumn distributed-load fallback
 Source: review of `opensees/_loads.py` / `opensees/_runner_pushover.py`

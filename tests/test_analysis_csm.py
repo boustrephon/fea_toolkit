@@ -2033,7 +2033,7 @@ def test_linear_link_builds_and_supports():
 
 
 def test_nonlinear_link_raises_in_nonlinear_mode():
-    """A rubber-isolator link raises in nonlinear mode; elastic mode builds."""
+    """An unsupported (T/C friction) isolator raises in nonlinear mode; elastic builds."""
     import openseespy.opensees as ops
 
     from fea_toolkit.model.sap_data import LinkElement, LinkProperty
@@ -2055,17 +2055,77 @@ def test_nonlinear_link_raises_in_nonlinear_mode():
         link_connectivity=[LinkElement(link_id="ISO_1", node_i="1", node_j="2")],
         link_assignments={"ISO_1": "RUB"},
         link_properties={
-            "RUB": LinkProperty(name="RUB", link_type="Rubber Isolator", ke=[1000.0] * 6)
+            "RUB": LinkProperty(name="RUB", link_type="T/C Friction Isolator", ke=[1000.0] * 6)
         },
     )
     try:
         mm = preprocess_model(md, {})
         ab = AnalysisBuilder(mm, {"link_model": "nonlinear"})
-        with pytest.raises(NotImplementedError, match="Rubber Isolator"):
+        with pytest.raises(NotImplementedError, match="T/C Friction Isolator"):
             ab.build_domain()
         ab2 = AnalysisBuilder(mm, {"link_model": "elastic"})
         ab2.build_domain()
         assert len(ops.getEleTags()) == 1
+    finally:
+        ops.wipe()
+
+
+def test_bearing_links_build():
+    """Rubber/Friction Isolator links emit bearing elements (no raise)."""
+    import openseespy.opensees as ops
+
+    from fea_toolkit.model.sap_data import (
+        FrictionIsolatorParams,
+        LinkElement,
+        LinkProperty,
+        RubberIsolatorParams,
+    )
+
+    md = SAPModelData(
+        nodes={
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=0.0, y=0.0, z=1000.0),
+        },
+        restraints={"1": Restraint([1, 1, 1, 1, 1, 1])},
+        materials={},
+        sections={},
+        frame_elements={},
+        area_elements={},
+        frame_assignments={},
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
+        link_connectivity=[
+            LinkElement(link_id="B1", node_i="1", node_j="2"),
+            LinkElement(link_id="B2", node_i="1", node_j="2"),
+        ],
+        link_assignments={"B1": "RUB", "B2": "FP"},
+        link_properties={
+            "RUB": LinkProperty(
+                name="RUB",
+                link_type="Rubber Isolator",
+                ke=[1.0e6, 5000.0, 5000.0, 0.0, 0.0, 0.0],
+                nonlinear_params=RubberIsolatorParams(
+                    k=[0.0, 5000.0, 5000.0, 0.0, 0.0, 0.0],
+                    fy=[0.0, 50.0, 50.0, 0.0, 0.0, 0.0],
+                    ratio=0.1,
+                ),
+            ),
+            "FP": LinkProperty(
+                name="FP",
+                link_type="Friction Isolator",
+                ke=[1.0e6, 5000.0, 5000.0, 0.0, 0.0, 0.0],
+                nonlinear_params=FrictionIsolatorParams(
+                    k=[0.0, 5000.0, 5000.0, 0.0, 0.0, 0.0], radius=2.0, mu=0.06
+                ),
+            ),
+        },
+    )
+    try:
+        mm = preprocess_model(md, {})
+        ab = AnalysisBuilder(mm, {"link_model": "nonlinear"})
+        ab.build_domain()
+        assert len(ops.getEleTags()) == 2  # one bearing element per link
     finally:
         ops.wipe()
 

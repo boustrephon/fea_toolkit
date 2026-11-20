@@ -555,6 +555,30 @@ def nDMaterial(mat_type: str, tag: int, *args: Any) -> None:
     ...
 
 # ============================================================================
+# Friction model commands
+# ============================================================================
+
+
+def frictionModel(frn_type: str, tag: int, *args: Any) -> None:
+    """Define a friction model (used by FP bearing elements).
+
+    Forms::
+
+        # Coulomb friction — kinetic friction independent of sliding velocity
+        frictionModel('Coulomb', tag, mu)
+
+        # Velocity-dependent friction (PTFE-like)
+        frictionModel('VelDependent', tag, muSlow, muFast, transRate)
+
+    Args:
+        frn_type: Friction model type (``'Coulomb'``, ``'VelDependent'``, …).
+        tag: Friction model tag.
+        *args: Type-specific parameters.
+    """
+    ...
+
+
+# ============================================================================
 # Element commands
 # ============================================================================
 
@@ -592,6 +616,19 @@ def element(elem_type: str, tag: int, *args: Any) -> None:
 
         # Two-node link (isolator / connection / damper; uncoupled per-DOF springs)
         element('twoNodeLink', tag, iNode, jNode, '-mat', m1, m2, ..., '-dir', 1, 2, ...)
+
+        # Elastomeric bearing (bilinear plasticity in coupled shear)
+        element('elastomericBearingPlasticity', tag, iNode, jNode, kInit, qd, alpha1,
+                alpha2, mu, '-P', pTag, '-T', tTag, '-My', myTag, '-Mz', mzTag, ...)
+
+        # Elastomeric bearing (Bouc-Wen smooth hysteresis in coupled shear)
+        element('elastomericBearingBoucWen', tag, iNode, jNode, kInit, qd, alpha1,
+                alpha2, mu, eta, beta, gamma, '-P', pTag, '-T', tTag, '-My', myTag,
+                '-Mz', mzTag, ...)
+
+        # Single friction-pendulum bearing
+        element('singleFPBearing', tag, iNode, jNode, frnMdlTag, Reff, kInit,
+                '-P', pTag, '-T', tTag, '-My', myTag, '-Mz', mzTag, ...)
 
     Args:
         elem_type: Element type string.
