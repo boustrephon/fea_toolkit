@@ -776,23 +776,57 @@ class SAP2000Parser:
             props.setdefault(name, LinkProperty(name=name, link_type=link_type))
         return props
 
+    def _get_link_local_axes(self) -> dict[str, dict[str, Any]]:
+        """Parse ``LINK LOCAL AXES ASSIGNMENTS 1 - TYPICAL`` / ``2 - ADVANCED``.
+
+        Returns ``{link_id: {"angle", "coord_dir1", "coord_dir2"}}``.  The
+        reference-vector directions (``2 - ADVANCED``) are what orient a
+        zero-length link (e.g. a base isolator whose U1 must be vertical).
+        """
+        axes: dict[str, dict[str, Any]] = {}
+        for rec in self._raw_tables.get("LINK LOCAL AXES ASSIGNMENTS 1 - TYPICAL", []):
+            link_id = str(rec.get("Link", "")).strip()
+            if link_id:
+                axes.setdefault(link_id, {}).setdefault(
+                    "angle", float(rec.get("Angle", 0.0) or 0.0)
+                )
+        for rec in self._raw_tables.get("LINK LOCAL AXES ASSIGNMENTS 2 - ADVANCED", []):
+            link_id = str(rec.get("Link", "")).strip()
+            if not link_id:
+                continue
+            entry = axes.setdefault(link_id, {})
+            entry.setdefault("angle", float(rec.get("Angle", 0.0) or 0.0))
+            coord_dir1 = str(rec.get("CoordDir1", "")).strip()
+            coord_dir2 = str(rec.get("CoordDir2", "")).strip()
+            if coord_dir1:
+                entry["coord_dir1"] = coord_dir1
+            if coord_dir2:
+                entry["coord_dir2"] = coord_dir2
+        return axes
+
     def _get_link_connectivity(self) -> list[LinkElement]:
         """Parse ``CONNECTIVITY - LINK`` into link-endpoint records.
 
         A single-joint (grounded) link omits ``JointJ``, leaving ``node_j``
         empty.  Link *properties* are resolved separately by
-        :meth:`_get_link_properties` / :meth:`_get_link_assignments`.
+        :meth:`_get_link_properties` / :meth:`_get_link_assignments`; local
+        axes come from :meth:`_get_link_local_axes`.
         """
+        axes = self._get_link_local_axes()
         links: list[LinkElement] = []
         for rec in self._raw_tables.get("CONNECTIVITY - LINK", []):
             link_id = str(rec.get("Link", "")).strip()
             if not link_id:
                 continue
+            ax = axes.get(link_id, {})
             links.append(
                 LinkElement(
                     link_id=link_id,
                     node_i=str(rec.get("JointI", "")),
                     node_j=str(rec.get("JointJ", "")),
+                    angle=float(ax.get("angle", 0.0) or 0.0),
+                    coord_dir1=str(ax.get("coord_dir1", "")),
+                    coord_dir2=str(ax.get("coord_dir2", "")),
                 )
             )
         return links

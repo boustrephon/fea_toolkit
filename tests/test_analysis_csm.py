@@ -2068,3 +2068,36 @@ def test_nonlinear_link_raises_in_nonlinear_mode():
         assert len(ops.getEleTags()) == 1
     finally:
         ops.wipe()
+
+
+def test_link_orient_uses_reference_vectors_for_zero_length():
+    """A zero-length link with CoordDir1=+Z is oriented vertically."""
+    from fea_toolkit.model.sap_data import LinkElement, LinkProperty
+
+    md = SAPModelData(
+        nodes={
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=0.0, y=0.0, z=0.0),  # coincident
+        },
+        restraints={},
+        materials={},
+        sections={},
+        frame_elements={},
+        area_elements={},
+        frame_assignments={},
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
+        link_connectivity=[
+            LinkElement(link_id="ISO_1", node_i="1", node_j="2", coord_dir1="+Z", coord_dir2="+X")
+        ],
+        link_assignments={"ISO_1": "ISO_LIN"},
+        link_properties={
+            "ISO_LIN": LinkProperty(name="ISO_LIN", link_type="Linear", ke=[1000.0] * 6)
+        },
+    )
+    mm = preprocess_model(md, {})
+    ab = AnalysisBuilder(mm, {})
+    vx, vy = ab._link_orient(mm.links[0])
+    assert vx[2] == pytest.approx(1.0)  # U1 (axial) vertical
+    assert vy[0] == pytest.approx(1.0)  # local 2 = +X

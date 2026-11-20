@@ -28,6 +28,17 @@ logger = logging.getLogger(__name__)
 #: (500000) and soil-spring (600000) blocks.
 _LINK_MAT_BASE = 700000
 
+#: Global-axis direction tokens accepted by ``LINK LOCAL AXES ASSIGNMENTS
+#: 2 - ADVANCED`` (``CoordDir1`` / ``CoordDir2``), mapped to unit vectors.
+_DIRECTION_VECTORS: dict[str, np.ndarray] = {
+    "+X": np.array([1.0, 0.0, 0.0]),
+    "-X": np.array([-1.0, 0.0, 0.0]),
+    "+Y": np.array([0.0, 1.0, 0.0]),
+    "-Y": np.array([0.0, -1.0, 0.0]),
+    "+Z": np.array([0.0, 0.0, 1.0]),
+    "-Z": np.array([0.0, 0.0, -1.0]),
+}
+
 
 class LinkMixin:
     """Emit link (connection / isolator / damper) elements."""
@@ -90,20 +101,32 @@ class LinkMixin:
                 logger.warning("link %s has no active DOFs — skipped", link.link_id)
                 continue
 
-            if grounded:
-                ops.element("zeroLength", next_tag, j_tag, ni, "-mat", *mats, "-dir", *dirs)
-            else:
-                orient = self._link_orient(link.node_i, link.node_j)
-                if orient is None:
-                    # Zero-length link: twoNodeLink falls back to global axes.
-                    # SAP2000's LINK LOCAL AXES ASSIGNMENTS are not parsed yet.
-                    logger.debug(
-                        "link %s is zero-length; using global axes (local axes not parsed)",
-                        link.link_id,
-                    )
-                    ops.element("twoNodeLink", next_tag, ni, j_tag, "-mat", *mats, "-dir", *dirs)
+            orient = self._link_orient(link)
+            if orient is None:
+                # Zero-length link with no reference-vector axes: fall back to
+                # global axes (SAP's local axes are unspecified).
+                logger.debug("link %s has no local axes; using global axes", link.link_id)
+                if grounded:
+                    ops.element("zeroLength", next_tag, j_tag, ni, "-mat", *mats, "-dir", *dirs)
                 else:
-                    vx, vy = orient
+                    ops.element("twoNodeLink", next_tag, ni, j_tag, "-mat", *mats, "-dir", *dirs)
+            else:
+                vx, vy = orient
+                if grounded:
+                    ops.element(
+                        "zeroLength",
+                        next_tag,
+                        j_tag,
+                        ni,
+                        "-mat",
+                        *mats,
+                        "-dir",
+                        *dirs,
+                        "-orient",
+                        *vx,
+                        *vy,
+                    )
+                else:
                     ops.element(
                         "twoNodeLink",
                         next_tag,
@@ -149,14 +172,29 @@ class LinkMixin:
         scale = max((k for k in prop.ke if k > 0.0), default=1.0)
         return scale * 1.0e6
 
-    def _link_orient(self, node_i: str, node_j: str):
-        """Return ``(vx, vy)`` orientation vectors, or ``None`` for zero length."""
-        ni = self.mesh_model.nodes.get(node_i)
-        nj = self.mesh_model.nodes.get(node_j)
+    def _link_orient(self, link):
+        """Return ``(vx, vy)`` orientation vectors, or ``None`` for zero length.
+
+        Reference-vector axes (``coord_dir1`` / ``coord_dir2`` from
+        ``LINK LOCAL AXES ASSIGNMENTS 2 - ADVANCED``) take precedence — they
+        are the only way to orient a zero-length link (e.g. a vertical base
+        isolator whose U1 must be vertical).  Otherwise the I→J geometry and
+        the ``angle`` rotation (``1 - TYPICAL``) define the axes.
+        """
+        vx = _DIRECTION_VECTORS.get(link.coord_dir1.strip().upper())
+        if vx is not None:
+            vy = _DIRECTION_VECTORS.get(link.coord_dir2.strip().upper())
+            if vy is not None and abs(float(np.dot(vx, vy))) < 1e-9:
+                # coord_dir2 is an explicit, perpendicular local-2 direction.
+                return vx.copy(), vy.copy()
+            vx_o, vy_o, _vz = get_local_axes(vx, link.angle)
+            return vx_o, vy_o
+        ni = self.mesh_model.nodes.get(link.node_i)
+        nj = self.mesh_model.nodes.get(link.node_j)
         if ni is None or nj is None:
             return None
         axis = np.array([nj.x - ni.x, nj.y - ni.y, nj.z - ni.z])
         if np.linalg.norm(axis) < 1e-12:
             return None
-        vx, vy, _vz = get_local_axes(axis, 0.0)
-        return vx, vy
+        vx_o, vy_o, _vz = get_local_axes(axis, link.angle)
+        return vx_o, vy_o

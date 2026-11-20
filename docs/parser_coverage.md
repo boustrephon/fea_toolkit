@@ -126,7 +126,7 @@ registry below.  Three things about how they are matched:
 
 *Generated from `src/fea_toolkit/io/table_registry.py` — do not edit by hand.  Regenerate with `python docs/_generate_parser_tables.py`.*
 
-### Handled (50 exact names)
+### Handled (52 exact names)
 
 - `AREA AUTO MESH ASSIGNMENTS`
 - `AREA EDGE CONSTRAINT ASSIGNMENTS`
@@ -166,6 +166,8 @@ registry below.  Three things about how they are matched:
 - `JOINT COORDINATES`
 - `JOINT LOADS - FORCE`
 - `JOINT RESTRAINT ASSIGNMENTS`
+- `LINK LOCAL AXES ASSIGNMENTS 1 - TYPICAL`
+- `LINK LOCAL AXES ASSIGNMENTS 2 - ADVANCED`
 - `LINK PROPERTY ASSIGNMENTS`
 - `LINK PROPERTY DEFINITIONS 01 - GENERAL`
 - `LINK PROPERTY DEFINITIONS 02 - LINEAR`

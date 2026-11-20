@@ -71,18 +71,21 @@ class Restraint:
 class LinkElement:
     """A link (connection / isolator / damper) between two joints.
 
-    Parsed from ``CONNECTIVITY - LINK``.  The toolkit does not yet emit link
-    elements to OpenSees; this class exists so the parser can surface their
-    presence and the Preprocessor can refuse to silently drop their nodes
-    (see ``docs/_pending_work.md`` P49).
-
-    A single-joint (grounded) link has no end J — SAP2000 omits the
-    ``JointJ`` column for such links, so ``node_j`` is the empty string.
+    Parsed from ``CONNECTIVITY - LINK``.  A single-joint (grounded) link has
+    no end J — SAP2000 omits the ``JointJ`` column for such links, so
+    ``node_j`` is the empty string.  Local axes come from
+    ``LINK LOCAL AXES ASSIGNMENTS 1 - TYPICAL`` (``angle``) and
+    ``2 - ADVANCED`` (``coord_dir1`` / ``coord_dir2`` reference vectors); for a
+    zero-length link (e.g. a base isolator) the reference vectors are the only
+    way to orient it.
     """
 
     link_id: str  # SAP2000 label (e.g. "ISO_1")
     node_i: str  # SAP2000 joint label at end I
     node_j: str = ""  # SAP2000 joint label at end J (empty for a grounded link)
+    angle: float = 0.0  # rotation about local 1 (degrees, TYPICAL table)
+    coord_dir1: str = ""  # primary local-axis reference (e.g. "+Z")
+    coord_dir2: str = ""  # secondary local-plane reference (e.g. "+X")
 
 
 #: Local DOF order for a link's six directional properties (U1..R3), matching

@@ -1274,9 +1274,12 @@ links — the nonlinear types (Rubber/Friction Isolator, Gap, Hook, Wen, Damper)
 raise `NotImplementedError` until their `03+` property tables are parsed and
 the dedicated bearing/friction elements (`elastomericBearingBoucWen` /
 `elastomericBearingPlasticity`, `flatSliderBearing` / `singleFPBearing` /
-`tripleFPBearing` + `frictionModel`) are emitted; link *local axes*
-(`LINK LOCAL AXES ASSIGNMENTS`) are not parsed (zero-length links fall back to
-global axes); and the nonlinear runners should set `link_model: "nonlinear"`.
+`tripleFPBearing` + `frictionModel`) are emitted; and the nonlinear runners
+should set `link_model: "nonlinear"`.  Link *local axes* are now parsed
+(`LINK LOCAL AXES ASSIGNMENTS 1 - TYPICAL` angle and `2 - ADVANCED`
+`CoordDir1`/`CoordDir2` reference vectors, which orient a zero-length
+isolator); a non-axis-aligned `CoordDir2` is not yet honoured — the CSI
+default local 2/3 plane is used instead.
 
 **Outline steps.** 1) ✅ parse connectivity (incl. grounded links).  2) ✅
 `LinkProperty` + `link_assignments` + parse `LINK PROPERTY ASSIGNMENTS` /

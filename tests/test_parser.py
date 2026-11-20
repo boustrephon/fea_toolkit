@@ -281,6 +281,28 @@ TABLE:  "LINK PROPERTY DEFINITIONS 02 - LINEAR"
     assert prop.fixed[:3] == [False, False, True]
 
 
+def test_parse_link_local_axes(tmp_path):
+    """LINK LOCAL AXES ASSIGNMENTS 1 - TYPICAL / 2 - ADVANCED parse."""
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "CONNECTIVITY - LINK"
+   Link=ISO_1   JointI=1   JointJ=2
+   Link=ISO_2   JointI=3   JointJ=4
+TABLE:  "LINK LOCAL AXES ASSIGNMENTS 1 - TYPICAL"
+   Link=ISO_1   Angle=45
+TABLE:  "LINK LOCAL AXES ASSIGNMENTS 2 - ADVANCED"
+   Link=ISO_2   AdvanceAxes=Yes   CoordSys=GLOBAL   CoordDir1=+Z   CoordDir2=+X   Angle=0
+"""
+    s2k = tmp_path / "test_link_axes.s2k"
+    s2k.write_text(content)
+    md = SAP2000Parser(s2k).parse().get_model_data()
+    by_id = {link.link_id: link for link in md.link_connectivity}
+    assert by_id["ISO_1"].angle == 45.0
+    assert by_id["ISO_1"].coord_dir1 == ""
+    assert by_id["ISO_2"].angle == 0.0
+    assert by_id["ISO_2"].coord_dir1 == "+Z"
+    assert by_id["ISO_2"].coord_dir2 == "+X"
+
+
 def test_parse_area_section_properties(tmp_path):
     """Parse AREA SECTION PROPERTIES into ShellSection objects."""
     content = """File test.s2k was saved on m/d/yy at h:mm:ss
