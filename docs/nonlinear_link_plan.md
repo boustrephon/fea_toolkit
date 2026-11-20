@@ -187,9 +187,12 @@ compression-only special case exists to support.
 3. The nonlinear runners (`_runner_pushover.py`, NLD) set
    `link_model: "nonlinear"` by default (via `_set_defaults`, not a hard
    override, so a user can force `elastic` for a quick linearised check).
-4. The policy lives in one registry — `_SUPPORTED_NONLINEAR_LINK_TYPES` and
-   `_LINEARIZED_LINK_TYPES` — so "supported vs linearised vs rejected" has a
-   single source of truth.
+4. The policy lives in one registry — a `_LINK_EMISSION_FAMILY` dict mapping
+   each link type to its emitter family (`"linear"` / `"per-dof"` /
+   `"bearing"`, with `"unsupported"` as the default).  `_SUPPORTED_NONLINEAR_
+   LINK_TYPES` is derived from it (never hand-edited); "linearised" is the
+   rule *a non-`Linear` link under `link_model="elastic"` warns*, not a
+   separate enumerated set.
 
 ## 9. Gaps (no clean 1:1)
 
@@ -250,7 +253,10 @@ compression-only special case exists to support.
    validation deferred to P2d — the bearing elements are numerically sensitive
    and need the reference dynamic models.)
 4. **P49-P2c** — `link_model` dispatch, warnings, runner defaults, type
-   registry.
+   registry.  ✅ **Done** — `_LINK_EMISSION_FAMILY` registry (single source of
+   truth) + `_link_emission_family` helper, the elastic-mode linearisation
+   warning (deduped per property), family-based dispatch, and `link_model=
+   "nonlinear"` defaults in the pushover/transient runners.
 5. **P49-P2d** — the D8 check verb + recipe preset, benchmark tests (§10), and
    `docs/modeling_guidance.md` bearing/damper guidance.
 6. **P49-P2e (stretch)** — `tripleFPBearing`, T/C FP, friction-damper family,

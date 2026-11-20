@@ -1299,8 +1299,9 @@ are parsed; a non-axis-aligned `CoordDir2` is not yet honoured (stretch).
 `twoNodeLink`/`zeroLength` in `AnalysisBuilder`.  4) ✅ P2a parse the `03+`
 tables + E2K tokens into `nonlinear_params` sub-dataclasses.  5) ✅ P2b(i) emit
 per-DOF nonlinear materials (Gap/Hook/Wen/dampers).  6) ✅ P2b(ii) emit bearing
-elements (rubber/FP isolators).  7) ☐ P2c dispatch/warnings + P2d check verb
-(see `docs/nonlinear_link_plan.md`).
+elements (rubber/FP isolators).  7) ✅ P2c dispatch/warnings/runner-defaults +
+registry (`_LINK_EMISSION_FAMILY`).  8) ☐ P2d check verb + benchmarks (see
+`docs/nonlinear_link_plan.md`).
 
 #### P50 — Recover member-force / fiber demands for the dispBeamColumn distributed-load fallback
 Source: review of `opensees/_loads.py` / `opensees/_runner_pushover.py`

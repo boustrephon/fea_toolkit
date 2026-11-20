@@ -154,6 +154,11 @@ class TransientRunnerMixin:
         ``transient_exclude_below_ground`` (a bool that additionally excludes
         below-ground free nodes from the base-shear sum; default ``False``).
         """
+        # Nonlinear links (isolators, dampers) are the point of a transient
+        # analysis; default them on, but let an explicit link_model="elastic"
+        # override.
+        self.config.setdefault("link_model", "nonlinear")
+
         accel = np.asarray(accel, dtype=float)
         if num_steps is None:
             num_steps = len(accel)

@@ -55,10 +55,23 @@ _DIRECTION_VECTORS: dict[str, np.ndarray] = {
 # Nonlinear link material backbones (pure — no ops, unit-testable)
 # ═══════════════════════════════════════════════════════════════════
 
-#: Link types emitted per-DOF (one uniaxial spring per direction) in the
-#: nonlinear representation.  Bearing isolators (Phase 2b(ii)) replace the
-#: element itself and are not in this set.
-_NONLINEAR_PER_DOF_TYPES = frozenset({"Gap", "Hook", "Plastic (Wen)", "Damper"})
+#: Nonlinear link emission policy — the single source of truth for which link
+#: type gets which emitter.  ``"per-dof"`` types get one uniaxial spring per
+#: direction; ``"bearing"`` types get a dedicated bearing element.  Damper
+#: subtypes (``"Damper - …"``) resolve to ``"per-dof"`` via the ``startswith``
+#: check in :func:`_link_emission_family`; ``Linear`` resolves to ``"linear"``;
+#: anything else is ``"unsupported"`` (raises under ``link_model="nonlinear"``).
+_LINK_EMISSION_FAMILY: dict[str, str] = {
+    "Gap": "per-dof",
+    "Hook": "per-dof",
+    "Plastic (Wen)": "per-dof",
+    "Damper": "per-dof",
+    "Rubber Isolator": "bearing",
+    "Friction Isolator": "bearing",
+}
+
+#: Link types with a nonlinear emitter (derived — never hand-edited).
+_SUPPORTED_NONLINEAR_LINK_TYPES = frozenset(_LINK_EMISSION_FAMILY)
 
 #: Damper subtypes with no clean per-DOF uniaxial emitter (plan §9).
 _DAMPER_UNSUPPORTED = frozenset(
@@ -69,18 +82,25 @@ _DAMPER_UNSUPPORTED = frozenset(
 _STEEL02_CR1 = 0.925
 _STEEL02_CR2 = 0.15
 
-#: Link types emitted as dedicated bearing elements (Phase 2b(ii)); the
-#: bearing couples the U2/U3 shear internally and takes Elastic materials for
-#: the axial / torsional / bending DOFs.
-_BEARING_TYPES = frozenset({"Rubber Isolator", "Friction Isolator"})
-
 #: Tag block for friction models (distinct from the link material block).
 _LINK_FRICTION_BASE = 710000
 
 
+def _link_emission_family(prop) -> str:
+    """Emission family: ``"linear"`` / ``"per-dof"`` / ``"bearing"`` / ``"unsupported"``."""
+    if prop.link_type == "Linear":
+        return "linear"
+    family = _LINK_EMISSION_FAMILY.get(prop.link_type)
+    if family is not None:
+        return family
+    if prop.link_type.startswith("Damper"):
+        return "per-dof"
+    return "unsupported"
+
+
 def _is_per_dof_nonlinear(prop) -> bool:
     """True if the link type is emitted per-DOF in the nonlinear representation."""
-    return prop.link_type in _NONLINEAR_PER_DOF_TYPES or prop.link_type.startswith("Damper")
+    return _link_emission_family(prop) == "per-dof"
 
 
 def _damper_subtype(prop) -> str:
@@ -259,6 +279,7 @@ class LinkMixin:
         next_tag = max(max_frame, max_ops_tag, max(self.frame_tag_map.values(), default=0)) + 1
         mat_cache: dict[tuple, int] = {}
         friction_count = [0]
+        warned_linearised: set[str] = set()
 
         for link in links:
             prop = props.get(assigns.get(link.link_id, ""))
@@ -267,11 +288,16 @@ class LinkMixin:
                     "link %s has no recognised property assignment — skipped", link.link_id
                 )
                 continue
-            if model == "nonlinear" and not (
-                prop.link_type == "Linear"
-                or _is_per_dof_nonlinear(prop)
-                or prop.link_type in _BEARING_TYPES
-            ):
+            family = _link_emission_family(prop)
+            if model == "elastic" and family != "linear" and prop.name not in warned_linearised:
+                warned_linearised.add(prop.name)
+                logger.warning(
+                    "link property %r (%s) represented by effective stiffness; "
+                    "set link_model='nonlinear' for nonlinear response",
+                    prop.name,
+                    prop.link_type,
+                )
+            if model == "nonlinear" and family == "unsupported":
                 raise NotImplementedError(
                     f"link property {prop.name!r} is type {prop.link_type!r}; "
                     "nonlinear emission is not implemented for this type yet "
@@ -298,7 +324,7 @@ class LinkMixin:
                     logger.warning("link %s references a missing node — skipped", link.link_id)
                     continue
 
-            if model == "nonlinear" and prop.link_type in _BEARING_TYPES:
+            if model == "nonlinear" and family == "bearing":
                 self._create_bearing_element(
                     link,
                     prop,

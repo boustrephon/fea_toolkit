@@ -112,6 +112,10 @@ class PushoverRunnerMixin:
             ``dof``, ``lateral_load_type`` and (when
             ``record_element_forces=True``) ``element_forces_history``.
         """
+        # Nonlinear links (isolators, dampers) are the point of a pushover;
+        # default them on, but let an explicit link_model="elastic" override.
+        self.config.setdefault("link_model", "nonlinear")
+
         valid_types = {"uniform", "triangular", "mode1", "pattern", "point"}
         if lateral_load_type not in valid_types:
             raise ValueError(

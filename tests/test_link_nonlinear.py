@@ -418,3 +418,64 @@ def test_emit_friction_model_coulomb_vs_veldependent(monkeypatch):
 # static rig.  The emitter's parameters are pinned by
 # ``test_rubber_bearing_params`` / ``test_emit_friction_model_*`` above and by
 # ``test_bearing_links_build`` in ``tests/test_analysis_csm.py``.
+
+
+# ── Phase 2c: emission-family registry + linearisation warning ────────
+
+
+def test_link_emission_family():
+    """The emission-family helper classifies every link type."""
+    from fea_toolkit.model.sap_data import LinkProperty
+    from fea_toolkit.opensees._links import _link_emission_family
+
+    def fam(t):
+        return _link_emission_family(LinkProperty(name="X", link_type=t))
+
+    assert fam("Linear") == "linear"
+    assert fam("Gap") == "per-dof"
+    assert fam("Hook") == "per-dof"
+    assert fam("Plastic (Wen)") == "per-dof"
+    assert fam("Damper") == "per-dof"
+    assert fam("Damper - Exponential") == "per-dof"  # subtype
+    assert fam("Rubber Isolator") == "bearing"
+    assert fam("Friction Isolator") == "bearing"
+    assert fam("T/C Friction Isolator") == "unsupported"
+    assert fam("Multilinear Elastic") == "unsupported"
+
+
+def test_elastic_mode_linearisation_warning(caplog):
+    """A nonlinear link under link_model='elastic' warns it is linearised."""
+    import logging
+
+    from fea_toolkit.model.sap_data import LinkElement, LinkProperty, Node, Restraint, SAPModelData
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+
+    md = SAPModelData(
+        nodes={
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=0.0, y=0.0, z=1000.0),
+        },
+        restraints={"1": Restraint([1, 1, 1, 1, 1, 1])},
+        materials={},
+        sections={},
+        frame_elements={},
+        area_elements={},
+        frame_assignments={},
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
+        link_connectivity=[LinkElement(link_id="B1", node_i="1", node_j="2")],
+        link_assignments={"B1": "RUB"},
+        link_properties={
+            "RUB": LinkProperty(name="RUB", link_type="Rubber Isolator", ke=[1000.0] * 6)
+        },
+    )
+    try:
+        mm = preprocess_model(md, {})
+        ab = AnalysisBuilder(mm, {"link_model": "elastic"})
+        with caplog.at_level(logging.WARNING):
+            ab.build_domain()
+        assert "represented by effective stiffness" in caplog.text
+    finally:
+        ops.wipe()
