@@ -1,26 +1,33 @@
-"""Nonlinear link materials — component-level comparison tests (P49 Phase 2).
+"""Nonlinear link materials — component-level tests (P49 Phase 2).
 
 Phase 2 emits the nonlinear SAP2000/ETABS link types as OpenSees materials.
 The *one-sided / backbone family* (Gap, Hook, bilinear, multilinear, friction
 dampers) is emitted with a single ``Hysteretic`` backbone whose pinching /
-damage knobs are pinned neutral — see ``docs/nonlinear_link_plan.md``.
+damage knobs are pinned neutral — see ``docs/nonlinear_link_plan.md``.  The
+Plastic (Wen) link emits ``Steel02`` (smooth, default) or ``Hysteretic``
+(sharp bilinear) via ``wen_model``.
 
-These tests pin that backbone to the purpose-built special-case materials
-OpenSees ships, so the "one model" choice is backed by evidence rather than
-assumption:
+The backbones are built by the shared helpers in
+``fea_toolkit.opensees._links``, so the emitter and these tests cannot drift
+apart.  Two reference materials pin the "one model" backbone to the
+purpose-built special cases OpenSees ships:
 
-* ``ENT`` (elastic-no-tension) is the reference for a **compression-only**
-  Gap;
-* ``ElasticPP`` (with ``epsyN = 0``) is the *monotonic* reference for a
-  **tension-only** Hook.
+* ``ENT`` (elastic-no-tension) — reference for a **compression-only** Gap;
+* ``ElasticPP`` (``epsyN = 0``) — *monotonic* reference for a **tension-only**
+  Hook.
 
-Both drives use a 1-DOF truss (``ndm=1, ndf=1``) as a material rig.  This is a
-test-only convenience; the production workflow stays 3-D (``.clinerules``
-§3.11).
+The 1-DOF truss (``ndm=1, ndf=1``) is a test-only material rig; the production
+workflow stays 3-D (``.clinerules`` §3.11).
 """
 
 import openseespy.opensees as ops
 import pytest
+
+from fea_toolkit.opensees._links import (
+    _hysteretic_bilinear_args,
+    _hysteretic_one_sided_args,
+    _wen_r0,
+)
 
 E = 1000.0  # reference spring stiffness (force per unit displacement)
 EMAX = 1.0  # backbone extent — beyond every test displacement
@@ -34,54 +41,12 @@ def _emit_ent(tag: int) -> None:
 
 def _emit_hysteretic_compression_only(tag: int) -> None:
     """Compression-only ``Hysteretic`` backbone: slope ``E``, tension released."""
-    ops.uniaxialMaterial(
-        "Hysteretic",
-        tag,
-        # positive (tension) branch — released, tiny residual stiffness
-        TINY * EMAX,
-        EMAX,
-        TINY * EMAX,
-        2 * EMAX,
-        TINY * EMAX,
-        3 * EMAX,
-        # negative (compression) branch — slope E
-        -E * EMAX,
-        -EMAX,
-        -2 * E * EMAX,
-        -2 * EMAX,
-        -3 * E * EMAX,
-        -3 * EMAX,
-        1.0,
-        1.0,
-        0.0,
-        0.0,
-        0.0,  # neutral pinching / damage
-    )
+    ops.uniaxialMaterial("Hysteretic", tag, *_hysteretic_one_sided_args(E, 0.0, "gap"))
 
 
 def _emit_hysteretic_tension_only(tag: int) -> None:
     """Tension-only ``Hysteretic`` backbone: slope ``E``, compression released."""
-    ops.uniaxialMaterial(
-        "Hysteretic",
-        tag,
-        E * EMAX,
-        EMAX,
-        2 * E * EMAX,
-        2 * EMAX,
-        3 * E * EMAX,
-        3 * EMAX,
-        -TINY * EMAX,
-        -EMAX,
-        -TINY * EMAX,
-        -2 * EMAX,
-        -TINY * EMAX,
-        -3 * EMAX,
-        1.0,
-        1.0,
-        0.0,
-        0.0,
-        0.0,
-    )
+    ops.uniaxialMaterial("Hysteretic", tag, *_hysteretic_one_sided_args(E, 0.0, "hook"))
 
 
 def _emit_elasticpp_tension_only(tag: int) -> None:
@@ -116,6 +81,41 @@ def _axial_force(emit, u: float) -> float:
     ops.analysis("Static")
     assert ops.analyze(1) == 0
     return float(ops.eleResponse(1, "axialForce")[0])
+
+
+def _axial_forces(emit, displacements: list[float]) -> list[float]:
+    """Axial forces of a 1-DOF truss driven through a displacement history.
+
+    One model is reused across the whole history (no ``wipe`` between steps) so
+    the material's path-dependent state is preserved — the rig for the cyclic
+    (D7) check.  The history is imposed through a ``Path`` time series on a
+    unit ``sp``, which is the reliable way to reverse a displacement-controlled
+    analysis mid-run.
+    """
+    ops.wipe()
+    ops.model("basic", "-ndm", 1, "-ndf", 1)
+    ops.node(1, 0.0)
+    ops.node(2, 1.0)
+    ops.fix(1, 1)
+    emit(1)
+    ops.element("truss", 1, 1, 2, 1.0, 1)
+    times = list(range(len(displacements) + 1))
+    values = [0.0, *displacements]
+    ops.timeSeries("Path", 1, "-time", *times, "-values", *values, "-factor", 1.0)
+    ops.pattern("Plain", 1, 1)
+    ops.sp(2, 1, 1.0)
+    ops.constraints("Penalty", 1.0e14, 1.0e14)
+    ops.numberer("RCM")
+    ops.system("BandGeneral")
+    ops.test("NormDispIncr", 1.0e-12, 50)
+    ops.algorithm("Newton")
+    ops.integrator("LoadControl", 1.0)
+    ops.analysis("Static")
+    forces: list[float] = []
+    for _ in displacements:
+        assert ops.analyze(1) == 0
+        forces.append(float(ops.eleResponse(1, "axialForce")[0]))
+    return forces
 
 
 def test_hysteretic_compression_only_matches_ent():
@@ -159,5 +159,217 @@ def test_hysteretic_tension_only_matches_elasticpp_monotonic():
         f_epp = _axial_force(_emit_elasticpp_tension_only, -0.01)
         assert f_epp == pytest.approx(0.0, abs=1.0e-9)
         assert abs(f_hyst) <= TINY * 0.01 * 2
+    finally:
+        ops.wipe()
+
+
+# ── Phase 2b(i): backbone helpers + nonlinear material behaviour ────────
+
+
+def test_hysteretic_bilinear_backbone_args():
+    """The bilinear backbone helper builds the expected ``Hysteretic`` args."""
+    args = _hysteretic_bilinear_args(1000.0, 50.0, 0.1)
+    assert args[0:2] == [50.0, 0.05]  # yield point (s1p, e1p) = (fy, fy/ke)
+    assert args[-5:] == [1.0, 1.0, 0.0, 0.0, 0.0]  # neutral pinch/damage
+    s3, e3 = args[4], args[5]
+    s2, e2 = args[2], args[3]
+    assert (s3 - s2) / (e3 - e2) == pytest.approx(0.1 * 1000.0)  # post-yield slope
+
+
+def test_wen_r0_mapping():
+    """``n → R0`` is monotonic and clamped to the Steel02 band."""
+    assert _wen_r0(1.0) == 10.0
+    assert _wen_r0(2.0) == 15.0
+    assert _wen_r0(4.0) == 25.0
+    assert _wen_r0(20.0) == 30.0  # clamped
+
+
+def test_gap_with_open_offset():
+    """A Gap carries zero force until the initial ``open`` gap closes."""
+    gap = 0.01
+
+    def emit(tag):
+        ops.uniaxialMaterial("Hysteretic", tag, *_hysteretic_one_sided_args(E, gap, "gap"))
+
+    try:
+        assert abs(_axial_force(emit, 0.005)) <= E * 1e-6 * 0.005 * 2  # tension
+        assert abs(_axial_force(emit, -0.005)) <= E * 1e-6 * 0.005 * 2  # gap not closed
+        f = _axial_force(emit, -0.03)
+        assert f == pytest.approx(E * (-0.03 + gap), rel=1e-6)
+    finally:
+        ops.wipe()
+
+
+def test_steel02_wen_smooth_yield():
+    """Steel02 (the Wen default) is elastic, then yields toward ``ratio * ke``."""
+    fy, ke, ratio = 50.0, E, 0.1
+
+    def emit(tag):
+        ops.uniaxialMaterial(
+            "Steel02", tag, fy, ke, ratio, _wen_r0(2.0), 0.925, 0.15, 0.0, 0.0, 0.0, 0.0, 0.0
+        )
+
+    try:
+        ey = fy / ke
+        assert _axial_force(emit, 0.02) == pytest.approx(ke * 0.02, rel=1e-6)
+        f = _axial_force(emit, 4 * ey)  # well past yield
+        assert f == pytest.approx(fy + ratio * ke * (4 * ey - ey), rel=2e-2)
+        assert f > fy  # it did yield
+    finally:
+        ops.wipe()
+
+
+def test_hysteretic_wen_bilinear_yield():
+    """``wen_model='hysteretic'`` gives an exact bilinear backbone."""
+    fy, ke, ratio = 50.0, E, 0.1
+
+    def emit(tag):
+        ops.uniaxialMaterial("Hysteretic", tag, *_hysteretic_bilinear_args(ke, fy, ratio))
+
+    try:
+        ey = fy / ke
+        assert _axial_force(emit, 0.02) == pytest.approx(ke * 0.02, rel=1e-6)
+        assert _axial_force(emit, 0.1) == pytest.approx(fy + ratio * ke * (0.1 - ey), rel=1e-6)
+    finally:
+        ops.wipe()
+
+
+def test_hysteretic_cyclic_neutral_defaults():
+    """D7: a full cycle shows no pinching and no strength degradation."""
+    fy, ke, ratio = 50.0, E, 0.1
+
+    def emit(tag):
+        ops.uniaxialMaterial("Hysteretic", tag, *_hysteretic_bilinear_args(ke, fy, ratio))
+
+    try:
+        peak = fy + ratio * ke * (0.1 - fy / ke)
+        forces = _axial_forces(emit, [0.1, 0.0, -0.1, 0.0, 0.1])
+        assert forces[0] == pytest.approx(peak, rel=1e-6)
+        assert forces[2] == pytest.approx(-peak, rel=1e-6)
+        assert forces[4] == pytest.approx(peak, rel=1e-6)  # no degradation
+    finally:
+        ops.wipe()
+
+
+def test_wen_steel02_emitter_args(monkeypatch):
+    """The Wen emitter passes the correct ``Steel02`` material args."""
+    import fea_toolkit.opensees._links as links_mod
+    from fea_toolkit.model.sap_data import LinkProperty, WenParams
+
+    calls = []
+    monkeypatch.setattr(links_mod.ops, "uniaxialMaterial", lambda *a: calls.append(a))
+
+    prop = LinkProperty(
+        name="W",
+        link_type="Plastic (Wen)",
+        ke=[1000.0] * 6,
+        nonlinear_params=WenParams(fy=[50.0] * 6, ratio=0.1, n=2.0),
+    )
+    tag = links_mod.LinkMixin._wen_dof_mat(links_mod.LinkMixin(), prop, 0, "steel02", {})
+    assert calls == [
+        ("Steel02", tag, 50.0, 1000.0, 0.1, 15.0, 0.925, 0.15, 0.0, 0.0, 0.0, 0.0, 0.0)
+    ]
+
+
+def test_damper_dof_material_selection(monkeypatch):
+    """A damper DOF emits ``Viscous`` (``ce > 0``) or ``Parallel`` (``ke > 0`` too)."""
+    import fea_toolkit.opensees._links as links_mod
+    from fea_toolkit.model.sap_data import DamperParams, LinkProperty
+
+    calls = []
+    monkeypatch.setattr(links_mod.ops, "uniaxialMaterial", lambda *a: calls.append(a))
+
+    pure = LinkProperty(
+        name="D",
+        link_type="Damper",
+        ke=[0.0] * 6,
+        ce=[50.0, 0, 0, 0, 0, 0],
+        nonlinear_params=DamperParams(cexp=0.3),
+    )
+    tag = links_mod.LinkMixin._damper_dof_mat(links_mod.LinkMixin(), pure, 0, {})
+    assert calls == [("Viscous", tag, 50.0, 0.3)]
+
+    calls.clear()
+    ve = LinkProperty(
+        name="VE",
+        link_type="Damper - Viscoelastic",
+        ke=[200.0, 0, 0, 0, 0, 0],
+        ce=[50.0, 0, 0, 0, 0, 0],
+        nonlinear_params=DamperParams(cexp=0.3),
+    )
+    links_mod.LinkMixin._damper_dof_mat(links_mod.LinkMixin(), ve, 0, {})
+    assert [c[0] for c in calls] == ["Elastic", "Viscous", "Parallel"]
+
+
+def test_nonlinear_per_dof_links_build():
+    """Gap/Hook/Wen/Damper links emit their nonlinear materials (no raise)."""
+    from fea_toolkit.model.sap_data import (
+        DamperParams,
+        GapParams,
+        HookParams,
+        LinkElement,
+        LinkProperty,
+        Node,
+        Restraint,
+        SAPModelData,
+        WenParams,
+    )
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+
+    md = SAPModelData(
+        nodes={
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=0.0, y=0.0, z=1000.0),
+        },
+        restraints={"1": Restraint([1, 1, 1, 1, 1, 1])},
+        materials={},
+        sections={},
+        frame_elements={},
+        area_elements={},
+        frame_assignments={},
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
+        link_connectivity=[
+            LinkElement(link_id="L1", node_i="1", node_j="2"),
+            LinkElement(link_id="L2", node_i="1", node_j="2"),
+            LinkElement(link_id="L3", node_i="1", node_j="2"),
+            LinkElement(link_id="L4", node_i="1", node_j="2"),
+        ],
+        link_assignments={"L1": "GAP", "L2": "HOOK", "L3": "WEN", "L4": "DMP"},
+        link_properties={
+            "GAP": LinkProperty(
+                name="GAP",
+                link_type="Gap",
+                ke=[1000.0] * 6,
+                nonlinear_params=GapParams(open=[0.0] * 6),
+            ),
+            "HOOK": LinkProperty(
+                name="HOOK",
+                link_type="Hook",
+                ke=[1000.0] * 6,
+                nonlinear_params=HookParams(open=[0.0] * 6),
+            ),
+            "WEN": LinkProperty(
+                name="WEN",
+                link_type="Plastic (Wen)",
+                ke=[1000.0] * 6,
+                nonlinear_params=WenParams(fy=[50.0] * 6, ratio=0.1, n=2.0),
+            ),
+            "DMP": LinkProperty(
+                name="DMP",
+                link_type="Damper - Exponential",
+                ke=[0.0] * 6,
+                ce=[50.0] + [0.0] * 5,
+                nonlinear_params=DamperParams(cexp=0.3),
+            ),
+        },
+    )
+    try:
+        mm = preprocess_model(md, {})
+        ab = AnalysisBuilder(mm, {"link_model": "nonlinear"})
+        ab.build_domain()
+        assert len(ops.getEleTags()) == 4  # one twoNodeLink per link
     finally:
         ops.wipe()

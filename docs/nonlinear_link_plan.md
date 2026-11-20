@@ -49,6 +49,7 @@ component-tested).  Benchmarks and the stretch link types are a follow-up
 | D7 | `Hysteretic` neutral defaults | guarded by a **one-time cyclic check** (§7) | none |
 | D8 | That cyclic check | also exposed as a **workflow verb**, so a generated model's script re-runs it (§7) | a test-only check — rejected |
 | D9 | Compression-only validation | `ENT` kept as a validation reference; `Hysteretic` compression-only compared to it in `tests/test_link_nonlinear.py` (§7) | none |
+| D10 | Plastic (Wen) material | **`Steel02` default** (smooth, explicit `Fy`, `R0`↔`n`); `Hysteretic` opt-in (`wen_model`) | `BoucWen` — rejected: no explicit `Fy`, six unexported knobs (§4) |
 
 ## 3. Architecture — data model and parsing (Phase 2a)
 
@@ -97,7 +98,7 @@ families:
 | Linear | `twoNodeLink` + `Elastic` (unchanged) | `Ke`, `Ce` | exact |
 | Gap | `twoNodeLink` + `Hysteretic` (compression branch = `Ke`, tension ≈ 0) | `Ke`→slope, `open`→backbone shift | good |
 | Hook | `twoNodeLink` + `Hysteretic` (tension branch = `Ke`, compression ≈ 0) | `Ke`→slope, `open`→backbone shift | good |
-| Plastic (Wen) | `twoNodeLink` + `Hysteretic` (or `BoucWen` per DOF) | `Ke`→`ko`, `ratio`→post-yield, `n`→sharpness | good |
+| Plastic (Wen) | `twoNodeLink` + `Steel02` (default) or `Hysteretic` | `Fy`→`Fy`, `Ke`→`E0`, `ratio`→`b`, `n`↔`R0` (Steel02); `Ke`/`fy`/`ratio` (Hysteretic, sharp corner) | good |
 | Rubber Isolator | `elastomericBearingBoucWen` (lead/HDR) or `elastomericBearingPlasticity` (bilinear) | `Ke`→`kInit`, `fy`→`qd`, `k2_ratio`→`α1`; `-P/-T/-My/-Mz` `Elastic` | good |
 | Friction Isolator | `singleFPBearing` + `frictionModel Coulomb` (or `VelDependent`) | `radius`→`Reff`, `Ke`→`kInit`, `mu`→`μ` | good |
 | Damper – Linear | `twoNodeLink` + `Viscous(C, 1.0)` | `Ce`→`C` | exact |
@@ -236,7 +237,10 @@ compression-only special case exists to support.
    `03+` parser + E2K token interpretation (+ tests, table-registry `handled`
    flips).
 2. **P49-P2b(i)** — per-DOF nonlinear emitters: Gap/Hook/Wen/dampers (+ the
-   D7 cyclic check, §7) (+ component tests).
+   D7 cyclic check, §7) (+ component tests).  ✅ **Done** — `Steel02` (default)
+   / `Hysteretic` Wen, `Hysteretic` Gap/Hook/bilinear, `Viscous`/`Parallel`
+   dampers, shared backbone helpers, `wen_model` knob, cyclic + component
+   tests in `tests/test_link_nonlinear.py`.
 3. **P49-P2b(ii)** — bearing elements: `elastomericBearing*`,
    `singleFPBearing` + `frictionModel` (+ component tests).
 4. **P49-P2c** — `link_model` dispatch, warnings, runner defaults, type
