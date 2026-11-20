@@ -40,6 +40,11 @@ for automated cross-referencing.
   Tags: `llm`, `guidance`, `modeling`, `nonlinear`, `element-choice`, `hinge`, `steel`, `damping`, `units`
   Related: [LLM & AI Assistant Guide](llm_guide.md) · [SAC Trilinear Hinge — Four Modelling Approaches](sac_trilinear_hinge_approaches.md) · [SAC 3-Story Nonlinear Benchmark (T4)](sac_nonlinear_benchmark.md) · [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Units Workflow (kN·m·s → kip·in Limit-State Analysis)](units_conversion.md)
 
+- [Nonlinear link properties — plan (P49 Phase 2)](nonlinear_link_plan.md) — 🚧 Draft
+  > Plan for parsing SAP2000/ETABS 03+ link-property tables and emitting nonlinear OpenSees link elements; records the Hysteretic-backbone decision, the one-time cyclic check and its recipe requirement, and the ENT/ElasticPP comparison tests.
+  Tags: `links`, `isolators`, `dampers`, `nonlinear`, `opensees`, `parser`, `workflow`, `s2k`, `e2k`
+  Related: [_pending_work.md](_pending_work.md) · [Structural Modeling Guidance](modeling_guidance.md) · [ETABS (.E2K / .$ET) import](e2k_import_plan.md) · [Workflow Authoring — Steps and Recipes](workflow_authoring.md)
+
 - [Recipe CLI — Headless Batch Runs](recipe_cli.md) — ✅ Complete
   > The headless recipe runner: python -m fea_toolkit run. Load any model file (.s2k/.e2k/.f2k/.json), run a recipe of workflow steps, and emit a results archive (NPZ), a model snapshot (JSON) or a plain-text report — with no GUI.
   Tags: `cli`, `recipe`, `workflow`, `batch`, `npz`, `report`, `headless`
@@ -549,6 +554,7 @@ Tags across all documentation files:
 - **`cracked-section`** — [stiffness_factors.md](stiffness_factors.md)
 - **`csi`** — [shell_openings.md](shell_openings.md)
 - **`csm`** — [csm_bilinearization.md](csm_bilinearization.md), [csm_test_model_plan.md](csm_test_model_plan.md), [pushover_analysis.md](pushover_analysis.md)
+- **`dampers`** — [nonlinear_link_plan.md](nonlinear_link_plan.md)
 - **`damping`** — [modeling_guidance.md](modeling_guidance.md)
 - **`data-model`** — [parser_coverage.md](parser_coverage.md)
 - **`dcr`** — [capacity.md](capacity.md)
@@ -567,7 +573,7 @@ Tags across all documentation files:
 - **`drift`** — [storey_response.md](storey_response.md)
 - **`duong`** — [duong_benchmark.md](duong_benchmark.md), [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`dynamic`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
-- **`e2k`** — [e2k_import_plan.md](e2k_import_plan.md)
+- **`e2k`** — [e2k_import_plan.md](e2k_import_plan.md), [nonlinear_link_plan.md](nonlinear_link_plan.md)
 - **`edge-detection`** — [constraint_detection.md](constraint_detection.md)
 - **`eigen`** — [modal_analysis.md](modal_analysis.md)
 - **`eigenvalue`** — [modal_analysis.md](modal_analysis.md)
@@ -620,6 +626,7 @@ Tags across all documentation files:
 - **`internal`** — [parser_coverage.md](parser_coverage.md)
 - **`interoperability`** — [opensees_gui_comparison.md](opensees_gui_comparison.md)
 - **`io`** — [e2k_import_plan.md](e2k_import_plan.md), [json_serialization.md](json_serialization.md), [model_stage_file.md](model_stage_file.md), [pipeline_logging.md](pipeline_logging.md), [results_schema.md](results_schema.md), [safe_import.md](safe_import.md), [tcl_import.md](tcl_import.md)
+- **`isolators`** — [nonlinear_link_plan.md](nonlinear_link_plan.md)
 - **`jntOffset`** — [member_offsets.md](member_offsets.md)
 - **`joint`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`json`** — [json_serialization.md](json_serialization.md)
@@ -630,6 +637,7 @@ Tags across all documentation files:
 - **`licensing`** — [ground_motion_data.md](ground_motion_data.md)
 - **`lignos-krawinkler`** — [imk_deterioration_model.md](imk_deterioration_model.md), [imk_member_classification.md](imk_member_classification.md)
 - **`limit-state`** — [units_conversion.md](units_conversion.md)
+- **`links`** — [nonlinear_link_plan.md](nonlinear_link_plan.md)
 - **`linting`** — [linting_fix_plan.md](linting_fix_plan.md)
 - **`llm`** — [llm_guide.md](llm_guide.md), [modeling_guidance.md](modeling_guidance.md)
 - **`load-case`** — [load_cases_and_combinations.md](load_cases_and_combinations.md)
@@ -655,21 +663,21 @@ Tags across all documentation files:
 - **`moment-frame`** — [benchmark_roadmap.md](benchmark_roadmap.md), [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [imk_deterioration_model.md](imk_deterioration_model.md), [sac_benchmark.md](sac_benchmark.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`mvlem`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
 - **`nltha`** — [benchmark_roadmap.md](benchmark_roadmap.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
-- **`nonlinear`** — [element_properties_config.md](element_properties_config.md), [modeling_guidance.md](modeling_guidance.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [opensees_modeling_sources.md](opensees_modeling_sources.md), [pushover_analysis.md](pushover_analysis.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
+- **`nonlinear`** — [element_properties_config.md](element_properties_config.md), [modeling_guidance.md](modeling_guidance.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [nonlinear_link_plan.md](nonlinear_link_plan.md), [opensees_modeling_sources.md](opensees_modeling_sources.md), [pushover_analysis.md](pushover_analysis.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`nonlinear-dynamic`** — [benchmark_register.md](benchmark_register.md), [ground_motion_data.md](ground_motion_data.md), [imk_deterioration_model.md](imk_deterioration_model.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md)
 - **`notes`** — [dev_notes.md](dev_notes.md)
 - **`npz`** — [model_stage_file.md](model_stage_file.md), [project_bundle.md](project_bundle.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [recipe_cli.md](recipe_cli.md), [results_schema.md](results_schema.md)
 - **`nuitka`** — [build_nuitka.md](build_nuitka.md)
 - **`offsets`** — [member_offsets.md](member_offsets.md)
 - **`openings`** — [shell_openings.md](shell_openings.md)
-- **`opensees`** — [build_nuitka.md](build_nuitka.md), [opensees_gui_comparison.md](opensees_gui_comparison.md), [opensees_modeling_sources.md](opensees_modeling_sources.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [tcl_export.md](tcl_export.md)
+- **`opensees`** — [build_nuitka.md](build_nuitka.md), [nonlinear_link_plan.md](nonlinear_link_plan.md), [opensees_gui_comparison.md](opensees_gui_comparison.md), [opensees_modeling_sources.md](opensees_modeling_sources.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [tcl_export.md](tcl_export.md)
 - **`openseespy`** — [licence.md](licence.md), [openseespy_local_build.md](openseespy_local_build.md)
 - **`openseesrt`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`orchestration`** — [analysis.md](analysis.md)
 - **`packaging`** — [build_nuitka.md](build_nuitka.md), [versioning.md](versioning.md)
 - **`palette`** — [workflow_palette.md](workflow_palette.md)
 - **`panel-zone`** — [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md)
-- **`parser`** — [e2k_import_plan.md](e2k_import_plan.md), [json_serialization.md](json_serialization.md), [parser_coverage.md](parser_coverage.md), [safe_import.md](safe_import.md)
+- **`parser`** — [e2k_import_plan.md](e2k_import_plan.md), [json_serialization.md](json_serialization.md), [nonlinear_link_plan.md](nonlinear_link_plan.md), [parser_coverage.md](parser_coverage.md), [safe_import.md](safe_import.md)
 - **`partial-fixity`** — [member_releases.md](member_releases.md)
 - **`pbee`** — [opensees_gui_comparison.md](opensees_gui_comparison.md)
 - **`peak-oriented`** — [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md)
@@ -710,7 +718,7 @@ Tags across all documentation files:
 - **`roadmap`** — [gui_roadmap.md](gui_roadmap.md), [opensees_gui_comparison.md](opensees_gui_comparison.md)
 - **`round-trip`** — [model_stage_file.md](model_stage_file.md)
 - **`runtime`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
-- **`s2k`** — [model_review.md](model_review.md)
+- **`s2k`** — [model_review.md](model_review.md), [nonlinear_link_plan.md](nonlinear_link_plan.md)
 - **`sac`** — [benchmark_roadmap.md](benchmark_roadmap.md), [imk_member_classification.md](imk_member_classification.md), [sac_benchmark.md](sac_benchmark.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [tcl_import.md](tcl_import.md)
 - **`safe`** — [safe_import.md](safe_import.md)
 - **`sap2000`** — [ETABS_checklist.md](ETABS_checklist.md), [member_offsets.md](member_offsets.md), [member_releases.md](member_releases.md), [model_review.md](model_review.md), [parser_coverage.md](parser_coverage.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
@@ -768,7 +776,7 @@ Tags across all documentation files:
 - **`walls`** — [element_classification.md](element_classification.md)
 - **`warranty`** — [licence.md](licence.md)
 - **`wind`** — [model_review.md](model_review.md)
-- **`workflow`** — [layered_analysis_workflow.md](layered_analysis_workflow.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [recipe_cli.md](recipe_cli.md), [workflow.md](workflow.md), [workflow_authoring.md](workflow_authoring.md), [workflow_palette.md](workflow_palette.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
+- **`workflow`** — [layered_analysis_workflow.md](layered_analysis_workflow.md), [nonlinear_link_plan.md](nonlinear_link_plan.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [recipe_cli.md](recipe_cli.md), [workflow.md](workflow.md), [workflow_authoring.md](workflow_authoring.md), [workflow_palette.md](workflow_palette.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`xara`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [tcl_export.md](tcl_export.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md), [xara_pushover_workflow.md](xara_pushover_workflow.md), [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`yaml-config`** — [report_generation.md](report_generation.md)
 - **`yield-point`** — [csm_bilinearization.md](csm_bilinearization.md)
