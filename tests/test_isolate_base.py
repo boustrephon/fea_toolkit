@@ -8,6 +8,7 @@ from fea_toolkit.model.sap_data import (
     Node,
     Restraint,
     SAPModelData,
+    TriplePendulumParams,
     WenParams,
 )
 from fea_toolkit.model.supports import isolate_base
@@ -55,6 +56,25 @@ def test_isolate_base_rejects_non_isolator_property():
     md.link_properties["LIN"] = LinkProperty(name="LIN", link_type="Linear", ke=[1000.0] * 6)
     with pytest.raises(ValueError, match="not an isolator"):
         isolate_base(md, "LIN")
+
+
+def test_isolate_base_accepts_triple_friction_pendulum():
+    """A Triple Friction Pendulum property is a valid grounded isolator."""
+    md = _model()
+    md.link_properties["TPB"] = LinkProperty(
+        name="TPB",
+        link_type="Triple Friction Pendulum",
+        ke=[1.0e6, 1000.0, 1000.0, 0.0, 0.0, 0.0],
+        nonlinear_params=TriplePendulumParams(
+            radius=[0.4, 3.8, 3.8],
+            ubar=[0.05, 0.5, 0.5],
+            mu=[0.02, 0.08, 0.08],
+            W=1000.0,
+        ),
+    )
+    count, ids = isolate_base(md, "TPB")
+    assert (count, ids) == (1, ["1"])
+    assert md.link_assignments["ISO_1"] == "TPB"
 
 
 def test_isolate_base_respects_selection():

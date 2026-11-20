@@ -4,7 +4,7 @@ Wraps :func:`fea_toolkit.model.supports.isolate_base`, which edits the parsed
 model *before it is meshed*: each fully-restrained base node's support is
 removed and replaced by a grounded isolator link assigned the step's
 ``property``.  The builder then emits the isolator (a bearing element for a
-Rubber/Friction Isolator) at each base node.
+Rubber/Friction/Triple Friction Pendulum Isolator) at each base node.
 
 This is the *convenience* form — applied once, up front, so every later
 analysis step inherits the isolated base without repeating a flag.
@@ -18,7 +18,7 @@ ISOLATE_BASE_PARAMS: dict[str, ParamSpec] = {
     "property": ParamSpec(
         default="",
         type=str,
-        help="Name of the isolator link property (Rubber/Friction Isolator) to assign.",
+        help="Name of the isolator link property (Rubber/Friction/Triple Friction Pendulum Isolator) to assign.",
     ),
     "coord_dir1": ParamSpec(
         default="+Z",

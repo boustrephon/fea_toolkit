@@ -24,6 +24,12 @@ _PATTERN_NAMES = {
     (1, 1, 1, 0, 0, 0): "Pinned",
 }
 
+#: Link types ``isolate_base`` accepts as a grounded isolator.  These mirror the
+#: bearing-emitter family in ``opensees._links._LINK_EMISSION_FAMILY`` (Rubber /
+#: Friction Isolator, Triple Friction Pendulum), kept here — model-layer and
+#: OpenSees-free — so the gate needs no ``ops`` import.
+_ISOLATOR_LINK_TYPES = ("Rubber Isolator", "Friction Isolator", "Triple Friction Pendulum")
+
 
 def restraint_dofs(model: Any, node_id: str) -> tuple:
     """The six restraint flags at *node_id*.
@@ -191,7 +197,8 @@ def isolate_base(md, property_name, selection=None, coord_dir1="+Z"):
             ``link_connectivity``, ``link_assignments`` and
             ``link_properties``).
         property_name: The isolator link property to assign — must be a
-            ``Rubber Isolator`` or ``Friction Isolator``.
+            ``Rubber Isolator``, ``Friction Isolator`` or
+            ``Triple Friction Pendulum``.
         selection: Optional ``Selection`` naming the base nodes; ``None`` means
             every fully-restrained node.
         coord_dir1: The local-1 (axial) reference direction for the grounded
@@ -210,7 +217,7 @@ def isolate_base(md, property_name, selection=None, coord_dir1="+Z"):
     if prop is None:
         raise ValueError(f"isolate_base: link property {property_name!r} not found")
     link_type = getattr(prop, "link_type", "")
-    if link_type not in ("Rubber Isolator", "Friction Isolator"):
+    if link_type not in _ISOLATOR_LINK_TYPES:
         raise ValueError(f"isolate_base: {property_name!r} is type {link_type!r}, not an isolator")
 
     restraints = getattr(md, "restraints", None)
