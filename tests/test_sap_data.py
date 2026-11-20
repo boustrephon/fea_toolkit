@@ -1523,3 +1523,45 @@ def test_force_quantity_labels_name_the_release_dofs_in_order():
     """
     assert tuple(FORCE_QUANTITY_LABELS) == FRAME_RELEASE_DOF_LABELS
     assert list(FORCE_QUANTITY_LABELS.values()) == ["Fx", "Fy", "Fz", "Mx", "My", "Mz"]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Triple-pendulum backbone fitting (P49 stretch)
+# ═══════════════════════════════════════════════════════════════════
+
+
+def test_triple_pendulum_backbone_roundtrip():
+    """from_backbone(backbone(params)) recovers radius and mu exactly."""
+    from fea_toolkit.model.sap_data import TriplePendulumParams
+
+    params = TriplePendulumParams(
+        radius=[0.4, 3.0, 5.0],
+        ubar=[0.05, 0.3, 0.5],
+        mu=[0.02, 0.05, 0.08],
+        W=1000.0,
+    )
+    u, fw = params.backbone()
+    recovered = TriplePendulumParams.from_backbone(list(zip(u, fw)), W=1.0)
+
+    assert recovered.radius == pytest.approx(params.radius, rel=1.0e-6)
+    assert recovered.mu == pytest.approx(params.mu, rel=1.0e-6)
+    # individual ubar is underdetermined, but the terminal capacity is preserved
+    assert 2.0 * recovered.ubar[0] + recovered.ubar[1] + recovered.ubar[2] == pytest.approx(
+        2.0 * 0.05 + 0.3 + 0.5, rel=1.0e-6
+    )
+
+
+def test_triple_pendulum_backbone_symmetric_two_regimes():
+    """The symmetric (2-regime) backbone recovers the E-Defense radius and mu."""
+    from fea_toolkit.model.sap_data import TriplePendulumParams
+
+    params = TriplePendulumParams(
+        radius=[0.419, 3.848, 3.848],
+        ubar=[0.051, 0.514, 0.514],
+        mu=[0.02, 0.08, 0.08],
+    )
+    u, fw = params.backbone()
+    recovered = TriplePendulumParams.from_backbone(list(zip(u, fw)), W=1.0)
+
+    assert recovered.radius == pytest.approx([0.419, 3.848, 3.848], rel=1.0e-6)
+    assert recovered.mu == pytest.approx([0.02, 0.08, 0.08], rel=1.0e-6)

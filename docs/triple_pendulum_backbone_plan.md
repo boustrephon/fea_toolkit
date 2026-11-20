@@ -71,15 +71,21 @@ F = mu_i·W + (W / (2·L_i)) · u
 
 so, from a backbone of `(u, F)` points with a known axial load `W`:
 
-1. **Slopes** → effective radii: `L_i = W / (2·slope_i)`.
-2. **Force intercepts** (extrapolated to `u=0`) → `mu_i = intercept_i / W`.
-3. **Kink abscissae** → slider limits `Ubar_i` (cumulative:
-   `Ubar_1 = u_1`, `Ubar_2 = u_2 − u_1`, `Ubar_3 = u_3 − u_2`).
+1. **Slopes** → effective radii: `L_1 = W/(2·slope_1)`, `L_2 = W/slope_2 − 2·L_1`,
+   `L_3 = W/slope_3 − 2·L_1 − L_2`.
+2. **Force intercepts** (extrapolated to `u=0`) → `mu_i` (the radius-weighted
+   intercept of each regime, solved back for the per-mechanism `mu_i`).
+3. **Terminal displacement** → capacity `2·Ubar_1 + Ubar_2 + Ubar_3`.  The
+   intermediate kinks are *friction-transition* displacements
+   (`u*_1 = 2·L_1·(μ_2 − μ_1)`, …), **not** slider limits — so the individual
+   `Ubar_i` are underdetermined from a monotonic backbone; only their weighted
+   sum is recoverable (the fit splits it equally as a documented placeholder).
 
-Fit as a 3-segment piecewise-linear least-squares problem, then sanity-check:
+Fit as a piecewise-linear least-squares problem (1–3 segments), then
+sanity-check:
 
 - monotonic `L` and `mu` (the inner regime is softest, `L_1` smallest);
-- total capacity `Σ Ubar` ≈ the backbone's terminal displacement;
+- the recovered terminal capacity ≈ the backbone's terminal displacement;
 - reject the fit (fall back to C + warning) if any regime is non-monotonic or
   the residual exceeds a tolerance.
 
@@ -102,9 +108,12 @@ defaults.
 ## 7. Sequencing
 
 1. Obtain a real ETABS v22+ triple-pendulum export + the OAPI signature (§6.1).
-2. Add a `TriplePendulumParams.from_backbone(points, W)` classmethod (pure,
-   model-layer, no OpenSees) + unit tests on synthetic 3-segment backbones and
-   on the E-Defense backbone (must recover the published `(L, Ubar, mu)`).
+2. ✅ **Done** — `TriplePendulumParams.from_backbone(points, W)` + a companion
+   `backbone()` forward model (pure, model-layer, no OpenSees); unit tests in
+   `tests/test_sap_data.py` cover the 3-regime round-trip and the symmetric
+   2-regime E-Defense case (recovers `L = (0.419, 3.848, 3.848)` and
+   `mu = (0.02, 0.08, 0.08)` exactly).  `Ubar` is recovered only in its
+   weighted sum (see §5) — the split is a placeholder pending the datasheet.
 3. Wire the CSI triple-pendulum table into the parser → build the backbone →
    `from_backbone` → `TriplePendulumParams` (Option A), with the poor-fit
    fallback (Option C).

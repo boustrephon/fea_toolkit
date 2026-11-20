@@ -175,6 +175,54 @@ class FrictionIsolatorParams(LinkNonlinearParams):
     rate: float = 0.0  # friction velocity rate parameter
 
 
+def _fit_line(xs, ys):
+    """Least-squares fit of a line to ``(xs, ys)``; returns ``(slope, intercept)``."""
+    n = len(xs)
+    if n == 0:
+        return 0.0, 0.0
+    if n == 1:
+        return 0.0, ys[0]
+    xm = sum(xs) / n
+    ym = sum(ys) / n
+    num = sum((x - xm) * (y - ym) for x, y in zip(xs, ys))
+    den = sum((x - xm) * (x - xm) for x in xs)
+    slope = num / den if den != 0.0 else 0.0
+    return slope, ym - slope * xm
+
+
+def _fit_piecewise_linear(u, fw, tol=1.0e-9):
+    """Split a clean piecewise-linear backbone into its linear segments.
+
+    Returns a list of ``(u_start, u_end, slope, intercept)`` per segment in
+    increasing ``u``.  Kinks are detected where the local slope changes by more
+    than ``tol`` (relative); each segment is then least-squares fitted.
+    """
+    n = len(u)
+    if n == 0:
+        return []
+    if n == 1:
+        return [(u[0], u[0], 0.0, fw[0])]
+    slopes = []
+    for i in range(n - 1):
+        du = u[i + 1] - u[i]
+        slopes.append((fw[i + 1] - fw[i]) / du if du != 0.0 else 0.0)
+    bounds = [0]
+    for i in range(1, n - 1):
+        s_prev = slopes[i - 1]
+        s_next = slopes[i]
+        scale = max(abs(s_prev), abs(s_next), 1.0)
+        if abs(s_prev - s_next) > tol * scale:
+            bounds.append(i)
+    bounds.append(n - 1)
+    segs = []
+    for a, b in zip(bounds[:-1], bounds[1:]):
+        xs = u[a : b + 1]
+        ys = fw[a : b + 1]
+        slope, intercept = _fit_line(xs, ys)
+        segs.append((u[a], u[b], slope, intercept))
+    return segs
+
+
 @dataclass
 class TriplePendulumParams(LinkNonlinearParams):
     """Nonlinear parameters for a Triple Friction Pendulum isolator link.
@@ -196,6 +244,120 @@ class TriplePendulumParams(LinkNonlinearParams):
     Kvt: float = 0.0  # tension stiffness (force/length)
     minFv: float = 0.0  # minimum vertical force for friction activation (force)
     tol: float = 1.0e-8  # element internal convergence tolerance
+
+    def backbone(self, n_points_per_regime: int = 12) -> tuple[list[float], list[float]]:
+        """Evaluate the normalised backbone ``(u, F/W)`` of the triple pendulum.
+
+        Uses the three-mechanism series model with the inner mechanism counted
+        double (it slides on two surfaces): the effective radii accumulate as
+        ``2*L1``, ``2*L1+L2``, ``2*L1+L2+L3`` and the regime boundaries are the
+        friction-transition displacements.  ``mu`` must be non-decreasing.
+        """
+        L1, L2, L3 = self.radius
+        m1, m2, m3 = self.mu
+        U1, U2, U3 = self.ubar
+        R1 = 2.0 * L1
+        R2 = R1 + L2
+        R3 = R2 + L3
+        u1 = R1 * (m2 - m1)
+        u2 = u1 + R2 * (m3 - m2)
+        u_cap = 2.0 * U1 + U2 + U3
+        b1 = m1
+        b2 = (m1 * R1 + m2 * L2) / R2 if R2 else b1
+        b3 = (m1 * R1 + m2 * L2 + m3 * L3) / R3 if R3 else b2
+        regimes = (
+            (0.0, u1, 1.0 / R1 if R1 else 0.0, b1),
+            (u1, u2, 1.0 / R2 if R2 else 0.0, b2),
+            (u2, u_cap, 1.0 / R3 if R3 else 0.0, b3),
+        )
+        xs: list[float] = []
+        for a, b, _, _ in regimes:
+            for j in range(n_points_per_regime + 1):
+                xs.append(a + (b - a) * j / n_points_per_regime)
+        out: list[float] = []
+        for x in xs:
+            if not out or abs(x - out[-1]) > 1.0e-12:
+                out.append(x)
+        fw: list[float] = []
+        for x in out:
+            for a, b, s, c in regimes:
+                if a - 1.0e-12 <= x <= b + 1.0e-12:
+                    fw.append(s * x + c)
+                    break
+            else:
+                fw.append(regimes[-1][2] * x + regimes[-1][3])
+        return out, fw
+
+    @classmethod
+    def from_backbone(cls, points, W: float = 1.0) -> "TriplePendulumParams":
+        """Recover ``(radius, mu, ubar)`` from a monotonic backbone.
+
+        Args:
+            points: Iterable of ``(displacement, force)`` pairs.  ``force`` is
+                the absolute base shear, normalised by ``W``.
+            W: Axial load used to normalise the force column.  Set ``W=1.0``
+                when ``points`` are already the base-shear coefficient ``F/W``.
+
+        Returns:
+            A :class:`TriplePendulumParams` with ``radius``/``mu`` recovered
+            from the backbone's slopes and intercepts.  ``ubar`` is
+            *underdetermined* from a monotonic backbone — its intermediate
+            kinks are friction-transition displacements, not slider limits, so
+            only the terminal capacity ``2*Ubar1 + Ubar2 + Ubar3`` is known;
+            the returned ``ubar`` splits it equally and must be refined from
+            the bearing datasheet.
+
+        The assumed force law is the three-mechanism series model with the
+        inner mechanism counted double (see :meth:`backbone`).  The OpenSees
+        ``TripleFrictionPendulum`` element uses the Fenz-Constantinou model
+        (surface-swapping kinematics), so the recovered radii are leading-order
+        effective radii, to be refined once the CSI backbone format is known
+        (``docs/triple_pendulum_backbone_plan.md`` §6).
+        """
+        raw = sorted((float(p[0]), float(p[1]) / W) for p in points)
+        u: list[float] = []
+        fw: list[float] = []
+        for x, y in raw:
+            if u and abs(x - u[-1]) < 1.0e-12:
+                fw[-1] = (fw[-1] + y) / 2.0
+            else:
+                u.append(x)
+                fw.append(y)
+        segs = _fit_piecewise_linear(u, fw)
+        n = len(segs)
+        if n == 0:
+            raise ValueError("empty backbone")
+        slopes = [s for (_, _, s, _) in segs]
+        intercepts = [c for (_, _, _, c) in segs]
+        radii_eff = [1.0 / s if s > 0.0 else 0.0 for s in slopes]
+        if n >= 3:
+            R1, R2, R3 = radii_eff[0], radii_eff[1], radii_eff[2]
+            L1 = R1 / 2.0
+            L2 = R2 - R1
+            L3 = R3 - R2
+            b1, b2, b3 = intercepts[0], intercepts[1], intercepts[2]
+            m1 = b1
+            m2 = (b2 * R2 - m1 * R1) / L2 if L2 else b2
+            m3 = (b3 * R3 - m1 * R1 - m2 * L2) / L3 if L3 else b3
+            radius = [L1, L2, L3]
+            mu = [m1, m2, m3]
+        elif n == 2:
+            R1, R3 = radii_eff[0], radii_eff[1]
+            L1 = R1 / 2.0
+            L2 = L3 = max(R3 - R1, 0.0) / 2.0
+            b1, b3 = intercepts[0], intercepts[1]
+            m1 = b1
+            m2 = m3 = (b3 * R3 - m1 * R1) / (L2 + L3) if (L2 + L3) else b3
+            radius = [L1, L2, L3]
+            mu = [m1, m2, m3]
+        else:  # n == 1
+            L1 = radii_eff[0] / 2.0
+            m1 = intercepts[0]
+            radius = [L1, 0.0, 0.0]
+            mu = [m1, m1, m1]
+        u_cap = u[-1] - u[0]
+        ubar = [u_cap / 4.0, u_cap / 4.0, u_cap / 4.0]
+        return cls(radius=radius, ubar=ubar, mu=mu, W=W)
 
 
 @dataclass

@@ -361,6 +361,25 @@ TABLE:  "LINK PROPERTY DEFINITIONS 04 - DAMPER"
     assert dmp.cexp == pytest.approx(0.3)
 
 
+def test_tc_friction_isolator_title_mismatch_warns(tmp_path, caplog):
+    """A ``09`` table under an unexpected title warns instead of silently dropping."""
+    import logging
+
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "LINK PROPERTY DEFINITIONS 01 - GENERAL"
+   Link=TC1   LinkType=T/C Friction Isolator
+TABLE:  "LINK PROPERTY DEFINITIONS 09 - T/C FRICTION ISOLATOR"
+   Link=TC1   DOF=U2   Fixed=No   Ke=1000   Ce=0   K=5000   Radius=2.0   Slow=0.05   Fast=0.16   Rate=0.6
+"""
+    s2k = tmp_path / "test_tc_mismatch.s2k"
+    s2k.write_text(content)
+    with caplog.at_level(logging.WARNING):
+        md = SAP2000Parser(s2k).parse().get_model_data()
+    assert any("T/C Friction Isolator" in r.message and "09" in r.message for r in caplog.records)
+    # The mismatched table is not consumed, so the link carries no nonlinear params.
+    assert md.link_properties["TC1"].nonlinear_params is None
+
+
 def test_parse_bilinear_friction_damper(tmp_path):
     """The DAMPER table's ``Ratio``/``K``/``Yield`` land on DamperParams."""
     from fea_toolkit.model.sap_data import DamperParams

@@ -816,6 +816,25 @@ class SAP2000Parser:
             "LINK PROPERTY DEFINITIONS 09 - TC SLIDING ISOLATOR": "T/C Friction Isolator",
             "LINK PROPERTY DEFINITIONS 10 - PLASTIC (WEN)": "Plastic (Wen)",
         }
+
+        # Guard: the T/C Friction Isolator table title is version-dependent.
+        # The CSI database reference lists it as "09 - TC SLIDING ISOLATOR";
+        # a newer SAP2000 export may spell it "09 - T/C FRICTION ISOLATOR" (or
+        # similar).  A ``09`` table under any other title is a *mismatch*, not
+        # an unknown table — warn so the isolator is not silently dropped.
+        for raw_table in self._raw_tables:
+            if (
+                raw_table.startswith("LINK PROPERTY DEFINITIONS 09")
+                and raw_table not in table_specs
+            ):
+                logging.warning(
+                    "unrecognised T/C Friction Isolator table title %r — expected "
+                    "%r; the isolator will be skipped.  If this is a real SAP2000 "
+                    "export, add its exact title to `table_specs` in `s2k_parser.py`.",
+                    raw_table,
+                    "LINK PROPERTY DEFINITIONS 09 - TC SLIDING ISOLATOR",
+                )
+
         for table, link_type in table_specs.items():
             for rec in self._raw_tables.get(table, []):
                 name = str(rec.get("Link", "")).strip()
