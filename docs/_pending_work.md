@@ -1276,9 +1276,11 @@ analyses work for linear and isolator links alike.
 (`Steel02` by default, `Hysteretic` via `wen_model`), the damper subtypes with a
 clean 1:1 (`Viscous`/`Parallel`), the bilinear/friction dampers (`Hysteretic`,
 post-yield ratio parsed), Rubber Isolator (`elastomericBearing*`) and
-Friction Isolator (`singleFPBearing` + `Coulomb`/`VelDependent`).  **Still
-raising `NotImplementedError`**: multilinear, T/C-FP, triple-FP and the damper
-friction directional/orthotropic subtypes.
+Friction Isolator (`singleFPBearing` + `Coulomb`/`VelDependent`), T/C Friction
+Isolator (`singleFPBearing` + `VelDependent`, compression friction; the
+tension-friction half is dropped with a warning) and Triple Friction Pendulum
+(`TripleFrictionPendulum`).  **Still raising `NotImplementedError`**:
+multilinear and the damper friction directional/orthotropic subtypes.
 **Decisions (recorded in the plan):** D1–D3 the one-sided / backbone family
 (Gap, Hook, bilinear, multilinear, friction dampers) uses a single `Hysteretic`
 backbone with neutral pinch/damage — not `ENT`/`ElasticPPGap`/`ElasticPP`;
@@ -1318,8 +1320,12 @@ repo's LRB backbone benchmark value).  12) ✅ TPB configuration (Phase B) —
 `benchmarks/e_defense.py` `config="tpb"` + `tests/test_e_defense_tpb.py`
 (backbone 0.275 W at 1.13 m, first-slope period ~1.96 s, Kobe NLTHA).  The
 element is `TripleFrictionPendulum` — `tripleFPBearing` is an unknown element
-type in OpenSeesPy (verified against the installed library).  ☐
-T/C-FP, damper directional/orthotropic.
+type in OpenSeesPy (verified against the installed library).
+13) ✅ T/C Friction Isolator (singleFPBearing + VelDependent) — parse the
+``09 - TC SLIDING ISOLATOR`` table (``Slow``/``Fast``/``Rate``) and the E2K
+``ISOLATOR3`` tokens into ``FrictionIsolatorParams``; emit with a warning that
+the tension-friction half (``SlowT``/``FastT``/``RateT``) is dropped.
+☐ multilinear, damper directional/orthotropic.
 
 **Follow-up (pending external access).**  The Phase-A NLTHA currently drives
 the model with a JMA-Kobe stand-in; the measured LRB-CLB targets are the

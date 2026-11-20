@@ -204,8 +204,8 @@ compression-only special case exists to support.
 
 | Feature | Options | Recommendation |
 |---|---|---|
-| T/C Friction Isolator | `singleFPBearing` (loses uplift capacity) vs defer | warn + `singleFPBearing`, or defer |
-| Triple Friction Pendulum | `tripleFPBearing` (full geometry backbone) | defer to last — the SAP2000 TFP table may not expose the 3-radius/3-μ backbone 1:1 |
+| T/C Friction Isolator | `singleFPBearing` (loses uplift capacity) vs defer | ✅ **Done** — `singleFPBearing` + `VelDependent` (compression `Slow`/`Fast`/`Rate`); the tension-friction half is dropped with a warning |
+| Triple Friction Pendulum | `TripleFrictionPendulum` (Dao et al. 2013, full geometry backbone) | ✅ **Done** (emitter + benchmark); the SAP2000 triple-pendulum *backbone* still has no 1:1 fit — see `docs/triple_pendulum_backbone_plan.md` |
 | Damper – friction directional/orthotropic | `frictionModel` + bearing in the damper DOF, or `Hysteretic` plastic | defer; linearised-elastic interim |
 | Viscoelastic freq/temp dependence | `Parallel(Elastic, Viscous)` is rate-independent | ship it, flag the approximation |
 | Non-axis-aligned `CoordDir2` | honour arbitrary `CoordDir2` | ✅ **Done** — `_direction_vector` parses axis-aligned tokens or arbitrary triples (§4 of `_link_orient`) |

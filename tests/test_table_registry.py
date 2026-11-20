@@ -454,6 +454,7 @@ def test_load_tables_that_are_tracked_holes_read_as_gaps_not_surprises():
     assert classify("LINK PROPERTY DEFINITIONS 05 - GAP") == "handled"
     assert classify("LINK PROPERTY DEFINITIONS 07 - RUBBER ISOLATOR") == "handled"
     assert classify("LINK PROPERTY DEFINITIONS 08 - SLIDING ISOLATOR") == "handled"
+    assert classify("LINK PROPERTY DEFINITIONS 09 - TC SLIDING ISOLATOR") == "handled"
     # The force-deformation / T-C friction tables remain a tracked hole.
     assert classify("LINK PROPERTY DEFINITIONS 03 - MULTILINEAR") == "known-gap"
     assert classify("LINK PROPERTY DEFINITIONS 11 - MULTILINEAR PLASTIC") == "known-gap"

@@ -1274,6 +1274,27 @@ def test_link_nonlinear_isolator_parse():
     assert params.radius == 2.0
 
 
+def test_link_nonlinear_tc_friction_isolator_parse():
+    """A T/C Friction Isolator's SLOW/FAST/RATE tokens map into FrictionIsolatorParams."""
+    from fea_toolkit.io.e2k_parser import _get_link_properties
+    from fea_toolkit.model.sap_data import FrictionIsolatorParams
+
+    sections = _parse_sections(
+        "$ LINK PROPERTIES\n"
+        '  LINKPROP  "ISO3"  TYPE "ISOLATOR3"  \n'
+        '  LINKPROP  "ISO3"  DOF "U2"  KE 1000  K 5000  SLOW 0.05  FAST 0.16  RATE 0.6  R 2.0 \n'
+    )
+    props = _get_link_properties(sections)
+    assert props["ISO3"].link_type == "T/C Friction Isolator"
+    params = props["ISO3"].nonlinear_params
+    assert isinstance(params, FrictionIsolatorParams)
+    assert params.k[1] == 5000.0
+    assert params.mu == 0.05
+    assert params.mu_fast == 0.16
+    assert params.rate == 0.6
+    assert params.radius == 2.0
+
+
 def test_link_connectivity_parse():
     """``$ LINK CONNECTIVITIES`` → {link: (story_i, point_i, story_j, point_j)}."""
     from fea_toolkit.io.e2k_parser import _get_link_connectivity

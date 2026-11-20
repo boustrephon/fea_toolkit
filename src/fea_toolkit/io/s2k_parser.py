@@ -808,6 +808,12 @@ class SAP2000Parser:
             "LINK PROPERTY DEFINITIONS 06 - HOOK": "Hook",
             "LINK PROPERTY DEFINITIONS 07 - RUBBER ISOLATOR": "Rubber Isolator",
             "LINK PROPERTY DEFINITIONS 08 - SLIDING ISOLATOR": "Friction Isolator",
+            # T/C = tension/compression friction isolator (a single-concave
+            # pendulum with velocity-dependent friction).  The CSI database
+            # reference lists the table as ``09 - TC SLIDING ISOLATOR``; ETABS
+            # writes the same property as ``TYPE "TCFRICTIONISOLATOR"`` /
+            # ``"ISOLATOR3"`` (canonical ``"T/C Friction Isolator"``).
+            "LINK PROPERTY DEFINITIONS 09 - TC SLIDING ISOLATOR": "T/C Friction Isolator",
             "LINK PROPERTY DEFINITIONS 10 - PLASTIC (WEN)": "Plastic (Wen)",
         }
         for table, link_type in table_specs.items():
@@ -842,8 +848,12 @@ class SAP2000Parser:
         elif isinstance(params, FrictionIsolatorParams):
             params.k[idx] = self._num(rec, "K")
             params.radius = self._num(rec, "Radius", params.radius)
-            params.mu = self._num(rec, "Mu", params.mu)
-            params.mu_fast = self._num(rec, "MuFast", params.mu_fast)
+            if link_type == "T/C Friction Isolator":
+                params.mu = self._num(rec, "Slow", params.mu)
+                params.mu_fast = self._num(rec, "Fast", params.mu_fast)
+            else:
+                params.mu = self._num(rec, "Mu", params.mu)
+                params.mu_fast = self._num(rec, "MuFast", params.mu_fast)
             params.rate = self._num(rec, "Rate", params.rate)
         elif isinstance(params, DamperParams):
             params.cexp = self._num(rec, "Cexp", params.cexp)

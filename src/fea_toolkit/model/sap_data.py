@@ -210,14 +210,20 @@ class DamperParams(LinkNonlinearParams):
 
 
 #: Canonical link type → nonlinear-parameter dataclass (P49 Phase 2).
-#: ``Linear`` (and the not-yet-parsed multilinear / T/C-friction types) have no
-#: entry, so :attr:`LinkProperty.nonlinear_params` stays ``None`` for them.
+#: ``Linear`` (and the not-yet-parsed multilinear types) have no entry, so
+#: :attr:`LinkProperty.nonlinear_params` stays ``None`` for them.  ``T/C
+#: Friction Isolator`` reuses :class:`FrictionIsolatorParams` — it is a
+#: single-concave pendulum whose velocity-dependent friction (Slow/Fast/Rate)
+#: maps onto ``mu``/``mu_fast``/``rate``; the tension-friction half
+#: (SlowT/FastT/RateT) has no ``singleFPBearing`` representation and is
+#: dropped at emission (see ``opensees._links``).
 LINK_NONLINEAR_PARAMS: dict[str, type[LinkNonlinearParams]] = {
     "Gap": GapParams,
     "Hook": HookParams,
     "Plastic (Wen)": WenParams,
     "Rubber Isolator": RubberIsolatorParams,
     "Friction Isolator": FrictionIsolatorParams,
+    "T/C Friction Isolator": FrictionIsolatorParams,
     "Triple Friction Pendulum": TriplePendulumParams,
     "Damper": DamperParams,
 }

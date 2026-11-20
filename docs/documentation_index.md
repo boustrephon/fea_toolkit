@@ -501,6 +501,14 @@ for automated cross-referencing.
 - [Sd Sections](sd_sections.md)
 
 
+## 📦 Plan
+
+- [Triple-Pendulum Backbone → OpenSees Geometry — Plan (P49 stretch)](triple_pendulum_backbone_plan.md) — 🚧 Draft
+  > Plan for mapping the CSI SAP2000/ETABS triple-pendulum isolator backbone (force–deformation) onto the OpenSees TripleFrictionPendulum (Dao) or TFP (Becker–Mahin) geometry parameters.
+  Tags: `plan`, `nonlinear-link`, `base-isolation`, `TPB`, `backbone`, `OpenSees`
+  Related: [Nonlinear link properties — plan (P49 Phase 2)](nonlinear_link_plan.md) · [E-Defense Base-Isolated Frame (TPB) Benchmark (T4)](e_defense_tpb_benchmark.md) · [Structural Modeling Guidance](modeling_guidance.md)
+
+
 ---
 
 ## Tag Index
@@ -509,7 +517,8 @@ Tags across all documentation files:
 
 - **`LRB`** — [e_defense_lrb_benchmark.md](e_defense_lrb_benchmark.md)
 - **`NLTHA`** — [e_defense_lrb_benchmark.md](e_defense_lrb_benchmark.md), [e_defense_tpb_benchmark.md](e_defense_tpb_benchmark.md)
-- **`TPB`** — [e_defense_tpb_benchmark.md](e_defense_tpb_benchmark.md)
+- **`OpenSees`** — [triple_pendulum_backbone_plan.md](triple_pendulum_backbone_plan.md)
+- **`TPB`** — [e_defense_tpb_benchmark.md](e_defense_tpb_benchmark.md), [triple_pendulum_backbone_plan.md](triple_pendulum_backbone_plan.md)
 - **`aci-318`** — [stiffness_factors.md](stiffness_factors.md)
 - **`ai`** — [llm_guide.md](llm_guide.md)
 - **`analysis`** — [analysis.md](analysis.md), [load_cases_and_combinations.md](load_cases_and_combinations.md)
@@ -522,8 +531,8 @@ Tags across all documentation files:
 - **`area-elements`** — [shell_openings.md](shell_openings.md), [shell_support.md](shell_support.md)
 - **`asce41`** — [capacity.md](capacity.md)
 - **`attributes`** — [rhino_attributes.md](rhino_attributes.md)
-- **`backbone`** — [shear_failure_modelling.md](shear_failure_modelling.md)
-- **`base-isolation`** — [e_defense_lrb_benchmark.md](e_defense_lrb_benchmark.md), [e_defense_tpb_benchmark.md](e_defense_tpb_benchmark.md)
+- **`backbone`** — [shear_failure_modelling.md](shear_failure_modelling.md), [triple_pendulum_backbone_plan.md](triple_pendulum_backbone_plan.md)
+- **`base-isolation`** — [e_defense_lrb_benchmark.md](e_defense_lrb_benchmark.md), [e_defense_tpb_benchmark.md](e_defense_tpb_benchmark.md), [triple_pendulum_backbone_plan.md](triple_pendulum_backbone_plan.md)
 - **`batch`** — [recipe_cli.md](recipe_cli.md)
 - **`beam-column-joint`** — [benchmark_register.md](benchmark_register.md)
 - **`beam-with-hinges`** — [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
@@ -679,6 +688,7 @@ Tags across all documentation files:
 - **`nltha`** — [benchmark_roadmap.md](benchmark_roadmap.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`nonlinear`** — [element_properties_config.md](element_properties_config.md), [modeling_guidance.md](modeling_guidance.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [nonlinear_link_plan.md](nonlinear_link_plan.md), [opensees_modeling_sources.md](opensees_modeling_sources.md), [pushover_analysis.md](pushover_analysis.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`nonlinear-dynamic`** — [benchmark_register.md](benchmark_register.md), [ground_motion_data.md](ground_motion_data.md), [imk_deterioration_model.md](imk_deterioration_model.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md)
+- **`nonlinear-link`** — [triple_pendulum_backbone_plan.md](triple_pendulum_backbone_plan.md)
 - **`notes`** — [dev_notes.md](dev_notes.md)
 - **`npz`** — [model_stage_file.md](model_stage_file.md), [project_bundle.md](project_bundle.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [recipe_cli.md](recipe_cli.md), [results_schema.md](results_schema.md)
 - **`nuitka`** — [build_nuitka.md](build_nuitka.md)
@@ -697,6 +707,7 @@ Tags across all documentation files:
 - **`peak-oriented`** — [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md)
 - **`phase-b`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`pipeline`** — [pipeline_logging.md](pipeline_logging.md), [workflow.md](workflow.md)
+- **`plan`** — [triple_pendulum_backbone_plan.md](triple_pendulum_backbone_plan.md)
 - **`planning`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [csm_test_model_plan.md](csm_test_model_plan.md), [deprecation_plan.md](deprecation_plan.md), [force_diagram_unification.md](force_diagram_unification.md), [gui_roadmap.md](gui_roadmap.md), [linting_fix_plan.md](linting_fix_plan.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [versioning.md](versioning.md)
 - **`plotting`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`post-processing`** — [storey_response.md](storey_response.md)

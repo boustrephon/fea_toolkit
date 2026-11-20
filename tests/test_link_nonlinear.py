@@ -497,7 +497,7 @@ def test_link_emission_family():
     assert fam("Rubber Isolator") == "bearing"
     assert fam("Friction Isolator") == "bearing"
     assert fam("Triple Friction Pendulum") == "bearing"
-    assert fam("T/C Friction Isolator") == "unsupported"
+    assert fam("T/C Friction Isolator") == "bearing"
     assert fam("Multilinear Elastic") == "unsupported"
 
 

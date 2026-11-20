@@ -99,6 +99,7 @@ _LINK_EMISSION_FAMILY: dict[str, str] = {
     "Damper": "per-dof",
     "Rubber Isolator": "bearing",
     "Friction Isolator": "bearing",
+    "T/C Friction Isolator": "bearing",
     "Triple Friction Pendulum": "bearing",
 }
 
@@ -639,8 +640,16 @@ class LinkMixin:
                 p.minFv,
                 p.tol,
             ]
-        else:  # Friction Isolator
+        else:  # Friction Isolator / T/C Friction Isolator
             p = prop.nonlinear_params
+            if prop.link_type == "T/C Friction Isolator":
+                logger.warning(
+                    "link property %r (T/C Friction Isolator) is represented by "
+                    "singleFPBearing with its *compression* friction; the tension "
+                    "friction coefficients (SlowT/FastT/RateT) are not representable "
+                    "and are ignored",
+                    prop.name,
+                )
             frn_tag = _LINK_FRICTION_BASE + friction_count[0]
             friction_count[0] += 1
             _emit_friction_model(frn_tag, p)

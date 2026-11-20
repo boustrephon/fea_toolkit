@@ -2033,7 +2033,7 @@ def test_linear_link_builds_and_supports():
 
 
 def test_nonlinear_link_raises_in_nonlinear_mode():
-    """An unsupported (T/C friction) isolator raises in nonlinear mode; elastic builds."""
+    """An unsupported (multilinear) link raises in nonlinear mode; elastic builds."""
     import openseespy.opensees as ops
 
     from fea_toolkit.model.sap_data import LinkElement, LinkProperty
@@ -2055,17 +2055,67 @@ def test_nonlinear_link_raises_in_nonlinear_mode():
         link_connectivity=[LinkElement(link_id="ISO_1", node_i="1", node_j="2")],
         link_assignments={"ISO_1": "RUB"},
         link_properties={
-            "RUB": LinkProperty(name="RUB", link_type="T/C Friction Isolator", ke=[1000.0] * 6)
+            "RUB": LinkProperty(name="RUB", link_type="Multilinear Elastic", ke=[1000.0] * 6)
         },
     )
     try:
         mm = preprocess_model(md, {})
         ab = AnalysisBuilder(mm, {"link_model": "nonlinear"})
-        with pytest.raises(NotImplementedError, match="T/C Friction Isolator"):
+        with pytest.raises(NotImplementedError, match="Multilinear Elastic"):
             ab.build_domain()
         ab2 = AnalysisBuilder(mm, {"link_model": "elastic"})
         ab2.build_domain()
         assert len(ops.getEleTags()) == 1
+    finally:
+        ops.wipe()
+
+
+def test_tc_friction_isolator_builds_single_fp_bearing(caplog):
+    """A T/C Friction Isolator emits singleFPBearing and warns about tension friction."""
+    import logging
+
+    import openseespy.opensees as ops
+
+    from fea_toolkit.model.sap_data import FrictionIsolatorParams, LinkElement, LinkProperty
+
+    md = SAPModelData(
+        nodes={
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=0.0, y=0.0, z=1000.0),
+        },
+        restraints={"1": Restraint([1, 1, 1, 1, 1, 1])},
+        materials={},
+        sections={},
+        frame_elements={},
+        area_elements={},
+        frame_assignments={},
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
+        link_connectivity=[LinkElement(link_id="ISO_1", node_i="1", node_j="2")],
+        link_assignments={"ISO_1": "RUB"},
+        link_properties={
+            "RUB": LinkProperty(
+                name="RUB",
+                link_type="T/C Friction Isolator",
+                ke=[1000.0] * 6,
+                nonlinear_params=FrictionIsolatorParams(
+                    k=[0.0, 5000.0, 5000.0, 0.0, 0.0, 0.0],
+                    radius=2.0,
+                    mu=0.05,
+                    mu_fast=0.16,
+                    rate=0.6,
+                ),
+            )
+        },
+    )
+    try:
+        mm = preprocess_model(md, {})
+        ab = AnalysisBuilder(mm, {"link_model": "nonlinear"})
+        with caplog.at_level(logging.WARNING):
+            ab.build_domain()
+        assert len(ops.getEleTags()) == 1
+        assert any("T/C Friction Isolator" in r.message for r in caplog.records)
     finally:
         ops.wipe()
 

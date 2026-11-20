@@ -754,7 +754,22 @@ def _get_link_properties(sections: dict[str, list[GroupedLine]]) -> dict[str, Li
         fixed = attrs.get("FIXED")
         if fixed is not None:
             prop.fixed[idx] = str(fixed).strip().upper() in ("YES", "TRUE")
-        for kw in ("NONLIN", "K", "OPEN", "F", "YIELD", "R", "MU", "RADIUS"):
+        for kw in (
+            "NONLIN",
+            "K",
+            "OPEN",
+            "F",
+            "YIELD",
+            "R",
+            "MU",
+            "RADIUS",
+            "SLOW",
+            "FAST",
+            "RATE",
+            "SLOWT",
+            "FASTT",
+            "RATET",
+        ):
             if kw in attrs:
                 prop.nonlinear.setdefault(dof, {})[kw] = attrs[kw]
     for prop in props.values():
@@ -789,7 +804,13 @@ def _interpret_link_nonlinear(prop: LinkProperty) -> None:
             params.fy[idx] = _as_float(attrs.get("YIELD", attrs.get("F", 0.0)))
         elif isinstance(params, FrictionIsolatorParams):
             params.k[idx] = _as_float(attrs.get("K", 0.0))
-            params.mu = _as_float(attrs.get("MU", 0.0))
+            if prop.link_type == "T/C Friction Isolator":
+                # T/C: velocity-dependent friction, ``Slow``/``Fast``/``Rate``.
+                params.mu = _as_float(attrs.get("SLOW", attrs.get("MU", 0.0)))
+                params.mu_fast = _as_float(attrs.get("FAST", 0.0))
+                params.rate = _as_float(attrs.get("RATE", 0.0))
+            else:
+                params.mu = _as_float(attrs.get("MU", 0.0))
             radius = attrs.get("RADIUS", attrs.get("R"))
             if radius is not None:
                 params.radius = _as_float(radius)

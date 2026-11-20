@@ -282,7 +282,7 @@ TABLE:  "LINK PROPERTY DEFINITIONS 02 - LINEAR"
 
 
 def test_parse_nonlinear_link_property_tables(tmp_path):
-    """LINK PROPERTY DEFINITIONS 04/05/06/07/08/10 populate nonlinear_params."""
+    """LINK PROPERTY DEFINITIONS 04/05/06/07/08/09/10 populate nonlinear_params."""
     from fea_toolkit.model.sap_data import (
         DamperParams,
         FrictionIsolatorParams,
@@ -298,6 +298,7 @@ TABLE:  "LINK PROPERTY DEFINITIONS 01 - GENERAL"
    Link=HOOK1   LinkType=Hook
    Link=RUB1   LinkType=Rubber Isolator
    Link=ISO1   LinkType=Friction Isolator
+   Link=TC1   LinkType=T/C Friction Isolator
    Link=WEN1   LinkType=Plastic (Wen)
    Link=DMP1   LinkType=Damper - Exponential
 TABLE:  "LINK PROPERTY DEFINITIONS 05 - GAP"
@@ -308,6 +309,8 @@ TABLE:  "LINK PROPERTY DEFINITIONS 07 - RUBBER ISOLATOR"
    Link=RUB1   DOF=U2   Fixed=No   Ke=1000   Ce=0   K=2000   Yield=50   Ratio=0.1
 TABLE:  "LINK PROPERTY DEFINITIONS 08 - SLIDING ISOLATOR"
    Link=ISO1   DOF=U2   Fixed=No   Ke=1000   Ce=0   K=5000   Radius=2.0   Mu=0.06   MuFast=0.09   Rate=0.4
+TABLE:  "LINK PROPERTY DEFINITIONS 09 - TC SLIDING ISOLATOR"
+   Link=TC1   DOF=U2   Fixed=No   Ke=1000   Ce=0   K=5000   Radius=2.0   Slow=0.05   Fast=0.16   Rate=0.6
 TABLE:  "LINK PROPERTY DEFINITIONS 10 - PLASTIC (WEN)"
    Link=WEN1   DOF=U1   Fixed=No   Ke=1000   Ce=0   Yield=30   YieldExp=2   Ratio=0.05
 TABLE:  "LINK PROPERTY DEFINITIONS 04 - DAMPER"
@@ -338,6 +341,14 @@ TABLE:  "LINK PROPERTY DEFINITIONS 04 - DAMPER"
     assert iso.mu == pytest.approx(0.06)
     assert iso.mu_fast == pytest.approx(0.09)
     assert iso.rate == pytest.approx(0.4)
+
+    tc = md.link_properties["TC1"].nonlinear_params
+    assert isinstance(tc, FrictionIsolatorParams)
+    assert tc.k[1] == pytest.approx(5000.0)
+    assert tc.radius == pytest.approx(2.0)
+    assert tc.mu == pytest.approx(0.05)
+    assert tc.mu_fast == pytest.approx(0.16)
+    assert tc.rate == pytest.approx(0.6)
 
     wen = md.link_properties["WEN1"].nonlinear_params
     assert isinstance(wen, WenParams)

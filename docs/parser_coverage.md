@@ -126,7 +126,7 @@ registry below.  Three things about how they are matched:
 
 *Generated from `src/fea_toolkit/io/table_registry.py` — do not edit by hand.  Regenerate with `python docs/_generate_parser_tables.py`.*
 
-### Handled (58 exact names)
+### Handled (59 exact names)
 
 - `AREA AUTO MESH ASSIGNMENTS`
 - `AREA EDGE CONSTRAINT ASSIGNMENTS`
@@ -176,6 +176,7 @@ registry below.  Three things about how they are matched:
 - `LINK PROPERTY DEFINITIONS 06 - HOOK`
 - `LINK PROPERTY DEFINITIONS 07 - RUBBER ISOLATOR`
 - `LINK PROPERTY DEFINITIONS 08 - SLIDING ISOLATOR`
+- `LINK PROPERTY DEFINITIONS 09 - TC SLIDING ISOLATOR`
 - `LINK PROPERTY DEFINITIONS 10 - PLASTIC (WEN)`
 - `LOAD CASE DEFINITIONS`
 - `LOAD PATTERN DEFINITIONS`
@@ -204,7 +205,7 @@ registry below.  Three things about how they are matched:
 ### Known-gap prefix families
 
 - `SECTION DESIGNER PROPERTIES*` — SD section geometry not parsed
-- `LINK PROPERTY DEFINITIONS*` — remaining nonlinear link tables (03/09/11, bridge flags) not yet parsed
+- `LINK PROPERTY DEFINITIONS*` — remaining nonlinear link tables (03/11, bridge flags) not yet parsed
 
 ### Ignored (14 exact names)
 
