@@ -447,8 +447,11 @@ def test_a_non_load_auto_table_is_not_swallowed_by_the_family_prefixes():
 def test_load_tables_that_are_tracked_holes_read_as_gaps_not_surprises():
     """A known gap must classify as a gap, so the report distinguishes them."""
     assert classify("FRAME LOADS - POINT") == "handled"  # parsed since P14
-    assert classify("LINK PROPERTY DEFINITIONS 01 - GENERAL") == "known-gap"
-    assert classify("LINK PROPERTY DEFINITIONS 02 - LINEAR") == "known-gap"
+    # Link connectivity + linear properties are handled since P49 Phase 1;
+    # only the nonlinear (03+) link-property tables remain a known gap.
+    assert classify("LINK PROPERTY DEFINITIONS 01 - GENERAL") == "handled"
+    assert classify("LINK PROPERTY DEFINITIONS 02 - LINEAR") == "handled"
+    assert classify("LINK PROPERTY DEFINITIONS 05 - GAP") == "known-gap"
 
 
 def test_the_real_model_table_set_reports_no_unrecognised_tables():

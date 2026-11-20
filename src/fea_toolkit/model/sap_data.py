@@ -85,6 +85,33 @@ class LinkElement:
     node_j: str = ""  # SAP2000 joint label at end J (empty for a grounded link)
 
 
+#: Local DOF order for a link's six directional properties (U1..R3), matching
+#: the ``LINK PROPERTY DEFINITIONS 02 - LINEAR`` ``DOF`` column.
+LINK_DOF_ORDER: tuple[str, ...] = ("U1", "U2", "U3", "R1", "R2", "R3")
+
+
+@dataclass
+class LinkProperty:
+    """A SAP2000/ETABS link property (connection / isolator / damper).
+
+    Every link property carries six directional properties in the order U1,
+    U2, U3, R1, R2, R3.  For a *linear* link these are the spring stiffness
+    and dashpot damping; for the nonlinear types (Rubber Isolator, Friction
+    Isolator, Gap, Hook, Plastic-Wen, …) the ``02 - LINEAR`` table holds their
+    *effective* (linearised) stiffness and damping, which elastic static /
+    modal / response-spectrum analyses use.  Type-specific nonlinear
+    parameters (``LINK PROPERTY DEFINITIONS 03+``) are parsed by a later phase
+    and kept in :attr:`nonlinear`.
+    """
+
+    name: str
+    link_type: str  # "Linear", "Rubber Isolator", "Friction Isolator", …
+    ke: list[float] = field(default_factory=lambda: [0.0] * 6)  # U1..R3 effective stiffness
+    ce: list[float] = field(default_factory=lambda: [0.0] * 6)  # U1..R3 effective damping
+    fixed: list[bool] = field(default_factory=lambda: [False] * 6)  # U1..R3 rigidly connected
+    nonlinear: dict[str, Any] = field(default_factory=dict)
+
+
 @dataclass
 class Constraint:
     """Boundary conditions at a node."""
@@ -2670,12 +2697,15 @@ class SAPModelData:
     source: str = ""
     # Default units used for all coordinates and section properties
     units: dict[str, str] = field(default_factory=lambda: {"F": "N", "L": "m", "T": "C"})
-    # Link (connection / isolator) connectivity — parsed but not yet emitted
-    # to OpenSees; the Preprocessor refuses to preprocess a model that has
-    # any rather than silently dropping their nodes (see P49).  Kept last so
-    # the positional order of ``frame_releases`` and every later field is
-    # unchanged (this field was added after ``frame_end_offsets``).
+    # Link (connection / isolator) connectivity and its resolved properties.
+    # Kept last so the positional order of every earlier field is unchanged
+    # (these were added after ``frame_end_offsets``).  ``link_connectivity``
+    # is parsed from ``CONNECTIVITY - LINK``; ``link_assignments`` maps link id
+    # -> property name; ``link_properties`` holds the parsed
+    # ``LINK PROPERTY DEFINITIONS`` (see ``docs/_pending_work.md`` P49).
     link_connectivity: list[LinkElement] = field(default_factory=list)
+    link_assignments: dict[str, str] = field(default_factory=dict)
+    link_properties: dict[str, LinkProperty] = field(default_factory=dict)
 
     @property
     def opening_area_ids(self) -> set[str]:

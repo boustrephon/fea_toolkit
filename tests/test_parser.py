@@ -239,10 +239,8 @@ TABLE:  "CONNECTIVITY - LINK"
 def test_parse_link_connectivity_grounded(tmp_path):
     """A single-joint (grounded) link with no ``JointJ`` is retained.
 
-    SAP2000 omits the ``JointJ`` column for a link connected to ground, so
-    the link must survive parsing (with ``node_j=""``) and still reach the
-    Preprocessor's NotImplementedError rather than being silently dropped
-    (which would leave the link-only node unsupported).
+    SAP2000 omits the ``JointJ`` column for a link connected to ground, so the
+    link must survive parsing with ``node_j=""``.
     """
     content = """File test.s2k was saved on m/d/yy at h:mm:ss
 TABLE:  "CONNECTIVITY - LINK"
@@ -257,10 +255,30 @@ TABLE:  "CONNECTIVITY - LINK"
         ("ISO_2", "3", "4"),
     ]
 
-    from fea_toolkit.opensees.preprocessor import Preprocessor
 
-    with pytest.raises(NotImplementedError):
-        Preprocessor({}).run(md)
+def test_parse_link_properties_and_assignments(tmp_path):
+    """LINK PROPERTY DEFINITIONS 01/02 and LINK PROPERTY ASSIGNMENTS parse."""
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "CONNECTIVITY - LINK"
+   Link=ISO_1   JointI=1   JointJ=2
+TABLE:  "LINK PROPERTY ASSIGNMENTS"
+   Link=ISO_1   LinkProp=ISO_LIN   LinkFDProp=None   PropMod=1
+TABLE:  "LINK PROPERTY DEFINITIONS 01 - GENERAL"
+   Link=ISO_LIN   LinkType=Linear
+TABLE:  "LINK PROPERTY DEFINITIONS 02 - LINEAR"
+   Link=ISO_LIN   DOF=U1   Fixed=No   Ke=1000   Ce=0
+   Link=ISO_LIN   DOF=U2   Fixed=No   Ke=2000   Ce=0
+   Link=ISO_LIN   DOF=U3   Fixed=Yes   Ke=0   Ce=0
+"""
+    s2k = tmp_path / "test_link_props.s2k"
+    s2k.write_text(content)
+    md = SAP2000Parser(s2k).parse().get_model_data()
+    assert md.link_assignments == {"ISO_1": "ISO_LIN"}
+    prop = md.link_properties["ISO_LIN"]
+    assert prop.link_type == "Linear"
+    assert prop.ke[:3] == [1000.0, 2000.0, 0.0]
+    assert prop.ce[:3] == [0.0, 0.0, 0.0]
+    assert prop.fixed[:3] == [False, False, True]
 
 
 def test_parse_area_section_properties(tmp_path):

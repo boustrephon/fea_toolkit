@@ -1952,8 +1952,8 @@ def test_issue2_build_once_manual_recipe_does_not_accumulate(tmp_path):
         ops.wipe()
 
 
-def test_issue3_link_only_node_is_rejected(tmp_path):
-    """GitHub issue #3: a link-only node is rejected, not silently dropped."""
+def test_issue3_linear_link_parses_and_retains(tmp_path):
+    """GitHub issue #3: a link-only node is parsed and retained, not dropped."""
     from fea_toolkit.io.s2k_parser import SAP2000Parser
 
     content = (
@@ -1972,6 +1972,15 @@ def test_issue3_link_only_node_is_rejected(tmp_path):
         "   Link=ISO_1   JointI=1   JointJ=2\n"
         'TABLE:  "LINK PROPERTY ASSIGNMENTS"\n'
         "   Link=ISO_1   LinkProp=ISO_LIN   LinkFDProp=None   PropMod=1\n"
+        'TABLE:  "LINK PROPERTY DEFINITIONS 01 - GENERAL"\n'
+        "   Link=ISO_LIN   LinkType=Linear\n"
+        'TABLE:  "LINK PROPERTY DEFINITIONS 02 - LINEAR"\n'
+        "   Link=ISO_LIN   DOF=U1   Fixed=No   Ke=1000   Ce=0\n"
+        "   Link=ISO_LIN   DOF=U2   Fixed=No   Ke=1000   Ce=0\n"
+        "   Link=ISO_LIN   DOF=U3   Fixed=No   Ke=1000   Ce=0\n"
+        "   Link=ISO_LIN   DOF=R1   Fixed=No   Ke=1000   Ce=0\n"
+        "   Link=ISO_LIN   DOF=R2   Fixed=No   Ke=1000   Ce=0\n"
+        "   Link=ISO_LIN   DOF=R3   Fixed=No   Ke=1000   Ce=0\n"
     )
     s2k = tmp_path / "issue3.s2k"
     s2k.write_text(content)
@@ -1979,5 +1988,83 @@ def test_issue3_link_only_node_is_rejected(tmp_path):
     assert [(link.link_id, link.node_i, link.node_j) for link in md.link_connectivity] == [
         ("ISO_1", "1", "2")
     ]
-    with pytest.raises(NotImplementedError, match="link element"):
-        preprocess_model(md, {})
+    assert md.link_assignments == {"ISO_1": "ISO_LIN"}
+    assert md.link_properties["ISO_LIN"].link_type == "Linear"
+    assert md.link_properties["ISO_LIN"].ke == pytest.approx([1000.0] * 6)
+
+    mm = preprocess_model(md, {"element_type": "elasticBeamColumn"})
+    assert "1" in mm.nodes  # link-only node retained, no longer dropped
+    assert [link.link_id for link in mm.links] == ["ISO_1"]
+
+
+def test_linear_link_builds_and_supports():
+    """A linear link emits a twoNodeLink and keeps a link-only node supported."""
+    import openseespy.opensees as ops
+
+    from fea_toolkit.model.sap_data import LinkElement, LinkProperty
+
+    md = SAPModelData(
+        nodes={
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=0.0, y=0.0, z=1000.0),
+        },
+        restraints={"1": Restraint([1, 1, 1, 1, 1, 1])},
+        materials={},
+        sections={},
+        frame_elements={},
+        area_elements={},
+        frame_assignments={},
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
+        link_connectivity=[LinkElement(link_id="ISO_1", node_i="1", node_j="2")],
+        link_assignments={"ISO_1": "ISO_LIN"},
+        link_properties={
+            "ISO_LIN": LinkProperty(name="ISO_LIN", link_type="Linear", ke=[1000.0] * 6)
+        },
+    )
+    try:
+        mm = preprocess_model(md, {"element_type": "elasticBeamColumn"})
+        ab = AnalysisBuilder(mm, {"element_type": "elasticBeamColumn"})
+        ab.build_domain()
+        assert len(ops.getEleTags()) == 1  # just the twoNodeLink
+    finally:
+        ops.wipe()
+
+
+def test_nonlinear_link_raises_in_nonlinear_mode():
+    """A rubber-isolator link raises in nonlinear mode; elastic mode builds."""
+    import openseespy.opensees as ops
+
+    from fea_toolkit.model.sap_data import LinkElement, LinkProperty
+
+    md = SAPModelData(
+        nodes={
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=0.0, y=0.0, z=1000.0),
+        },
+        restraints={"1": Restraint([1, 1, 1, 1, 1, 1])},
+        materials={},
+        sections={},
+        frame_elements={},
+        area_elements={},
+        frame_assignments={},
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
+        link_connectivity=[LinkElement(link_id="ISO_1", node_i="1", node_j="2")],
+        link_assignments={"ISO_1": "RUB"},
+        link_properties={
+            "RUB": LinkProperty(name="RUB", link_type="Rubber Isolator", ke=[1000.0] * 6)
+        },
+    )
+    try:
+        mm = preprocess_model(md, {})
+        ab = AnalysisBuilder(mm, {"link_model": "nonlinear"})
+        with pytest.raises(NotImplementedError, match="Rubber Isolator"):
+            ab.build_domain()
+        ab2 = AnalysisBuilder(mm, {"link_model": "elastic"})
+        ab2.build_domain()
+        assert len(ops.getEleTags()) == 1
+    finally:
+        ops.wipe()

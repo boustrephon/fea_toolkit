@@ -25,6 +25,8 @@ from .sap_data import (
     Group,
     JointLoad,
     LayeredShellSection,
+    LinkElement,
+    LinkProperty,
     LoadCase,
     LoadCombination,
     LoadPattern,
@@ -245,6 +247,13 @@ class MeshModel:
     # ── Loads (redistributed to split children) ───────────────────
     frame_dist_loads: list[FrameDistributedLoad]
     edge_loads_from_areas: list = field(default_factory=list)
+
+    # ── Link (connection / isolator) elements ─────────────────────
+    # Carried through from the parsed model; the builder emits them per the
+    # ``link_model`` config (see ``opensees/_links.py``).
+    links: list[LinkElement] = field(default_factory=list)
+    link_assignments: dict[str, str] = field(default_factory=dict)
+    link_properties: dict[str, LinkProperty] = field(default_factory=dict)
     # ── Wall elements (SFI_MVLEM_3D / E_SFI_MVLEM_3D / MVLEM_3D) ──
     # Populated by the Preprocessor from wall-classified areas when
     # ``element_strategies.wall.element_type`` is one of the supported

@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 from ._constraints import ConstraintMixin
 from ._elements import ElementMixin
 from ._limit_state import LimitStateMixin
+from ._links import LinkMixin
 from ._loads import LoadMixin
 from ._materials import MaterialMixin
 from ._runners import RunnerMixin, _normalise_frame_response, _record_step
@@ -53,6 +54,7 @@ class AnalysisBuilder(
     SectionMixin,
     MaterialMixin,
     LoadMixin,
+    LinkMixin,
     LimitStateMixin,
     ConstraintMixin,
 ):
@@ -656,6 +658,7 @@ class AnalysisBuilder(
             self._create_bond_slip_springs()
             self._create_member_releases()
             self._create_elements()
+            self._create_link_elements()
             self._create_limit_state_columns()
             self._apply_rigid_diaphragms()
             self._apply_floor_ux_ties()

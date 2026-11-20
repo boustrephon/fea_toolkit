@@ -99,6 +99,9 @@ HANDLED_TABLES: frozenset[str] = frozenset(
         "CONNECTIVITY - FRAME",
         "CONNECTIVITY - AREA",
         "CONNECTIVITY - LINK",
+        "LINK PROPERTY ASSIGNMENTS",
+        "LINK PROPERTY DEFINITIONS 01 - GENERAL",
+        "LINK PROPERTY DEFINITIONS 02 - LINEAR",
         "FRAME SECTION ASSIGNMENTS",
         "AREA SECTION ASSIGNMENTS",
         "FRAME LOCAL AXES ASSIGNMENTS 1 - TYPICAL",
@@ -227,13 +230,12 @@ KNOWN_GAP_TABLES: dict[str, str] = {
 #: Prefixes for known-gap families.
 KNOWN_GAP_PREFIXES: tuple[tuple[str, str], ...] = (
     ("SECTION DESIGNER PROPERTIES", "SD section geometry not parsed"),
-    # Link (connection / isolator / damper) *property* definitions.  Link
-    # connectivity (``CONNECTIVITY - LINK``) is parsed and rejected at
-    # preprocess, but the properties — and therefore any OpenSees link
-    # element — remain unsupported, so these stay a recognised gap rather than
-    # an unknown table (the same treatment ``SOLID PROPERTY DEFINITIONS``
-    # gets).  ``01 - GENERAL`` / ``02 - LINEAR`` are the variants seen so far.
-    ("LINK PROPERTY DEFINITIONS", "link (connection / isolator) elements not supported"),
+    # Link (connection / isolator / damper) *type-specific* property tables
+    # (03+ — Gap, Hook, Multilinear, Wen, Rubber/Friction Isolator, Damper,
+    # Frequency-dependent).  ``01 - GENERAL`` / ``02 - LINEAR`` are handled;
+    # these nonlinear definitions remain a recognised gap rather than an
+    # unknown table.
+    ("LINK PROPERTY DEFINITIONS", "nonlinear link property definitions (03+) not yet parsed"),
 )
 
 _KNOWN_GAP_PREFIX_KEYS = tuple(p for p, _ in KNOWN_GAP_PREFIXES)

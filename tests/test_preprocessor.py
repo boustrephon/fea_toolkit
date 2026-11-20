@@ -16,8 +16,6 @@ deepcopy*.
 
 import copy
 
-import pytest
-
 from fea_toolkit.model.geometry import mesh_area_elements
 from fea_toolkit.model.sap_data import (
     AreaElement,
@@ -388,11 +386,14 @@ def test_point_loads_redistribute_onto_split_children():
     assert child.parent_load_id == authored[0].load_id
 
 
-def test_preprocess_rejects_link_connectivity():
-    """A model carrying any link refuses to preprocess (fail loudly)."""
+def test_preprocess_retains_link_endpoint_nodes():
+    """Link-only nodes are retained, not orphaned, so the link can be built."""
     md = SAPModelData(
-        nodes={},
-        restraints={},
+        nodes={
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=0.0, y=0.0, z=10.0),
+        },
+        restraints={"1": Restraint([1, 1, 1, 1, 1, 1])},
         materials={},
         sections={},
         frame_elements={},
@@ -403,8 +404,10 @@ def test_preprocess_rejects_link_connectivity():
         frame_auto_mesh={},
         link_connectivity=[LinkElement(link_id="ISO_1", node_i="1", node_j="2")],
     )
-    with pytest.raises(NotImplementedError, match="link element"):
-        Preprocessor({}).run(md)
+    mesh = Preprocessor({}).run(md)
+    assert "1" in mesh.nodes
+    assert "2" in mesh.nodes
+    assert [link.link_id for link in mesh.links] == ["ISO_1"]
 
 
 def test_preprocess_drops_a_restraint_on_a_removed_node():

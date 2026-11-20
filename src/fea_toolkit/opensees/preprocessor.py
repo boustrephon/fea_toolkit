@@ -521,24 +521,6 @@ class Preprocessor:
         # the untouched graph is not duplicated (see the helper).
         md = _copy_for_preprocessing(model_data)
 
-        # ── Refuse link elements (fail loudly) ────────────────────
-        # Link objects (connections / isolators / dampers) are parsed into
-        # ``link_connectivity`` but not yet emitted as OpenSees elements.
-        # Dropping their nodes would silently leave the structure unsupported
-        # (a singular matrix), so refuse to preprocess rather than return a
-        # model that has quietly lost its link-only nodes — see
-        # ``docs/_pending_work.md`` P49.
-        link_connectivity = getattr(md, "link_connectivity", None) or []
-        if link_connectivity:
-            ids = sorted({link.link_id for link in link_connectivity})
-            preview = ", ".join(ids[:5]) + (" …" if len(ids) > 5 else "")
-            raise NotImplementedError(
-                "The model contains link element(s) "
-                f"({preview}) which fea_toolkit does not yet convert to "
-                "OpenSees.  Refusing to preprocess rather than silently drop "
-                "their nodes (which would leave the structure unsupported)."
-            )
-
         # Apply material defaults (SI → model units) so the MeshModel always
         # carries fully-populated materials.  Idempotent — the parser may
         # already have applied them.  Single source of truth:
@@ -970,6 +952,14 @@ class Preprocessor:
                 for _nid in _diaph_ids:
                     if _nid in md.restraints:
                         referenced.add(_nid)
+        # Link-endpoint nodes must be retained — the link element connects them
+        # (a grounded link connects node_i to a fixed ground node instead), so
+        # dropping a link-only node would leave the link dangling.
+        for link in getattr(md, "link_connectivity", []):
+            if link.node_i:
+                referenced.add(link.node_i)
+            if link.node_j:
+                referenced.add(link.node_j)
         # Opening (void) corner nodes are moved to ``orphan_nodes`` rather than
         # kept in ``nodes``, so no OpenSees-domain consumer can accidentally
         # create them; ``net_area`` resolves opening vertices from both
@@ -1056,6 +1046,9 @@ class Preprocessor:
             frame_releases=frame_releases,
             area_elements=md.area_elements,
             area_assignments=md.area_assignments,
+            links=getattr(md, "link_connectivity", []),
+            link_assignments=getattr(md, "link_assignments", {}),
+            link_properties=getattr(md, "link_properties", {}),
             frame_dist_loads=split_dist_loads,
             edge_loads_from_areas=edge_loads_from_areas,
             detected_edge_pairs=raw_edges,

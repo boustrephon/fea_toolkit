@@ -590,6 +590,9 @@ def element(elem_type: str, tag: int, *args: Any) -> None:
         # Zero-length with section (for lumped plasticity)
         element('zeroLengthSection', tag, iNode, jNode, secTag)
 
+        # Two-node link (isolator / connection / damper; uncoupled per-DOF springs)
+        element('twoNodeLink', tag, iNode, jNode, '-mat', m1, m2, ..., '-dir', 1, 2, ...)
+
     Args:
         elem_type: Element type string.
         tag: Element tag.

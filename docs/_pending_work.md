@@ -1258,26 +1258,31 @@ session (`_build_recipe_dock`, `open_project_path`).
 Source: GitHub issue #3 — "Link objects are ignored: link-only nodes are dropped
 while their restraints are kept, producing an unsupported (singular) model".
 
-**What.** Link objects are parsed only as *connectivity*
-(`CONNECTIVITY - LINK` → `SAPModelData.link_connectivity`), not as elements.
-`Preprocessor.run` now **refuses** to preprocess a model that carries any link
-(`NotImplementedError`) rather than silently dropping the link-only nodes, and
-the orphan pass drops any restraint that references a removed node with a
-warning.  What is still missing is the real conversion: parse
-`LINK PROPERTY ASSIGNMENTS` + `LINK PROPERTY DEFINITIONS 01/02 - LINEAR`, carry
-the links through the MeshModel, and emit the matching OpenSees element
-(`twoNodeLink` / `zeroLength`).  Linear links map cleanly (`TransKE` → spring
-stiffness, `Fixed=Yes` → fully restrained DOF); nonlinear isolators (rubber,
-friction-pendulum, gap/hook dampers) need their own material laws and are a
-separate tranche.
+**What.** Link objects are parsed and, since **Phase 1**, **emitted** as
+OpenSees elements.  `LINK PROPERTY DEFINITIONS 01 - GENERAL` / `02 - LINEAR`
+and `LINK PROPERTY ASSIGNMENTS` parse into `SAPModelData.link_properties` /
+`link_assignments`; the Preprocessor retains link-endpoint nodes; and
+`AnalysisBuilder._create_link_elements` (`opensees/_links.py`) emits a
+`twoNodeLink` with one `Elastic` uniaxial material per active DOF (a grounded
+link becomes a `zeroLength` to a coincident fixed ground node).  ``Fixed``
+DOFs get a near-rigid spring; `link_model: "elastic"` (default) uses the
+effective stiffness for *all* link types, so elastic static / modal / RS
+analyses work for linear and isolator links alike.
 
-**Outline steps.** 1) ✅ **done** — parse `CONNECTIVITY - LINK` into
-`link_connectivity` and register the table; refuse link-bearing models in
-`Preprocessor.run`; filter dangling restraints.  2) add `LinkProperty` +
-`link_assignments` to the data model and parse `LINK PROPERTY ASSIGNMENTS` /
-`LINK PROPERTY DEFINITIONS 01/02`.  3) retain link-endpoint nodes and emit
-`twoNodeLink`/`zeroLength` in `AnalysisBuilder` (update `typings/openseespy`
-stubs).  4) extend the pushover/RS/modal runners to honour link elements.
+**Remaining (Phase 2).** `link_model: "nonlinear"` only supports `Linear`
+links — the nonlinear types (Rubber/Friction Isolator, Gap, Hook, Wen, Damper)
+raise `NotImplementedError` until their `03+` property tables are parsed and
+the dedicated bearing/friction elements (`elastomericBearingBoucWen` /
+`elastomericBearingPlasticity`, `flatSliderBearing` / `singleFPBearing` /
+`tripleFPBearing` + `frictionModel`) are emitted; link *local axes*
+(`LINK LOCAL AXES ASSIGNMENTS`) are not parsed (zero-length links fall back to
+global axes); and the nonlinear runners should set `link_model: "nonlinear"`.
+
+**Outline steps.** 1) ✅ parse connectivity (incl. grounded links).  2) ✅
+`LinkProperty` + `link_assignments` + parse `LINK PROPERTY ASSIGNMENTS` /
+`01 - GENERAL` / `02 - LINEAR`.  3) ✅ retain link nodes + emit
+`twoNodeLink`/`zeroLength` in `AnalysisBuilder`.  4) ☐ Phase 2 — nonlinear
+link types + local axes + runner dispatch.
 
 #### P50 — Recover member-force / fiber demands for the dispBeamColumn distributed-load fallback
 Source: review of `opensees/_loads.py` / `opensees/_runner_pushover.py`

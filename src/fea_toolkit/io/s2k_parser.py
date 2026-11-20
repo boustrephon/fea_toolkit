@@ -12,6 +12,7 @@ import numpy as np  # noqa: F401
 
 from ..model.load_combinations import classify_combination_refs
 from ..model.sap_data import (
+    LINK_DOF_ORDER,
     AreaEdgeConstraint,
     AreaElement,
     AreaGravityLoad,
@@ -28,6 +29,7 @@ from ..model.sap_data import (
     Group,
     JointLoad,
     LinkElement,
+    LinkProperty,
     LoadCase,
     LoadCombination,
     LoadCombinationEntry,
@@ -229,6 +231,8 @@ class SAP2000Parser:
         frame_elements = self._get_frame_elements()
         area_elements = self._get_area_elements()
         link_connectivity = self._get_link_connectivity()
+        link_assignments = self._get_link_assignments()
+        link_properties = self._get_link_properties()
         frame_assignments = self._get_frame_assignments()
         area_assignments = self._get_area_assignments()
         groups = self._get_groups()
@@ -300,6 +304,8 @@ class SAP2000Parser:
             frame_elements=frame_elements,
             area_elements=area_elements,
             link_connectivity=link_connectivity,
+            link_assignments=link_assignments,
+            link_properties=link_properties,
             frame_assignments=frame_assignments,
             area_assignments=area_assignments,
             groups=groups,
@@ -720,13 +726,62 @@ class SAP2000Parser:
                 assignments[joint] = cname
         return assignments
 
+    def _get_link_assignments(self) -> dict[str, str]:
+        """Parse ``LINK PROPERTY ASSIGNMENTS`` into ``{link_id: property_name}``."""
+        assignments: dict[str, str] = {}
+        for rec in self._raw_tables.get("LINK PROPERTY ASSIGNMENTS", []):
+            link_id = str(rec.get("Link", "")).strip()
+            prop = str(rec.get("LinkProp", "")).strip()
+            if link_id and prop:
+                assignments[link_id] = prop
+        return assignments
+
+    def _get_link_properties(self) -> dict[str, LinkProperty]:
+        """Parse ``LINK PROPERTY DEFINITIONS 01/02`` into link properties.
+
+        ``01 - GENERAL`` gives the link type; ``02 - LINEAR`` gives the six
+        directional properties (effective stiffness ``Ke``, effective damping
+        ``Ce`` and a ``Fixed`` flag) that every link type carries.  For the
+        nonlinear types (Rubber/Friction Isolator, Gap, Hook, Wen, …) these
+        are the *effective* (linearised) values used by elastic analyses; the
+        type-specific ``03+`` tables are a later phase.
+        """
+        props: dict[str, LinkProperty] = {}
+        types: dict[str, str] = {}
+        for rec in self._raw_tables.get("LINK PROPERTY DEFINITIONS 01 - GENERAL", []):
+            name = str(rec.get("Link", "")).strip()
+            if name:
+                types[name] = str(rec.get("LinkType", "Linear")).strip()
+        for rec in self._raw_tables.get("LINK PROPERTY DEFINITIONS 02 - LINEAR", []):
+            name = str(rec.get("Link", "")).strip()
+            if not name:
+                continue
+            prop = props.get(name)
+            if prop is None:
+                prop = LinkProperty(name=name, link_type=types.get(name, "Linear"))
+                props[name] = prop
+            dof = str(rec.get("DOF", "")).strip().upper()
+            if dof not in LINK_DOF_ORDER:
+                continue
+            idx = LINK_DOF_ORDER.index(dof)
+            prop.ke[idx] = float(rec.get("Ke", 0.0) or 0.0)
+            prop.ce[idx] = float(rec.get("Ce", 0.0) or 0.0)
+            fixed = rec.get("Fixed", False)
+            if isinstance(fixed, str):
+                fixed = fixed.lower() in ("yes", "true")
+            prop.fixed[idx] = bool(fixed)
+        # A property defined in 01 - GENERAL but with no 02 - LINEAR rows (e.g.
+        # an all-fixed linear link) still needs an entry.
+        for name, link_type in types.items():
+            props.setdefault(name, LinkProperty(name=name, link_type=link_type))
+        return props
+
     def _get_link_connectivity(self) -> list[LinkElement]:
         """Parse ``CONNECTIVITY - LINK`` into link-endpoint records.
 
-        Only connectivity is captured — link *properties* are not parsed yet
-        (the toolkit cannot emit link elements).  The Preprocessor uses this
-        list to refuse to preprocess a link-bearing model rather than silently
-        drop the link-only nodes.
+        A single-joint (grounded) link omits ``JointJ``, leaving ``node_j``
+        empty.  Link *properties* are resolved separately by
+        :meth:`_get_link_properties` / :meth:`_get_link_assignments`.
         """
         links: list[LinkElement] = []
         for rec in self._raw_tables.get("CONNECTIVITY - LINK", []):
