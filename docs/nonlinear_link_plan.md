@@ -14,7 +14,8 @@ related: [_pending_work.md, modeling_guidance.md, e2k_import_plan.md, workflow_a
 > (Rubber/Friction Isolator), dispatch/warnings/runner-defaults, the
 > `check_hysteretic_backbone` and `isolate_base` verbs, and the
 > `modeling_guidance.md` §10 guidance.  See [`_pending_work.md` → P49](_pending_work.md).
-> Remaining: the §10 reference-benchmark tests and the §9/P2e stretch types.
+> Remaining: the §10 damper/gap benchmark tests and the §9/P2e stretch types
+> (`tripleFPBearing`, T/C Friction Isolator, damper directional/orthotropic).
 > This documents the design, the decisions, and the sequencing.
 
 ## 1. Scope and goal
@@ -206,7 +207,12 @@ compression-only special case exists to support.
 | Triple Friction Pendulum | `tripleFPBearing` (full geometry backbone) | defer to last — the SAP2000 TFP table may not expose the 3-radius/3-μ backbone 1:1 |
 | Damper – friction directional/orthotropic | `frictionModel` + bearing in the damper DOF, or `Hysteretic` plastic | defer; linearised-elastic interim |
 | Viscoelastic freq/temp dependence | `Parallel(Elastic, Viscous)` is rate-independent | ship it, flag the approximation |
-| Non-axis-aligned `CoordDir2` | honour arbitrary `CoordDir2` | fold into this phase (§4 of `_link_orient`) |
+| Non-axis-aligned `CoordDir2` | honour arbitrary `CoordDir2` | ✅ **Done** — `_direction_vector` parses axis-aligned tokens or arbitrary triples (§4 of `_link_orient`) |
+
+The bilinear / friction damper family is now **done** too: the `04 - DAMPER`
+`Ratio` column is parsed and both subtypes emit a symmetric `Hysteretic`
+backbone (bilinear hardens, friction is elastic-perfectly-plastic), using the
+nonlinear `K` (not the effective `Ke`) as the initial slope.
 
 ## 10. Benchmarks for validation
 
@@ -271,4 +277,8 @@ compression-only special case exists to support.
    in `tests/test_link_benchmarks.py`); the damper (Pekcan/Mander/Chen) and
    gap/pounding (Anagnostopoulos) benchmarks remain.
 6. **P49-P2e (stretch)** — `tripleFPBearing`, T/C FP, friction-damper family,
-   non-axis-aligned `CoordDir2`.
+   non-axis-aligned `CoordDir2`.  ⚠️ **Partly done** — the bilinear/friction
+   damper family (`Hysteretic`, `Ratio` parsed) and non-axis-aligned
+   `CoordDir2` (`_direction_vector`) are implemented; `tripleFPBearing`, the
+   T/C Friction Isolator and the damper directional/orthotropic subtypes remain
+   (deferred, §9).

@@ -350,6 +350,38 @@ TABLE:  "LINK PROPERTY DEFINITIONS 04 - DAMPER"
     assert dmp.cexp == pytest.approx(0.3)
 
 
+def test_parse_bilinear_friction_damper(tmp_path):
+    """The DAMPER table's ``Ratio``/``K``/``Yield`` land on DamperParams."""
+    from fea_toolkit.model.sap_data import DamperParams
+
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "LINK PROPERTY DEFINITIONS 01 - GENERAL"
+   Link=DMP2   LinkType=Damper - Bilinear
+   Link=DMP3   LinkType=Damper - Friction
+TABLE:  "LINK PROPERTY DEFINITIONS 02 - LINEAR"
+   Link=DMP2   DOF=U1   Fixed=No   Ke=100   Ce=0
+   Link=DMP3   DOF=U1   Fixed=No   Ke=100   Ce=0
+TABLE:  "LINK PROPERTY DEFINITIONS 04 - DAMPER"
+   Link=DMP2   DOF=U1   Fixed=No   Ke=0   Ce=0   K=1000   Yield=50   Ratio=0.1
+   Link=DMP3   DOF=U1   Fixed=No   Ke=0   Ce=0   K=1000   Yield=50
+"""
+    s2k = tmp_path / "test_link_bilinear_friction.s2k"
+    s2k.write_text(content)
+    md = SAP2000Parser(s2k).parse().get_model_data()
+
+    bilin = md.link_properties["DMP2"].nonlinear_params
+    assert isinstance(bilin, DamperParams)
+    assert bilin.k[0] == pytest.approx(1000.0)
+    assert bilin.fy[0] == pytest.approx(50.0)
+    assert bilin.ratio == pytest.approx(0.1)
+
+    fric = md.link_properties["DMP3"].nonlinear_params
+    assert isinstance(fric, DamperParams)
+    assert fric.k[0] == pytest.approx(1000.0)
+    assert fric.fy[0] == pytest.approx(50.0)
+    assert fric.ratio == pytest.approx(0.0)
+
+
 def test_parse_link_local_axes(tmp_path):
     """LINK LOCAL AXES ASSIGNMENTS 1 - TYPICAL / 2 - ADVANCED parse."""
     content = """File test.s2k was saved on m/d/yy at h:mm:ss

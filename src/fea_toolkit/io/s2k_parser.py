@@ -849,6 +849,7 @@ class SAP2000Parser:
             params.cexp = self._num(rec, "Cexp", params.cexp)
             params.k[idx] = self._num(rec, "K")
             params.fy[idx] = self._num(rec, "Yield")
+            params.ratio = self._num(rec, "Ratio", params.ratio)
 
     def _get_link_local_axes(self) -> dict[str, dict[str, Any]]:
         """Parse ``LINK LOCAL AXES ASSIGNMENTS 1 - TYPICAL`` / ``2 - ADVANCED``.

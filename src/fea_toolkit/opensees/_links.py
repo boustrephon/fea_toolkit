@@ -21,6 +21,7 @@ backbone).
 """
 
 import logging
+from typing import Optional
 
 import numpy as np
 import openseespy.opensees as ops
@@ -51,6 +52,36 @@ _DIRECTION_VECTORS: dict[str, np.ndarray] = {
     "-Z": np.array([0.0, 0.0, -1.0]),
 }
 
+
+def _direction_vector(token: str) -> Optional[np.ndarray]:
+    """Parse an axis-aligned or arbitrary direction token into a unit vector.
+
+    ``LINK LOCAL AXES ASSIGNMENTS 2 - ADVANCED`` writes ``CoordDir1`` /
+    ``CoordDir2`` as global-axis tokens (``+X``, ``-Y``, …) or, for a general
+    direction, as a coordinate triple (``(0.707, 0, 0.707)`` — comma- or
+    whitespace-separated, optionally parenthesised).  Returns ``None`` for an
+    empty or unparseable token.
+    """
+    tok = token.strip()
+    if not tok:
+        return None
+    v = _DIRECTION_VECTORS.get(tok.upper())
+    if v is not None:
+        return v.copy()
+    s = tok.strip("()[]{}")
+    parts = s.replace(",", " ").split()
+    if len(parts) != 3:
+        return None
+    try:
+        vec = np.array([float(x) for x in parts], dtype=float)
+    except ValueError:
+        return None
+    norm = np.linalg.norm(vec)
+    if norm < 1e-12:
+        return None
+    return vec / norm
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Nonlinear link material backbones (pure — no ops, unit-testable)
 # ═══════════════════════════════════════════════════════════════════
@@ -73,9 +104,10 @@ _LINK_EMISSION_FAMILY: dict[str, str] = {
 #: Link types with a nonlinear emitter (derived — never hand-edited).
 _SUPPORTED_NONLINEAR_LINK_TYPES = frozenset(_LINK_EMISSION_FAMILY)
 
-#: Damper subtypes with no clean per-DOF uniaxial emitter (plan §9).
+#: Damper subtypes with no clean per-DOF uniaxial emitter (plan §9).  The
+#: simple ``"Friction"`` damper is *not* here — it emits ``Hysteretic`` (EPP).
 _DAMPER_UNSUPPORTED = frozenset(
-    {"Friction", "Friction Spring Based", "Friction Directional", "Friction Orthotropic"}
+    {"Friction Spring Based", "Friction Directional", "Friction Orthotropic"}
 )
 
 #: Steel02 (Giuffré–Menegotto-Pinto) transition-curvature defaults.
@@ -501,12 +533,18 @@ class LinkMixin:
                 )
             return self._cached_mat(mat_cache, ("viscous", ce, cexp), "Viscous", ce, cexp)
         fy = params.fy[dof] if isinstance(params, DamperParams) else 0.0
-        if ke > 0.0 and fy > 0.0:
-            # Bilinear damper — its post-yield ratio is not parsed yet (P2a), so
-            # the elastic-perfectly-plastic fallback would silently drop it.
-            raise NotImplementedError(
-                f"bilinear damper on link property {prop.name!r} needs a post-yield "
-                "ratio that is not parsed yet (plan §9)"
+        ratio = params.ratio if isinstance(params, DamperParams) else 0.0
+        k_nl = params.k[dof] if isinstance(params, DamperParams) else 0.0
+        k_init = k_nl if k_nl > 0.0 else ke
+        if k_init > 0.0 and fy > 0.0:
+            # Bilinear (ratio > 0) or friction (ratio = 0 → elastic-perfectly
+            # plastic) damper — a symmetric Hysteretic backbone.  The *nonlinear*
+            # stiffness ``K`` is the initial slope (the effective ``Ke`` is the
+            # linearised secant, wrong for the backbone) — same rule as the
+            # Rubber Isolator's ``_rubber_bearing_params``.
+            args = _hysteretic_bilinear_args(k_init, fy, ratio)
+            return self._cached_mat(
+                mat_cache, ("hyst", "bilin", k_init, fy, ratio), "Hysteretic", *args
             )
         return None
 
@@ -618,12 +656,12 @@ class LinkMixin:
         isolator whose U1 must be vertical).  Otherwise the I→J geometry and
         the ``angle`` rotation (``1 - TYPICAL``) define the axes.
         """
-        vx = _DIRECTION_VECTORS.get(link.coord_dir1.strip().upper())
+        vx = _direction_vector(link.coord_dir1)
         if vx is not None:
-            vy = _DIRECTION_VECTORS.get(link.coord_dir2.strip().upper())
+            vy = _direction_vector(link.coord_dir2)
             if vy is not None and abs(float(np.dot(vx, vy))) < 1e-9:
                 # coord_dir2 is an explicit, perpendicular local-2 direction.
-                return vx.copy(), vy.copy()
+                return vx, vy
             vx_o, vy_o, _vz = get_local_axes(vx, link.angle)
             return vx_o, vy_o
         ni = self.mesh_model.nodes.get(link.node_i)

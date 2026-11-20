@@ -1274,10 +1274,11 @@ analyses work for linear and isolator links alike.
 (per-DOF emitters) and P2b(ii) (bearing elements) are done**: `link_model:
 "nonlinear"` now emits Gap/Hook (one-sided `Hysteretic`), Plastic (Wen)
 (`Steel02` by default, `Hysteretic` via `wen_model`), the damper subtypes with a
-clean 1:1 (`Viscous`/`Parallel`), Rubber Isolator (`elastomericBearing*`) and
+clean 1:1 (`Viscous`/`Parallel`), the bilinear/friction dampers (`Hysteretic`,
+post-yield ratio parsed), Rubber Isolator (`elastomericBearing*`) and
 Friction Isolator (`singleFPBearing` + `Coulomb`/`VelDependent`).  **Still
-raising `NotImplementedError`** until P2c/P2e: the bilinear/friction damper
-subtypes (post-yield ratio / μ not parsed), multilinear, T/C-FP and triple-FP.
+raising `NotImplementedError`**: multilinear, T/C-FP, triple-FP and the damper
+friction directional/orthotropic subtypes.
 **Decisions (recorded in the plan):** D1–D3 the one-sided / backbone family
 (Gap, Hook, bilinear, multilinear, friction dampers) uses a single `Hysteretic`
 backbone with neutral pinch/damage — not `ENT`/`ElasticPPGap`/`ElasticPP`;
@@ -1291,7 +1292,7 @@ model's script re-runs it (plan §7, D7/D8).  `tests/test_link_nonlinear.py`
 pins the compression-only backbone to `ENT`, the tension-only backbone to
 `ElasticPP` (monotonic, D9), the `Steel02` smooth yield, the neutral-defaults
 cyclic check, and the bearing/friction-model emitter args.  Link *local axes*
-are parsed; a non-axis-aligned `CoordDir2` is not yet honoured (stretch).
+are parsed, including an arbitrary (non-axis-aligned) `CoordDir2`.
 
 **Outline steps.** 1) ✅ parse connectivity (incl. grounded links).  2) ✅
 `LinkProperty` + `link_assignments` + parse `LINK PROPERTY ASSIGNMENTS` /
@@ -1304,7 +1305,9 @@ registry (`_LINK_EMISSION_FAMILY`).  8) ✅ P2d check verb (`check_hysteretic_
 backbone`) + base-isolation verb (`isolate_base`).  9) ⚠️ P2d benchmarks (§10) —
 ✅ E-Defense LRB + Morgan & Mahin FP (`tests/test_link_benchmarks.py`); ☐
 damper/gap; + ✅ `modeling_guidance.md` §10 (gravity-before-dynamic,
-bearing/material choices, base isolation).
+bearing/material choices, base isolation).  10) ✅ P2e bilinear/friction damper
+family (`Hysteretic`, `Ratio` parsed) + non-axis-aligned `CoordDir2`; ☐
+`tripleFPBearing`, T/C-FP, damper directional/orthotropic.
 
 #### P50 — Recover member-force / fiber demands for the dispBeamColumn distributed-load fallback
 Source: review of `opensees/_loads.py` / `opensees/_runner_pushover.py`

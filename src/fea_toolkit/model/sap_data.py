@@ -182,6 +182,7 @@ class DamperParams(LinkNonlinearParams):
     cexp: float = 1.0  # velocity exponent (1.0 = linear, <1 = nonlinear)
     k: list[float] = field(default_factory=lambda: [0.0] * 6)  # stiffness (bilinear/friction)
     fy: list[float] = field(default_factory=lambda: [0.0] * 6)  # yield force (bilinear/friction)
+    ratio: float = 0.0  # post-yield stiffness ratio (bilinear/friction)
     damper_type: str = ""  # "Exponential" / "Linear" / "Bilinear" / "Friction"
 
 

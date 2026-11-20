@@ -301,6 +301,63 @@ def test_damper_dof_material_selection(monkeypatch):
     assert [c[0] for c in calls] == ["Elastic", "Viscous", "Parallel"]
 
 
+def test_damper_bilinear_friction_material(monkeypatch):
+    """Bilinear → Hysteretic (hardening), friction → Hysteretic (EPP), on K not Ke."""
+    import fea_toolkit.opensees._links as links_mod
+    from fea_toolkit.model.sap_data import DamperParams, LinkProperty
+
+    calls = []
+    monkeypatch.setattr(links_mod.ops, "uniaxialMaterial", lambda *a: calls.append(a))
+
+    bilin = LinkProperty(
+        name="BL",
+        link_type="Damper - Bilinear",
+        ke=[100.0, 0, 0, 0, 0, 0],
+        ce=[0.0] * 6,
+        nonlinear_params=DamperParams(k=[1000.0] * 6, fy=[50.0] * 6, ratio=0.1),
+    )
+    tag = links_mod.LinkMixin._damper_dof_mat(links_mod.LinkMixin(), bilin, 0, {})
+    assert calls[0][0] == "Hysteretic"
+    assert calls[0][1] == tag
+    assert calls[0][2] == pytest.approx(50.0)  # s1p = fy
+    assert calls[0][3] == pytest.approx(0.05)  # e1p = fy / K (the nonlinear K)
+    assert calls[0][4] == pytest.approx(95.0)  # s2p: post-yield hardening
+    assert calls[0][4] > calls[0][2]
+
+    calls.clear()
+    fric = LinkProperty(
+        name="FR",
+        link_type="Damper - Friction",
+        ke=[100.0, 0, 0, 0, 0, 0],
+        ce=[0.0] * 6,
+        nonlinear_params=DamperParams(k=[1000.0] * 6, fy=[50.0] * 6),
+    )
+    links_mod.LinkMixin._damper_dof_mat(links_mod.LinkMixin(), fric, 0, {})
+    assert calls[0][0] == "Hysteretic"
+    assert calls[0][3] == pytest.approx(0.05)  # e1p = fy / K
+    assert calls[0][4] == pytest.approx(calls[0][2])  # s2p == s1p → EPP (ratio 0)
+
+
+def test_direction_vector_parsing():
+    """Axis-aligned tokens and arbitrary coordinate triples parse to unit vectors."""
+    import numpy as np
+
+    from fea_toolkit.opensees._links import _direction_vector
+
+    assert np.allclose(_direction_vector("+X"), [1.0, 0.0, 0.0])
+    assert np.allclose(_direction_vector("-Z"), [0.0, 0.0, -1.0])
+    v = _direction_vector("(0.707, 0, 0.707)")
+    assert v is not None
+    assert np.linalg.norm(v) == pytest.approx(1.0)
+    assert v[0] == pytest.approx(v[2])  # symmetric (45° in X–Z)
+    assert v[1] == pytest.approx(0.0)
+    v = _direction_vector("0 1 0")
+    assert v is not None and np.allclose(v, [0.0, 1.0, 0.0])
+    assert _direction_vector("") is None
+    assert _direction_vector("garbage") is None
+    assert _direction_vector("1 2") is None  # wrong arity
+
+
 def test_nonlinear_per_dof_links_build():
     """Gap/Hook/Wen/Damper links emit their nonlinear materials (no raise)."""
     from fea_toolkit.model.sap_data import (
