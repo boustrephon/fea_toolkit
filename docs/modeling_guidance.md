@@ -4,7 +4,7 @@ description: "Canonical guidance for choosing element formulations, hinge/plasti
 status: "guidance"
 tags: [llm, guidance, modeling, nonlinear, element-choice, hinge, steel, damping, units]
 category: [core-pipeline]
-related: [llm_guide.md, sac_trilinear_hinge_approaches.md, sac_nonlinear_benchmark.md, nonlinear_dynamic_analysis.md, pushover_analysis.md, units_conversion.md]
+related: [llm_guide.md, sac_trilinear_hinge_approaches.md, sac_nonlinear_benchmark.md, nonlinear_dynamic_analysis.md, pushover_analysis.md, units_conversion.md, nonlinear_link_plan.md, modal_analysis.md]
 ---
 
 # Structural Modeling Guidance
@@ -323,3 +323,66 @@ Primary URLs: `openseesdigital.com/2020/08/21/a-marathon-not-a-sprint/`,
 `…/2024/09/02/murum-cura-te-ipsum/`, `…/2019/12/08/an-update-of-the-imk-models/`,
 `hanlindong.com/2019/opensees-converge/`, `jdcui.com/?page_id=1238`,
 `dergipark.org.tr/en/download/article-file/2136610`.
+
+## 10. Nonlinear links (isolators, dampers, gap/hook)
+
+> SAP2000/ETABS *link* objects (Gap, Hook, Plastic (Wen), Damper,
+> Rubber/Friction Isolator) have two builder representations, chosen by the
+> ``link_model`` config:
+>
+> * ``"elastic"`` (default) — one ``Elastic`` spring per active DOF at the
+>   effective stiffness.  Fine for elastic static / modal / response-spectrum
+>   runs of *any* link type; the builder **warns once per property** when the
+>   link is nonlinear, so a silently-linearised isolator is never mistaken for
+>   a nonlinear one.
+> * ``"nonlinear"`` — the type-specific nonlinear material/element.  Gap, Hook,
+>   Plastic (Wen) and Damper emit one uniaxial material per active DOF; the two
+>   bearing types (Rubber/Friction Isolator) emit a dedicated bearing element.
+>   The type→emitter map is `_LINK_EMISSION_FAMILY` in `opensees/_links.py`;
+>   the decisions behind it are in `nonlinear_link_plan.md`.
+
+### 10.1 Apply gravity (and other pre-loads) before the dynamic analysis
+
+Bearing/isolator response is **load-state-dependent**, so a transient, pushover
+or other nonlinear analysis must start from the gravity-loaded state — the same
+reason modal analysis applies a gravity pre-step (the `genBandArpack` / `ritz`
+modes in `modal_analysis.md`).  The transient runner's ``gravity_patterns``
+stage runs gravity first and retains the P-Δ and yield state; ``None`` skips it
+(**do not** skip it for an isolated model).  Hand-building: apply gravity, then
+``loadConst``, then start the dynamic integrator.
+
+- **Friction isolator** — friction is ``μ·N`` and post-yield stiffness is
+  ``N/Reff``, so a bearing with no axial load is *degenerate* (an early
+  zero-gravity push returned NaN).  Gravity supplies the ``N``.
+- **Rubber isolator** — the shear backbone is load-independent, but the
+  Schellenberg bearing's P-Δ geometric-stiffness term comes from the axial
+  load; without it the tangent is wrong.
+- **Gap / Hook** — the open/closed state at the start of the dynamic analysis
+  is whatever gravity left it in; applying gravity first establishes the
+  correct engagement before the excitation.
+
+### 10.2 Bearing and material choices
+
+| Link type | Emission | Notes |
+|---|---|---|
+| Rubber Isolator | `elastomericBearingPlasticity` (default) | `rubber_model="boucwen"` opts into `elastomericBearingBoucWen`.  The Schellenberg ``qd`` is the *post-yield intercept* (``F = alpha1·kInit·u + qd``), so the emitter maps SAP2000's yield force ``Fy`` to ``qd = Fy·(1 − ratio)``. |
+| Friction Isolator | `singleFPBearing` + friction model | `Coulomb` by default; `VelDependent` when ``mu_fast`` and ``rate`` are both given. |
+| Plastic (Wen) | `Steel02` (default, smooth) / `Hysteretic` (`wen_model`) | `BoucWen` is rejected — no explicit ``Fy``, six unexported knobs. |
+| Gap | `Hysteretic` (compression-only) | opens at the ``open`` value; zero force in the released direction. |
+| Hook | `Hysteretic` (tension-only) | uniform with Gap — one backbone model. |
+| Damper | `Viscous` / `Parallel` | `Parallel` puts an elastic spring beside `Viscous` for viscoelastic dampers; friction-damper subtypes are not yet emitted. |
+
+A bearing's axial (`-P`), torsional (`-T`) and bending (`-My`/`-Mz`) DOFs take
+``Elastic`` auxiliary materials; the coupled U2/U3 shear is modelled internally
+by the bearing element.  The Gap/Hook/bilinear backbones pin pinching and
+damage neutral — there are no degradation knobs to mis-tune — and the one-time
+`check_hysteretic_backbone` verb re-runs the open-close / symmetric-bilinear
+cyclic check on a generated model.
+
+### 10.3 Base isolation as a workflow verb
+
+The ``isolate_base`` verb (wrapping `model.supports.isolate_base`) replaces each
+fully-restrained base node with a grounded isolator link assigned the step's
+``property``, scoped by ``Selection``.  Run it once, up front, so every later
+analysis step inherits the isolated base rather than re-isolating per analysis
+(one operation, one spelling).

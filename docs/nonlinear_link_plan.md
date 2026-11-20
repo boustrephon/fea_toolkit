@@ -261,7 +261,8 @@ compression-only special case exists to support.
    `docs/modeling_guidance.md` bearing/damper guidance.  ✅ **Partly done** —
    the D8 check verb (`check_hysteretic_backbone`) and the base-isolation
    preparation verb (`isolate_base` → `model.supports.isolate_base`) are
-   implemented and registered; the benchmark tests (§10, need reference data)
-   and `modeling_guidance.md` remain.
+   implemented and registered; the `modeling_guidance.md` §10 guidance is
+   written (gravity-before-dynamic, bearing/material choices, base isolation).
+   The benchmark tests (§10, need reference data) remain.
 6. **P49-P2e (stretch)** — `tripleFPBearing`, T/C FP, friction-damper family,
    non-axis-aligned `CoordDir2`.
