@@ -1,17 +1,21 @@
 ---
 title: "Nonlinear link properties — plan (P49 Phase 2)"
 description: "Plan for parsing SAP2000/ETABS 03+ link-property tables and emitting nonlinear OpenSees link elements; records the Hysteretic-backbone decision, the one-time cyclic check and its recipe requirement, and the ENT/ElasticPP comparison tests."
-status: "draft"
+status: "partial"
 tags: [links, isolators, dampers, nonlinear, opensees, parser, workflow, s2k, e2k]
 category: [core-pipeline]
 related: [_pending_work.md, modeling_guidance.md, e2k_import_plan.md, workflow_authoring.md]
 ---
 # Nonlinear link properties — plan (P49 Phase 2)
 
-> **Status: 🚧 Draft — plan only.** Phase 1 (the linear / effective-stiffness
-> link representation) is live; see [`_pending_work.md` → P49](_pending_work.md).
-> This documents the design, the decisions, and the sequencing for the
-> nonlinear phase. Nothing in §2–§12 is implemented yet.
+> **Status: ⚠️ Partial — mostly implemented.** Phase 1 (the linear /
+> effective-stiffness link representation) is live, and Phase 2a–2d are done:
+> `03+` parsing, per-DOF emitters (Gap/Hook/Wen/dampers), bearing elements
+> (Rubber/Friction Isolator), dispatch/warnings/runner-defaults, the
+> `check_hysteretic_backbone` and `isolate_base` verbs, and the
+> `modeling_guidance.md` §10 guidance.  See [`_pending_work.md` → P49](_pending_work.md).
+> Remaining: the §10 reference-benchmark tests and the §9/P2e stretch types.
+> This documents the design, the decisions, and the sequencing.
 
 ## 1. Scope and goal
 
@@ -263,6 +267,8 @@ compression-only special case exists to support.
    preparation verb (`isolate_base` → `model.supports.isolate_base`) are
    implemented and registered; the `modeling_guidance.md` §10 guidance is
    written (gravity-before-dynamic, bearing/material choices, base isolation).
-   The benchmark tests (§10, need reference data) remain.
+   Two §10 benchmarks are done (E-Defense LRB, Morgan & Mahin FP first stage,
+   in `tests/test_link_benchmarks.py`); the damper (Pekcan/Mander/Chen) and
+   gap/pounding (Anagnostopoulos) benchmarks remain.
 6. **P49-P2e (stretch)** — `tripleFPBearing`, T/C FP, friction-damper family,
    non-axis-aligned `CoordDir2`.

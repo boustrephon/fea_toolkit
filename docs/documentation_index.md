@@ -40,7 +40,7 @@ for automated cross-referencing.
   Tags: `llm`, `guidance`, `modeling`, `nonlinear`, `element-choice`, `hinge`, `steel`, `damping`, `units`
   Related: [LLM & AI Assistant Guide](llm_guide.md) · [SAC Trilinear Hinge — Four Modelling Approaches](sac_trilinear_hinge_approaches.md) · [SAC 3-Story Nonlinear Benchmark (T4)](sac_nonlinear_benchmark.md) · [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Units Workflow (kN·m·s → kip·in Limit-State Analysis)](units_conversion.md) · [Nonlinear link properties — plan (P49 Phase 2)](nonlinear_link_plan.md) · [Modal Analysis Options](modal_analysis.md)
 
-- [Nonlinear link properties — plan (P49 Phase 2)](nonlinear_link_plan.md) — 🚧 Draft
+- [Nonlinear link properties — plan (P49 Phase 2)](nonlinear_link_plan.md) — ⚠️ Partial
   > Plan for parsing SAP2000/ETABS 03+ link-property tables and emitting nonlinear OpenSees link elements; records the Hysteretic-backbone decision, the one-time cyclic check and its recipe requirement, and the ENT/ElasticPP comparison tests.
   Tags: `links`, `isolators`, `dampers`, `nonlinear`, `opensees`, `parser`, `workflow`, `s2k`, `e2k`
   Related: [_pending_work.md](_pending_work.md) · [Structural Modeling Guidance](modeling_guidance.md) · [ETABS (.E2K / .$ET) import](e2k_import_plan.md) · [Workflow Authoring — Steps and Recipes](workflow_authoring.md)
