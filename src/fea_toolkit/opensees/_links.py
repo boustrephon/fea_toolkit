@@ -588,6 +588,13 @@ class LinkMixin:
                     0.5,
                 ]
             else:
+                # ``elastomericBearingPlasticity`` args after the shear DOFs:
+                # ``alpha2`` (post-yield ratio of the *nonlinear* hardening
+                # component, 0 for the bilinear LRB) and ``mu`` (the nonlinear-
+                # hardening exponent).  ``mu`` must be positive: mu=0 makes the
+                # hardening term degenerate (|u|^0) and the element NaNs under
+                # static gravity.  The repo's E-Defense LRB backbone benchmark
+                # (tests/test_link_benchmarks.py) calibrates ``mu = 1.0``.
                 args = [
                     "elastomericBearingPlasticity",
                     next_tag,
@@ -597,7 +604,7 @@ class LinkMixin:
                     qd,
                     alpha1,
                     0.0,
-                    0.0,
+                    1.0,
                 ]
         else:  # Friction Isolator
             p = prop.nonlinear_params

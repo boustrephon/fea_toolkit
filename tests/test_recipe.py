@@ -1655,7 +1655,12 @@ class TestBuildModelVerb:
         """The picker dialogs' combos live on as ``build_model`` parameter choices."""
         from fea_toolkit.workflow.verbs import BUILD_MODEL_PARAMS
 
-        assert BUILD_MODEL_PARAMS["builder"].choices == ("fema355c", "sac", "generic_frame")
+        assert BUILD_MODEL_PARAMS["builder"].choices == (
+            "fema355c",
+            "sac",
+            "generic_frame",
+            "e_defense_lrb",
+        )
         assert BUILD_MODEL_PARAMS["region"].choices == ("LA", "SE", "BO")
         assert BUILD_MODEL_PARAMS["n_stories"].choices == (3, 9, 20)
         assert BUILD_MODEL_PARAMS["design"].choices == ("pre", "post", "rbs", "r1", "r2", "r3")

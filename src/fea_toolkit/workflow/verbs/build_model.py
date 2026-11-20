@@ -22,6 +22,7 @@ BUILDER_TITLES: dict[str, str] = {
     "fema355c": "FEMA 355C / SAC Phase 2 steel frame",
     "sac": "SAC steel moment frame",
     "generic_frame": "IK-2005 generic frame",
+    "e_defense_lrb": "E-Defense 5-storey base-isolated frame (LRB-CLB)",
 }
 #: The builder names ``build_model`` delegates to.
 _BUILDERS = tuple(BUILDER_TITLES)
@@ -45,7 +46,7 @@ BUILD_MODEL_PARAMS: dict[str, ParamSpec] = {
         default="fema355c",
         type=str,
         choices=_BUILDERS,
-        help="Which builder: 'fema355c', 'sac' or 'generic_frame'.",
+        help="Which builder: 'fema355c', 'sac', 'generic_frame' or 'e_defense_lrb'.",
     ),
     # FEMA 355C / SAC Phase 2
     "region": ParamSpec(
@@ -146,10 +147,14 @@ def run_build_model(context: StepContext, step: Step) -> list[StepResult]:
             building=params["building"],
             backbone=params["backbone"],
         )
+    elif builder == "e_defense_lrb":
+        from ...benchmarks.e_defense import build_model as _build_e_defense
+
+        model = _build_e_defense(isolated=True)
     else:
         raise ValueError(
             f"build_model: unknown builder {builder!r} "
-            "(expected 'fema355c', 'sac' or 'generic_frame')"
+            "(expected 'fema355c', 'sac', 'generic_frame' or 'e_defense_lrb')"
         )
 
     context.model_data = model

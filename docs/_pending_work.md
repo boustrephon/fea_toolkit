@@ -1307,8 +1307,25 @@ all four in `tests/test_link_benchmarks.py` (E-Defense LRB, Morgan & Mahin FP,
 viscous damper (Pekcan/Mander/Chen), gap/pounding (Anagnostopoulos)); + ✅
 `modeling_guidance.md` §10 (gravity-before-dynamic, bearing/material choices,
 base isolation).  10) ✅ P2e bilinear/friction damper
-family (`Hysteretic`, `Ratio` parsed) + non-axis-aligned `CoordDir2`; ☐
-`tripleFPBearing`, T/C-FP, damper directional/orthotropic.
+family (`Hysteretic`, `Ratio` parsed) + non-axis-aligned `CoordDir2`; 11) ✅
+full-model shake-table check (Phase A) — `benchmarks/e_defense.py` +
+`tests/test_e_defense_lrb.py` reproduce the E-Defense 5-storey LRB-CLB building
+(fixed-base 0.70 s, isolated ~2.9 s, JMA-Kobe NLTHA, drift < 1/200).  This
+surfaced and fixed an emitter bug: `elastomericBearingPlasticity` was emitted
+with `mu = 0.0` (NaN under static gravity); it now emits `mu = 1.0` (the
+repo's LRB backbone benchmark value).  ☐
+`tripleFPBearing` (TPB configuration, Phase B), T/C-FP, damper directional/orthotropic.
+
+**Follow-up (pending external access).**  The Phase-A NLTHA currently drives
+the model with a JMA-Kobe stand-in; the measured LRB-CLB targets are the
+**100 % Iwanuma** (2011 Tohoku, K-NET station MYG004) record — peak isolator
+displacement **347 mm** and base shear **1187 kN = 0.224 W** (Ryan et al.
+2012, WCEE paper 2054).  Waiting on K-NET user-registration confirmation
+(`kyoshin.bosai.go.jp`) to download the `.NS`/`.EW`/`.UD` waveforms.  Once
+available: add a K-NET ASCII reader to `io/ground_motion.py`, add bidirectional
+(two-component `UniformExcitation`) support to `run_transient_analysis`, and
+replace the stand-in with the real Iwanuma case pinned to the published
+347 mm / 0.224 W targets.
 
 #### P50 — Recover member-force / fiber demands for the dispBeamColumn distributed-load fallback
 Source: review of `opensees/_loads.py` / `opensees/_runner_pushover.py`
