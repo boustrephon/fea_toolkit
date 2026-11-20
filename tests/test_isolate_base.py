@@ -2,7 +2,14 @@
 
 import pytest
 
-from fea_toolkit.model.sap_data import LinkProperty, Node, Restraint, SAPModelData, WenParams
+from fea_toolkit.model.sap_data import (
+    GapParams,
+    LinkProperty,
+    Node,
+    Restraint,
+    SAPModelData,
+    WenParams,
+)
 from fea_toolkit.model.supports import isolate_base
 
 
@@ -77,6 +84,29 @@ def test_check_hysteretic_backbone_verb_passes():
         results = run_check_hysteretic_backbone(ctx, Step(verb="check_hysteretic_backbone"))
         table = results[0].payload
         assert results[0].kind == "table"
+        assert all(row[1] == "passed" for row in table.rows)
+    finally:
+        import openseespy.opensees as ops
+
+        ops.wipe()
+
+
+def test_check_hysteretic_backbone_gap_opens_and_closes():
+    """The D8 verb cyclically checks a one-sided Gap (closes → opens → re-closes)."""
+    from fea_toolkit.workflow.steps import Step, StepContext
+    from fea_toolkit.workflow.verbs.check_hysteretic import run_check_hysteretic_backbone
+
+    md = _model()
+    md.link_properties["GAP"] = LinkProperty(
+        name="GAP",
+        link_type="Gap",
+        ke=[1000.0] * 6,
+        nonlinear_params=GapParams(open=[0.005] * 6),
+    )
+    try:
+        ctx = StepContext(model_data=md)
+        results = run_check_hysteretic_backbone(ctx, Step(verb="check_hysteretic_backbone"))
+        table = results[0].payload
         assert all(row[1] == "passed" for row in table.rows)
     finally:
         import openseespy.opensees as ops
