@@ -366,7 +366,7 @@ stage runs gravity first and retains the P-Δ and yield state; ``None`` skips it
 | Link type | Emission | Notes |
 |---|---|---|
 | Rubber Isolator | `elastomericBearingPlasticity` (default) | `rubber_model="boucwen"` opts into `elastomericBearingBoucWen`.  The Schellenberg ``qd`` is the *post-yield intercept* (``F = alpha1·kInit·u + qd``), so the emitter maps SAP2000's yield force ``Fy`` to ``qd = Fy·(1 − ratio)``. |
-| Friction Isolator | `singleFPBearing` + friction model | `Coulomb` by default; `VelDependent` when ``mu_fast`` and ``rate`` are both given. |
+| Friction Isolator | `singleFPBearing` + friction model | `Coulomb` by default; `VelDependent` when ``mu_fast`` and ``rate`` are both given.  The element adds geometric stiffening (its normal force grows with lateral displacement), so the linearised backbone ``F = μ·N + N/Reff·u`` holds at small ``u/Reff``. |
 | Plastic (Wen) | `Steel02` (default, smooth) / `Hysteretic` (`wen_model`) | `BoucWen` is rejected — no explicit ``Fy``, six unexported knobs. |
 | Gap | `Hysteretic` (compression-only) | opens at the ``open`` value; zero force in the released direction. |
 | Hook | `Hysteretic` (tension-only) | uniform with Gap — one backbone model. |
