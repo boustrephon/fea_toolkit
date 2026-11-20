@@ -249,9 +249,9 @@ compression-only special case exists to support.
    Rubber Isolator → `elastomericBearingPlasticity` (default) / `BoucWen`
    (`rubber_model`); Friction Isolator → `singleFPBearing` + `Coulomb` /
    `VelDependent`; `Elastic` `-P/-T/-My/-Mz` auxiliary DOFs; emitter arg tests
-   in `tests/test_link_nonlinear.py` + `test_bearing_links_build`.  (Behaviour
-   validation deferred to P2d — the bearing elements are numerically sensitive
-   and need the reference dynamic models.)
+   in `tests/test_link_nonlinear.py` + `test_bearing_links_build`, and a
+   gravity-loaded lateral-push behaviour test in `tests/test_bearing_behavior.py`
+   (rubber → NRC backbone, FP → `μ·N + (N/Reff)·u`).
 4. **P49-P2c** — `link_model` dispatch, warnings, runner defaults, type
    registry.  ✅ **Done** — `_LINK_EMISSION_FAMILY` registry (single source of
    truth) + `_link_emission_family` helper, the elastic-mode linearisation
