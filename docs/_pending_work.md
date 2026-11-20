@@ -1302,10 +1302,11 @@ tables + E2K tokens into `nonlinear_params` sub-dataclasses.  5) ✅ P2b(i) emit
 per-DOF nonlinear materials (Gap/Hook/Wen/dampers).  6) ✅ P2b(ii) emit bearing
 elements (rubber/FP isolators).  7) ✅ P2c dispatch/warnings/runner-defaults +
 registry (`_LINK_EMISSION_FAMILY`).  8) ✅ P2d check verb (`check_hysteretic_
-backbone`) + base-isolation verb (`isolate_base`).  9) ⚠️ P2d benchmarks (§10) —
-✅ E-Defense LRB + Morgan & Mahin FP (`tests/test_link_benchmarks.py`); ☐
-damper/gap; + ✅ `modeling_guidance.md` §10 (gravity-before-dynamic,
-bearing/material choices, base isolation).  10) ✅ P2e bilinear/friction damper
+backbone`) + base-isolation verb (`isolate_base`).  9) ✅ P2d benchmarks (§10) —
+all four in `tests/test_link_benchmarks.py` (E-Defense LRB, Morgan & Mahin FP,
+viscous damper (Pekcan/Mander/Chen), gap/pounding (Anagnostopoulos)); + ✅
+`modeling_guidance.md` §10 (gravity-before-dynamic, bearing/material choices,
+base isolation).  10) ✅ P2e bilinear/friction damper
 family (`Hysteretic`, `Ratio` parsed) + non-axis-aligned `CoordDir2`; ☐
 `tripleFPBearing`, T/C-FP, damper directional/orthotropic.
 

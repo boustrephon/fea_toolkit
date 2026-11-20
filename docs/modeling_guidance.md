@@ -370,7 +370,7 @@ stage runs gravity first and retains the P-Δ and yield state; ``None`` skips it
 | Plastic (Wen) | `Steel02` (default, smooth) / `Hysteretic` (`wen_model`) | `BoucWen` is rejected — no explicit ``Fy``, six unexported knobs. |
 | Gap | `Hysteretic` (compression-only) | opens at the ``open`` value; zero force in the released direction. |
 | Hook | `Hysteretic` (tension-only) | uniform with Gap — one backbone model. |
-| Damper | `Viscous` / `Parallel` | `Parallel` puts an elastic spring beside `Viscous` for viscoelastic dampers; friction-damper subtypes are not yet emitted. |
+| Damper | `Viscous` / `Parallel` / `Hysteretic` | `Parallel` puts an elastic spring beside `Viscous` for viscoelastic dampers; bilinear/friction dampers emit a symmetric `Hysteretic` backbone (friction = elastic-perfectly-plastic). |
 
 A bearing's axial (`-P`), torsional (`-T`) and bending (`-My`/`-Mz`) DOFs take
 ``Elastic`` auxiliary materials; the coupled U2/U3 shear is modelled internally

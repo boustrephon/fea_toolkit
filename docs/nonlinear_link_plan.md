@@ -14,8 +14,10 @@ related: [_pending_work.md, modeling_guidance.md, e2k_import_plan.md, workflow_a
 > (Rubber/Friction Isolator), dispatch/warnings/runner-defaults, the
 > `check_hysteretic_backbone` and `isolate_base` verbs, and the
 > `modeling_guidance.md` §10 guidance.  See [`_pending_work.md` → P49](_pending_work.md).
-> Remaining: the §10 damper/gap benchmark tests and the §9/P2e stretch types
-> (`tripleFPBearing`, T/C Friction Isolator, damper directional/orthotropic).
+> Remaining: the §9/P2e stretch types (`tripleFPBearing`, T/C Friction
+> Isolator, damper directional/orthotropic).  The §10 reference benchmarks
+> (E-Defense LRB, Morgan & Mahin FP, viscous damper, gap/pounding) are all
+> done.
 > This documents the design, the decisions, and the sequencing.
 
 ## 1. Scope and goal
@@ -268,14 +270,14 @@ nonlinear `K` (not the effective `Ke`) as the initial slope.
    warning (deduped per property), family-based dispatch, and `link_model=
    "nonlinear"` defaults in the pushover/transient runners.
 5. **P49-P2d** — the D8 check verb + recipe preset, benchmark tests (§10), and
-   `docs/modeling_guidance.md` bearing/damper guidance.  ✅ **Partly done** —
-   the D8 check verb (`check_hysteretic_backbone`) and the base-isolation
-   preparation verb (`isolate_base` → `model.supports.isolate_base`) are
-   implemented and registered; the `modeling_guidance.md` §10 guidance is
-   written (gravity-before-dynamic, bearing/material choices, base isolation).
-   Two §10 benchmarks are done (E-Defense LRB, Morgan & Mahin FP first stage,
-   in `tests/test_link_benchmarks.py`); the damper (Pekcan/Mander/Chen) and
-   gap/pounding (Anagnostopoulos) benchmarks remain.
+   `docs/modeling_guidance.md` bearing/damper guidance.  ✅ **Done** — the D8
+   check verb (`check_hysteretic_backbone`) and the base-isolation preparation
+   verb (`isolate_base` → `model.supports.isolate_base`) are implemented and
+   registered; the `modeling_guidance.md` §10 guidance is written
+   (gravity-before-dynamic, bearing/material choices, base isolation); and all
+   four §10 benchmarks are in `tests/test_link_benchmarks.py` (E-Defense LRB,
+   Morgan & Mahin FP first stage, the viscous-damper force–velocity law
+   (Pekcan/Mander/Chen), and gap/pounding (Anagnostopoulos)).
 6. **P49-P2e (stretch)** — `tripleFPBearing`, T/C FP, friction-damper family,
    non-axis-aligned `CoordDir2`.  ⚠️ **Partly done** — the bilinear/friction
    damper family (`Hysteretic`, `Ratio` parsed) and non-axis-aligned
