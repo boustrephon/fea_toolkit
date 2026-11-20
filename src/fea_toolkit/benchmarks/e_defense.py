@@ -1,10 +1,12 @@
-"""E-Defense 2011 full-scale 5-storey base-isolated steel frame (LRB-CLB).
+"""E-Defense 2011 full-scale 5-storey base-isolated steel frame (LRB-CLB / TPB).
 
 Reproduces the NEES/E-Defense collaborative shake-table test building
-(Ryan et al. 2012; Qin Dong et al. 2013): a 2x2-bay, 5-storey steel moment
-frame, 10 m (X) x 12 m (Y) in plan, 15.8 m tall, total weight ``W = 5420 kN``,
-isolated by four lead-rubber bearings (LRB) under the edge columns and five
-cross-linear bearings (CLB) under the corners and the centre column.
+(Ryan et al. 2012; Qin Dong et al. 2013; Dao & Ryan 2015): a 2x2-bay,
+5-storey steel moment frame, 10 m (X) x 12 m (Y) in plan, 15.8 m tall, total
+weight ``W = 5420 kN``.  Two isolation configurations are built: the LRB-CLB
+system (four lead-rubber bearings under the edge columns + five cross-linear
+bearings under the corners and centre) and the TPB system (nine identical
+triple friction pendulum bearings, ``config="tpb"``).
 
 Modelling follows Qin Dong et al. (2013) -- the superstructure is **linear
 elastic**; the fixed-base fundamental period is ``0.70 s`` (analysis 0.69 s,
@@ -44,6 +46,7 @@ from ..model.sap_data import (
     RubberIsolatorParams,
     SAPModelData,
     Section,
+    TriplePendulumParams,
 )
 from ..opensees.analysis_builder import AnalysisBuilder
 from ..opensees.preprocessor import preprocess_model
@@ -216,6 +219,16 @@ LRB_KC: float = 1.5e6  # vertical compression stiffness (1500 kN/mm)
 #: is modelled as a frictionless roller (see :func:`_clb_property`).
 CLB_MU: float = 0.0019
 
+#: TPB design parameters (Dao & Ryan 2015, CCEER 15-01 Table 3-8).  The triple
+#: friction pendulum (TPB) configuration uses nine identical EPS bearings.
+TPB_MU: tuple[float, float, float] = (0.02, 0.08, 0.08)  # friction coefficients
+TPB_RADIUS: tuple[float, float, float] = (0.419, 3.848, 3.848)  # effective radii R - h (m)
+TPB_UBAR: tuple[float, float, float] = (0.051, 0.514, 0.514)  # slider displacement limits (m)
+TPB_KV: float = 5.3e6  # vertical compression stiffness (5.3 MN/mm -> kN/m)
+TPB_KVT: float = 0.1  # vertical tension stiffness (100 N/m -> kN/m)
+TPB_MIN_FV: float = 10.0  # minimum vertical force for friction activation (kN)
+TPB_UY: float = 1.0e-3  # yield (sliding-start) displacement (m)
+
 
 def _lrb_property() -> LinkProperty:
     """The LRB link property (``Rubber Isolator``), axial U1 = vertical."""
@@ -251,18 +264,54 @@ def _clb_property() -> LinkProperty:
     )
 
 
+def _tpb_property() -> LinkProperty:
+    """The triple pendulum bearing (TPB) link property (``Triple Friction Pendulum``).
+
+    Nine identical EPS triple friction pendulum bearings (Dao & Ryan 2015,
+    CCEER 15-01 Table 3-8): ``mu = (0.02, 0.08, 0.08)``, effective radii
+    ``L = R - h = (0.419, 3.848, 3.848) m``, slider limits
+    ``d = (0.051, 0.514, 0.514) m``.  The total displacement capacity is
+    ``1.13 m`` at a base-shear coefficient of ``0.275`` (verified by the
+    ``tests/test_e_defense_tpb.py`` backbone push).  The axial (``U1``) DOF
+    carries the compression stiffness; the pendulum shear is modelled
+    internally by the element.  For the *elastic* (linearised) representation
+    the horizontal DOFs use the first-slope pendulum stiffness ``N / Leff1``
+    (``Leff1 = 2·L1``), which gives the isolator's 1.84 s first-slope period.
+    """
+    w_bearing = TOTAL_WEIGHT / (N_LINES_X * N_LINES_Y)
+    k1 = w_bearing / (2.0 * TPB_RADIUS[0])  # first-slope pendulum stiffness (kN/m)
+    return LinkProperty(
+        name="TPB",
+        link_type="Triple Friction Pendulum",
+        ke=[TPB_KV, k1, k1, 0.0, 0.0, 0.0],
+        nonlinear_params=TriplePendulumParams(
+            radius=list(TPB_RADIUS),
+            ubar=list(TPB_UBAR),
+            mu=list(TPB_MU),
+            W=w_bearing,
+            Uy=TPB_UY,
+            Kvt=TPB_KVT,
+            minFv=TPB_MIN_FV,
+            tol=1.0e-8,
+        ),
+    )
+
+
 # ============================================================================
 # Model construction
 # ============================================================================
 
 
-def build_model(isolated: bool = True) -> SAPModelData:
+def build_model(isolated: bool = True, config: str = "lrb-clb") -> SAPModelData:
     """Build the E-Defense 5-storey frame as a :class:`SAPModelData`.
 
     Args:
-        isolated: ``True`` places the LRB + CLB isolators under the base; the
-            base nodes are freed and supported by grounded isolator links.
-            ``False`` restrains the base fully (the fixed-base anchor).
+        isolated: ``True`` places isolators under the base; the base nodes are
+            freed and supported by grounded isolator links.  ``False``
+            restrains the base fully (the fixed-base anchor).
+        config: ``"lrb-clb"`` (four LRBs under the edge mid-columns + five CLBs
+            under the corners and centre) or ``"tpb"`` (nine identical triple
+            friction pendulum bearings under every column).
 
     Returns:
         The built model (kN, m, s).  Seismic masses are lumped at the floor
@@ -380,17 +429,28 @@ def build_model(isolated: bool = True) -> SAPModelData:
     link_properties: dict[str, LinkProperty] = {}
 
     if isolated:
-        link_properties["LRB"] = _lrb_property()
-        link_properties["CLB"] = _clb_property()
-        for i in range(lv.n_lines_x):
-            for j in range(lv.n_lines_y):
-                kind = lv.isolator_kind(i, j)
-                nid = lv.node_id(0, i, j)
-                lid = f"{kind.upper()}_{i}-{j}"
-                link_connectivity.append(
-                    LinkElement(link_id=lid, node_i=nid, node_j="", coord_dir1="+Z")
-                )
-                link_assignments[lid] = kind.upper()
+        if config == "tpb":
+            link_properties["TPB"] = _tpb_property()
+            for i in range(lv.n_lines_x):
+                for j in range(lv.n_lines_y):
+                    nid = lv.node_id(0, i, j)
+                    lid = f"TPB_{i}-{j}"
+                    link_connectivity.append(
+                        LinkElement(link_id=lid, node_i=nid, node_j="", coord_dir1="+Z")
+                    )
+                    link_assignments[lid] = "TPB"
+        else:  # "lrb-clb"
+            link_properties["LRB"] = _lrb_property()
+            link_properties["CLB"] = _clb_property()
+            for i in range(lv.n_lines_x):
+                for j in range(lv.n_lines_y):
+                    kind = lv.isolator_kind(i, j)
+                    nid = lv.node_id(0, i, j)
+                    lid = f"{kind.upper()}_{i}-{j}"
+                    link_connectivity.append(
+                        LinkElement(link_id=lid, node_i=nid, node_j="", coord_dir1="+Z")
+                    )
+                    link_assignments[lid] = kind.upper()
     else:
         for i in range(lv.n_lines_x):
             for j in range(lv.n_lines_y):
@@ -429,19 +489,22 @@ def build_model(isolated: bool = True) -> SAPModelData:
     )
 
 
-def build_builder(isolated: bool = True, link_model: str = "nonlinear") -> AnalysisBuilder:
+def build_builder(
+    isolated: bool = True, link_model: str = "nonlinear", config: str = "lrb-clb"
+) -> AnalysisBuilder:
     """Build the E-Defense model into a ready-to-run :class:`AnalysisBuilder`.
 
     Args:
-        isolated: ``True`` for the isolated configuration (LRB + CLB);
-            ``False`` for the fixed-base anchor.
+        isolated: ``True`` for the isolated configuration; ``False`` for the
+            fixed-base anchor.
         link_model: ``"nonlinear"`` (bearing elements) or ``"elastic"``
             (effective-stiffness links, for a linearised modal period).
+        config: ``"lrb-clb"`` or ``"tpb"`` (see :func:`build_model`).
 
     Returns:
         An :class:`AnalysisBuilder` with :meth:`build_domain` already called.
     """
-    md = build_model(isolated=isolated)
+    md = build_model(isolated=isolated, config=config)
     mesh = preprocess_model(md, {})
     b = AnalysisBuilder(mesh, {"link_model": link_model})
     b.build_domain()

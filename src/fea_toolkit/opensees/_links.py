@@ -99,6 +99,7 @@ _LINK_EMISSION_FAMILY: dict[str, str] = {
     "Damper": "per-dof",
     "Rubber Isolator": "bearing",
     "Friction Isolator": "bearing",
+    "Triple Friction Pendulum": "bearing",
 }
 
 #: Link types with a nonlinear emitter (derived — never hand-edited).
@@ -551,12 +552,15 @@ class LinkMixin:
     def _create_bearing_element(
         self, link, prop, ni, j_tag, grounded, next_tag, mat_cache, rubber_model, friction_count
     ):
-        """Emit a bearing element for a Rubber/Friction Isolator link.
+        """Emit a bearing element for a Rubber/Friction Isolator or TPB link.
 
-        The bearing models the coupled U2/U3 shear internally and takes
-        ``Elastic`` materials for the axial (``-P``), torsional (``-T``) and
-        bending (``-My``/``-Mz``) DOFs.  ``iNode`` is the bottom (concave
-        sliding surface for an FP bearing), ``jNode`` the top (slider).
+        The rubber and friction-pendulum bearings model the coupled U2/U3 shear
+        internally and take ``Elastic`` materials for the axial (``-P``),
+        torsional (``-T``) and bending (``-My``/``-Mz``) DOFs.  ``iNode`` is
+        the bottom (concave sliding surface for an FP bearing), ``jNode`` the
+        top (slider).  The triple friction pendulum (``TripleFrictionPendulum``)
+        takes the same four materials *positionally* plus three friction models,
+        and ignores ``-orient`` (its axial axis is I→J).
         """
         if grounded:
             i_node, j_node = j_tag, ni  # j_tag is the coincident ground node
@@ -606,6 +610,35 @@ class LinkMixin:
                     0.0,
                     1.0,
                 ]
+        elif prop.link_type == "Triple Friction Pendulum":
+            p = prop.nonlinear_params
+            frn_tags = []
+            for mu in p.mu:
+                frn_tag = _LINK_FRICTION_BASE + friction_count[0]
+                friction_count[0] += 1
+                ops.frictionModel("Coulomb", frn_tag, mu)
+                frn_tags.append(frn_tag)
+            # The TPB element takes its four auxiliary materials positionally
+            # (matP/T/My/Mz) and ignores ``-orient`` — it orients its axial
+            # (local-x) axis along I→J, which is vertical for a base isolator.
+            args = [
+                "TripleFrictionPendulum",
+                next_tag,
+                i_node,
+                j_node,
+                *frn_tags,
+                aux["P"],
+                aux["T"],
+                aux["My"],
+                aux["Mz"],
+                *p.radius,
+                *p.ubar,
+                p.W,
+                p.Uy,
+                p.Kvt,
+                p.minFv,
+                p.tol,
+            ]
         else:  # Friction Isolator
             p = prop.nonlinear_params
             frn_tag = _LINK_FRICTION_BASE + friction_count[0]
@@ -622,11 +655,12 @@ class LinkMixin:
                 k_init,
             ]
 
-        args += ["-P", aux["P"], "-T", aux["T"], "-My", aux["My"], "-Mz", aux["Mz"]]
-        orient = self._link_orient(link)
-        if orient is not None:
-            vx, vy = orient
-            args += ["-orient", *vx, *vy]
+        if prop.link_type != "Triple Friction Pendulum":
+            args += ["-P", aux["P"], "-T", aux["T"], "-My", aux["My"], "-Mz", aux["Mz"]]
+            orient = self._link_orient(link)
+            if orient is not None:
+                vx, vy = orient
+                args += ["-orient", *vx, *vy]
         ops.element(*args)
 
     def _bearing_aux_mat(self, prop, dof, mat_cache):

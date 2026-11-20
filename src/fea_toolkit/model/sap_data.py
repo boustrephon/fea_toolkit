@@ -176,6 +176,29 @@ class FrictionIsolatorParams(LinkNonlinearParams):
 
 
 @dataclass
+class TriplePendulumParams(LinkNonlinearParams):
+    """Nonlinear parameters for a Triple Friction Pendulum isolator link.
+
+    Maps to the OpenSees ``TripleFrictionPendulum`` element (Dao et al. 2013):
+    three friction-pendulum mechanisms in series.  ``radius`` are the effective
+    pendulum radii ``L_i = R_i - h_i``; ``ubar`` the slider displacement limits
+    ``d_i``; ``mu`` the friction coefficients.  The axial (``-P``) material —
+    the bearing's *compression* stiffness — is taken from ``ke[0]`` on
+    :class:`LinkProperty`; ``Kvt`` here is the separate *tension* stiffness
+    (a bearing carries ~no tension, so it is a small value).
+    """
+
+    radius: list[float] = field(default_factory=lambda: [0.0] * 3)  # effective radii (length)
+    ubar: list[float] = field(default_factory=lambda: [0.0] * 3)  # slider displacement limits
+    mu: list[float] = field(default_factory=lambda: [0.0] * 3)  # friction coefficients
+    W: float = 0.0  # reference axial load (force)
+    Uy: float = 0.001  # yield (sliding-start) displacement (length)
+    Kvt: float = 0.0  # tension stiffness (force/length)
+    minFv: float = 0.0  # minimum vertical force for friction activation (force)
+    tol: float = 1.0e-8  # element internal convergence tolerance
+
+
+@dataclass
 class DamperParams(LinkNonlinearParams):
     """Nonlinear parameters for a Damper link."""
 
@@ -195,6 +218,7 @@ LINK_NONLINEAR_PARAMS: dict[str, type[LinkNonlinearParams]] = {
     "Plastic (Wen)": WenParams,
     "Rubber Isolator": RubberIsolatorParams,
     "Friction Isolator": FrictionIsolatorParams,
+    "Triple Friction Pendulum": TriplePendulumParams,
     "Damper": DamperParams,
 }
 

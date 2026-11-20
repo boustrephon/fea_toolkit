@@ -14,10 +14,9 @@ related: [_pending_work.md, modeling_guidance.md, e2k_import_plan.md, workflow_a
 > (Rubber/Friction Isolator), dispatch/warnings/runner-defaults, the
 > `check_hysteretic_backbone` and `isolate_base` verbs, and the
 > `modeling_guidance.md` §10 guidance.  See [`_pending_work.md` → P49](_pending_work.md).
-> Remaining: the §9/P2e stretch types (`tripleFPBearing`, T/C Friction
-> Isolator, damper directional/orthotropic).  The §10 reference benchmarks
-> (E-Defense LRB, Morgan & Mahin FP, viscous damper, gap/pounding) are all
-> done.
+> Remaining: the §9/P2e stretch types (T/C Friction Isolator, damper
+> directional/orthotropic).  The §10 reference benchmarks (E-Defense LRB and
+> TPB, Morgan & Mahin FP, viscous damper, gap/pounding) are all done.
 > This documents the design, the decisions, and the sequencing.
 
 ## 1. Scope and goal
@@ -278,9 +277,10 @@ nonlinear `K` (not the effective `Ke`) as the initial slope.
    four §10 benchmarks are in `tests/test_link_benchmarks.py` (E-Defense LRB,
    Morgan & Mahin FP first stage, the viscous-damper force–velocity law
    (Pekcan/Mander/Chen), and gap/pounding (Anagnostopoulos)).
-6. **P49-P2e (stretch)** — `tripleFPBearing`, T/C FP, friction-damper family,
-   non-axis-aligned `CoordDir2`.  ⚠️ **Partly done** — the bilinear/friction
-   damper family (`Hysteretic`, `Ratio` parsed) and non-axis-aligned
-   `CoordDir2` (`_direction_vector`) are implemented; `tripleFPBearing`, the
-   T/C Friction Isolator and the damper directional/orthotropic subtypes remain
-   (deferred, §9).
+6. **P49-P2e (stretch)** — T/C FP, friction-damper family, non-axis-aligned
+   `CoordDir2`, and the triple friction pendulum.  ⚠️ **Partly done** — the
+   bilinear/friction damper family (`Hysteretic`, `Ratio` parsed),
+   non-axis-aligned `CoordDir2` (`_direction_vector`), and the triple friction
+   pendulum (`TripleFrictionPendulum` emitter + the E-Defense TPB benchmark)
+   are implemented; the T/C Friction Isolator and the damper
+   directional/orthotropic subtypes remain (deferred, §9).

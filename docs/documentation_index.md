@@ -372,6 +372,11 @@ for automated cross-referencing.
   Tags: `validation`, `benchmark`, `base-isolation`, `LRB`, `NLTHA`, `shake-table`
   Related: [Benchmark & Validation Model Register](benchmark_register.md) · [Nonlinear link properties — plan (P49 Phase 2)](nonlinear_link_plan.md) · [Structural Modeling Guidance](modeling_guidance.md)
 
+- [E-Defense Base-Isolated Frame (TPB) Benchmark (T4)](e_defense_tpb_benchmark.md) — ✅ Complete
+  > Full-model shake-table benchmark: E-Defense 5-storey base-isolated steel frame with triple friction pendulum bearings (TPB) — bearing backbone, first-slope period, and JMA-Kobe NLTHA.
+  Tags: `validation`, `benchmark`, `base-isolation`, `TPB`, `NLTHA`, `shake-table`
+  Related: [Benchmark & Validation Model Register](benchmark_register.md) · [Nonlinear link properties — plan (P49 Phase 2)](nonlinear_link_plan.md) · [Structural Modeling Guidance](modeling_guidance.md) · [E-Defense Base-Isolated Frame (LRB-CLB) Benchmark (T4)](e_defense_lrb_benchmark.md)
+
 - [Force-Diagram Unification (Phase B)](force_diagram_unification.md)
   > Detailed design for unifying the four force-diagram plotting entry points into one unit-aware API.
   Tags: `planning`, `refactor`, `plotting`, `phase-b`
@@ -503,7 +508,8 @@ for automated cross-referencing.
 Tags across all documentation files:
 
 - **`LRB`** — [e_defense_lrb_benchmark.md](e_defense_lrb_benchmark.md)
-- **`NLTHA`** — [e_defense_lrb_benchmark.md](e_defense_lrb_benchmark.md)
+- **`NLTHA`** — [e_defense_lrb_benchmark.md](e_defense_lrb_benchmark.md), [e_defense_tpb_benchmark.md](e_defense_tpb_benchmark.md)
+- **`TPB`** — [e_defense_tpb_benchmark.md](e_defense_tpb_benchmark.md)
 - **`aci-318`** — [stiffness_factors.md](stiffness_factors.md)
 - **`ai`** — [llm_guide.md](llm_guide.md)
 - **`analysis`** — [analysis.md](analysis.md), [load_cases_and_combinations.md](load_cases_and_combinations.md)
@@ -517,12 +523,12 @@ Tags across all documentation files:
 - **`asce41`** — [capacity.md](capacity.md)
 - **`attributes`** — [rhino_attributes.md](rhino_attributes.md)
 - **`backbone`** — [shear_failure_modelling.md](shear_failure_modelling.md)
-- **`base-isolation`** — [e_defense_lrb_benchmark.md](e_defense_lrb_benchmark.md)
+- **`base-isolation`** — [e_defense_lrb_benchmark.md](e_defense_lrb_benchmark.md), [e_defense_tpb_benchmark.md](e_defense_tpb_benchmark.md)
 - **`batch`** — [recipe_cli.md](recipe_cli.md)
 - **`beam-column-joint`** — [benchmark_register.md](benchmark_register.md)
 - **`beam-with-hinges`** — [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md)
 - **`beams`** — [element_classification.md](element_classification.md)
-- **`benchmark`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [cantilever_benchmark.md](cantilever_benchmark.md), [duong_benchmark.md](duong_benchmark.md), [e_defense_lrb_benchmark.md](e_defense_lrb_benchmark.md), [ground_motion_data.md](ground_motion_data.md), [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [imk_member_classification.md](imk_member_classification.md), [sac_benchmark.md](sac_benchmark.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [shear_building_benchmark.md](shear_building_benchmark.md), [tcl_import.md](tcl_import.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`benchmark`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [cantilever_benchmark.md](cantilever_benchmark.md), [duong_benchmark.md](duong_benchmark.md), [e_defense_lrb_benchmark.md](e_defense_lrb_benchmark.md), [e_defense_tpb_benchmark.md](e_defense_tpb_benchmark.md), [ground_motion_data.md](ground_motion_data.md), [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [imk_member_classification.md](imk_member_classification.md), [sac_benchmark.md](sac_benchmark.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [shear_building_benchmark.md](shear_building_benchmark.md), [tcl_import.md](tcl_import.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`bilin`** — [imk_deterioration_model.md](imk_deterioration_model.md)
 - **`bilinearization`** — [csm_bilinearization.md](csm_bilinearization.md)
 - **`boolean`** — [shell_openings.md](shell_openings.md)
@@ -743,7 +749,7 @@ Tags across all documentation files:
 - **`settings`** — [gui.md](gui.md)
 - **`sf`** — [safe_import.md](safe_import.md)
 - **`sfi-mvlem`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
-- **`shake-table`** — [e_defense_lrb_benchmark.md](e_defense_lrb_benchmark.md)
+- **`shake-table`** — [e_defense_lrb_benchmark.md](e_defense_lrb_benchmark.md), [e_defense_tpb_benchmark.md](e_defense_tpb_benchmark.md)
 - **`shear`** — [duong_benchmark.md](duong_benchmark.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [shear_failure_modelling.md](shear_failure_modelling.md), [storey_response.md](storey_response.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`shear-building`** — [shear_building_benchmark.md](shear_building_benchmark.md)
 - **`shear-critical`** — [duong_benchmark.md](duong_benchmark.md)
@@ -775,7 +781,7 @@ Tags across all documentation files:
 - **`units`** — [modeling_guidance.md](modeling_guidance.md), [units_conversion.md](units_conversion.md)
 - **`usage`** — [llm_guide.md](llm_guide.md)
 - **`userstrings`** — [rhino_attributes.md](rhino_attributes.md)
-- **`validation`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [cantilever_benchmark.md](cantilever_benchmark.md), [duong_benchmark.md](duong_benchmark.md), [e_defense_lrb_benchmark.md](e_defense_lrb_benchmark.md), [ground_motion_data.md](ground_motion_data.md), [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [mander_confinement_validation.md](mander_confinement_validation.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [sac_benchmark.md](sac_benchmark.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [shear_building_benchmark.md](shear_building_benchmark.md), [shear_failure_modelling.md](shear_failure_modelling.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`validation`** — [benchmark_register.md](benchmark_register.md), [benchmark_roadmap.md](benchmark_roadmap.md), [cantilever_benchmark.md](cantilever_benchmark.md), [duong_benchmark.md](duong_benchmark.md), [e_defense_lrb_benchmark.md](e_defense_lrb_benchmark.md), [e_defense_tpb_benchmark.md](e_defense_tpb_benchmark.md), [ground_motion_data.md](ground_motion_data.md), [ik2005_generic_frame_benchmark.md](ik2005_generic_frame_benchmark.md), [mander_confinement_validation.md](mander_confinement_validation.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [sac_benchmark.md](sac_benchmark.md), [sac_imk_collapse_benchmark.md](sac_imk_collapse_benchmark.md), [sac_nonlinear_benchmark.md](sac_nonlinear_benchmark.md), [sac_trilinear_hinge_approaches.md](sac_trilinear_hinge_approaches.md), [shear_building_benchmark.md](shear_building_benchmark.md), [shear_failure_modelling.md](shear_failure_modelling.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`verbs`** — [workflow_authoring.md](workflow_authoring.md)
 - **`versioning`** — [versioning.md](versioning.md)
 - **`viewer`** — [viewer.md](viewer.md)

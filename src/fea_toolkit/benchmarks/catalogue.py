@@ -178,6 +178,17 @@ BENCHMARK_ENTRIES: tuple[BenchmarkEntry, ...] = (
         test=("test_e_defense_lrb.py",),
         builder="e_defense_lrb",
     ),
+    BenchmarkEntry(
+        id="e_defense_tpb",
+        title="E-Defense 5-storey base-isolated frame (TPB)",
+        structural_type="base-isolated steel moment frame",
+        load_type="modal/NLTHA",
+        tier="T4",
+        status="validated",
+        doc=("e_defense_tpb_benchmark.md",),
+        test=("test_e_defense_tpb.py",),
+        builder="e_defense_tpb",
+    ),
 )
 
 _BY_ID: dict[str, BenchmarkEntry] = {entry.id: entry for entry in BENCHMARK_ENTRIES}

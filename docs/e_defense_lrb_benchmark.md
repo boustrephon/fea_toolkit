@@ -118,8 +118,9 @@ the NLTHA peak displacement is a sanity check against the published
 - The superstructure is linear-elastic (as in Qin Dong et al. 2013).
 - The CLB is modelled as a vertical roller, not a friction slider — its
   friction is negligible relative to the LRB yield strength.  The friction
-  pendulum (`singleFPBearing`) path is exercised by the TPB configuration
-  (Phase B, pending `tripleFPBearing` emission).
+  pendulum path is exercised by the TPB configuration (`config="tpb"`), which
+  uses OpenSees' `TripleFrictionPendulum` element (see
+  `tests/test_e_defense_tpb.py`).
 - The three haunched girder segments are represented by a single built-up
   `BH-400×200×12×19` section; the column lines C1/C2/C3 are collapsed to a
   single 22→12 mm taper.  Together with the composite ×2 factor these

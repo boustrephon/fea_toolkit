@@ -496,6 +496,7 @@ def test_link_emission_family():
     assert fam("Damper - Exponential") == "per-dof"  # subtype
     assert fam("Rubber Isolator") == "bearing"
     assert fam("Friction Isolator") == "bearing"
+    assert fam("Triple Friction Pendulum") == "bearing"
     assert fam("T/C Friction Isolator") == "unsupported"
     assert fam("Multilinear Elastic") == "unsupported"
 

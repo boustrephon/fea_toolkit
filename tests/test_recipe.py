@@ -1660,6 +1660,7 @@ class TestBuildModelVerb:
             "sac",
             "generic_frame",
             "e_defense_lrb",
+            "e_defense_tpb",
         )
         assert BUILD_MODEL_PARAMS["region"].choices == ("LA", "SE", "BO")
         assert BUILD_MODEL_PARAMS["n_stories"].choices == (3, 9, 20)

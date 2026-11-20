@@ -1313,8 +1313,13 @@ full-model shake-table check (Phase A) — `benchmarks/e_defense.py` +
 (fixed-base 0.70 s, isolated ~2.9 s, JMA-Kobe NLTHA, drift < 1/200).  This
 surfaced and fixed an emitter bug: `elastomericBearingPlasticity` was emitted
 with `mu = 0.0` (NaN under static gravity); it now emits `mu = 1.0` (the
-repo's LRB backbone benchmark value).  ☐
-`tripleFPBearing` (TPB configuration, Phase B), T/C-FP, damper directional/orthotropic.
+repo's LRB backbone benchmark value).  12) ✅ TPB configuration (Phase B) —
+`TripleFrictionPendulum` (Dao et al. 2013) emitter in `opensees/_links.py` +
+`benchmarks/e_defense.py` `config="tpb"` + `tests/test_e_defense_tpb.py`
+(backbone 0.275 W at 1.13 m, first-slope period ~1.96 s, Kobe NLTHA).  The
+element is `TripleFrictionPendulum` — `tripleFPBearing` is an unknown element
+type in OpenSeesPy (verified against the installed library).  ☐
+T/C-FP, damper directional/orthotropic.
 
 **Follow-up (pending external access).**  The Phase-A NLTHA currently drives
 the model with a JMA-Kobe stand-in; the measured LRB-CLB targets are the
