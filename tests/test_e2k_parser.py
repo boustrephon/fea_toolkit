@@ -1245,6 +1245,33 @@ def test_link_properties_parse():
     assert props["LP1"].ke[:3] == [1000.0, 2000.0, 3000.0]
     assert props["LP1"].ce[:3] == [0.0, 0.0, 0.0]
     assert props["LP1"].fixed[:3] == [False, False, True]
+    # The Hook's NONLIN/K/OPEN tokens interpret into nonlinear_params; a
+    # Linear link carries none.
+    from fea_toolkit.model.sap_data import HookParams
+
+    hook = props["D20RODLINK"].nonlinear_params
+    assert isinstance(hook, HookParams)
+    assert hook.open[0] == 0.0
+    assert props["LP1"].nonlinear_params is None
+
+
+def test_link_nonlinear_isolator_parse():
+    """A Friction Isolator's K/MU/R tokens interpret into FrictionIsolatorParams."""
+    from fea_toolkit.io.e2k_parser import _get_link_properties
+    from fea_toolkit.model.sap_data import FrictionIsolatorParams
+
+    sections = _parse_sections(
+        "$ LINK PROPERTIES\n"
+        '  LINKPROP  "ISO2"  TYPE "FRICTIONISOLATOR"  \n'
+        '  LINKPROP  "ISO2"  DOF "U2"  KE 1000  K 5000  MU 0.06  R 2.0 \n'
+    )
+    props = _get_link_properties(sections)
+    assert props["ISO2"].link_type == "Friction Isolator"
+    params = props["ISO2"].nonlinear_params
+    assert isinstance(params, FrictionIsolatorParams)
+    assert params.k[1] == 5000.0
+    assert params.mu == 0.06
+    assert params.radius == 2.0
 
 
 def test_link_connectivity_parse():

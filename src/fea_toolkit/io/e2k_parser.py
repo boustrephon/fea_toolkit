@@ -52,6 +52,7 @@ from typing import Any, Optional, Union
 from .._unit_scaling import force_unit_label, length_unit_label
 from ..model.sap_data import (
     LINK_DOF_ORDER,
+    LINK_NONLINEAR_PARAMS,
     SHAPE_NAMES,
     AngleSection,
     AreaElement,
@@ -62,11 +63,15 @@ from ..model.sap_data import (
     ConcreteCircularSection,
     ConcreteRectangularSection,
     Constraint,
+    DamperParams,
     DoubleAngleSection,
     FrameDistributedLoad,
     FrameElement,
     FrameEndOffset,
+    FrictionIsolatorParams,
+    GapParams,
     GeneralSection,
+    HookParams,
     ISection,
     JointLoad,
     LinkElement,
@@ -81,6 +86,7 @@ from ..model.sap_data import (
     PipeSection,
     RectangularSection,
     Restraint,
+    RubberIsolatorParams,
     SAPModelData,
     SDSection,
     Section,
@@ -88,6 +94,7 @@ from ..model.sap_data import (
     ShellUniformLoadSet,
     StoryDefinition,
     TeeSection,
+    WenParams,
     is_null_section,
     is_opening_section,
 )
@@ -750,7 +757,46 @@ def _get_link_properties(sections: dict[str, list[GroupedLine]]) -> dict[str, Li
         for kw in ("NONLIN", "K", "OPEN", "F", "YIELD", "R", "MU", "RADIUS"):
             if kw in attrs:
                 prop.nonlinear.setdefault(dof, {})[kw] = attrs[kw]
+    for prop in props.values():
+        _interpret_link_nonlinear(prop)
     return props
+
+
+def _interpret_link_nonlinear(prop: LinkProperty) -> None:
+    """Populate :attr:`LinkProperty.nonlinear_params` from the per-DOF token stash.
+
+    ETABS packs the nonlinear data into the same ``LINKPROP`` DOF records as
+    the linear ``KE``/``CE``/``FIXED`` values, using the tokens ``K`` (initial
+    nonlinear stiffness), ``OPEN`` (gap), ``F``/``YIELD`` (yield force),
+    ``R``/``RADIUS`` (pendulum radius) and ``MU`` (friction coefficient).  The
+    linear ``KE``/``CE`` stay on ``ke``/``ce``; only the nonlinear-only extras
+    land in :attr:`~LinkProperty.nonlinear_params`.
+    """
+    cls = LINK_NONLINEAR_PARAMS.get(prop.link_type)
+    if cls is None:
+        return
+    params = cls()
+    for dof, attrs in prop.nonlinear.items():
+        if dof not in LINK_DOF_ORDER:
+            continue
+        idx = LINK_DOF_ORDER.index(dof)
+        if isinstance(params, (GapParams, HookParams)):
+            params.open[idx] = _as_float(attrs.get("OPEN", 0.0))
+        elif isinstance(params, WenParams):
+            params.fy[idx] = _as_float(attrs.get("YIELD", attrs.get("F", 0.0)))
+        elif isinstance(params, RubberIsolatorParams):
+            params.k[idx] = _as_float(attrs.get("K", 0.0))
+            params.fy[idx] = _as_float(attrs.get("YIELD", attrs.get("F", 0.0)))
+        elif isinstance(params, FrictionIsolatorParams):
+            params.k[idx] = _as_float(attrs.get("K", 0.0))
+            params.mu = _as_float(attrs.get("MU", 0.0))
+            radius = attrs.get("RADIUS", attrs.get("R"))
+            if radius is not None:
+                params.radius = _as_float(radius)
+        elif isinstance(params, DamperParams):
+            params.k[idx] = _as_float(attrs.get("K", 0.0))
+            params.fy[idx] = _as_float(attrs.get("YIELD", attrs.get("F", 0.0)))
+    prop.nonlinear_params = params
 
 
 def _get_link_connectivity(sections: dict[str, list[GroupedLine]]) -> dict[str, tuple]:

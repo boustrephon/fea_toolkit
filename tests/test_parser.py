@@ -281,6 +281,75 @@ TABLE:  "LINK PROPERTY DEFINITIONS 02 - LINEAR"
     assert prop.fixed[:3] == [False, False, True]
 
 
+def test_parse_nonlinear_link_property_tables(tmp_path):
+    """LINK PROPERTY DEFINITIONS 04/05/06/07/08/10 populate nonlinear_params."""
+    from fea_toolkit.model.sap_data import (
+        DamperParams,
+        FrictionIsolatorParams,
+        GapParams,
+        HookParams,
+        RubberIsolatorParams,
+        WenParams,
+    )
+
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "LINK PROPERTY DEFINITIONS 01 - GENERAL"
+   Link=GAP1   LinkType=Gap
+   Link=HOOK1   LinkType=Hook
+   Link=RUB1   LinkType=Rubber Isolator
+   Link=ISO1   LinkType=Friction Isolator
+   Link=WEN1   LinkType=Plastic (Wen)
+   Link=DMP1   LinkType=Damper - Exponential
+TABLE:  "LINK PROPERTY DEFINITIONS 05 - GAP"
+   Link=GAP1   DOF=U1   Fixed=No   Ke=5000   Open=0.002
+TABLE:  "LINK PROPERTY DEFINITIONS 06 - HOOK"
+   Link=HOOK1   DOF=U1   Fixed=No   Ke=5000   Open=0.001
+TABLE:  "LINK PROPERTY DEFINITIONS 07 - RUBBER ISOLATOR"
+   Link=RUB1   DOF=U2   Fixed=No   Ke=1000   Ce=0   K=2000   Yield=50   Ratio=0.1
+TABLE:  "LINK PROPERTY DEFINITIONS 08 - SLIDING ISOLATOR"
+   Link=ISO1   DOF=U2   Fixed=No   Ke=1000   Ce=0   K=5000   Radius=2.0   Mu=0.06   MuFast=0.09   Rate=0.4
+TABLE:  "LINK PROPERTY DEFINITIONS 10 - PLASTIC (WEN)"
+   Link=WEN1   DOF=U1   Fixed=No   Ke=1000   Ce=0   Yield=30   YieldExp=2   Ratio=0.05
+TABLE:  "LINK PROPERTY DEFINITIONS 04 - DAMPER"
+   Link=DMP1   DOF=U1   Fixed=No   Ke=0   Ce=50   Cexp=0.3
+"""
+    s2k = tmp_path / "test_link_nonlinear.s2k"
+    s2k.write_text(content)
+    md = SAP2000Parser(s2k).parse().get_model_data()
+
+    gap = md.link_properties["GAP1"].nonlinear_params
+    assert isinstance(gap, GapParams)
+    assert gap.open[0] == pytest.approx(0.002)
+
+    hook = md.link_properties["HOOK1"].nonlinear_params
+    assert isinstance(hook, HookParams)
+    assert hook.open[0] == pytest.approx(0.001)
+
+    rub = md.link_properties["RUB1"].nonlinear_params
+    assert isinstance(rub, RubberIsolatorParams)
+    assert rub.k[1] == pytest.approx(2000.0)
+    assert rub.fy[1] == pytest.approx(50.0)
+    assert rub.ratio == pytest.approx(0.1)
+
+    iso = md.link_properties["ISO1"].nonlinear_params
+    assert isinstance(iso, FrictionIsolatorParams)
+    assert iso.k[1] == pytest.approx(5000.0)
+    assert iso.radius == pytest.approx(2.0)
+    assert iso.mu == pytest.approx(0.06)
+    assert iso.mu_fast == pytest.approx(0.09)
+    assert iso.rate == pytest.approx(0.4)
+
+    wen = md.link_properties["WEN1"].nonlinear_params
+    assert isinstance(wen, WenParams)
+    assert wen.fy[0] == pytest.approx(30.0)
+    assert wen.ratio == pytest.approx(0.05)
+    assert wen.n == pytest.approx(2.0)
+
+    dmp = md.link_properties["DMP1"].nonlinear_params
+    assert isinstance(dmp, DamperParams)
+    assert dmp.cexp == pytest.approx(0.3)
+
+
 def test_parse_link_local_axes(tmp_path):
     """LINK LOCAL AXES ASSIGNMENTS 1 - TYPICAL / 2 - ADVANCED parse."""
     content = """File test.s2k was saved on m/d/yy at h:mm:ss

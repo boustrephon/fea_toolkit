@@ -448,10 +448,15 @@ def test_load_tables_that_are_tracked_holes_read_as_gaps_not_surprises():
     """A known gap must classify as a gap, so the report distinguishes them."""
     assert classify("FRAME LOADS - POINT") == "handled"  # parsed since P14
     # Link connectivity + linear properties are handled since P49 Phase 1;
-    # only the nonlinear (03+) link-property tables remain a known gap.
+    # the scalar nonlinear (03+) link-property tables since P49 Phase 2.
     assert classify("LINK PROPERTY DEFINITIONS 01 - GENERAL") == "handled"
     assert classify("LINK PROPERTY DEFINITIONS 02 - LINEAR") == "handled"
-    assert classify("LINK PROPERTY DEFINITIONS 05 - GAP") == "known-gap"
+    assert classify("LINK PROPERTY DEFINITIONS 05 - GAP") == "handled"
+    assert classify("LINK PROPERTY DEFINITIONS 07 - RUBBER ISOLATOR") == "handled"
+    assert classify("LINK PROPERTY DEFINITIONS 08 - SLIDING ISOLATOR") == "handled"
+    # The force-deformation / T-C friction tables remain a tracked hole.
+    assert classify("LINK PROPERTY DEFINITIONS 03 - MULTILINEAR") == "known-gap"
+    assert classify("LINK PROPERTY DEFINITIONS 11 - MULTILINEAR PLASTIC") == "known-gap"
 
 
 def test_the_real_model_table_set_reports_no_unrecognised_tables():

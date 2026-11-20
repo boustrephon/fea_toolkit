@@ -13,6 +13,7 @@ import numpy as np  # noqa: F401
 from ..model.load_combinations import classify_combination_refs
 from ..model.sap_data import (
     LINK_DOF_ORDER,
+    LINK_NONLINEAR_PARAMS,
     AreaEdgeConstraint,
     AreaElement,
     AreaGravityLoad,
@@ -20,13 +21,17 @@ from ..model.sap_data import (
     AreaUniformLoad,
     ConcreteRectangularSection,
     Constraint,
+    DamperParams,
     FrameDistributedLoad,
     FrameElement,
     FrameEndOffset,
     FramePointLoad,
     FrameRelease,
+    FrictionIsolatorParams,
+    GapParams,
     GravityLoad,
     Group,
+    HookParams,
     JointLoad,
     LinkElement,
     LinkProperty,
@@ -39,10 +44,12 @@ from ..model.sap_data import (
     Node,
     ResponseSpectrumFunction,
     Restraint,
+    RubberIsolatorParams,
     SAPModelData,
     Section,
     ShellSection,
     StressStrainCurve,
+    WenParams,
     is_null_section,
     is_opening_section,
 )
@@ -774,7 +781,74 @@ class SAP2000Parser:
         # an all-fixed linear link) still needs an entry.
         for name, link_type in types.items():
             props.setdefault(name, LinkProperty(name=name, link_type=link_type))
+        self._parse_nonlinear_link_tables(props)
         return props
+
+    @staticmethod
+    def _num(rec: dict[str, Any], key: str, default: float = 0.0) -> float:
+        """Read a numeric column, defaulting on a missing/empty cell."""
+        try:
+            return float(rec.get(key) or default)
+        except (TypeError, ValueError):
+            return default
+
+    def _parse_nonlinear_link_tables(self, props: dict[str, LinkProperty]) -> None:
+        """Parse the ``LINK PROPERTY DEFINITIONS 03+`` tables into ``nonlinear_params``.
+
+        ``02 - LINEAR`` already holds the effective ``Ke``/``Ce`` every link
+        type carries; these type-specific tables hold the *nonlinear-only*
+        parameters (yield force, post-yield ratio, gap, pendulum radius,
+        friction coefficient, velocity exponent).  Column names follow the
+        SAP2000 database/OAPI spelling for each table; a missing column reads
+        as its default, so a partial export still parses.
+        """
+        table_specs = {
+            "LINK PROPERTY DEFINITIONS 04 - DAMPER": "Damper",
+            "LINK PROPERTY DEFINITIONS 05 - GAP": "Gap",
+            "LINK PROPERTY DEFINITIONS 06 - HOOK": "Hook",
+            "LINK PROPERTY DEFINITIONS 07 - RUBBER ISOLATOR": "Rubber Isolator",
+            "LINK PROPERTY DEFINITIONS 08 - SLIDING ISOLATOR": "Friction Isolator",
+            "LINK PROPERTY DEFINITIONS 10 - PLASTIC (WEN)": "Plastic (Wen)",
+        }
+        for table, link_type in table_specs.items():
+            for rec in self._raw_tables.get(table, []):
+                name = str(rec.get("Link", "")).strip()
+                dof = str(rec.get("DOF", "")).strip().upper()
+                if not name or dof not in LINK_DOF_ORDER:
+                    continue
+                prop = props.get(name)
+                if prop is None:
+                    continue
+                params = prop.nonlinear_params
+                if params is None:
+                    params = LINK_NONLINEAR_PARAMS[link_type]()
+                    prop.nonlinear_params = params
+                self._fill_nonlinear_row(params, link_type, LINK_DOF_ORDER.index(dof), rec)
+
+    def _fill_nonlinear_row(
+        self, params: Any, link_type: str, idx: int, rec: dict[str, Any]
+    ) -> None:
+        """Fill one DOF of a nonlinear-params object from a table row."""
+        if isinstance(params, (GapParams, HookParams)):
+            params.open[idx] = self._num(rec, "Open")
+        elif isinstance(params, WenParams):
+            params.fy[idx] = self._num(rec, "Yield")
+            params.ratio = self._num(rec, "Ratio", params.ratio)
+            params.n = self._num(rec, "YieldExp", params.n)
+        elif isinstance(params, RubberIsolatorParams):
+            params.k[idx] = self._num(rec, "K")
+            params.fy[idx] = self._num(rec, "Yield")
+            params.ratio = self._num(rec, "Ratio", params.ratio)
+        elif isinstance(params, FrictionIsolatorParams):
+            params.k[idx] = self._num(rec, "K")
+            params.radius = self._num(rec, "Radius", params.radius)
+            params.mu = self._num(rec, "Mu", params.mu)
+            params.mu_fast = self._num(rec, "MuFast", params.mu_fast)
+            params.rate = self._num(rec, "Rate", params.rate)
+        elif isinstance(params, DamperParams):
+            params.cexp = self._num(rec, "Cexp", params.cexp)
+            params.k[idx] = self._num(rec, "K")
+            params.fy[idx] = self._num(rec, "Yield")
 
     def _get_link_local_axes(self) -> dict[str, dict[str, Any]]:
         """Parse ``LINK LOCAL AXES ASSIGNMENTS 1 - TYPICAL`` / ``2 - ADVANCED``.

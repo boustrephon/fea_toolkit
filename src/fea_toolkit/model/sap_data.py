@@ -112,7 +112,90 @@ class LinkProperty:
     ke: list[float] = field(default_factory=lambda: [0.0] * 6)  # U1..R3 effective stiffness
     ce: list[float] = field(default_factory=lambda: [0.0] * 6)  # U1..R3 effective damping
     fixed: list[bool] = field(default_factory=lambda: [False] * 6)  # U1..R3 rigidly connected
+    #: Raw per-DOF nonlinear tokens (ETABS ``$ LINK PROPERTIES`` grammar —
+    #: ``K``/``OPEN``/``F``/``YIELD``/``R``/``MU``/``RADIUS``).  Interpreted
+    #: into :attr:`nonlinear_params` by the parser (P49 Phase 2).
     nonlinear: dict[str, Any] = field(default_factory=dict)
+    #: Type-specific nonlinear parameters, as a discriminated sub-dataclass
+    #: (see :data:`LINK_NONLINEAR_PARAMS`).  ``None`` for a linear link.
+    nonlinear_params: Optional["LinkNonlinearParams"] = None
+
+
+class LinkNonlinearParams:
+    """Marker base for type-specific nonlinear link parameters (P49 Phase 2).
+
+    One sub-dataclass per link type (see :data:`LINK_NONLINEAR_PARAMS`).
+    Every field carries the *nonlinear-only* parameters — the effective
+    stiffness/damping used by elastic analyses stay on :class:`LinkProperty`
+    (``ke``/``ce``), so the two representations never fight over the same
+    value.
+    """
+
+
+@dataclass
+class GapParams(LinkNonlinearParams):
+    """Nonlinear parameters for a Gap (compression-only) link."""
+
+    open: list[float] = field(default_factory=lambda: [0.0] * 6)  # U1..R3 initial gap
+
+
+@dataclass
+class HookParams(LinkNonlinearParams):
+    """Nonlinear parameters for a Hook (tension-only) link."""
+
+    open: list[float] = field(default_factory=lambda: [0.0] * 6)  # U1..R3 initial gap
+
+
+@dataclass
+class WenParams(LinkNonlinearParams):
+    """Nonlinear parameters for a Plastic (Wen) link."""
+
+    fy: list[float] = field(default_factory=lambda: [0.0] * 6)  # U1..R3 yield force
+    ratio: float = 0.0  # post-yield stiffness ratio
+    n: float = 2.0  # yield (sharpness) exponent
+
+
+@dataclass
+class RubberIsolatorParams(LinkNonlinearParams):
+    """Nonlinear parameters for a Rubber Isolator link."""
+
+    k: list[float] = field(default_factory=lambda: [0.0] * 6)  # initial nonlinear stiffness
+    fy: list[float] = field(default_factory=lambda: [0.0] * 6)  # yield force
+    ratio: float = 0.0  # post-yield stiffness ratio (Kd / Ke)
+
+
+@dataclass
+class FrictionIsolatorParams(LinkNonlinearParams):
+    """Nonlinear parameters for a Friction (sliding) Isolator link."""
+
+    k: list[float] = field(default_factory=lambda: [0.0] * 6)  # initial nonlinear stiffness
+    radius: float = 0.0  # pendulum radius (length)
+    mu: float = 0.0  # slow friction coefficient
+    mu_fast: float = 0.0  # fast friction coefficient
+    rate: float = 0.0  # friction velocity rate parameter
+
+
+@dataclass
+class DamperParams(LinkNonlinearParams):
+    """Nonlinear parameters for a Damper link."""
+
+    cexp: float = 1.0  # velocity exponent (1.0 = linear, <1 = nonlinear)
+    k: list[float] = field(default_factory=lambda: [0.0] * 6)  # stiffness (bilinear/friction)
+    fy: list[float] = field(default_factory=lambda: [0.0] * 6)  # yield force (bilinear/friction)
+    damper_type: str = ""  # "Exponential" / "Linear" / "Bilinear" / "Friction"
+
+
+#: Canonical link type → nonlinear-parameter dataclass (P49 Phase 2).
+#: ``Linear`` (and the not-yet-parsed multilinear / T/C-friction types) have no
+#: entry, so :attr:`LinkProperty.nonlinear_params` stays ``None`` for them.
+LINK_NONLINEAR_PARAMS: dict[str, type[LinkNonlinearParams]] = {
+    "Gap": GapParams,
+    "Hook": HookParams,
+    "Plastic (Wen)": WenParams,
+    "Rubber Isolator": RubberIsolatorParams,
+    "Friction Isolator": FrictionIsolatorParams,
+    "Damper": DamperParams,
+}
 
 
 @dataclass

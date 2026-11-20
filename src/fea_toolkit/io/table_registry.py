@@ -102,6 +102,12 @@ HANDLED_TABLES: frozenset[str] = frozenset(
         "LINK PROPERTY ASSIGNMENTS",
         "LINK PROPERTY DEFINITIONS 01 - GENERAL",
         "LINK PROPERTY DEFINITIONS 02 - LINEAR",
+        "LINK PROPERTY DEFINITIONS 04 - DAMPER",
+        "LINK PROPERTY DEFINITIONS 05 - GAP",
+        "LINK PROPERTY DEFINITIONS 06 - HOOK",
+        "LINK PROPERTY DEFINITIONS 07 - RUBBER ISOLATOR",
+        "LINK PROPERTY DEFINITIONS 08 - SLIDING ISOLATOR",
+        "LINK PROPERTY DEFINITIONS 10 - PLASTIC (WEN)",
         "LINK LOCAL AXES ASSIGNMENTS 1 - TYPICAL",
         "LINK LOCAL AXES ASSIGNMENTS 2 - ADVANCED",
         "FRAME SECTION ASSIGNMENTS",
@@ -232,12 +238,17 @@ KNOWN_GAP_TABLES: dict[str, str] = {
 #: Prefixes for known-gap families.
 KNOWN_GAP_PREFIXES: tuple[tuple[str, str], ...] = (
     ("SECTION DESIGNER PROPERTIES", "SD section geometry not parsed"),
-    # Link (connection / isolator / damper) *type-specific* property tables
-    # (03+ — Gap, Hook, Multilinear, Wen, Rubber/Friction Isolator, Damper,
-    # Frequency-dependent).  ``01 - GENERAL`` / ``02 - LINEAR`` are handled;
-    # these nonlinear definitions remain a recognised gap rather than an
-    # unknown table.
-    ("LINK PROPERTY DEFINITIONS", "nonlinear link property definitions (03+) not yet parsed"),
+    # Link (connection / isolator / damper) *type-specific* property tables.
+    # ``01 - GENERAL`` / ``02 - LINEAR`` and the scalar nonlinear tables
+    # (04 Damper, 05 Gap, 06 Hook, 07 Rubber Isolator, 08 Sliding Isolator,
+    # 10 Plastic (Wen)) are handled since P49 Phase 2.  The force-deformation
+    # tables (03 MultiLinear, 11 Multilinear Plastic), the 09 T/C Sliding
+    # Isolator, and the bridge-object flags remain a recognised gap rather
+    # than an unknown table.
+    (
+        "LINK PROPERTY DEFINITIONS",
+        "remaining nonlinear link tables (03/09/11, bridge flags) not yet parsed",
+    ),
 )
 
 _KNOWN_GAP_PREFIX_KEYS = tuple(p for p, _ in KNOWN_GAP_PREFIXES)
