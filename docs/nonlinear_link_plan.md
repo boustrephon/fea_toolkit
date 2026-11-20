@@ -258,6 +258,10 @@ compression-only special case exists to support.
    warning (deduped per property), family-based dispatch, and `link_model=
    "nonlinear"` defaults in the pushover/transient runners.
 5. **P49-P2d** — the D8 check verb + recipe preset, benchmark tests (§10), and
-   `docs/modeling_guidance.md` bearing/damper guidance.
+   `docs/modeling_guidance.md` bearing/damper guidance.  ✅ **Partly done** —
+   the D8 check verb (`check_hysteretic_backbone`) and the base-isolation
+   preparation verb (`isolate_base` → `model.supports.isolate_base`) are
+   implemented and registered; the benchmark tests (§10, need reference data)
+   and `modeling_guidance.md` remain.
 6. **P49-P2e (stretch)** — `tripleFPBearing`, T/C FP, friction-damper family,
    non-axis-aligned `CoordDir2`.

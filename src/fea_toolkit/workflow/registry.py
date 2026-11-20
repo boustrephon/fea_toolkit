@@ -37,7 +37,9 @@ from .verbs import (
     CONNECTIVITY_PARAMS,
     FIX_SHELL_ONLY_BASE_PARAMS,
     HINGE_LENGTH_PARAMS,
+    HYSTERETIC_CHECK_PARAMS,
     IDA_PARAMS,
+    ISOLATE_BASE_PARAMS,
     LOAD_VERIFICATION_PARAMS,
     MEMBER_SHEAR_CAPACITY_PARAMS,
     MESH_CHECKS_PARAMS,
@@ -61,12 +63,14 @@ from .verbs import (
     run_chart,
     run_check_brace_buckling,
     run_check_connectivity,
+    run_check_hysteretic_backbone,
     run_check_self_weight,
     run_close,
     run_combine,
     run_fix_shell_only_base,
     run_hinge_length,
     run_ida,
+    run_isolate_base,
     run_load_verification,
     run_member_shear_capacity,
     run_mesh,
@@ -202,6 +206,17 @@ STEP_SPECS: dict[str, StepSpec] = {
         help="In-plane shear / normal stress check (GB 50010) for the selected walls.",
         docs=("capacity.md",),
     ),
+    "check_hysteretic_backbone": StepSpec(
+        verb="check_hysteretic_backbone",
+        run=run_check_hysteretic_backbone,
+        params=HYSTERETIC_CHECK_PARAMS,
+        kind=TABLE,
+        help=(
+            "Re-run the cyclic check on the Hysteretic-backbone links (no pinching / "
+            "strength degradation)."
+        ),
+        docs=("nonlinear_link_plan.md",),
+    ),
     "build_model": StepSpec(
         verb="build_model",
         run=run_build_model,
@@ -232,6 +247,17 @@ STEP_SPECS: dict[str, StepSpec] = {
             "meshing (pinned → fixed rotations)."
         ),
         docs=("shell_support.md",),
+    ),
+    "isolate_base": StepSpec(
+        verb="isolate_base",
+        run=run_isolate_base,
+        params=ISOLATE_BASE_PARAMS,
+        kind=MODEL,
+        help=(
+            "Replace the model's fully-restrained base supports with grounded "
+            "isolator links before meshing."
+        ),
+        docs=("nonlinear_link_plan.md",),
     ),
     "mesh": StepSpec(
         verb="mesh",

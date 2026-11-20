@@ -174,3 +174,76 @@ def fix_shell_only_base_restraints(md: Any) -> tuple[int, list[str]]:
         restraints[nid] = Restraint(dofs=dofs)
         fixed.append(nid)
     return len(fixed), fixed
+
+
+def isolate_base(md, property_name, selection=None, coord_dir1="+Z"):
+    """Replace fully-restrained base supports with grounded isolator links.
+
+    For each selected node (default: every node with a full ``[1,1,1,1,1,1]``
+    restraint) the restraint is removed and a grounded isolator link
+    (``LinkElement(node_i=node, node_j="")``) is added and assigned
+    *property_name*.  The builder turns a grounded link into a
+    ``zeroLength``/bearing to a coincident fixed ground node, so the support is
+    replaced by the isolator without renumbering the structure.
+
+    Args:
+        md: A ``SAPModelData`` (or anything with ``restraints``,
+            ``link_connectivity``, ``link_assignments`` and
+            ``link_properties``).
+        property_name: The isolator link property to assign — must be a
+            ``Rubber Isolator`` or ``Friction Isolator``.
+        selection: Optional ``Selection`` naming the base nodes; ``None`` means
+            every fully-restrained node.
+        coord_dir1: The local-1 (axial) reference direction for the grounded
+            isolator (default ``"+Z"`` — a vertical bearing).
+
+    Returns:
+        ``(number of nodes isolated, their node ids)``.
+
+    Raises:
+        ValueError: If *property_name* is missing or is not an isolator type.
+    """
+    from .sap_data import LinkElement
+
+    props = getattr(md, "link_properties", None) or {}
+    prop = props.get(property_name)
+    if prop is None:
+        raise ValueError(f"isolate_base: link property {property_name!r} not found")
+    link_type = getattr(prop, "link_type", "")
+    if link_type not in ("Rubber Isolator", "Friction Isolator"):
+        raise ValueError(f"isolate_base: {property_name!r} is type {link_type!r}, not an isolator")
+
+    restraints = getattr(md, "restraints", None)
+    if restraints is None:
+        restraints = {}
+        md.restraints = restraints
+
+    if selection is not None:
+        node_ids = set(selection.get_node_ids(md))
+    else:
+        node_ids = {
+            nid
+            for nid, r in restraints.items()
+            if tuple(int(f) for f in getattr(r, "dofs", ())) == (1, 1, 1, 1, 1, 1)
+        }
+
+    links = getattr(md, "link_connectivity", None)
+    if links is None:
+        links = []
+        md.link_connectivity = links
+    assigns = getattr(md, "link_assignments", None)
+    if assigns is None:
+        assigns = {}
+        md.link_assignments = assigns
+
+    isolated: list[str] = []
+    for nid in sorted(node_ids):
+        if nid not in restraints:
+            continue  # a selection node with no support to replace
+        restraints.pop(nid)
+        link_id = f"ISO_{nid}"
+        links.append(LinkElement(link_id=link_id, node_i=nid, node_j="", coord_dir1=coord_dir1))
+        assigns[link_id] = property_name
+        isolated.append(nid)
+
+    return len(isolated), isolated
