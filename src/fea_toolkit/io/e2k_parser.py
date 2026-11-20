@@ -51,6 +51,7 @@ from typing import Any, Optional, Union
 
 from .._unit_scaling import force_unit_label, length_unit_label
 from ..model.sap_data import (
+    LINK_DOF_ORDER,
     SHAPE_NAMES,
     AngleSection,
     AreaElement,
@@ -68,6 +69,8 @@ from ..model.sap_data import (
     GeneralSection,
     ISection,
     JointLoad,
+    LinkElement,
+    LinkProperty,
     LoadCase,
     LoadCombination,
     LoadCombinationEntry,
@@ -347,6 +350,9 @@ class ETABSParser:
         point_assigns = _get_assigns(sections, "POINT ASSIGNS", "POINTASSIGN")
         line_assigns = _get_assigns(sections, "LINE ASSIGNS", "LINEASSIGN")
         area_assigns = _get_assigns(sections, "AREA ASSIGNS", "AREAASSIGN")
+        link_properties = _get_link_properties(sections)
+        link_conn = _get_link_connectivity(sections)
+        link_assignments = _get_link_assigns(sections)
 
         (
             nodes,
@@ -355,6 +361,7 @@ class ETABSParser:
             frame_assignments,
             area_assignments,
             restraints,
+            links,
         ) = _resolve_geometry(
             stories,
             abs_elev,
@@ -364,6 +371,7 @@ class ETABSParser:
             point_assigns,
             line_assigns,
             area_assigns,
+            link_conn,
         )
 
         materials = _get_materials(sections)
@@ -459,6 +467,9 @@ class ETABSParser:
             area_elements=area_elements,
             frame_assignments=frame_assignments,
             area_assignments=area_assignments,
+            link_connectivity=links,
+            link_assignments=link_assignments,
+            link_properties=link_properties,
             groups={},
             frame_auto_mesh={},
             frame_end_offsets=frame_end_offsets,
@@ -671,6 +682,113 @@ def _get_area_connectivity(
     return areas
 
 
+# ── Link (connection / isolator) elements ───────────────────────────
+
+#: ETABS link ``TYPE`` tokens → the toolkit's canonical SAP2000-style names.
+_LINK_TYPE_MAP = {
+    "LINEAR": "Linear",
+    "GAP": "Gap",
+    "HOOK": "Hook",
+    "DAMPER": "Damper",
+    "MULTILINEARELASTIC": "Multilinear Elastic",
+    "MULTILINEARPLASTIC": "Multilinear Plastic",
+    "PLASTICWEN": "Plastic (Wen)",
+    "WEN": "Plastic (Wen)",
+    "RUBBERISOLATOR": "Rubber Isolator",
+    "ISOLATOR1": "Rubber Isolator",
+    "FRICTIONISOLATOR": "Friction Isolator",
+    "ISOLATOR2": "Friction Isolator",
+    "TCFRICTIONISOLATOR": "T/C Friction Isolator",
+    "ISOLATOR3": "T/C Friction Isolator",
+}
+
+
+def _normalize_link_type(raw: str) -> str:
+    """Map an ETABS link ``TYPE`` token to the toolkit's canonical name.
+
+    ``LinkProperty.link_type`` uses SAP2000-style names (``"Linear"``,
+    ``"Rubber Isolator"``, …); ETABS writes them compact and upper-case
+    (``"HOOK"``) or with an ``IsolatorN`` alias.  Unknown types pass through
+    unchanged so Phase 1 still reports them faithfully.
+    """
+    key = str(raw).strip().upper().replace(" ", "").replace("-", "").replace("_", "")
+    return _LINK_TYPE_MAP.get(key, str(raw).strip())
+
+
+def _get_link_properties(sections: dict[str, list[GroupedLine]]) -> dict[str, LinkProperty]:
+    """Extract link properties from ``$ LINK PROPERTIES``.
+
+    Each property spans a ``TYPE`` line plus one ``DOF`` line per enabled
+    degree of freedom (``DOF "U1" KE … CE … FIXED …``).  ``KE``/``CE`` are the
+    effective (linearised) stiffness/damping used by elastic analyses; the
+    type-specific nonlinear tokens (``NONLIN``/``K``/``OPEN``/…) are stashed in
+    :attr:`LinkProperty.nonlinear` for Phase 2.
+    """
+    props: dict[str, LinkProperty] = {}
+    for groups in sections.get("LINK PROPERTIES", []):
+        if not groups or groups[0][0] != "LINKPROP" or not groups[0][1]:
+            continue
+        name = str(groups[0][1][0])
+        attrs: dict[str, Any] = {}
+        for kw, vals in groups[1:]:
+            attrs[kw] = vals[0] if len(vals) == 1 else tuple(vals)
+        prop = props.get(name)
+        if prop is None:
+            prop = LinkProperty(name=name, link_type="Linear")
+            props[name] = prop
+        if "TYPE" in attrs:
+            prop.link_type = _normalize_link_type(str(attrs["TYPE"]))
+        dof = str(attrs.get("DOF", "")).strip().upper()
+        if dof not in LINK_DOF_ORDER:
+            continue
+        idx = LINK_DOF_ORDER.index(dof)
+        prop.ke[idx] = _as_float(attrs.get("KE", 0.0))
+        prop.ce[idx] = _as_float(attrs.get("CE", 0.0))
+        fixed = attrs.get("FIXED")
+        if fixed is not None:
+            prop.fixed[idx] = str(fixed).strip().upper() in ("YES", "TRUE")
+        for kw in ("NONLIN", "K", "OPEN", "F", "YIELD", "R", "MU", "RADIUS"):
+            if kw in attrs:
+                prop.nonlinear.setdefault(dof, {})[kw] = attrs[kw]
+    return props
+
+
+def _get_link_connectivity(sections: dict[str, list[GroupedLine]]) -> dict[str, tuple]:
+    """Extract link objects from ``$ LINK CONNECTIVITIES``.
+
+    Returns ``{link: (story_i, point_i, story_j, point_j)}``.  Unlike LINE/AREA
+    templates (whose story comes from the ASSIGNS), a link is a direct 3-D
+    object, so each ``POINT1``/``POINT2`` carries its ``(story, point)`` pair
+    inline.
+    """
+    links: dict[str, tuple] = {}
+    for groups in sections.get("LINK CONNECTIVITIES", []):
+        if not groups or groups[0][0] != "LINK" or not groups[0][1]:
+            continue
+        name = str(groups[0][1][0])
+        attrs: dict[str, list[str]] = {}
+        for kw, vals in groups[1:]:
+            attrs[kw] = [str(v) for v in vals]
+        p1, p2 = attrs.get("POINT1", []), attrs.get("POINT2", [])
+        if len(p1) < 2 or len(p2) < 2:
+            continue
+        links[name] = (p1[0], p1[1], p2[0], p2[1])
+    return links
+
+
+def _get_link_assigns(sections: dict[str, list[GroupedLine]]) -> dict[str, str]:
+    """Extract ``$ LINK ASSIGNS`` into ``{link: property_name}``."""
+    assigns: dict[str, str] = {}
+    for groups in sections.get("LINK ASSIGNS", []):
+        if not groups or groups[0][0] != "LINKASSIGN" or not groups[0][1]:
+            continue
+        name = str(groups[0][1][0])
+        for kw, vals in groups[1:]:
+            if kw == "PROPERTY" and vals:
+                assigns[name] = str(vals[0])
+    return assigns
+
+
 # Assignment attributes whose repeated values aggregate into a list rather
 # than replacing one another.  ``MESHAT "BEAMS" MESHAT "WALLS"`` is the
 # canonical example; every other assignment keyword is scalar.
@@ -767,6 +885,7 @@ def _resolve_geometry(
     point_assigns: dict[tuple[str, str], dict[str, Any]],
     line_assigns: dict[tuple[str, str], dict[str, Any]],
     area_assigns: dict[tuple[str, str], dict[str, Any]],
+    link_conn: dict[str, tuple],
 ) -> tuple[
     dict[str, Node],
     dict[str, FrameElement],
@@ -774,6 +893,7 @@ def _resolve_geometry(
     dict[str, str],
     dict[str, str],
     dict[str, Restraint],
+    list[LinkElement],
 ]:
     """Materialise the deferred geometry into typed model collections.
 
@@ -903,7 +1023,33 @@ def _resolve_geometry(
         if section:
             area_assignments[area_id] = str(section)
 
-    return nodes, frame_elements, area_elements, frame_assignments, area_assignments, restraints
+    # 4. Link elements from LINK CONNECTIVITIES (direct 3-D objects).
+    # ``POINT1``/``POINT2`` each carry their ``(story, point)`` pair inline, so
+    # materialise the endpoint nodes and record the composite ``point@story``
+    # ids on the link (matching the S2K link_connectivity shape).
+    links: list[LinkElement] = []
+    for link_name, (story_i, point_i, story_j, point_j) in link_conn.items():
+        ni = node_for(point_i, story_i)
+        nj = node_for(point_j, story_j)
+        if ni is None or nj is None:
+            continue
+        links.append(
+            LinkElement(
+                link_id=link_name,
+                node_i=ni.node_id,
+                node_j=nj.node_id,
+            )
+        )
+
+    return (
+        nodes,
+        frame_elements,
+        area_elements,
+        frame_assignments,
+        area_assignments,
+        restraints,
+        links,
+    )
 
 
 def _coerce_cardinal_point(value: Any) -> int:

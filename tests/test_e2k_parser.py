@@ -1220,3 +1220,83 @@ def test_missing_sd_section_gets_placeholder(tmp_path):
     assert "SDEmpty" in md.sections
     assert isinstance(md.sections["SDEmpty"], GeneralSection)
     assert md.sections["SDEmpty"].A == 0.0
+
+
+# ── Link (connection / isolator) elements ──────────────────────────
+
+
+def test_link_properties_parse():
+    """``$ LINK PROPERTIES`` → LinkProperty (type + per-DOF Ke/Ce/Fixed)."""
+    from fea_toolkit.io.e2k_parser import _get_link_properties
+
+    sections = _parse_sections(
+        "$ LINK PROPERTIES\n"
+        '  LINKPROP  "D20RODLINK"  TYPE "HOOK"  \n'
+        '  LINKPROP  "D20RODLINK"  DOF "U1"  KE 25556 NONLIN "Yes"  K 25556 OPEN 0 \n'
+        '  LINKPROP  "LP1"  TYPE "LINEAR"  \n'
+        '  LINKPROP  "LP1"  DOF "U1"  KE 1000  CE 0  FIXED "No" \n'
+        '  LINKPROP  "LP1"  DOF "U2"  KE 2000  CE 0  FIXED "No" \n'
+        '  LINKPROP  "LP1"  DOF "U3"  KE 3000  CE 0  FIXED "Yes" \n'
+    )
+    props = _get_link_properties(sections)
+    assert props["D20RODLINK"].link_type == "Hook"
+    assert props["D20RODLINK"].ke[0] == 25556.0
+    assert props["LP1"].link_type == "Linear"
+    assert props["LP1"].ke[:3] == [1000.0, 2000.0, 3000.0]
+    assert props["LP1"].ce[:3] == [0.0, 0.0, 0.0]
+    assert props["LP1"].fixed[:3] == [False, False, True]
+
+
+def test_link_connectivity_parse():
+    """``$ LINK CONNECTIVITIES`` → {link: (story_i, point_i, story_j, point_j)}."""
+    from fea_toolkit.io.e2k_parser import _get_link_connectivity
+
+    sections = _parse_sections(
+        "$ LINK CONNECTIVITIES\n"
+        '  LINK  "K1"  POINT1  "ROOF-02"  "3655"  POINT2  "SPIRE-01(T1)"  "3645"  \n'
+    )
+    assert _get_link_connectivity(sections) == {"K1": ("ROOF-02", "3655", "SPIRE-01(T1)", "3645")}
+
+
+def test_link_assigns_parse():
+    """``$ LINK ASSIGNS`` → {link: property_name}."""
+    from fea_toolkit.io.e2k_parser import _get_link_assigns
+
+    sections = _parse_sections('$ LINK ASSIGNS\n  LINKASSIGN  "K1"  PROPERTY  "D20RODLINK"  \n')
+    assert _get_link_assigns(sections) == {"K1": "D20RODLINK"}
+
+
+def test_link_end_to_end(tmp_path):
+    """A link in an .e2k parses into connectivity + property + assignment."""
+    content = (
+        "$ CONTROLS\n"
+        '  UNITS  "N"  "MM"  "C"  \n'
+        "$ STORIES - IN SEQUENCE FROM TOP\n"
+        '  STORY "ROOF"  HEIGHT 3000\n'
+        '  STORY "BASE"  ELEV 0\n'
+        "$ POINT COORDINATES\n"
+        '  POINT "1"  0  0\n'
+        '  POINT "2"  0  0\n'
+        "$ LINK PROPERTIES\n"
+        '  LINKPROP  "LP1"  TYPE "LINEAR"  \n'
+        '  LINKPROP  "LP1"  DOF "U1"  KE 1000  CE 0\n'
+        '  LINKPROP  "LP1"  DOF "U2"  KE 2000  CE 0\n'
+        '  LINKPROP  "LP1"  DOF "U3"  KE 3000  CE 0\n'
+        "$ LINK CONNECTIVITIES\n"
+        '  LINK  "K1"  POINT1  "BASE"  "1"  POINT2  "ROOF"  "2"  \n'
+        "$ LINK ASSIGNS\n"
+        '  LINKASSIGN  "K1"  PROPERTY  "LP1"  \n'
+    )
+    p = tmp_path / "link.e2k"
+    p.write_text(content, encoding="utf-8")
+    md = ETABSParser(p).parse().get_model_data()
+
+    assert [(link.link_id, link.node_i, link.node_j) for link in md.link_connectivity] == [
+        ("K1", "1@BASE", "2@ROOF")
+    ]
+    assert md.link_assignments == {"K1": "LP1"}
+    assert md.link_properties["LP1"].link_type == "Linear"
+    assert md.link_properties["LP1"].ke[:3] == [1000.0, 2000.0, 3000.0]
+    # Link-endpoint nodes are materialised (not dropped).
+    assert "1@BASE" in md.nodes
+    assert "2@ROOF" in md.nodes
