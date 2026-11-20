@@ -391,7 +391,7 @@ def test_rubber_bearing_params():
             k=[0.0, 5000.0, 5000.0, 0.0, 0.0, 0.0], fy=[0.0, 50.0, 50.0, 0.0, 0.0, 0.0], ratio=0.1
         ),
     )
-    assert _rubber_bearing_params(prop) == (5000.0, 50.0, 0.1)
+    assert _rubber_bearing_params(prop) == (5000.0, 45.0, 0.1)
 
 
 def test_emit_friction_model_coulomb_vs_veldependent(monkeypatch):

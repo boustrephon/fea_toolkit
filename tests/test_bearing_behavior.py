@@ -7,10 +7,11 @@ with no axial load is degenerate (the earlier zero-gravity static push NaN'd).
 These tests load a zero-length bearing with a vertical force first, then push it
 laterally with ``DisplacementControl`` and read ``localForce``.
 
-The rubber bearing's shear is the Nagarajaiah–Reinhorn–Constantinou backbone
-``alpha1*kInit*u + (1-alpha1)*qd``; the measured value is ~7% higher for these
-parameters (a formulation subtlety to pin against the §10 benchmarks), so its
-tolerance is wider than the friction pendulum's.
+The rubber bearing's shear is the Schellenberg post-yield backbone
+``F = alpha1*kInit*u + qd`` — its ``qd`` is the *post-yield intercept*, not the
+yield force, so the emitter maps SAP2000's yield force ``Fy`` to
+``qd = Fy*(1 - ratio)``.  With that mapping the push reproduces the SAP2000
+bilinear exactly.
 """
 
 import pytest
@@ -81,14 +82,15 @@ def _push_bearing(elem_type, elem_args, weight, u_lat, friction=None):
 
 
 def test_rubber_bearing_shear_backbone():
-    """A rubber isolator carries gravity and yields with the NRC backbone."""
+    """A rubber isolator carries gravity and yields with the SAP2000 bilinear."""
     try:
+        # kInit=5000, qd = Fy*(1-ratio) = 50*0.9 = 45, alpha1=0.1.
         lf = _push_bearing(
-            "elastomericBearingPlasticity", [5000.0, 50.0, 0.1, 0.0, 1.0], 1000.0, 0.05
+            "elastomericBearingPlasticity", [5000.0, 45.0, 0.1, 0.0, 1.0], 1000.0, 0.05
         )
         assert lf[0] == pytest.approx(1000.0, rel=1.0e-3)  # axial force = weight
-        # qd + alpha1*kInit*(u - qd/kInit) = 50 + 500*(0.05 - 0.01) = 70.
-        assert abs(lf[2]) == pytest.approx(70.0, rel=0.10)
+        # Post-yield F = alpha1*kInit*u + qd = 500*0.05 + 45 = 70.
+        assert abs(lf[2]) == pytest.approx(70.0, rel=1.0e-3)
     finally:
         import openseespy.opensees as ops
 

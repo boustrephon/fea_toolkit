@@ -237,14 +237,19 @@ def _rubber_bearing_params(prop):
     ``kInit`` / ``qd`` act on the coupled U2/U3 shear, so the U2 value is used
     (U3 for an axisymmetric bearing is equal).  ``alpha1`` is the post-yield
     stiffness ratio.
+
+    SAP2000's ``Fy`` is the *yield force*, but the Schellenberg bearing's
+    ``qd`` is the *post-yield intercept* (its monotonic post-yield force is
+    ``F = alpha1*kInit*u + qd``), so ``qd = Fy * (1 - ratio)`` reproduces the
+    SAP2000 bilinear exactly.
     """
     p = prop.nonlinear_params
     k = p.k if isinstance(p, RubberIsolatorParams) else prop.ke
     fy = p.fy if isinstance(p, RubberIsolatorParams) else [0.0] * 6
     ratio = p.ratio if isinstance(p, RubberIsolatorParams) else 0.0
     k_init = k[1] if k[1] > 0.0 else k[2]
-    qd = fy[1] if fy[1] > 0.0 else fy[2]
-    return k_init, qd, ratio
+    fy = fy[1] if fy[1] > 0.0 else fy[2]
+    return k_init, fy * (1.0 - ratio), ratio
 
 
 def _emit_friction_model(frn_tag, p):
