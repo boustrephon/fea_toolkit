@@ -1916,23 +1916,29 @@ def test_issue2_build_once_manual_recipe_does_not_accumulate(tmp_path):
         'TABLE:  "LOAD PATTERN DEFINITIONS"\n'
         "   LoadPat=P1   DesignType=Live   SelfWtMult=0\n"
         "   LoadPat=P2   DesignType=Live   SelfWtMult=0\n"
+        "   LoadPat=P3   DesignType=Live   SelfWtMult=0\n"
         'TABLE:  "LOAD CASE DEFINITIONS"\n'
         "   Case=P1   Type=LinStatic   InitialCond=Zero\n"
         "   Case=P2   Type=LinStatic   InitialCond=Zero\n"
+        "   Case=P3   Type=LinStatic   InitialCond=Zero\n"
         'TABLE:  "CASE - STATIC 1 - LOAD ASSIGNMENTS"\n'
         "   Case=P1   LoadType=LoadPattern   LoadName=P1   ScaleFactor=1\n"
         "   Case=P2   LoadType=LoadPattern   LoadName=P2   ScaleFactor=1\n"
+        "   Case=P3   LoadType=LoadPattern   LoadName=P3   ScaleFactor=1\n"
         'TABLE:  "FRAME LOADS - DISTRIBUTED"\n'
         "   Frame=1   LoadPat=P1   CoordSys=Global   Type=Force   Dir=Z   DistType=RelDist   RelDistA=0   RelDistB=1   AbsDistA=0   AbsDistB=1000   FOverLA=-10   FOverLB=-10\n"
         "   Frame=1   LoadPat=P2   CoordSys=Global   Type=Force   Dir=Z   DistType=RelDist   RelDistA=0   RelDistB=1   AbsDistA=0   AbsDistB=1000   FOverLA=-10   FOverLB=-10\n"
+        "   Frame=1   LoadPat=P3   CoordSys=Global   Type=Force   Dir=Z   DistType=RelDist   RelDistA=0   RelDistB=1   AbsDistA=0   AbsDistB=1000   FOverLA=-10   FOverLB=-10\n"
     )
     s2k = tmp_path / "issue2.s2k"
     s2k.write_text(content)
     md = SAP2000Parser(s2k).parse().get_model_data()
     mm = preprocess_model(md, {"element_type": "elasticBeamColumn"})
     try:
+        # Three equal cases pin the full "k× on the k-th case" progression:
+        # a missing pseudo-time reset would give [10000, 20000, 30000] here.
         fresh = []
-        for pat in ("P1", "P2"):
+        for pat in ("P1", "P2", "P3"):
             ab = AnalysisBuilder(mm, {"element_type": "elasticBeamColumn"})
             ab.build_domain()
             res = ab.run_static_analysis(pattern_scales={pat: 1.0})
@@ -1941,13 +1947,13 @@ def test_issue2_build_once_manual_recipe_does_not_accumulate(tmp_path):
         ab = AnalysisBuilder(mm, {"element_type": "elasticBeamColumn"})
         ab.build_domain()
         manual = []
-        for pat in ("P1", "P2"):
+        for pat in ("P1", "P2", "P3"):
             ab.remove_load_patterns()
             ab.create_loads({pat: 1.0})
             res = ab.run_static_analysis(rebuild=False)
             manual.append(sum(r["fz"] for r in res["reactions"].values()))
-        assert fresh == pytest.approx([10000.0, 10000.0])
-        assert manual == pytest.approx([10000.0, 10000.0])
+        assert fresh == pytest.approx([10000.0, 10000.0, 10000.0])
+        assert manual == pytest.approx([10000.0, 10000.0, 10000.0])
     finally:
         ops.wipe()
 
