@@ -20,6 +20,8 @@ The 1-DOF truss (``ndm=1, ndf=1``) is a test-only material rig; the production
 workflow stays 3-D (``.clinerules`` §3.11).
 """
 
+import math
+
 import openseespy.opensees as ops
 import pytest
 
@@ -206,7 +208,7 @@ def test_steel02_wen_smooth_yield():
 
     def emit(tag):
         ops.uniaxialMaterial(
-            "Steel02", tag, fy, ke, ratio, _wen_r0(2.0), 0.925, 0.15, 0.0, 0.0, 0.0, 0.0, 0.0
+            "Steel02", tag, fy, ke, ratio, _wen_r0(2.0), 0.925, 0.15, 0.0, 1.0, 0.0, 1.0, 0.0
         )
 
     try:
@@ -215,6 +217,23 @@ def test_steel02_wen_smooth_yield():
         f = _axial_force(emit, 4 * ey)  # well past yield
         assert f == pytest.approx(fy + ratio * ke * (4 * ey - ey), rel=2e-2)
         assert f > fy  # it did yield
+    finally:
+        ops.wipe()
+
+
+def test_steel02_wen_reversal_stress_is_finite():
+    """Steel02 (a2/a4 = 1, no isotropic hardening) stays finite through a reversal."""
+    fy, ke, ratio = 50.0, E, 0.1
+
+    def emit(tag):
+        ops.uniaxialMaterial(
+            "Steel02", tag, fy, ke, ratio, _wen_r0(2.0), 0.925, 0.15, 0.0, 1.0, 0.0, 1.0, 0.0
+        )
+
+    try:
+        forces = _axial_forces(emit, [0.05, 0.01, 0.05])
+        assert forces[0] > 0.0  # active loading transmits force
+        assert all(math.isfinite(f) for f in forces)  # finite stress
     finally:
         ops.wipe()
 
@@ -267,7 +286,7 @@ def test_wen_steel02_emitter_args(monkeypatch):
     )
     tag = links_mod.LinkMixin._wen_dof_mat(links_mod.LinkMixin(), prop, 0, "steel02", {})
     assert calls == [
-        ("Steel02", tag, 50.0, 1000.0, 0.1, 15.0, 0.925, 0.15, 0.0, 0.0, 0.0, 0.0, 0.0)
+        ("Steel02", tag, 50.0, 1000.0, 0.1, 15.0, 0.925, 0.15, 0.0, 1.0, 0.0, 1.0, 0.0)
     ]
 
 

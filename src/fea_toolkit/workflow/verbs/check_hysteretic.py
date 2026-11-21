@@ -141,10 +141,15 @@ def run_check_hysteretic_backbone(context: StepContext, step: Step) -> list[Step
     tol = params["tol"]
 
     rows = []
-    for name, args, history, symmetric in _collect_backbones(context.model_data):
-        ok, detail = _cyclic_backbone_check(ops, args, tol, history, symmetric)
-        rows.append((name, "passed" if ok else "failed", detail))
-    ops.wipe()
+    try:
+        for name, args, history, symmetric in _collect_backbones(context.model_data):
+            ok, detail = _cyclic_backbone_check(ops, args, tol, history, symmetric)
+            rows.append((name, "passed" if ok else "failed", detail))
+    finally:
+        # The check owns the temporary 1-DOF truss domain it creates, so wipe it
+        # even when a material build or solve raises — never leave a live domain
+        # behind for a later step to accidentally reuse.
+        ops.wipe()
 
     table = Table(
         title="Hysteretic backbone",

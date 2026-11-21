@@ -60,6 +60,15 @@ from ..utils import (
     stress_scale_factor,
 )
 from .mesh_model import MeshModel
+from .sap_data import (
+    DamperParams,
+    FrictionIsolatorParams,
+    GapParams,
+    HookParams,
+    RubberIsolatorParams,
+    TriplePendulumParams,
+    WenParams,
+)
 
 KIP_IN_UNITS: dict[str, str] = {"L": "in", "F": "kip"}
 
@@ -263,6 +272,44 @@ def _scale_loads(mesh: MeshModel, m: dict[str, float]) -> None:
     # Gravity load / area-gravity multipliers are dimensionless — unchanged.
 
 
+def _scale_link_properties(mesh: MeshModel, m: dict[str, float]) -> None:
+    """Rescale link effective stiffness/damping and nonlinear params in place.
+
+    ``ke``/``ce`` are force-per-length (damping is force·time/length, and time
+    is seconds in both systems, so it shares the stiffness factor).  The
+    type-specific nonlinear params scale by their own dimensions: gaps and
+    radii/limits by length, yield forces and axial loads by force, and
+    nonlinear stiffness by force-per-length.
+    """
+    fpl = m["force_per_length"]
+    for prop in mesh.link_properties.values():
+        prop.ke = [k * fpl for k in prop.ke]
+        prop.ce = [c * fpl for c in prop.ce]
+        p = prop.nonlinear_params
+        if p is None:
+            continue
+        if isinstance(p, (GapParams, HookParams)):
+            p.open = [o * m["length"] for o in p.open]
+        elif isinstance(p, WenParams):
+            p.fy = [f * m["force"] for f in p.fy]
+        elif isinstance(p, RubberIsolatorParams):
+            p.k = [k * fpl for k in p.k]
+            p.fy = [f * m["force"] for f in p.fy]
+        elif isinstance(p, FrictionIsolatorParams):
+            p.k = [k * fpl for k in p.k]
+            p.radius *= m["length"]
+        elif isinstance(p, TriplePendulumParams):
+            p.radius = [r * m["length"] for r in p.radius]
+            p.ubar = [u * m["length"] for u in p.ubar]
+            p.W *= m["force"]
+            p.Uy *= m["length"]
+            p.Kvt *= fpl
+            p.minFv *= m["force"]
+        elif isinstance(p, DamperParams):
+            p.k = [k * fpl for k in p.k]
+            p.fy = [f * m["force"] for f in p.fy]
+
+
 # ═════════════════════════════════════════════════════════════════════
 # Public API
 # ═════════════════════════════════════════════════════════════════════
@@ -335,6 +382,8 @@ def convert_mesh_units(
 
     # ── Loads ────────────────────────────────────────────────────
     _scale_loads(out, m)
+    # ── Link (connection / isolator) properties ──────────────────
+    _scale_link_properties(out, m)
 
     # ── Mesh metadata (length-scaled) ────────────────────────────
     if out.base_z is not None:

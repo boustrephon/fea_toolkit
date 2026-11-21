@@ -11,9 +11,12 @@ node i to a coincident fixed ground node via ``zeroLength``.
 * ``"elastic"`` (default) — effective-stiffness springs, valid for elastic
   static / modal / response-spectrum analyses of *all* link types.
 * ``"nonlinear"`` — the per-DOF nonlinear types (Gap, Hook, Plastic (Wen),
-  Damper) emit their type-specific uniaxial materials (Phase 2b(i)).  Bearing
-  isolators (Rubber/Friction Isolator) and the remaining types still raise
-  :class:`NotImplementedError` (Phase 2b(ii) / 2e).
+  Damper) emit their type-specific uniaxial materials (Phase 2b(i)).  The
+  bearing isolators emit dedicated bearing elements: Rubber Isolator →
+  ``elastomericBearingPlasticity``/``elastomericBearingBoucWen``, Friction
+  Isolator (and T/C Friction Isolator, compression-only) → ``singleFPBearing``,
+  and Triple Friction Pendulum → ``TripleFrictionPendulum``.  Only genuinely
+  unsupported link types still raise :class:`NotImplementedError`.
 
 ``wen_model`` selects the Plastic (Wen) material: ``"steel02"`` (default,
 smooth Giuffré–Menegotto-Pinto transition) or ``"hysteretic"`` (sharp bilinear
@@ -502,11 +505,11 @@ class LinkMixin:
                 _wen_r0(params.n),
                 _STEEL02_CR1,
                 _STEEL02_CR2,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
+                0.0,  # a1 — isotropic hardening ratio (0 = none)
+                1.0,  # a2 — hardening denominator (nonzero)
+                0.0,  # a3 — isotropic hardening ratio (0 = none)
+                1.0,  # a4 — hardening denominator (nonzero)
+                0.0,  # sigInit
             )
         args = _hysteretic_bilinear_args(ke, fy, params.ratio)
         return self._cached_mat(

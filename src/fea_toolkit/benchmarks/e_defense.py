@@ -12,9 +12,9 @@ Modelling follows Qin Dong et al. (2013) -- the superstructure is **linear
 elastic**; the fixed-base fundamental period is ``0.70 s`` (analysis 0.69 s,
 experiment 0.70 s).  The LRBs use the manufacturer bilinear model
 (``K0 = 6.5 kN/mm``, ``KF = 0.65 kN/mm``, ``FU = 73 kN``), emitted as
-``elastomericBearingPlasticity``; the CLBs are friction rollers
-(``mu = 0.0019``) with negligible horizontal stiffness and very large vertical
-stiffness, emitted as ``singleFPBearing`` with a large (flat) radius.
+``elastomericBearingPlasticity``; the CLBs are idealised as frictionless,
+vertical-only ``Linear`` links (their ``mu = 0.0019`` friction is omitted — it
+is two orders of magnitude below the LRB yield strength).
 
 Units are ``kN, m, s`` (consistent mass unit = tonne), matching the paper's
 ``kN/mm`` isolator specs converted to ``kN/m``.
@@ -34,6 +34,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .._unit_scaling import g_from_units
 from ..model.sap_data import (
     FrameElement,
     JointLoad,
@@ -75,8 +76,9 @@ G_STEEL: float = E_STEEL / 2.6
 #: Poisson's ratio (steel).
 NU_STEEL: float = 0.3
 
-#: Gravitational acceleration (m/s2) for the kN-m unit system.
-GRAVITY: float = 9.80665
+#: Gravitational acceleration (m/s2) for the kN-m unit system, derived from
+#: the model length unit rather than hardcoded (§4.6).
+GRAVITY: float = g_from_units(E_DEFENSE_UNITS)
 
 #: Bay widths (m): two 5 m bays in X, two 6 m bays in Y.
 BAY_X: float = 5.0
@@ -216,7 +218,8 @@ LRB_KF: float = 0.65e3  # post-yield stiffness (0.65 kN/mm)
 LRB_FY: float = 73.0  # yield force (kN)
 LRB_KC: float = 1.5e6  # vertical compression stiffness (1500 kN/mm)
 #: CLB friction coefficient (Ryan 2012) — documented for completeness; the CLB
-#: is modelled as a frictionless roller (see :func:`_clb_property`).
+#: is modelled as a frictionless, vertical-only Linear link (see
+#: :func:`_clb_property`) — CLB friction is not simulated.
 CLB_MU: float = 0.0019
 
 #: TPB design parameters (Dao & Ryan 2015, CCEER 15-01 Table 3-8).  The triple
@@ -321,6 +324,17 @@ def build_model(isolated: bool = True, config: str = "lrb-clb") -> SAPModelData:
     lv = layout
     levels = lv.levels()
     n_levels = len(levels)
+
+    # -- Isolation configuration --
+    # Only the two isolation configurations (plus ``isolated=False`` for the
+    # fixed-base anchor) are accepted; an unknown ``config`` must not silently
+    # fall through to the LRB-CLB branch.
+    if config not in ("lrb-clb", "tpb"):
+        raise ValueError(
+            f"config={config!r} is not a recognised isolation configuration; "
+            "expected 'lrb-clb' or 'tpb' (or pass isolated=False for the "
+            "fixed-base anchor)"
+        )
 
     # -- Nodes --
     nodes: dict[str, Node] = {}

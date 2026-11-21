@@ -156,8 +156,9 @@ class TransientRunnerMixin:
         """
         # Nonlinear links (isolators, dampers) are the point of a transient
         # analysis; default them on, but let an explicit link_model="elastic"
-        # override.
-        self.config.setdefault("link_model", "nonlinear")
+        # override.  Resolve it *locally* — never write it into ``self.config``,
+        # so a later ordinary build keeps its own default.
+        link_model = self.config.get("link_model", "nonlinear")
 
         accel = np.asarray(accel, dtype=float)
         if num_steps is None:
@@ -175,8 +176,12 @@ class TransientRunnerMixin:
         # on the old one.  Rebuild — reproducing the last build's config
         # overrides (e.g. the fiber sections from ``rebuild_with_fiber_sections``)
         # rather than the elastic defaults — re-apply any saved edge constraints,
-        # and re-apply masses (``build_domain`` does not apply them).
-        self.build_domain(config_overrides=self._last_build_overrides)
+        # and re-apply masses (``build_domain`` does not apply them).  Force the
+        # resolved ``link_model`` so a prior per-build elastic override cannot
+        # mask the transient nonlinear default.
+        overrides = dict(self._last_build_overrides)
+        overrides["link_model"] = link_model
+        self.build_domain(config_overrides=overrides)
         self._reapply_edge_constraints()
         self.compute_seismic_masses()
 

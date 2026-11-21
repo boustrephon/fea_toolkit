@@ -22,6 +22,7 @@ from fea_toolkit.model.sap_data import (
     FrameElementProperties,
     GravityLoad,
     JointLoad,
+    LinkProperty,
     Material,
     Node,
 )
@@ -316,6 +317,25 @@ class TestConvertMeshUnits:
         convert_mesh_units(si_mesh, _KIP_IN)
         assert si_mesh.nodes["2"].z == before
         assert si_mesh.units == _N_M
+
+    def test_link_property_stiffness_scales(self):
+        """A link's effective stiffness/damping convert N/mm -> kip/in (F/L)."""
+        mesh = MeshModel(
+            nodes={},
+            frame_elements={},
+            frame_assignments={},
+            area_elements={},
+            area_assignments={},
+            frame_dist_loads=[],
+        )
+        mesh.units = {"L": "mm", "F": "N", "T": "C"}
+        mesh.link_properties = {
+            "LIN": LinkProperty(name="LIN", link_type="Linear", ke=[1000.0] * 6, ce=[100.0] * 6)
+        }
+        out = convert_mesh_units(mesh, KIP_IN_UNITS)
+        # 1000 N/mm -> kip/in ≈ 5.710 (F/L); damping shares the F/L factor.
+        assert out.link_properties["LIN"].ke[0] == pytest.approx(5.710, rel=1e-3)
+        assert out.link_properties["LIN"].ce[0] == pytest.approx(0.5710, rel=1e-3)
 
 
 # ═════════════════════════════════════════════════════════════════════

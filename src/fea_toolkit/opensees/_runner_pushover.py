@@ -114,7 +114,9 @@ class PushoverRunnerMixin:
         """
         # Nonlinear links (isolators, dampers) are the point of a pushover;
         # default them on, but let an explicit link_model="elastic" override.
-        self.config.setdefault("link_model", "nonlinear")
+        # Resolve it locally — never write it into ``self.config``, so an
+        # invalid call or a successful pushover leaves the config unchanged.
+        link_model = self.config.get("link_model", "nonlinear")
 
         valid_types = {"uniform", "triangular", "mode1", "pattern", "point"}
         if lateral_load_type not in valid_types:
@@ -178,6 +180,7 @@ class PushoverRunnerMixin:
         if not _hinge_lumped:
             self.rebuild_with_fiber_sections(
                 brace_selection=self._brace_selection,
+                link_model=link_model,
             )
         else:
             # Lumped plasticity keeps elastic sections; the zero-length
@@ -187,6 +190,7 @@ class PushoverRunnerMixin:
                     "element_type": "elasticBeamColumn",
                     "create_fiber_sections": False,
                     "use_elastic_sections": True,
+                    "link_model": link_model,
                 }
             )
 

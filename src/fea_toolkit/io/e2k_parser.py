@@ -806,11 +806,19 @@ def _interpret_link_nonlinear(prop: LinkProperty) -> None:
             params.k[idx] = _as_float(attrs.get("K", 0.0))
             if prop.link_type == "T/C Friction Isolator":
                 # T/C: velocity-dependent friction, ``Slow``/``Fast``/``Rate``.
-                params.mu = _as_float(attrs.get("SLOW", attrs.get("MU", 0.0)))
-                params.mu_fast = _as_float(attrs.get("FAST", 0.0))
-                params.rate = _as_float(attrs.get("RATE", 0.0))
+                if "SLOW" in attrs or "MU" in attrs:
+                    params.mu = _as_float(attrs.get("SLOW", attrs.get("MU", 0.0)))
+                if "FAST" in attrs:
+                    params.mu_fast = _as_float(attrs.get("FAST", 0.0))
+                if "RATE" in attrs:
+                    params.rate = _as_float(attrs.get("RATE", 0.0))
             else:
-                params.mu = _as_float(attrs.get("MU", 0.0))
+                if "MU" in attrs:
+                    params.mu = _as_float(attrs.get("MU", 0.0))
+                if "FAST" in attrs:
+                    params.mu_fast = _as_float(attrs.get("FAST", 0.0))
+                if "RATE" in attrs:
+                    params.rate = _as_float(attrs.get("RATE", 0.0))
             radius = attrs.get("RADIUS", attrs.get("R"))
             if radius is not None:
                 params.radius = _as_float(radius)

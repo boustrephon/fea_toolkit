@@ -15,13 +15,15 @@ category: [plan]
 ## 1. Problem
 
 CSI's **triple-pendulum isolator** (ETABS v22+ *Analysis Reference Manual*
-§15.18, "Triple-Pendulum Isolator Property") is defined by a **force–deformation
-backbone curve**, not by the bearing's physical geometry.  The two OpenSees
-elements that model a triple pendulum both need the *geometry* (radii, slider
-diameters, displacement limits, per-interface friction), so there is no 1:1
-field-for-field path from a CSI export to either element.  This is the
-remaining P49 gap after the T/C Friction Isolator (single-FP) and the
-`TripleFrictionPendulum` emitter landed.
+§15.18, "Triple-Pendulum Isolator Property") is authored through the bearing's
+physical parameters — surface radii, slider displacement limits ("stops"),
+per-surface friction coefficients, and the slider/plate heights — from which
+CSI derives the **force–deformation backbone** curve.  The two OpenSees
+elements that model a triple pendulum both need that *geometry* (radii, slider
+diameters, displacement limits, per-interface friction), so the natural mapping
+is geometry-to-geometry; the exact export columns are still unverified (§6).
+This is the remaining P49 gap after the T/C Friction Isolator (single-FP) and
+the `TripleFrictionPendulum` emitter landed.
 
 ## 2. Target — what OpenSees actually needs
 
@@ -42,17 +44,21 @@ To be pinned down (see §6).  Known facts:
 
 - Newer SAP2000/ETABS releases have a dedicated **Triple-Pendulum Isolator**
   link type (distinct from the T/C Friction Isolator).
-- It is authored as a **nonlinear force–deformation backbone** (force vs
-  displacement, per horizontal direction), plus the usual
-  `01 - GENERAL` / `02 - LINEAR` effective properties.
-- It does **not** carry `R`/`d`/`mu` triples in the export; those live in the
-  manufacturer's datasheet, not in the model file.
+- The property is authored through the bearing's physical parameters — surface
+  radii, slider displacement limits (stops), per-surface friction coefficients
+  and the slider/plate heights — and CSI derives the nonlinear
+  **force–deformation backbone** (force vs displacement, per horizontal
+  direction) from those inputs, alongside the usual `01 - GENERAL` /
+  `02 - LINEAR` effective properties.
+- Whether the export carries the `R`/`d`/`mu` geometry directly, or only the
+  derived backbone, is **unverified** — do not assume the geometry is absent.
+  Confirm the columns from a real export (see §6).
 
 ## 4. Mapping options
 
 | Option | Approach | Cost / risk |
 |---|---|---|
-| **A. Backbone regime fit** | Recover `(L, Ubar, mu)` by fitting the backbone's three linear regimes to the series-model force law `F = mu_i·W + W/(2·L_i)·u` | cheap at runtime; ill-conditioned if the backbone is coarse/noisy; needs one reference `W` |
+| **A. Backbone regime fit** | Recover `(L, Ubar, mu)` by fitting the backbone's three linear regimes to the series-model force law `F = mu_i·W + W/R_i·u` (composite radii `R_1 = 2·L_1`, `R_2 = 2·L_1 + L_2`, `R_3 = 2·L_1 + L_2 + L_3` — see §5) | cheap at runtime; ill-conditioned if the backbone is coarse/noisy; needs one reference `W` |
 | **B. Geometry datasheet → `TFP`** | User supplies `R/D/d/mu/h` from the bearing datasheet; emit the Becker–Mahin `TFP` element | exact, but requires data the model file does not contain |
 | **C. Linearised/bilinear fallback** | `02 - LINEAR` effective stiffness only (`link_model="elastic"`), warn | already available today; loses the multi-regime backbone |
 
@@ -66,20 +72,36 @@ For a triple pendulum in series, the normalised backbone has three piecewise
 regimes; in regime `i`:
 
 ```
-F = mu_i·W + (W / (2·L_i)) · u
+F = mu_i·W + (W / R_i) · u
 ```
+
+where the composite radii accumulate as the mechanisms engage — `R_1 = 2·L_1`,
+`R_2 = 2·L_1 + L_2`, `R_3 = 2·L_1 + L_2 + L_3` (the inner mechanism slides on
+two surfaces, so its effective radius counts double; this is the series model
+in `docs/nonlinear_link_plan.md`, mirrored by `TriplePendulumParams.backbone`).
+The normalised slopes are therefore `1/(2·L_1)`, `1/(2·L_1 + L_2)` and
+`1/(2·L_1 + L_2 + L_3)`.
 
 so, from a backbone of `(u, F)` points with a known axial load `W`:
 
-1. **Slopes** → effective radii: `L_1 = W/(2·slope_1)`, `L_2 = W/slope_2 − 2·L_1`,
+1. **Slopes** → effective radii: `R_i = W/slope_i`, then `L_1 = R_1/2`,
+   `L_2 = R_2 − R_1`, `L_3 = R_3 − R_2` — equivalently
+   `L_1 = W/(2·slope_1)`, `L_2 = W/slope_2 − 2·L_1`,
    `L_3 = W/slope_3 − 2·L_1 − L_2`.
 2. **Force intercepts** (extrapolated to `u=0`) → `mu_i` (the radius-weighted
    intercept of each regime, solved back for the per-mechanism `mu_i`).
-3. **Terminal displacement** → capacity `2·Ubar_1 + Ubar_2 + Ubar_3`.  The
-   intermediate kinks are *friction-transition* displacements
-   (`u*_1 = 2·L_1·(μ_2 − μ_1)`, …), **not** slider limits — so the individual
+3. **Terminal displacement** → capacity `2·Ubar_1 + Ubar_2 + Ubar_3`.  An
+   intermediate kink is usually a *friction-transition* displacement
+   (`u*_1 = 2·L_1·(μ_2 − μ_1)`, …), **not** a slider limit — so the individual
    `Ubar_i` are underdetermined from a monotonic backbone; only their weighted
    sum is recoverable (the fit splits it equally as a documented placeholder).
+   But a kink can also be a *stop transition* — an outer sliding surface
+   reaching its displacement limit `Ubar_i` before the terminal bearing
+   displacement.  The three-regime fit above assumes every intermediate kink is
+   a friction transition; a backbone whose intermediate kink is a stop
+   transition is **not representable** by this fit.  Reject such a backbone
+   with a warning (fall back to Option C) rather than misreporting it as a
+   friction transition.
 
 Fit as a piecewise-linear least-squares problem (1–3 segments), then
 sanity-check:

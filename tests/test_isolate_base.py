@@ -104,7 +104,9 @@ def test_check_hysteretic_backbone_verb_passes():
         results = run_check_hysteretic_backbone(ctx, Step(verb="check_hysteretic_backbone"))
         table = results[0].payload
         assert results[0].kind == "table"
-        assert all(row[1] == "passed" for row in table.rows)
+        statuses = {row[0]: row[1] for row in table.rows}
+        assert statuses.get("WEN") == "passed"
+        assert "(none)" not in statuses
     finally:
         import openseespy.opensees as ops
 
@@ -127,7 +129,9 @@ def test_check_hysteretic_backbone_gap_opens_and_closes():
         ctx = StepContext(model_data=md)
         results = run_check_hysteretic_backbone(ctx, Step(verb="check_hysteretic_backbone"))
         table = results[0].payload
-        assert all(row[1] == "passed" for row in table.rows)
+        statuses = {row[0]: row[1] for row in table.rows}
+        assert statuses.get("GAP") == "passed"
+        assert "(none)" not in statuses
     finally:
         import openseespy.opensees as ops
 

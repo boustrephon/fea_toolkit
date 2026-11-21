@@ -244,11 +244,22 @@ def isolate_base(md, property_name, selection=None, coord_dir1="+Z"):
         md.link_assignments = assigns
 
     isolated: list[str] = []
+    existing_ids = {lk.link_id for lk in links}
+    existing_ids.update(assigns.keys())
     for nid in sorted(node_ids):
         if nid not in restraints:
             continue  # a selection node with no support to replace
         restraints.pop(nid)
         link_id = f"ISO_{nid}"
+        if link_id in existing_ids:
+            # ``ISO_{nid}`` is already taken by an existing link or assignment;
+            # select an unused id so the new link and its assignment stay
+            # consistent without clobbering the existing object.
+            suffix = 1
+            while f"{link_id}_{suffix}" in existing_ids:
+                suffix += 1
+            link_id = f"{link_id}_{suffix}"
+        existing_ids.add(link_id)
         links.append(LinkElement(link_id=link_id, node_i=nid, node_j="", coord_dir1=coord_dir1))
         assigns[link_id] = property_name
         isolated.append(nid)

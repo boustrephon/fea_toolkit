@@ -677,6 +677,7 @@ class AnalysisBuilder(
         self,
         brace_selection: Optional[set] = None,
         pushover_spring_scale: float = 1.0,
+        link_model: Optional[str] = None,
     ) -> None:
         """Rebuild the OpenSees domain with fiber sections for pushover.
 
@@ -693,6 +694,9 @@ class AnalysisBuilder(
                 sinusoidal imperfection.
             pushover_spring_scale: Scale factor for edge constraint
                 spring stiffness on rebuild (default 1.0).
+            link_model: Optional per-build ``link_model`` override (e.g. the
+                pushover runner's run-scoped ``"nonlinear"`` default).  ``None``
+                leaves the effective setting unchanged.
 
         Note:
             Braces are subdivided at domain creation time (in
@@ -706,6 +710,8 @@ class AnalysisBuilder(
             "create_fiber_sections": True,
             "use_elastic_sections": False,
         }
+        if link_model is not None:
+            overrides["link_model"] = link_model
         if brace_selection:
             overrides["geom_transf_type"] = "PDelta"
             overrides["subdivide_braces"] = True

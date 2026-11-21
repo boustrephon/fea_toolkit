@@ -93,8 +93,10 @@ def _push_tpb(weight: float = 1000.0, u_lat: float = 1.15) -> tuple[np.ndarray, 
     disp: list[float] = []
     force: list[float] = []
     for _ in range(int(u_lat / 0.001)):
-        if ops.analyze(1) != 0:
-            break
+        # A failed step must fail the benchmark, not silently truncate the
+        # push history (which would let the capacity check pass at an early
+        # displacement).
+        assert ops.analyze(1) == 0, "lateral push failed"
         disp.append(float(ops.nodeDisp(2, 2)))
         force.append(float(list(ops.eleResponse(1, "localForce")[:6])[2]))
     return np.asarray(disp), np.asarray(force)
@@ -104,6 +106,9 @@ def test_tpb_backbone_capacity():
     """The TPB backbone reaches 0.275 W at its 1.13 m displacement capacity."""
     try:
         disp, force = _push_tpb(u_lat=1.15)
+        # The push must reach the target displacement — a truncated history
+        # (from a failed step) is not a valid capacity check.
+        assert disp[-1] >= 1.149, f"push stopped at {disp[-1]:.3f} m, expected 1.15 m"
         f = np.abs(force)
         i_cap = int(np.argmin(np.abs(disp - 1.13)))
         assert f[i_cap] / 1000.0 == pytest.approx(0.275, rel=0.03)

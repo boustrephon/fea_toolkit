@@ -559,7 +559,16 @@ def run_recipe(
         ValueError: If a step names an unknown verb.
     """
     from .registry import STEP_SPECS
-    from .steps import CASES, FIGURE, GEOMETRY, MODAL, SESSION, StepContext, StepError
+    from .steps import (
+        CASES,
+        FIGURE,
+        GEOMETRY,
+        MODAL,
+        MODEL,
+        SESSION,
+        StepContext,
+        StepError,
+    )
 
     context = StepContext(model_data=model_data, model=model)
     if named_selections is not None:
@@ -641,6 +650,16 @@ def run_recipe(
                 # step's ``needs`` is re-validated against the new mesh, and
                 # clear their context slots so nothing reads a stale payload.
                 produced.difference_update((CASES, MODAL, FIGURE))
+                context.case_results.clear()
+                context.results.clear()
+            if spec.kind == MODEL:
+                # A MODEL step (isolate_base, scale_sections, …) replaced the
+                # working ``SAPModelData``, so any topology prepared from the
+                # previous model — and the results that depended on it — are
+                # stale.  Invalidate them so a later geometry-dependent step
+                # must re-mesh rather than solve a mesh of the old model.
+                produced.difference_update((GEOMETRY, CASES, MODAL, FIGURE))
+                context.model = None
                 context.case_results.clear()
                 context.results.clear()
             if spec.kind == SESSION and spec.resets_document:
