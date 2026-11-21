@@ -361,9 +361,9 @@ TABLE:  "LINK PROPERTY DEFINITIONS 04 - DAMPER"
     assert dmp.cexp == pytest.approx(0.3)
 
 
-def test_tc_friction_isolator_title_mismatch_warns(tmp_path, caplog):
-    """A ``09`` table under an unexpected title warns instead of silently dropping."""
-    import logging
+def test_tc_friction_isolator_newer_spelling_parses(tmp_path):
+    """The newer ``T/C FRICTION ISOLATOR`` suffix is an alias for ``TC SLIDING ISOLATOR``."""
+    from fea_toolkit.model.sap_data import FrictionIsolatorParams
 
     content = """File test.s2k was saved on m/d/yy at h:mm:ss
 TABLE:  "LINK PROPERTY DEFINITIONS 01 - GENERAL"
@@ -371,13 +371,34 @@ TABLE:  "LINK PROPERTY DEFINITIONS 01 - GENERAL"
 TABLE:  "LINK PROPERTY DEFINITIONS 09 - T/C FRICTION ISOLATOR"
    Link=TC1   DOF=U2   Fixed=No   Ke=1000   Ce=0   K=5000   Radius=2.0   Slow=0.05   Fast=0.16   Rate=0.6
 """
-    s2k = tmp_path / "test_tc_mismatch.s2k"
+    s2k = tmp_path / "test_tc_newer.s2k"
+    s2k.write_text(content)
+    md = SAP2000Parser(s2k).parse().get_model_data()
+    params = md.link_properties["TC1"].nonlinear_params
+    assert isinstance(params, FrictionIsolatorParams)
+    assert params.mu == pytest.approx(0.05)
+    assert params.mu_fast == pytest.approx(0.16)
+    assert params.rate == pytest.approx(0.6)
+
+
+def test_unparsed_isolator_table_warns_preliminary(tmp_path, caplog):
+    """An isolator table we do not parse yet warns that processing is preliminary."""
+    import logging
+
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "LINK PROPERTY DEFINITIONS 01 - GENERAL"
+   Link=TP1   LinkType=Triple Pendulum Isolator
+TABLE:  "LINK PROPERTY DEFINITIONS 12 - TRIPLE PENDULUM ISOLATOR"
+   Link=TP1   DOF=U2   Fixed=No   Ke=1000   Ce=0
+"""
+    s2k = tmp_path / "test_triple_pendulum.s2k"
     s2k.write_text(content)
     with caplog.at_level(logging.WARNING):
         md = SAP2000Parser(s2k).parse().get_model_data()
-    assert any("T/C Friction Isolator" in r.message and "09" in r.message for r in caplog.records)
-    # The mismatched table is not consumed, so the link carries no nonlinear params.
-    assert md.link_properties["TC1"].nonlinear_params is None
+    assert any(
+        "preliminary" in r.message and "TRIPLE PENDULUM" in r.message for r in caplog.records
+    )
+    assert md.link_properties["TP1"].nonlinear_params is None
 
 
 def test_parse_v8_legacy_plastic_wen_table_09(tmp_path):

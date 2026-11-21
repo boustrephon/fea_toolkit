@@ -88,6 +88,54 @@ def _normalise_frame_dir(direction: Any) -> str:
     return d
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Link/support property tables — number-independent dispatch
+# ═══════════════════════════════════════════════════════════════════════════
+
+#: Numbered ``LINK PROPERTY DEFINITIONS NN - SUFFIX`` table titles: capture the
+#: descriptive suffix, because SAP2000 renumbered these tables across releases.
+_LINK_TABLE_SUFFIX_RE = re.compile(r"^LINK PROPERTY DEFINITIONS\s+\d+\s*-\s*(.+)$")
+
+
+def _link_table_suffix(table_name: str) -> Optional[str]:
+    """Return the uppercased suffix of a numbered link table, else ``None``.
+
+    ``"LINK PROPERTY DEFINITIONS 09 - TC SLIDING ISOLATOR"`` → ``"TC SLIDING
+    ISOLATOR"``; a table without a number (``… - BRIDGE OBJECT FLAGS``) or a
+    non-link table returns ``None``.
+    """
+    m = _LINK_TABLE_SUFFIX_RE.match(table_name)
+    return m.group(1).strip().upper() if m else None
+
+
+#: Descriptive suffix → canonical link type.  The number is ignored, so a table
+#: renumbered across releases still dispatches correctly; where the ``.s2k``
+#: table spelling and the OAPI display name differ, both are accepted
+#: (``SLIDING ISOLATOR`` ↔ ``FRICTION ISOLATOR``, ``TC SLIDING ISOLATOR`` ↔
+#: ``T/C FRICTION ISOLATOR``).
+_LINK_TABLE_SUFFIXES: dict[str, str] = {
+    "DAMPER": "Damper",
+    "GAP": "Gap",
+    "HOOK": "Hook",
+    "RUBBER ISOLATOR": "Rubber Isolator",
+    "SLIDING ISOLATOR": "Friction Isolator",
+    "FRICTION ISOLATOR": "Friction Isolator",
+    "TC SLIDING ISOLATOR": "T/C Friction Isolator",
+    "T/C FRICTION ISOLATOR": "T/C Friction Isolator",
+    "PLASTIC (WEN)": "Plastic (Wen)",
+}
+
+#: Isolator suffixes recognised but **not yet parsed** — warn that the
+#: processing is preliminary rather than silently dropping them.
+_LINK_TABLE_ISOLATOR_PENDING: dict[str, str] = {
+    "TRIPLE PENDULUM ISOLATOR": "triple friction pendulum (force-deformation backbone)",
+    "HIGH DAMPING RUBBER ISOLATOR": "high-damping rubber bearing",
+}
+
+#: Suffixes read elsewhere or tracked as known gaps — skip silently.
+_LINK_TABLE_SKIP = frozenset({"GENERAL", "LINEAR", "MULTILINEAR", "MULTILINEAR PLASTIC"})
+
+
 class SAP2000Parser:
     """Parse SAP2000 .S2K file and convert to SAPModelData.
 
@@ -801,63 +849,47 @@ class SAP2000Parser:
         friction coefficient, velocity exponent).  Column names follow the
         SAP2000 database/OAPI spelling for each table; a missing column reads
         as its default, so a partial export still parses.
-        """
-        table_specs = {
-            "LINK PROPERTY DEFINITIONS 04 - DAMPER": "Damper",
-            "LINK PROPERTY DEFINITIONS 05 - GAP": "Gap",
-            "LINK PROPERTY DEFINITIONS 06 - HOOK": "Hook",
-            "LINK PROPERTY DEFINITIONS 07 - RUBBER ISOLATOR": "Rubber Isolator",
-            "LINK PROPERTY DEFINITIONS 08 - SLIDING ISOLATOR": "Friction Isolator",
-            # The ``09`` slot is version-dependent.  Since SAP2000 v9 it is the
-            # T/C (tension/compression) friction isolator — a single-concave
-            # pendulum with velocity-dependent friction — which ETABS writes as
-            # ``TYPE "TCFRICTIONISOLATOR"`` / ``"ISOLATOR3"`` (canonical
-            # ``"T/C Friction Isolator"``) and Plastic (Wen) moved to ``10``.
-            # In the legacy v8 numbering ``09`` was Plastic (Wen), so both
-            # spellings are accepted.
-            "LINK PROPERTY DEFINITIONS 09 - TC SLIDING ISOLATOR": "T/C Friction Isolator",
-            "LINK PROPERTY DEFINITIONS 09 - PLASTIC (WEN)": "Plastic (Wen)",  # v8 legacy
-            "LINK PROPERTY DEFINITIONS 10 - PLASTIC (WEN)": "Plastic (Wen)",
-            # Not yet parsed: ``11 - MULTILINEAR PLASTIC`` (kinematic/Takeda/
-            # Pivot), ``12 - TRIPLE PENDULUM ISOLATOR`` (a force-deformation
-            # backbone — see docs/triple_pendulum_backbone_plan.md) and
-            # ``14 - HIGH DAMPING RUBBER ISOLATOR``.  Their exact column names
-            # need a real export before they can be wired in here.
-        }
 
-        # Guard: the ``09`` slot is version-dependent (see ``table_specs``): it
-        # is the T/C Friction Isolator in v9+ and Plastic (Wen) in the legacy
-        # v8 numbering.  A ``09`` table under *any* other title is a mismatch,
-        # not an unknown table — warn so the property is not silently dropped.
-        for raw_table in self._raw_tables:
-            if (
-                raw_table.startswith("LINK PROPERTY DEFINITIONS 09")
-                and raw_table not in table_specs
-            ):
+        Tables are dispatched by their *descriptive suffix* (e.g. ``RUBBER
+        ISOLATOR``, ``TC SLIDING ISOLATOR``) rather than their number, because
+        SAP2000 renumbered these tables as link types were added (``09`` was
+        ``PLASTIC (WEN)`` in v8 and ``TC SLIDING ISOLATOR`` since v9).  Isolator
+        tables we do not yet parse warn that the processing is *preliminary*.
+        """
+        for raw_table in list(self._raw_tables):
+            suffix = _link_table_suffix(raw_table)
+            if suffix is None or suffix in _LINK_TABLE_SKIP:
+                continue
+            if suffix in _LINK_TABLE_SUFFIXES:
+                link_type = _LINK_TABLE_SUFFIXES[suffix]
+                for rec in self._raw_tables.get(raw_table, []):
+                    name = str(rec.get("Link", "")).strip()
+                    dof = str(rec.get("DOF", "")).strip().upper()
+                    if not name or dof not in LINK_DOF_ORDER:
+                        continue
+                    prop = props.get(name)
+                    if prop is None:
+                        continue
+                    params = prop.nonlinear_params
+                    if params is None:
+                        params = LINK_NONLINEAR_PARAMS[link_type]()
+                        prop.nonlinear_params = params
+                    self._fill_nonlinear_row(params, link_type, LINK_DOF_ORDER.index(dof), rec)
+            elif suffix in _LINK_TABLE_ISOLATOR_PENDING:
                 logging.warning(
-                    "unrecognised LINK PROPERTY DEFINITIONS 09 table title %r — the "
-                    "``09`` slot is the T/C Friction Isolator (``TC SLIDING "
-                    "ISOLATOR``, v9+) or ``PLASTIC (WEN)`` (v8 legacy); neither "
-                    "matched, so the property was skipped.  If this is a real "
-                    "SAP2000 export, add its exact title to `table_specs` in "
-                    "`s2k_parser.py`.",
+                    "preliminary link/support parsing: %r is recognised but not "
+                    "yet processed (%s).  If you can share a real SAP2000 export, "
+                    "this mapping can be completed and updated.",
+                    raw_table,
+                    _LINK_TABLE_ISOLATOR_PENDING[suffix],
+                )
+            else:
+                logging.warning(
+                    "preliminary link/support parsing: %r has an unrecognised "
+                    "suffix; if you can share a real SAP2000 export, the parser "
+                    "can be updated.",
                     raw_table,
                 )
-
-        for table, link_type in table_specs.items():
-            for rec in self._raw_tables.get(table, []):
-                name = str(rec.get("Link", "")).strip()
-                dof = str(rec.get("DOF", "")).strip().upper()
-                if not name or dof not in LINK_DOF_ORDER:
-                    continue
-                prop = props.get(name)
-                if prop is None:
-                    continue
-                params = prop.nonlinear_params
-                if params is None:
-                    params = LINK_NONLINEAR_PARAMS[link_type]()
-                    prop.nonlinear_params = params
-                self._fill_nonlinear_row(params, link_type, LINK_DOF_ORDER.index(dof), rec)
 
     def _fill_nonlinear_row(
         self, params: Any, link_type: str, idx: int, rec: dict[str, Any]

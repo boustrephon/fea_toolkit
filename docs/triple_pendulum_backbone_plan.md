@@ -98,7 +98,12 @@ defaults.
 1. **Exact CSI table name/columns** for the Triple-Pendulum Isolator backbone
    (the `.s2k` `LINK PROPERTY DEFINITIONS` number, and whether the backbone is
    a points table or coefficient columns).  Needs a real SAP2000/ETABS v22+
-   export or the OAPI `GetTriplePendulumIsolator` signature.
+   export or the OAPI `GetTriplePendulumIsolator` signature.  **Status note —
+   no SAP2000 access at the time of writing (2026-11-20); the user expects to
+   obtain an export "next week".**  When it arrives, confirm the exact table
+   titles + columns for `12 - TRIPLE PENDULUM ISOLATOR` and `14 - HIGH DAMPING
+   RUBBER ISOLATOR` (and whether a `13` table exists at all), then wire them
+   into `s2k_parser._LINK_TABLE_ISOLATOR_PENDING`.
 2. Whether the backbone is **per-direction** or a single 2D curve (the Dao
    element is isotropic in `L`/`Ubar`/`mu` — a per-direction backbone would
    need a direction choice or an average).
