@@ -81,6 +81,10 @@ Parsing normalises two formats that diverge:
 * **E2K** packs the same data into per-DOF `LINKPROP` records; the tokens
   `NONLIN/K/OPEN/F/YIELD/R/MU/RADIUS` are already stashed in
   `prop.nonlinear[dof]` and are interpreted into the same sub-dataclasses.
+  **Pending:** the Wen post-yield `ratio` and yield-exponent `n` are not yet
+  parsed — the exact ETABS export attribute names for those two values are
+  awaiting confirmation against a real export (the parser does not invent
+  token names).
 
 **Units.** These values come *from the model file*, so they are already in
 model units — like frame loads, not like our SI-authored material constants.
@@ -105,7 +109,7 @@ families:
 | Gap | `twoNodeLink` + `Hysteretic` (compression branch = `Ke`, tension ≈ 0) | `Ke`→slope, `open`→backbone shift | good |
 | Hook | `twoNodeLink` + `Hysteretic` (tension branch = `Ke`, compression ≈ 0) | `Ke`→slope, `open`→backbone shift | good |
 | Plastic (Wen) | `twoNodeLink` + `Steel02` (default) or `Hysteretic` | `Fy`→`Fy`, `Ke`→`E0`, `ratio`→`b`, `n`↔`R0` (Steel02); `Ke`/`fy`/`ratio` (Hysteretic, sharp corner) | good |
-| Rubber Isolator | `elastomericBearingBoucWen` (lead/HDR) or `elastomericBearingPlasticity` (bilinear) | `Ke`→`kInit`, `fy`→`qd`, `k2_ratio`→`α1`; `-P/-T/-My/-Mz` `Elastic` | good |
+| Rubber Isolator | `elastomericBearingBoucWen` (lead/HDR) or `elastomericBearingPlasticity` (bilinear) | `Ke`→`kInit`, `qd = Fy·(1 − ratio)` (the hardening-corrected post-yield intercept, not `Fy` directly), `k2_ratio`→`α1`; `-P/-T/-My/-Mz` `Elastic` | good |
 | Friction Isolator | `singleFPBearing` + `frictionModel Coulomb` (or `VelDependent`) | `radius`→`Reff`, `Ke`→`kInit`, `mu`→`μ` | good |
 | Damper – Linear | `twoNodeLink` + `Viscous(C, 1.0)` | `Ce`→`C` | exact |
 | Damper – Exponential | `twoNodeLink` + `Viscous(C, α)` | `Ce`→`C`, `Cexp`→`α` | exact |
@@ -207,7 +211,7 @@ compression-only special case exists to support.
 | T/C Friction Isolator | `singleFPBearing` (loses uplift capacity) vs defer | ✅ **Done** — `singleFPBearing` + `VelDependent` (compression `Slow`/`Fast`/`Rate`); the tension-friction half is dropped with a warning |
 | Triple Friction Pendulum | `TripleFrictionPendulum` (Dao et al. 2013, full geometry backbone) | ✅ **Done** (emitter + benchmark); the SAP2000 triple-pendulum *backbone* still has no 1:1 fit — see `docs/triple_pendulum_backbone_plan.md` |
 | Damper – friction directional/orthotropic | `frictionModel` + bearing in the damper DOF, or `Hysteretic` plastic | defer; linearised-elastic interim |
-| Viscoelastic freq/temp dependence | `Parallel(Elastic, Viscous)` is rate-independent | ship it, flag the approximation |
+| Viscoelastic freq/temp dependence | `Parallel(Elastic, Viscous)` is strain-rate-dependent (the `Viscous` dashpot models velocity-dependent force) but omits the frequency- and temperature-dependent material coefficients | ship it, flag the approximation |
 | Non-axis-aligned `CoordDir2` | honour arbitrary `CoordDir2` | ✅ **Done** — `_direction_vector` parses axis-aligned tokens or arbitrary triples (§4 of `_link_orient`) |
 
 The bilinear / friction damper family is now **done** too: the `04 - DAMPER`

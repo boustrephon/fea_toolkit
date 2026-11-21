@@ -1,7 +1,7 @@
 ---
 title: "E-Defense Base-Isolated Frame (TPB) Benchmark (T4)"
 description: "Full-model shake-table benchmark: E-Defense 5-storey base-isolated steel frame with triple friction pendulum bearings (TPB) — bearing backbone, first-slope period, and JMA-Kobe NLTHA."
-status: "complete"
+status: "partial"
 tags: [validation, benchmark, base-isolation, TPB, NLTHA, shake-table]
 category: [planning]
 related: [benchmark_register.md, nonlinear_link_plan.md, modeling_guidance.md, e_defense_lrb_benchmark.md]
@@ -9,9 +9,12 @@ related: [benchmark_register.md, nonlinear_link_plan.md, modeling_guidance.md, e
 
 # E-Defense base-isolated frame (TPB) benchmark
 
-**Status: ✅ Complete** — `tests/test_e_defense_tpb.py` reproduces the published
+**Status: ⚠️ Partial** — `tests/test_e_defense_tpb.py` reproduces the published
 triple-friction-pendulum bearing backbone and first-slope period of the 2011
-NEES/E-Defense full-scale shake-table test building (the TPB configuration).
+NEES/E-Defense full-scale shake-table test building (the TPB configuration),
+but the NLTHA response is validated only against a JMA-Kobe stand-in (the
+100 % Iwanuma record is still pending K-NET download), so the combined
+modal/NLTHA entry is not fully closed.
 
 ## Reference
 
@@ -44,8 +47,10 @@ OpenSees' `TripleFrictionPendulum` element (Dao et al. 2013) — **not**
 `tripleFPBearing`, which is an unknown element type in OpenSeesPy (verified
 against the installed library).  The element takes `L` (effective radii),
 `Ubar` (slider limits), three `frictionModel` objects (`Coulomb` here, the
-design coefficients) and four *positional* uniaxial materials; it ignores
-`-orient` and orients its axial axis along I→J.
+design coefficients) and four *positional* uniaxial materials.  Its documented
+coordinate system requires global axis 3 (global Z) to be vertical — the axial
+direction is along global Z and sliding is in global X/Y — and it ignores
+`-orient`.
 
 ## Validation targets
 

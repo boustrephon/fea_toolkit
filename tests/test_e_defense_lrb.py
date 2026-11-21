@@ -67,8 +67,9 @@ def test_fixed_base_period():
     try:
         b = _build(isolated=False, link_model="elastic")
         periods = _translational_periods(b.run_modal_analysis(num_modes=6))
-        # The two horizontal fundamentals (X and Y) bracket the published 0.70 s.
-        assert periods and all(0.60 <= p <= 0.80 for p in periods), f"T1 = {periods}"
+        # Exactly two horizontal fundamentals (X and Y) must be selected.
+        assert len(periods) == 2, f"expected 2 horizontal modes, got {periods}"
+        assert all(0.60 <= p <= 0.80 for p in periods), f"T1 = {periods}"
     finally:
         wipe()
 
@@ -79,7 +80,8 @@ def test_isolated_period():
     try:
         b = _build(isolated=True, link_model="elastic")
         periods = _translational_periods(b.run_modal_analysis(num_modes=6))
-        assert periods and all(2.6 <= p <= 3.1 for p in periods), f"isolated T = {periods}"
+        assert len(periods) == 2, f"expected 2 horizontal modes, got {periods}"
+        assert all(2.6 <= p <= 3.1 for p in periods), f"isolated T = {periods}"
     finally:
         wipe()
 

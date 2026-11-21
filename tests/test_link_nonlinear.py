@@ -256,16 +256,32 @@ def test_hysteretic_wen_bilinear_yield():
 def test_hysteretic_cyclic_neutral_defaults():
     """D7: a full cycle shows no pinching and no strength degradation."""
     fy, ke, ratio = 50.0, E, 0.1
+    peak = fy + ratio * ke * (0.1 - fy / ke)
 
     def emit(tag):
         ops.uniaxialMaterial("Hysteretic", tag, *_hysteretic_bilinear_args(ke, fy, ratio))
 
     try:
-        peak = fy + ratio * ke * (0.1 - fy / ke)
-        forces = _axial_forces(emit, [0.1, 0.0, -0.1, 0.0, 0.1])
+        # Sample the reload branch (not just the extrema) so a pinched loop
+        # cannot pass on peak values alone.
+        history = [0.1, 0.0, -0.1, 0.0, 0.05, 0.1]
+        forces = _axial_forces(emit, history)
         assert forces[0] == pytest.approx(peak, rel=1e-6)
         assert forces[2] == pytest.approx(-peak, rel=1e-6)
-        assert forces[4] == pytest.approx(peak, rel=1e-6)  # no degradation
+        assert forces[5] == pytest.approx(peak, rel=1e-6)  # no degradation
+
+        # A pinched loop (pinchX/pinchY < 1) lands at the same extrema but
+        # diverges on the reload branch — the intermediate samples are what
+        # catch it.
+        def emit_pinched(tag):
+            args = _hysteretic_bilinear_args(ke, fy, ratio)
+            args[-5] = args[-4] = 0.5
+            ops.uniaxialMaterial("Hysteretic", tag, *args)
+
+        pinched = _axial_forces(emit_pinched, history)
+        assert pinched[0] == pytest.approx(peak, rel=1e-6)  # same extrema
+        assert pinched[5] == pytest.approx(peak, rel=1e-6)
+        assert any(abs(f - p) > 1e-6 for f, p in zip(forces[3:], pinched[3:]))
     finally:
         ops.wipe()
 

@@ -657,11 +657,14 @@ def run_recipe(
                 # working ``SAPModelData``, so any topology prepared from the
                 # previous model — and the results that depended on it — are
                 # stale.  Invalidate them so a later geometry-dependent step
-                # must re-mesh rather than solve a mesh of the old model.
+                # must re-mesh rather than solve a mesh of the old model, and
+                # drop the prior document's results from ``run.results`` so a
+                # caller never registers A's mesh/analysis alongside B's MODEL.
                 produced.difference_update((GEOMETRY, CASES, MODAL, FIGURE))
                 context.model = None
                 context.case_results.clear()
                 context.results.clear()
+                del run.results[:prior_results]
             if spec.kind == SESSION and spec.resets_document:
                 # A document-lifecycle step (``open`` / ``close`` /
                 # ``build_model``) replaced or closed the working document, so

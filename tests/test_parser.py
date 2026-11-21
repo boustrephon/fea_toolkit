@@ -333,6 +333,12 @@ TABLE:  "LINK PROPERTY DEFINITIONS 04 - DAMPER"
     assert rub.k[1] == pytest.approx(2000.0)
     assert rub.fy[1] == pytest.approx(50.0)
     assert rub.ratio == pytest.approx(0.1)
+    # The 03+ table repeats the effective Ke/Ce/Fixed columns; they must merge
+    # into the LinkProperty even without an 02 - LINEAR table.
+    rub_prop = md.link_properties["RUB1"]
+    assert rub_prop.ke[1] == pytest.approx(1000.0)
+    assert rub_prop.ce[1] == pytest.approx(0.0)
+    assert rub_prop.fixed[1] is False
 
     iso = md.link_properties["ISO1"].nonlinear_params
     assert isinstance(iso, FrictionIsolatorParams)
@@ -359,6 +365,9 @@ TABLE:  "LINK PROPERTY DEFINITIONS 04 - DAMPER"
     dmp = md.link_properties["DMP1"].nonlinear_params
     assert isinstance(dmp, DamperParams)
     assert dmp.cexp == pytest.approx(0.3)
+    dmp_prop = md.link_properties["DMP1"]
+    assert dmp_prop.ke[0] == pytest.approx(0.0)
+    assert dmp_prop.ce[0] == pytest.approx(50.0)
 
 
 def test_tc_friction_isolator_newer_spelling_parses(tmp_path):

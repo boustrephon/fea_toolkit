@@ -696,7 +696,11 @@ class AnalysisBuilder(
                 spring stiffness on rebuild (default 1.0).
             link_model: Optional per-build ``link_model`` override (e.g. the
                 pushover runner's run-scoped ``"nonlinear"`` default).  ``None``
-                leaves the effective setting unchanged.
+                applies no override, so :meth:`build_domain` falls back to the
+                builder's base ``self.config["link_model"]`` (or the
+                ``"elastic"`` default) — it does **not** preserve the last
+                build's effective setting.  An explicit value here is the
+                higher-priority choice.
 
         Note:
             Braces are subdivided at domain creation time (in

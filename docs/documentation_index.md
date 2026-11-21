@@ -367,12 +367,12 @@ for automated cross-referencing.
   Tags: `validation`, `benchmark`, `shear`, `mcft`, `duong`, `rc-frame`, `pushover`, `shear-critical`
   Related: [RC Shear-Failure Modelling (MCFT Capacity + Nonlinear Shear Backbone)](shear_failure_modelling.md) · [Vecchio & Emara (1992) RC-Frame Pushover Benchmark](vecchio_emara_benchmark.md) · [Benchmark & Validation Model Register](benchmark_register.md)
 
-- [E-Defense Base-Isolated Frame (LRB-CLB) Benchmark (T4)](e_defense_lrb_benchmark.md) — ✅ Complete
+- [E-Defense Base-Isolated Frame (LRB-CLB) Benchmark (T4)](e_defense_lrb_benchmark.md) — ⚠️ Partial
   > Full-model shake-table benchmark: E-Defense 5-storey base-isolated steel frame (LRB-CLB) — fixed-base and isolated periods and JMA-Kobe NLTHA.
   Tags: `validation`, `benchmark`, `base-isolation`, `LRB`, `NLTHA`, `shake-table`
   Related: [Benchmark & Validation Model Register](benchmark_register.md) · [Nonlinear link properties — plan (P49 Phase 2)](nonlinear_link_plan.md) · [Structural Modeling Guidance](modeling_guidance.md)
 
-- [E-Defense Base-Isolated Frame (TPB) Benchmark (T4)](e_defense_tpb_benchmark.md) — ✅ Complete
+- [E-Defense Base-Isolated Frame (TPB) Benchmark (T4)](e_defense_tpb_benchmark.md) — ⚠️ Partial
   > Full-model shake-table benchmark: E-Defense 5-storey base-isolated steel frame with triple friction pendulum bearings (TPB) — bearing backbone, first-slope period, and JMA-Kobe NLTHA.
   Tags: `validation`, `benchmark`, `base-isolation`, `TPB`, `NLTHA`, `shake-table`
   Related: [Benchmark & Validation Model Register](benchmark_register.md) · [Nonlinear link properties — plan (P49 Phase 2)](nonlinear_link_plan.md) · [Structural Modeling Guidance](modeling_guidance.md) · [E-Defense Base-Isolated Frame (LRB-CLB) Benchmark (T4)](e_defense_lrb_benchmark.md)

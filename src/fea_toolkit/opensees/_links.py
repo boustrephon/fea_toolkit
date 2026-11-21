@@ -703,11 +703,17 @@ class LinkMixin:
     def _link_orient(self, link):
         """Return ``(vx, vy)`` orientation vectors, or ``None`` for zero length.
 
-        Reference-vector axes (``coord_dir1`` / ``coord_dir2`` from
-        ``LINK LOCAL AXES ASSIGNMENTS 2 - ADVANCED``) take precedence — they
-        are the only way to orient a zero-length link (e.g. a vertical base
-        isolator whose U1 must be vertical).  Otherwise the I→J geometry and
-        the ``angle`` rotation (``1 - TYPICAL``) define the axes.
+        ``vx`` is the local-1 axis and ``vy`` the local-2 axis.  Reference-vector
+        axes (``coord_dir1`` / ``coord_dir2`` from ``LINK LOCAL AXES ASSIGNMENTS
+        2 - ADVANCED``) take precedence — they are the only way to orient a
+        zero-length link (e.g. a vertical base isolator whose U1 must be
+        vertical).  Otherwise the I→J geometry and the ``angle`` rotation
+        (``1 - TYPICAL``, degrees about local 1) define the axes.
+
+        Returns:
+            ``(vx, vy)`` as unit vectors, or ``None`` when the orientation could
+            not be resolved (a zero-length/coincident link with no reference
+            vectors) — distinct from a resolved default orientation.
         """
         vx = _direction_vector(link.coord_dir1)
         if vx is not None:

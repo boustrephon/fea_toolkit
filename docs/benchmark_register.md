@@ -55,8 +55,8 @@ Legend: ● have a real benchmark · ◐ exercised vs synthetic/semi-analytical 
 | Vecchio & Emara (1992) frame | RC moment frame · pushover | T3 | ✅ | [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md) | `test_rc_benchmark.py` |
 | Duong et al. (2007) shear-critical frame | RC moment frame · pushover | T3 | ✅ | [duong_benchmark.md](duong_benchmark.md) | `test_duong_benchmark.py` |
 | RC wall pushover (LayeredShell + MVLEM) | shear wall · pushover | — | ✅ | [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [shell_support.md](shell_support.md) | `test_wall_pushover.py` |
-| E-Defense 5-storey base-isolated frame (LRB-CLB) | base-isolated steel moment frame · modal/NLTHA | T4 | ✅ | [e_defense_lrb_benchmark.md](e_defense_lrb_benchmark.md) | `test_e_defense_lrb.py` |
-| E-Defense 5-storey base-isolated frame (TPB) | base-isolated steel moment frame · modal/NLTHA | T4 | ✅ | [e_defense_tpb_benchmark.md](e_defense_tpb_benchmark.md) | `test_e_defense_tpb.py` |
+| E-Defense 5-storey base-isolated frame (LRB-CLB) | base-isolated steel moment frame · modal/NLTHA | T4 | ⚠️ | [e_defense_lrb_benchmark.md](e_defense_lrb_benchmark.md) | `test_e_defense_lrb.py` |
+| E-Defense 5-storey base-isolated frame (TPB) | base-isolated steel moment frame · modal/NLTHA | T4 | ⚠️ | [e_defense_tpb_benchmark.md](e_defense_tpb_benchmark.md) | `test_e_defense_tpb.py` |
 
 > `—` = a synthetic exercise, not a T-tier benchmark (matrix cell ◐); its docs
 > are the feature pages rather than a `_benchmark.md`.

@@ -74,13 +74,13 @@ def _collect_backbones(model_data):
             if fy > 0.0:
                 peak = _peak_displacement(0.0, ke, fy)
                 args = _hysteretic_bilinear_args(ke, fy, p.ratio)
-                yield name, args, [peak, 0.0, -peak, 0.0, peak], True
+                yield name, args, [peak, 0.0, -peak, 0.0, 0.5 * peak, peak], True
         elif prop.link_type.startswith("Damper") and isinstance(p, DamperParams):
             fy = _first_positive(p.fy)
             if fy > 0.0:
                 peak = _peak_displacement(0.0, ke, fy)
                 args = _hysteretic_bilinear_args(ke, fy, 0.0)
-                yield name, args, [peak, 0.0, -peak, 0.0, peak], True
+                yield name, args, [peak, 0.0, -peak, 0.0, 0.5 * peak, peak], True
 
 
 def _cyclic_backbone_check(
@@ -88,32 +88,50 @@ def _cyclic_backbone_check(
 ) -> tuple[bool, str]:
     """Drive a ``Hysteretic`` material through a cycle; report pinching/degradation.
 
-    A 1-DOF truss rig mirrors the component test in ``tests/test_link_nonlinear.py``.
+    A 1-DOF truss rig mirrors the component test in
+    ``tests/test_link_nonlinear.py``.  The material is driven alongside a
+    *neutral-pinch reference* (the same backbone with ``pinchX=pinchY=1`` and
+    zero damage/beta forced): the peak checks catch strength degradation, and
+    the reload-branch comparison catches pinching, which shifts the reload
+    forces between the extrema without moving the peaks themselves.
     """
-    ops.wipe()
-    ops.model("basic", "-ndm", 1, "-ndf", 1)
-    ops.node(1, 0.0)
-    ops.node(2, 1.0)
-    ops.fix(1, 1)
-    ops.uniaxialMaterial("Hysteretic", 1, *args)
-    ops.element("truss", 1, 1, 2, 1.0, 1)
-    times = list(range(len(history) + 1))
-    values = [0.0, *history]
-    ops.timeSeries("Path", 1, "-time", *times, "-values", *values, "-factor", 1.0)
-    ops.pattern("Plain", 1, 1)
-    ops.sp(2, 1, 1.0)
-    ops.constraints("Penalty", 1.0e14, 1.0e14)
-    ops.numberer("RCM")
-    ops.system("BandGeneral")
-    ops.test("NormDispIncr", 1.0e-12, 50)
-    ops.algorithm("Newton")
-    ops.integrator("LoadControl", 1.0)
-    ops.analysis("Static")
-    forces = []
-    for _ in history:
-        if ops.analyze(1) != 0:
-            return False, "analysis failed to converge"
-        forces.append(float(ops.eleResponse(1, "axialForce")[0]))
+    neutral_args = list(args)
+    neutral_args[-5:] = [1.0, 1.0, 0.0, 0.0, 0.0]
+
+    def _drive(mat_args):
+        ops.wipe()
+        ops.model("basic", "-ndm", 1, "-ndf", 1)
+        ops.node(1, 0.0)
+        ops.node(2, 1.0)
+        ops.fix(1, 1)
+        ops.uniaxialMaterial("Hysteretic", 1, *mat_args)
+        ops.element("truss", 1, 1, 2, 1.0, 1)
+        times = list(range(len(history) + 1))
+        values = [0.0, *history]
+        ops.timeSeries("Path", 1, "-time", *times, "-values", *values, "-factor", 1.0)
+        ops.pattern("Plain", 1, 1)
+        ops.sp(2, 1, 1.0)
+        ops.constraints("Penalty", 1.0e14, 1.0e14)
+        ops.numberer("RCM")
+        ops.system("BandGeneral")
+        ops.test("NormDispIncr", 1.0e-12, 50)
+        ops.algorithm("Newton")
+        ops.integrator("LoadControl", 1.0)
+        ops.analysis("Static")
+        forces = []
+        for _ in history:
+            if ops.analyze(1) != 0:
+                return None
+            forces.append(float(ops.eleResponse(1, "axialForce")[0]))
+        return forces
+
+    forces = _drive(args)
+    if forces is None:
+        return False, "analysis failed to converge"
+    reference = _drive(neutral_args)
+    if reference is None:
+        return False, "reference analysis failed to converge"
+
     peak_force = forces[0]
     if abs(peak_force) < tol:
         return False, "no force transmitted in the active direction"
@@ -121,6 +139,9 @@ def _cyclic_backbone_check(
         return False, "strength degraded after a cycle"
     if symmetric and abs(forces[2] + peak_force) > tol:
         return False, "asymmetric reverse (pinching)"
+    for i, (force, ref) in enumerate(zip(forces, reference)):
+        if abs(force - ref) > tol:
+            return False, f"non-neutral (pinched) reload at sample {i}"
     return True, "clean cyclic backbone"
 
 

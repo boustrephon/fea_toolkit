@@ -2034,6 +2034,22 @@ def test_linear_link_builds_and_supports():
         ab = AnalysisBuilder(mm, {"element_type": "elasticBeamColumn"})
         ab.build_domain()
         assert len(ops.getEleTags()) == 1  # just the twoNodeLink
+        # Apply a vertical load at node 2 and verify F/k displacement and the
+        # matching support reaction (the twoNodeLink's U3 spring, ke = 1000).
+        ops.timeSeries("Linear", 1)
+        ops.pattern("Plain", 1, 1)
+        ops.load(2, 0.0, 0.0, -5000.0, 0.0, 0.0, 0.0)
+        ops.constraints("Transformation")
+        ops.numberer("RCM")
+        ops.system("BandGeneral")
+        ops.test("NormDispIncr", 1e-8, 30)
+        ops.algorithm("Newton")
+        ops.integrator("LoadControl", 1.0)
+        ops.analysis("Static")
+        assert ops.analyze(1) == 0
+        ops.reactions()
+        assert ops.nodeDisp(2, 3) == pytest.approx(-5000.0 / 1000.0)
+        assert ops.nodeReaction(1, 3) == pytest.approx(5000.0)
     finally:
         ops.wipe()
 
@@ -2118,9 +2134,19 @@ def test_tc_friction_isolator_builds_single_fp_bearing(caplog):
     try:
         mm = preprocess_model(md, {})
         ab = AnalysisBuilder(mm, {"link_model": "nonlinear"})
-        with caplog.at_level(logging.WARNING):
-            ab.build_domain()
+        import fea_toolkit.opensees._links as links_mod
+        from fea_toolkit.opensees.recorder import RecordingOpenSees
+
+        rec = RecordingOpenSees(ops)
+        links_mod.ops = rec
+        try:
+            with caplog.at_level(logging.WARNING):
+                ab.build_domain()
+        finally:
+            links_mod.ops = ops
         assert len(ops.getEleTags()) == 1
+        element_types = [args[0] for name, args, _kw in rec.commands if name == "element"]
+        assert element_types == ["singleFPBearing"]
         assert any("T/C Friction Isolator" in r.message for r in caplog.records)
     finally:
         ops.wipe()
@@ -2180,8 +2206,18 @@ def test_bearing_links_build():
     try:
         mm = preprocess_model(md, {})
         ab = AnalysisBuilder(mm, {"link_model": "nonlinear"})
-        ab.build_domain()
+        import fea_toolkit.opensees._links as links_mod
+        from fea_toolkit.opensees.recorder import RecordingOpenSees
+
+        rec = RecordingOpenSees(ops)
+        links_mod.ops = rec
+        try:
+            ab.build_domain()
+        finally:
+            links_mod.ops = ops
         assert len(ops.getEleTags()) == 2  # one bearing element per link
+        element_types = sorted(args[0] for name, args, _kw in rec.commands if name == "element")
+        assert element_types == ["elastomericBearingPlasticity", "singleFPBearing"]
     finally:
         ops.wipe()
 

@@ -119,14 +119,32 @@ def test_tpb_backbone_capacity():
         wipe()
 
 
+def _translational_periods(res, n=6):
+    """Periods of the modes carrying the horizontal translational mass.
+
+    A base-isolated model has a soft *rocking* mode (the isolators release all
+    rotations) whose period is close to the isolation period but which carries
+    no translational mass; selecting by mass participation (not by longest
+    period) picks the true horizontal modes.
+    """
+    mp = res["modal_props"]
+    periods = mp["eigenPeriod"][:n]
+    mx = mp["partiMassMX"][:n]
+    my = mp["partiMassMY"][:n]
+    total = mp["totalMass"][0]
+    return [p for p, x, y in zip(periods, mx, my) if (x + y) > 0.5 * total]
+
+
 def test_tpb_isolated_period():
     """Isolated first-slope period ≈ 1.84–2.2 s (isolator + superstructure)."""
     wipe()
     try:
         b = ed.build_builder(isolated=True, config="tpb", link_model="elastic")
         res = b.run_modal_analysis(num_modes=6)
-        mp = res["modal_props"]
-        periods = mp["eigenPeriod"][:2]  # the two horizontal translational modes
+        periods = _translational_periods(res)
+        # Exactly two horizontal translational modes (X and Y) must be selected;
+        # the soft rocking mode carries no translational mass and is excluded.
+        assert len(periods) == 2, f"expected 2 horizontal modes, got {periods}"
         assert all(1.7 <= p <= 2.2 for p in periods), f"isolated T = {periods}"
     finally:
         wipe()

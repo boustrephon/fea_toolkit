@@ -76,7 +76,7 @@ def _push_bearing(elem_type, elem_args, weight, u_lat, friction=None):
     ops.load(2, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0)
     ops.integrator("DisplacementControl", 2, 2, 0.001)
     ops.analysis("Static")
-    for _ in range(int(u_lat / 0.001)):
+    for _ in range(int(round(u_lat / 0.001))):
         assert ops.analyze(1) == 0, "lateral push failed"
     return list(ops.eleResponse(1, "localForce")[:6])
 

@@ -1329,7 +1329,7 @@ the tension-friction half (``SlowT``/``FastT``/``RateT``) is dropped.
 
 **Follow-up (pending external access).**  The Phase-A NLTHA currently drives
 the model with a JMA-Kobe stand-in; the measured LRB-CLB targets are the
-**100 % Iwanuma** (2011 Tohoku, K-NET station MYG004) record — peak isolator
+**100 % Iwanuma** (2011 Tohoku, K-NET station MYG015) record — peak isolator
 displacement **347 mm** and base shear **1187 kN = 0.224 W** (Ryan et al.
 2012, WCEE paper 2054).  Waiting on K-NET user-registration confirmation
 (`kyoshin.bosai.go.jp`) to download the `.NS`/`.EW`/`.UD` waveforms.  Once

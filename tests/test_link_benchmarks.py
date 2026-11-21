@@ -13,7 +13,7 @@ Sources
   Manufacturer's bilinear model: initial stiffness ``K0 = 6.5 kN/mm``,
   post-yield stiffness ``KF = 0.65 kN/mm``, yield strength ``FU = 73 kN``;
   tributary axial load per bearing ``N = 1325 kN``.
-* Friction pendulum (first-stage single pendulum) — Morgan & Mahin (2010),
+* Friction pendulum (first-stage single pendulum) — Morgan & Mahin (2011),
   "The Use of Base Isolation Systems to Achieve Complex Seismic Performance
   Objectives" (PEER 2011/06), Table 1 isolator ``TP-3-0.10``: first-stage
   effective radius ``L1 = 11 in = 0.2794 m``, ``mu1 = 0.01``.

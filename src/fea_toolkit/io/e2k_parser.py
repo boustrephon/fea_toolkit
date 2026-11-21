@@ -799,6 +799,13 @@ def _interpret_link_nonlinear(prop: LinkProperty) -> None:
             params.open[idx] = _as_float(attrs.get("OPEN", 0.0))
         elif isinstance(params, WenParams):
             params.fy[idx] = _as_float(attrs.get("YIELD", attrs.get("F", 0.0)))
+            # NOTE: the Wen post-yield ``ratio`` and yield-exponent ``n`` are not
+            # parsed here yet — the exact ETABS export attribute names for those
+            # two values have not been confirmed against a real ``$ LINK
+            # PROPERTIES`` export, and this parser deliberately does not invent
+            # token names.  Waiting on a real export to add the whitelist tokens
+            # and populate ``WenParams.ratio`` / ``WenParams.n`` (see
+            # docs/nonlinear_link_plan.md §3).
         elif isinstance(params, RubberIsolatorParams):
             params.k[idx] = _as_float(attrs.get("K", 0.0))
             params.fy[idx] = _as_float(attrs.get("YIELD", attrs.get("F", 0.0)))

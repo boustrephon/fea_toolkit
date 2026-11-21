@@ -870,11 +870,26 @@ class SAP2000Parser:
                     prop = props.get(name)
                     if prop is None:
                         continue
+                    idx = LINK_DOF_ORDER.index(dof)
+                    # The ``03+`` tables repeat the effective ``Ke``/``Ce``/``Fixed``
+                    # columns, and a model may omit the ``02 - LINEAR`` table
+                    # entirely.  Merge any present value into the effective
+                    # properties, preserving the existing value when a column is
+                    # absent from this row.
+                    if rec.get("Ke") not in (None, ""):
+                        prop.ke[idx] = float(rec.get("Ke"))
+                    if rec.get("Ce") not in (None, ""):
+                        prop.ce[idx] = float(rec.get("Ce"))
+                    if rec.get("Fixed") not in (None, ""):
+                        fixed = rec.get("Fixed")
+                        if isinstance(fixed, str):
+                            fixed = fixed.lower() in ("yes", "true")
+                        prop.fixed[idx] = bool(fixed)
                     params = prop.nonlinear_params
                     if params is None:
                         params = LINK_NONLINEAR_PARAMS[link_type]()
                         prop.nonlinear_params = params
-                    self._fill_nonlinear_row(params, link_type, LINK_DOF_ORDER.index(dof), rec)
+                    self._fill_nonlinear_row(params, link_type, idx, rec)
             elif suffix in _LINK_TABLE_ISOLATOR_PENDING:
                 logging.warning(
                     "preliminary link/support parsing: %r is recognised but not "

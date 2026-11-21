@@ -282,9 +282,10 @@ def _scale_link_properties(mesh: MeshModel, m: dict[str, float]) -> None:
     nonlinear stiffness by force-per-length.
     """
     fpl = m["force_per_length"]
+    ftl = m["force_times_length"]
     for prop in mesh.link_properties.values():
-        prop.ke = [k * fpl for k in prop.ke]
-        prop.ce = [c * fpl for c in prop.ce]
+        prop.ke = [k * (fpl if i < 3 else ftl) for i, k in enumerate(prop.ke)]
+        prop.ce = [c * (fpl if i < 3 else ftl) for i, c in enumerate(prop.ce)]
         p = prop.nonlinear_params
         if p is None:
             continue

@@ -1,7 +1,7 @@
 ---
 title: "E-Defense Base-Isolated Frame (LRB-CLB) Benchmark (T4)"
 description: "Full-model shake-table benchmark: E-Defense 5-storey base-isolated steel frame (LRB-CLB) — fixed-base and isolated periods and JMA-Kobe NLTHA."
-status: "complete"
+status: "partial"
 tags: [validation, benchmark, base-isolation, LRB, NLTHA, shake-table]
 category: [planning]
 related: [benchmark_register.md, nonlinear_link_plan.md, modeling_guidance.md]
@@ -9,9 +9,10 @@ related: [benchmark_register.md, nonlinear_link_plan.md, modeling_guidance.md]
 
 # E-Defense base-isolated frame (LRB-CLB) benchmark
 
-**Status: ✅ Complete** — `tests/test_e_defense_lrb.py` reproduces the published
-fixed-base and isolated periods and the JMA-Kobe NLTHA response of the 2011
-NEES/E-Defense full-scale shake-table test building.
+**Status: ⚠️ Partial** — the fixed-base and isolated modal-period checks are
+complete and reproduce the published periods, but the NLTHA response is
+validated only against a JMA-Kobe stand-in (the 100 % Iwanuma record is still
+pending K-NET download), so the combined modal/NLTHA entry is not fully closed.
 
 ## Reference
 
