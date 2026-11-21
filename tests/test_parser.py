@@ -380,6 +380,26 @@ TABLE:  "LINK PROPERTY DEFINITIONS 09 - T/C FRICTION ISOLATOR"
     assert md.link_properties["TC1"].nonlinear_params is None
 
 
+def test_parse_v8_legacy_plastic_wen_table_09(tmp_path):
+    """The legacy v8 ``09 - PLASTIC (WEN)`` table maps to Plastic (Wen), not T/C."""
+    from fea_toolkit.model.sap_data import WenParams
+
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "LINK PROPERTY DEFINITIONS 01 - GENERAL"
+   Link=WEN1   LinkType=Plastic (Wen)
+TABLE:  "LINK PROPERTY DEFINITIONS 09 - PLASTIC (WEN)"
+   Link=WEN1   DOF=U1   Fixed=No   Ke=1000   Ce=0   Yield=30   YieldExp=2   Ratio=0.05
+"""
+    s2k = tmp_path / "test_v8_plastic_wen.s2k"
+    s2k.write_text(content)
+    md = SAP2000Parser(s2k).parse().get_model_data()
+    wen = md.link_properties["WEN1"].nonlinear_params
+    assert isinstance(wen, WenParams)
+    assert wen.fy[0] == pytest.approx(30.0)
+    assert wen.ratio == pytest.approx(0.05)
+    assert wen.n == pytest.approx(2.0)
+
+
 def test_parse_bilinear_friction_damper(tmp_path):
     """The DAMPER table's ``Ratio``/``K``/``Yield`` land on DamperParams."""
     from fea_toolkit.model.sap_data import DamperParams

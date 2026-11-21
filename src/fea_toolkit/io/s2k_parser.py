@@ -808,31 +808,35 @@ class SAP2000Parser:
             "LINK PROPERTY DEFINITIONS 06 - HOOK": "Hook",
             "LINK PROPERTY DEFINITIONS 07 - RUBBER ISOLATOR": "Rubber Isolator",
             "LINK PROPERTY DEFINITIONS 08 - SLIDING ISOLATOR": "Friction Isolator",
-            # T/C = tension/compression friction isolator (a single-concave
-            # pendulum with velocity-dependent friction).  The CSI database
-            # reference lists the table as ``09 - TC SLIDING ISOLATOR``; ETABS
-            # writes the same property as ``TYPE "TCFRICTIONISOLATOR"`` /
-            # ``"ISOLATOR3"`` (canonical ``"T/C Friction Isolator"``).
+            # The ``09`` slot is version-dependent.  Since SAP2000 v9 it is the
+            # T/C (tension/compression) friction isolator — a single-concave
+            # pendulum with velocity-dependent friction — which ETABS writes as
+            # ``TYPE "TCFRICTIONISOLATOR"`` / ``"ISOLATOR3"`` (canonical
+            # ``"T/C Friction Isolator"``) and Plastic (Wen) moved to ``10``.
+            # In the legacy v8 numbering ``09`` was Plastic (Wen), so both
+            # spellings are accepted.
             "LINK PROPERTY DEFINITIONS 09 - TC SLIDING ISOLATOR": "T/C Friction Isolator",
+            "LINK PROPERTY DEFINITIONS 09 - PLASTIC (WEN)": "Plastic (Wen)",  # v8 legacy
             "LINK PROPERTY DEFINITIONS 10 - PLASTIC (WEN)": "Plastic (Wen)",
         }
 
-        # Guard: the T/C Friction Isolator table title is version-dependent.
-        # The CSI database reference lists it as "09 - TC SLIDING ISOLATOR";
-        # a newer SAP2000 export may spell it "09 - T/C FRICTION ISOLATOR" (or
-        # similar).  A ``09`` table under any other title is a *mismatch*, not
-        # an unknown table — warn so the isolator is not silently dropped.
+        # Guard: the ``09`` slot is version-dependent (see ``table_specs``): it
+        # is the T/C Friction Isolator in v9+ and Plastic (Wen) in the legacy
+        # v8 numbering.  A ``09`` table under *any* other title is a mismatch,
+        # not an unknown table — warn so the property is not silently dropped.
         for raw_table in self._raw_tables:
             if (
                 raw_table.startswith("LINK PROPERTY DEFINITIONS 09")
                 and raw_table not in table_specs
             ):
                 logging.warning(
-                    "unrecognised T/C Friction Isolator table title %r — expected "
-                    "%r; the isolator will be skipped.  If this is a real SAP2000 "
-                    "export, add its exact title to `table_specs` in `s2k_parser.py`.",
+                    "unrecognised LINK PROPERTY DEFINITIONS 09 table title %r — the "
+                    "``09`` slot is the T/C Friction Isolator (``TC SLIDING "
+                    "ISOLATOR``, v9+) or ``PLASTIC (WEN)`` (v8 legacy); neither "
+                    "matched, so the property was skipped.  If this is a real "
+                    "SAP2000 export, add its exact title to `table_specs` in "
+                    "`s2k_parser.py`.",
                     raw_table,
-                    "LINK PROPERTY DEFINITIONS 09 - TC SLIDING ISOLATOR",
                 )
 
         for table, link_type in table_specs.items():
