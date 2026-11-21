@@ -245,11 +245,13 @@ KNOWN_GAP_PREFIXES: tuple[tuple[str, str], ...] = (
     # (04 Damper, 05 Gap, 06 Hook, 07 Rubber Isolator, 08 Sliding Isolator,
     # 09 T/C Sliding Isolator / 09 Plastic (Wen) (v8 legacy), 10 Plastic
     # (Wen)) are handled since P49 Phase 2.  The force-deformation tables
-    # (03 MultiLinear, 11 Multilinear Plastic) and the bridge-object flags
+    # (03 MultiLinear, 11 Multilinear Plastic) and the newer isolator tables
+    # (12 Triple Pendulum Isolator, 14 High Damping Rubber Isolator — numbers
+    # per community references, exact columns pending a real SAP2000 export)
     # remain a recognised gap rather than an unknown table.
     (
         "LINK PROPERTY DEFINITIONS",
-        "remaining nonlinear link tables (03/11, bridge flags) not yet parsed",
+        "remaining nonlinear link tables (03/11/12/14, bridge flags) not yet parsed",
     ),
 )
 

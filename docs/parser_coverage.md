@@ -206,7 +206,7 @@ registry below.  Three things about how they are matched:
 ### Known-gap prefix families
 
 - `SECTION DESIGNER PROPERTIES*` — SD section geometry not parsed
-- `LINK PROPERTY DEFINITIONS*` — remaining nonlinear link tables (03/11, bridge flags) not yet parsed
+- `LINK PROPERTY DEFINITIONS*` — remaining nonlinear link tables (03/11/12/14, bridge flags) not yet parsed
 
 ### Ignored (14 exact names)
 

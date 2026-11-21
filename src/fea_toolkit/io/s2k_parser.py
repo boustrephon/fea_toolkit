@@ -818,6 +818,11 @@ class SAP2000Parser:
             "LINK PROPERTY DEFINITIONS 09 - TC SLIDING ISOLATOR": "T/C Friction Isolator",
             "LINK PROPERTY DEFINITIONS 09 - PLASTIC (WEN)": "Plastic (Wen)",  # v8 legacy
             "LINK PROPERTY DEFINITIONS 10 - PLASTIC (WEN)": "Plastic (Wen)",
+            # Not yet parsed: ``11 - MULTILINEAR PLASTIC`` (kinematic/Takeda/
+            # Pivot), ``12 - TRIPLE PENDULUM ISOLATOR`` (a force-deformation
+            # backbone — see docs/triple_pendulum_backbone_plan.md) and
+            # ``14 - HIGH DAMPING RUBBER ISOLATOR``.  Their exact column names
+            # need a real export before they can be wired in here.
         }
 
         # Guard: the ``09`` slot is version-dependent (see ``table_specs``): it
