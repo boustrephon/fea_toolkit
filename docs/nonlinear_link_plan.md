@@ -26,8 +26,10 @@ the ETABS `$ LINK PROPERTIES` equivalent) and emits a `twoNodeLink` — or a
 `zeroLength` for a grounded link — with one `Elastic` spring per active DOF,
 using the effective stiffness.  That makes elastic static / modal /
 response-spectrum analyses work for *all* link types, linear or not.
-`link_model: "nonlinear"` currently raises `NotImplementedError` for any type
-other than `Linear`.
+A link definition the importer does not yet cover is *warned* at import time
+(``NotImplementedWarning`` — see ``src/fea_toolkit/_warnings.py``) with a
+request to report it, and is linearised on its effective stiffness; it raises
+``NotImplementedError`` only when there is nothing to linearise onto.
 
 Phase 2 adds the *nonlinear* representations, with two goals:
 

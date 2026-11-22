@@ -1279,8 +1279,12 @@ post-yield ratio parsed), Rubber Isolator (`elastomericBearing*`) and
 Friction Isolator (`singleFPBearing` + `Coulomb`/`VelDependent`), T/C Friction
 Isolator (`singleFPBearing` + `VelDependent`, compression friction; the
 tension-friction half is dropped with a warning) and Triple Friction Pendulum
-(`TripleFrictionPendulum`).  **Still raising `NotImplementedError`**:
-multilinear and the damper friction directional/orthotropic subtypes.
+(`TripleFrictionPendulum`).  Uncovered link types (multilinear, the S2K
+triple-pendulum / high-damping-rubber isolator tables, the damper friction
+directional/orthotropic subtypes, and unknown types) now **warn** at import
+time (``NotImplementedWarning`` — see ``src/fea_toolkit/_warnings.py``) with a
+request to report them, and are linearised on their effective stiffness; they
+raise ``NotImplementedError`` only when there is nothing to linearise onto.
 **Decisions (recorded in the plan):** D1–D3 the one-sided / backbone family
 (Gap, Hook, bilinear, multilinear, friction dampers) uses a single `Hysteretic`
 backbone with neutral pinch/damage — not `ENT`/`ElasticPPGap`/`ElasticPP`;
