@@ -3,9 +3,13 @@
 # Keeps CodeRabbit reviews aligned with the project's own guardrails in
 # `.clinerules` (also registered explicitly under `knowledge_base` below, since
 # CodeRabbit's built-in auto-detection only matches `**/.clinerules/*` as a
-# directory pattern, not a single root file).  `reviews.path_instructions` are a
-# second lever: they inject repo conventions into every review without
-# disabling any default checks.
+# directory pattern, not a single root file).  The decision & known-limitation
+# registers (docs/llm_guide.md, docs/modeling_guidance.md,
+# docs/nonlinear_link_plan.md, docs/triple_pendulum_backbone_plan.md,
+# docs/_pending_work.md) are registered alongside it so settled choices and
+# tracked "not a bug" items are not re-reported as fresh findings.
+# `reviews.path_instructions` are a second lever: they inject repo conventions
+# into every review without disabling any default checks.
 #
 # Scope: every tracked file is eligible for review; this repo contains no
 # tracked generated/build artifacts, so no `path_filters` excludes are needed.
@@ -17,10 +21,30 @@ knowledge_base:
     enabled: true
     filePatterns:
       - ".clinerules"
+      # Decision & known-limitation registers — consulted so settled choices and
+      # tracked "not a bug" items are not re-reported as fresh findings (the P49
+      # "Deferred — known limitations" list and "Interim import policy for
+      # unverified CSI columns" in _pending_work.md; the D1-D10 decisions in
+      # nonlinear_link_plan.md).
+      - "docs/llm_guide.md"
+      - "docs/modeling_guidance.md"
+      - "docs/nonlinear_link_plan.md"
+      - "docs/triple_pendulum_backbone_plan.md"
+      - "docs/_pending_work.md"
 
 reviews:
   profile: "quiet"
   path_instructions:
+    - path: "**"
+      instructions: |
+        Report only defects demonstrable against the current code: a
+        doc/implementation mismatch, a cross-file inconsistency, a math/units
+        error, or a dead/broken code path.  Do not issue "verify whether X could
+        fail" / "trace X through N modules" requests unless you can name a
+        concrete failing input or a specific code-path contradiction.  An item
+        already listed as a known limitation (docs/_pending_work.md P49) or a
+        settled decision (docs/nonlinear_link_plan.md D1-D10) is tracked work,
+        not a bug — do not re-report it.
     - path: "src/fea_toolkit/**"
       instructions: |
         Review against the project guardrails in `.clinerules` (read the top-level
@@ -65,6 +89,18 @@ reviews:
           Preprocessor -> AnalysisBuilder path.
         - Naming: `*_id` are SAP2000 string labels, `*_tag` are OpenSees integer
           tags; never feed SAP IDs directly to `ops` commands.
+        - Link/isolator/damper (P49) decisions and limitations are recorded in
+          `docs/nonlinear_link_plan.md` (D1-D10) and `docs/_pending_work.md` P49
+          ("Deferred — known limitations" + "Interim import policy for unverified
+          CSI columns").  Treat these as tracked and intentional, not bugs:
+          warn-and-linearise for uncovered link types; the `Viscous(C, α)` (not a
+          Maxwell `ViscousDamper`) exponential-damper approximation; grounded-link
+          *ground-node* creation staying in the builder (only topology belongs in
+          the Preprocessor); and unconfirmed CSI column spellings (damper `C`, Wen
+          `RATIO`/`n`, E2K per-DOF `NONLIN`, link-axis tokens), which the parser
+          degrades on honestly with a `NotImplementedWarning` and never invents
+          (`.clinerules` §12) — flag only an *invented* name or a silently
+          mis-read *confirmed* column.
         - `inactive = True` marks split/meshed parents; builders must skip them.
 
     - path: "tests/**"
