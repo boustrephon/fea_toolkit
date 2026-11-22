@@ -53,13 +53,16 @@ def collect_backbones(model_data: Any):
                 open_ = p.open[idx]
                 peak = _peak_displacement(open_, ke, 0.0)
                 args = _hysteretic_one_sided_args(ke, open_, "gap")
-                # compression (negative) closes the gap; tension opens it.
-                yield label, args, [-peak, 0.0, peak, 0.0, -peak], False
+                # compression (negative) closes the gap; tension opens it.  The
+                # intermediate ``-0.5*peak`` sample probes the reload branch (not
+                # just the extrema), so a pinched one-sided response is compared
+                # with the neutral reference along the re-closing path.
+                yield label, args, [-peak, 0.0, peak, 0.0, -0.5 * peak, -peak], False
             elif prop.link_type == "Hook" and isinstance(p, HookParams):
                 open_ = p.open[idx]
                 peak = _peak_displacement(open_, ke, 0.0)
                 args = _hysteretic_one_sided_args(ke, open_, "hook")
-                yield label, args, [peak, 0.0, -peak, 0.0, peak], False
+                yield label, args, [peak, 0.0, -peak, 0.0, 0.5 * peak, peak], False
             elif prop.link_type == "Plastic (Wen)" and isinstance(p, WenParams):
                 fy = p.fy[idx]
                 if fy > 0.0:

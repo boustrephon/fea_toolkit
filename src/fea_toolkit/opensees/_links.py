@@ -586,21 +586,27 @@ class LinkMixin:
         # The nonlinear dashpot coefficient ``c`` (F·(s/L)^cexp) is distinct
         # from the effective damping ``Ce`` (a linearised coefficient).  For a
         # linear damper (cexp == 1) the two coincide, so fall back to ``ce``
-        # when ``c`` was not populated (e.g. a table carrying only Ce).
+        # when ``c`` was not populated (e.g. a table carrying only Ce).  The
+        # ``Ce`` fallback is a *linear* coefficient, so it always uses exponent
+        # 1.0 — only a supplied nonlinear ``c`` uses ``params.cexp``.
         c_nl = params.c[dof] if isinstance(params, DamperParams) else 0.0
-        dash_c = c_nl if c_nl > 0.0 else prop.ce[dof]
+        use_nl = c_nl > 0.0
+        dash_c = c_nl if use_nl else prop.ce[dof]
+        dash_exp = cexp if use_nl else 1.0
         ke = prop.ke[dof]
         if dash_c > 0.0:
             if ke > 0.0:
                 # Viscoelastic: elastic stiffness in parallel with the damper.
                 e_tag = self._cached_mat(mat_cache, ("elastic", ke), "Elastic", ke)
                 v_tag = self._cached_mat(
-                    mat_cache, ("viscous", dash_c, cexp), "Viscous", dash_c, cexp
+                    mat_cache, ("viscous", dash_c, dash_exp), "Viscous", dash_c, dash_exp
                 )
                 return self._cached_mat(
                     mat_cache, ("parallel", e_tag, v_tag), "Parallel", e_tag, v_tag
                 )
-            return self._cached_mat(mat_cache, ("viscous", dash_c, cexp), "Viscous", dash_c, cexp)
+            return self._cached_mat(
+                mat_cache, ("viscous", dash_c, dash_exp), "Viscous", dash_c, dash_exp
+            )
         fy = params.fy[dof] if isinstance(params, DamperParams) else 0.0
         ratio = params.ratio if isinstance(params, DamperParams) else 0.0
         k_nl = params.k[dof] if isinstance(params, DamperParams) else 0.0
@@ -662,6 +668,12 @@ class LinkMixin:
         if prop.link_type == "Rubber Isolator":
             k_init, qd, alpha1 = _rubber_bearing_params(prop)
             if rubber_model == "boucwen":
+                # ``elastomericBearingBoucWen`` args after the shear DOFs:
+                # ``alpha2`` (post-yield ratio of the nonlinear hardening
+                # component, 0 to disable it) and ``mu`` (the hardening
+                # exponent, which must be positive — mu=0 makes the |u|^0
+                # term degenerate and NaNs the element, the same reason the
+                # Plasticity branch emits mu=1.0), then eta/beta/gamma.
                 args = [
                     "elastomericBearingBoucWen",
                     next_tag,
@@ -671,7 +683,7 @@ class LinkMixin:
                     qd,
                     alpha1,
                     0.0,
-                    0.0,
+                    1.0,
                     1.0,
                     0.5,
                     0.5,

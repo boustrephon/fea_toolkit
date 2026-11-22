@@ -286,22 +286,36 @@ def test_wen_steel02_emitter_args(monkeypatch):
 
 
 def test_damper_dof_material_selection(monkeypatch):
-    """A damper DOF emits ``Viscous`` (``ce > 0``) or ``Parallel`` (``ke > 0`` too)."""
+    """A damper DOF emits ``Viscous`` from ``c`` (nonlinear) or the ``Ce`` fallback
+    (linear exponent 1.0), and ``Parallel`` when an elastic stiffness is also present."""
     import fea_toolkit.opensees._links as links_mod
     from fea_toolkit.model.sap_data import DamperParams, LinkProperty
 
     calls = []
     monkeypatch.setattr(links_mod.ops, "uniaxialMaterial", lambda *a: calls.append(a))
 
+    # Nonlinear dashpot coefficient ``c`` → Viscous with the cexp exponent.
     pure = LinkProperty(
         name="D",
         link_type="Damper",
         ke=[0.0] * 6,
-        ce=[50.0, 0, 0, 0, 0, 0],
-        nonlinear_params=DamperParams(cexp=0.3),
+        ce=[0.0] * 6,
+        nonlinear_params=DamperParams(c=[50.0, 0, 0, 0, 0, 0], cexp=0.3),
     )
     tag = links_mod.LinkMixin._damper_dof_mat(links_mod.LinkMixin(), pure, 0, {})
     assert calls == [("Viscous", tag, 50.0, 0.3)]
+
+    # Ce-only fallback (no nonlinear ``c``) → Viscous with the linear exponent 1.0.
+    calls.clear()
+    ce_only = LinkProperty(
+        name="Ce",
+        link_type="Damper - Exponential",
+        ke=[0.0] * 6,
+        ce=[50.0, 0, 0, 0, 0, 0],
+        nonlinear_params=DamperParams(cexp=0.3),
+    )
+    tag = links_mod.LinkMixin._damper_dof_mat(links_mod.LinkMixin(), ce_only, 0, {})
+    assert calls == [("Viscous", tag, 50.0, 1.0)]
 
     calls.clear()
     ve = LinkProperty(
@@ -313,6 +327,8 @@ def test_damper_dof_material_selection(monkeypatch):
     )
     links_mod.LinkMixin._damper_dof_mat(links_mod.LinkMixin(), ve, 0, {})
     assert [c[0] for c in calls] == ["Elastic", "Viscous", "Parallel"]
+    # The Ce fallback inside the Parallel uses the linear exponent.
+    assert calls[1][3] == 1.0
 
 
 def test_damper_bilinear_friction_material(monkeypatch):
