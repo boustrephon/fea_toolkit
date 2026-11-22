@@ -451,6 +451,27 @@ TABLE:  "LINK PROPERTY DEFINITIONS 02 - LINEAR"
         SAP2000Parser(s2k).parse().get_model_data()
 
 
+def test_linear_link_rotke_identity_value_warns(tmp_path):
+    """A ``RotKE=1.0`` value is still an unconsumed stiffness, not an identity cell.
+
+    The identity-value exemption must apply only to known modifier fields
+    (``PropMod``), not to an arbitrary column: ``RotKE=1.0`` with no ``Ke`` is a
+    nonzero rotational stiffness the parser does not apply, so it must warn.
+    """
+    from fea_toolkit._warnings import NotImplementedWarning
+
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "LINK PROPERTY DEFINITIONS 01 - GENERAL"
+   Link=ISO_LIN   LinkType=Linear
+TABLE:  "LINK PROPERTY DEFINITIONS 02 - LINEAR"
+   Link=ISO_LIN   DOF=R1   Fixed=No   Ce=0   RotKE=1.0
+"""
+    s2k = tmp_path / "test_rotke_identity.s2k"
+    s2k.write_text(content)
+    with pytest.warns(NotImplementedWarning, match="field 'RotKE'"):
+        SAP2000Parser(s2k).parse().get_model_data()
+
+
 def test_damper_table_unconsumed_column_warns(tmp_path):
     """An unrecognised damper-table column (the unverified ``C``) is flagged."""
     from fea_toolkit._warnings import NotImplementedWarning

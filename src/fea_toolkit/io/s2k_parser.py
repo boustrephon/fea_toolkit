@@ -145,13 +145,19 @@ _LINK_TABLE_SKIP = frozenset(
 
 
 def _is_benign_cell(value: Any) -> bool:
-    """True for a cell that represents "nothing to drop" (empty/None/zero/identity)."""
+    """True for a cell that represents "nothing to drop" (empty/None/zero/false).
+
+    A numeric identity ``1`` / ``1.0`` is *not* benign here: for an arbitrary
+    column it is a real value (e.g. ``RotKE=1.0`` is a nonzero rotational
+    stiffness that must stay unconsumed and warn).  Only the known modifier
+    fields exempt ``1``, through :func:`_propmod_is_identity`.
+    """
     if value is None:
         return True
     s = str(value).strip()
     if s == "":
         return True
-    return s.lower() in ("none", "0", "0.0", "1", "1.0", "no", "false")
+    return s.lower() in ("none", "0", "0.0", "no", "false")
 
 
 def _propmod_is_identity(value: Any) -> bool:
@@ -1135,9 +1141,9 @@ class SAP2000Parser:
         """Warn for non-benign columns of a link table the parser does not read.
 
         ``consumed`` is the set of columns this table's parser reads; any other
-        column whose value is non-trivial (not empty / ``None`` / identity /
-        zero) is a dropped field.  One warning per column, keyed on the first
-        link that carries a non-benign value.
+        column whose value is non-trivial (not empty / ``None`` / zero /
+        boolean-false) is a dropped field.  One warning per column, keyed on the
+        first link that carries a non-benign value.
         """
         seen: dict[str, str] = {}
         for rec in self._raw_tables.get(table, []):
