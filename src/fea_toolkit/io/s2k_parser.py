@@ -144,6 +144,45 @@ _LINK_TABLE_SKIP = frozenset(
 )
 
 
+def _set_shared_scalar(params: Any, attr: str, value: Optional[float], idx: int) -> None:
+    """Set a shared (non-per-DOF) nonlinear parameter, rejecting per-DOF conflicts.
+
+    Some nonlinear parameters (the Wen post-yield ``ratio`` and yield exponent
+    ``n``) are stored as a single scalar rather than per-DOF.  When a numbered
+    table carries a different value for two DOFs the last row would otherwise
+    silently overwrite the first; this raises instead.  A ``None`` value
+    (column absent or empty) is a no-op so a partial export still parses, and
+    equal values across DOFs are accepted.
+
+    Args:
+        params: The nonlinear-params object being filled.
+        attr: The scalar attribute name (e.g. ``"ratio"``).
+        value: The parsed column value, or ``None`` when the cell is absent.
+        idx: The 0-based DOF index (for the error message only).
+
+    Raises:
+        ValueError: If *value* conflicts with a value already recorded for a
+            different DOF.
+    """
+    if value is None:
+        return
+    seen = getattr(params, "_shared_scalars", None)
+    if seen is None:
+        seen = {}
+        params._shared_scalars = seen
+    if attr in seen:
+        if seen[attr] != value:
+            raise ValueError(
+                f"link property nonlinear parameter {attr!r} is specified "
+                f"per-DOF with conflicting values ({seen[attr]!r} at an earlier "
+                f"DOF and {value!r} at DOF {idx}); the model stores a single "
+                "shared value"
+            )
+        return
+    seen[attr] = value
+    setattr(params, attr, value)
+
+
 class SAP2000Parser:
     """Parse SAP2000 .S2K file and convert to SAPModelData.
 
@@ -793,8 +832,12 @@ class SAP2000Parser:
         """Parse ``LINK PROPERTY ASSIGNMENTS`` into ``{link_id: property_name}``."""
         assignments: dict[str, str] = {}
         for rec in self._raw_tables.get("LINK PROPERTY ASSIGNMENTS", []):
-            link_id = str(rec.get("Link", "")).strip()
-            prop = str(rec.get("LinkProp", "")).strip()
+            raw_link = rec.get("Link")
+            raw_prop = rec.get("LinkProp")
+            if raw_link is None or raw_prop is None:
+                continue
+            link_id = str(raw_link).strip()
+            prop = str(raw_prop).strip()
             if link_id and prop:
                 assignments[link_id] = prop
         return assignments
@@ -844,10 +887,25 @@ class SAP2000Parser:
         return props
 
     @staticmethod
-    def _num(rec: dict[str, Any], key: str, default: float = 0.0) -> float:
-        """Read a numeric column, defaulting on a missing/empty cell."""
+    def _num(rec: dict[str, Any], key: str, default: Optional[float] = 0.0) -> float:
+        """Read a numeric column, preserving explicit zeros.
+
+        Args:
+            rec: A row dict from a parsed table.
+            key: The column name to read.
+            default: Returned when *key* is missing (``None``) or the cell is an
+                empty string.  An explicit numeric value — including ``0`` — is
+                converted and returned as-is.
+
+        Returns:
+            The numeric value as a ``float``, or *default* for a missing/empty
+            cell or a failed conversion.
+        """
+        value = rec.get(key)
+        if value is None or value == "":
+            return default
         try:
-            return float(rec.get(key) or default)
+            return float(value)
         except (TypeError, ValueError):
             return default
 
@@ -864,62 +922,87 @@ class SAP2000Parser:
         Tables are dispatched by their *descriptive suffix* (e.g. ``RUBBER
         ISOLATOR``, ``TC SLIDING ISOLATOR``) rather than their number, because
         SAP2000 renumbered these tables as link types were added (``09`` was
-        ``PLASTIC (WEN)`` in v8 and ``TC SLIDING ISOLATOR`` since v9).  Isolator
-        tables we do not yet parse are skipped here and surfaced as a coverage
-        warning by :meth:`_warn_uncovered_link_types`.
+        ``PLASTIC (WEN)`` in v8 and ``TC SLIDING ISOLATOR`` since v9).  A
+        numbered table with an unsupported suffix still contributes its
+        effective ``Ke``/``Ce``/``Fixed`` columns (so elastic builds work even
+        when ``02 - LINEAR`` is absent), but its type-specific columns are not
+        parsed — the property is surfaced as a coverage warning by
+        :meth:`_warn_uncovered_link_types`.
         """
         for raw_table in list(self._raw_tables):
             suffix = _link_table_suffix(raw_table)
-            if suffix is None or suffix in _LINK_TABLE_SKIP:
+            if suffix is None or suffix in ("GENERAL", "LINEAR"):
+                # 01 - GENERAL / 02 - LINEAR are read by _get_link_properties.
                 continue
-            if suffix in _LINK_TABLE_SUFFIXES:
-                link_type = _LINK_TABLE_SUFFIXES[suffix]
-                for rec in self._raw_tables.get(raw_table, []):
-                    name = str(rec.get("Link", "")).strip()
-                    dof = str(rec.get("DOF", "")).strip().upper()
-                    if not name or dof not in LINK_DOF_ORDER:
-                        continue
-                    prop = props.get(name)
-                    if prop is None:
-                        continue
-                    idx = LINK_DOF_ORDER.index(dof)
-                    # The ``03+`` tables repeat the effective ``Ke``/``Ce``/``Fixed``
-                    # columns, and a model may omit the ``02 - LINEAR`` table
-                    # entirely.  Merge any present value into the effective
-                    # properties, preserving the existing value when a column is
-                    # absent from this row.
-                    if rec.get("Ke") not in (None, ""):
-                        prop.ke[idx] = float(rec.get("Ke"))
-                    if rec.get("Ce") not in (None, ""):
-                        prop.ce[idx] = float(rec.get("Ce"))
-                    if rec.get("Fixed") not in (None, ""):
-                        fixed = rec.get("Fixed")
-                        if isinstance(fixed, str):
-                            fixed = fixed.lower() in ("yes", "true")
-                        prop.fixed[idx] = bool(fixed)
-                    params = prop.nonlinear_params
-                    if params is None:
-                        params = LINK_NONLINEAR_PARAMS[link_type]()
-                        prop.nonlinear_params = params
-                    self._fill_nonlinear_row(params, link_type, idx, rec)
-            else:
+            link_type = _LINK_TABLE_SUFFIXES.get(suffix)
+            if link_type is None and suffix not in _LINK_TABLE_SKIP:
                 logging.warning(
                     "preliminary link/support parsing: %r has an unrecognised "
                     "suffix; if you can share a real SAP2000 export, the parser "
                     "can be updated.",
                     raw_table,
                 )
+            for rec in self._raw_tables.get(raw_table, []):
+                name = str(rec.get("Link", "")).strip()
+                dof = str(rec.get("DOF", "")).strip().upper()
+                if not name or dof not in LINK_DOF_ORDER:
+                    continue
+                prop = props.get(name)
+                if prop is None:
+                    continue
+                idx = LINK_DOF_ORDER.index(dof)
+                # The numbered tables repeat the effective ``Ke``/``Ce``/``Fixed``
+                # columns, and a model may omit the ``02 - LINEAR`` table
+                # entirely.  Merge any present value into the effective
+                # properties from *every* numbered table — recognised or not —
+                # so elastic builds have the effective stiffness even when the
+                # suffix is unsupported for nonlinear dispatch.  Only a
+                # recognised suffix populates ``nonlinear_params``.
+                if rec.get("Ke") not in (None, ""):
+                    prop.ke[idx] = float(rec.get("Ke"))
+                if rec.get("Ce") not in (None, ""):
+                    prop.ce[idx] = float(rec.get("Ce"))
+                if rec.get("Fixed") not in (None, ""):
+                    fixed = rec.get("Fixed")
+                    if isinstance(fixed, str):
+                        fixed = fixed.lower() in ("yes", "true")
+                    prop.fixed[idx] = bool(fixed)
+                if link_type is None:
+                    continue
+                params = prop.nonlinear_params
+                if params is None:
+                    params = LINK_NONLINEAR_PARAMS[link_type]()
+                    prop.nonlinear_params = params
+                self._fill_nonlinear_row(params, link_type, idx, rec)
 
     def _fill_nonlinear_row(
         self, params: Any, link_type: str, idx: int, rec: dict[str, Any]
     ) -> None:
-        """Fill one DOF of a nonlinear-params object from a table row."""
+        """Fill one DOF of a nonlinear-params object from a table row.
+
+        Args:
+            params: The type-specific nonlinear-params object (a subclass of
+                :class:`~fea_toolkit.model.sap_data.LinkNonlinearParams`).
+            link_type: The canonical link type (drives the friction-isolator
+                column selection for ``T/C Friction Isolator`` vs ``Friction
+                Isolator``).
+            idx: The 0-based local DOF index (``LINK_DOF_ORDER`` order U1..R3)
+                that per-DOF columns (``Open``, ``Yield``, ``K``) write to.
+            rec: The row dict from the numbered ``LINK PROPERTY DEFINITIONS``
+                table.
+
+        Per-DOF columns (``Open``, ``Yield``, ``K``) write ``params.<field>[idx]``;
+        shared (non-per-DOF) columns (``Ratio``, ``YieldExp``, ``Radius``,
+        ``Mu``/``Slow``, ``Cexp``) write the corresponding scalar attribute,
+        rejecting conflicting per-DOF values for the Wen ``Ratio``/``YieldExp``
+        (which are stored as a single scalar).
+        """
         if isinstance(params, (GapParams, HookParams)):
             params.open[idx] = self._num(rec, "Open")
         elif isinstance(params, WenParams):
             params.fy[idx] = self._num(rec, "Yield")
-            params.ratio = self._num(rec, "Ratio", params.ratio)
-            params.n = self._num(rec, "YieldExp", params.n)
+            _set_shared_scalar(params, "ratio", self._num(rec, "Ratio", None), idx)
+            _set_shared_scalar(params, "n", self._num(rec, "YieldExp", None), idx)
         elif isinstance(params, RubberIsolatorParams):
             params.k[idx] = self._num(rec, "K")
             params.fy[idx] = self._num(rec, "Yield")
@@ -954,26 +1037,41 @@ class SAP2000Parser:
         single summary line reports the total.
         """
         reporter = LinkCoverageReporter()
+        lines_by_name = self._link_definition_lines_by_name()
         for prop in props.values():
             reason = link_type_status(prop.link_type)
             if reason is None:
                 continue
             reporter.report(
-                prop.name, prop.link_type, reason, self._link_definition_lines(prop.name)
+                prop.name,
+                prop.link_type,
+                reason,
+                lines_by_name.get(prop.name, f"Link={prop.name}"),
             )
         reporter.summarise()
 
-    def _link_definition_lines(self, name: str) -> str:
-        """Reconstruct the raw ``LINK PROPERTY DEFINITIONS`` lines for a property."""
-        lines: list[str] = []
+    def _link_definition_lines_by_name(self) -> dict[str, str]:
+        """Index the raw ``LINK PROPERTY DEFINITIONS`` lines by property name.
+
+        Runs one pass over the link tables (instead of rescanning every row for
+        each uncovered property), so the full warning can look up each property's
+        offending line(s) without O(N²) rescans.
+
+        Returns:
+            ``{property_name: newline-joined "table    field=value" lines}`` for
+            every property named in a ``LINK PROPERTY DEFINITIONS`` table.
+        """
+        by_name: dict[str, list[str]] = {}
         for raw_table in self._raw_tables:
             if not raw_table.startswith("LINK PROPERTY DEFINITIONS"):
                 continue
             for rec in self._raw_tables.get(raw_table, []):
-                if str(rec.get("Link", "")).strip() == name:
-                    fields = "  ".join(f"{k}={v}" for k, v in rec.items())
-                    lines.append(f"{raw_table}    {fields}")
-        return "\n".join(lines) if lines else f"Link={name}"
+                name = str(rec.get("Link", "")).strip()
+                if not name:
+                    continue
+                fields = "  ".join(f"{k}={v}" for k, v in rec.items())
+                by_name.setdefault(name, []).append(f"{raw_table}    {fields}")
+        return {name: "\n".join(lines) for name, lines in by_name.items()}
 
     def _get_link_local_axes(self) -> dict[str, dict[str, Any]]:
         """Parse ``LINK LOCAL AXES ASSIGNMENTS 1 - TYPICAL`` / ``2 - ADVANCED``.
@@ -995,8 +1093,10 @@ class SAP2000Parser:
                 continue
             entry = axes.setdefault(link_id, {})
             entry.setdefault("angle", float(rec.get("Angle", 0.0) or 0.0))
-            coord_dir1 = str(rec.get("CoordDir1", "")).strip()
-            coord_dir2 = str(rec.get("CoordDir2", "")).strip()
+            raw_dir1 = rec.get("CoordDir1")
+            raw_dir2 = rec.get("CoordDir2")
+            coord_dir1 = str(raw_dir1).strip() if raw_dir1 is not None else ""
+            coord_dir2 = str(raw_dir2).strip() if raw_dir2 is not None else ""
             if coord_dir1:
                 entry["coord_dir1"] = coord_dir1
             if coord_dir2:
