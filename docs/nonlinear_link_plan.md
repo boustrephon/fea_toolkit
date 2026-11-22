@@ -50,7 +50,7 @@ component-tested).  Benchmarks and the stretch link types are a follow-up
 |---|---|---|---|
 | D1 | Hook (tension-only) | `Hysteretic` backbone | `ElasticPP` — rejected (§5) |
 | D2 | Gap (compression-only) | `Hysteretic` backbone (uniform with D1) | `ENT`/`ElasticPPGap` — simpler, rejected for "one model" |
-| D3 | Bilinear / multilinear / friction dampers | `Hysteretic` backbone | per-type materials — rejected (a "model zoo") |
+| D3 | Bilinear / friction dampers | `Hysteretic` backbone | per-type materials — rejected (a "model zoo") |
 | D4 | Friction isolator μ | `Coulomb` first | `VelDependent` — added later via a one-line branch (§6) |
 | D5 | Tuning | pinching/damage pinned neutral; backbones auto-derived | expose knobs — rejected |
 | D6 | Scope | items 1–4 (parse → emit → dispatch → warnings) | benchmarks + stretch types = follow-up |
@@ -99,9 +99,9 @@ once" convention does not apply to values read from the model.
 `AnalysisBuilder._create_link_elements` branches on `link_type` into two
 families:
 
-* **A. Per-DOF uniaxial materials** (Gap, Hook, Wen, dampers, multilinear) —
-  the existing `twoNodeLink`/`zeroLength` loop, with `_link_spring_mats`
-  returning a *material kind* per DOF instead of always `Elastic`.
+* **A. Per-DOF uniaxial materials** (Gap, Hook, Wen, dampers) — the existing
+  `twoNodeLink`/`zeroLength` loop, with `_link_spring_mats` returning a
+  *material kind* per DOF instead of always `Elastic`.
 * **B. Dedicated bearing elements** (isolators) — replace the link element
   entirely, since these couple U2/U3 shear and need a friction model.
 
@@ -118,7 +118,7 @@ families:
 | Damper – Viscoelastic | `twoNodeLink` + `Parallel(Elastic(Ke), Viscous(Ce, α))` | `Ke`, `Ce` | good (freq/temp ignored) |
 | Damper – Bilinear | `twoNodeLink` + `Hysteretic` (pinch = neutral) | `Ke`, `fy`, `k2_ratio` | good |
 | Damper – Friction | no clean 1:1 — see §9 | — | gap |
-| Multilinear Elastic/Plastic | `twoNodeLink` + `Hysteretic` backbone | force-deflection points | good (monotonic) |
+| Multilinear Elastic/Plastic | unsupported — warned and linearised on `Ke` (`NotImplementedError` when there is no effective stiffness) | force-deflection points | not emitted |
 
 ## 5. The Hook decision — why `Hysteretic`
 
@@ -132,19 +132,19 @@ $eps0>` is elastic-perfectly-plastic and symmetric; faking one-sidedness needs
 develops spurious stiffness and energy; (b) makes the tangent go `E → 0` the
 moment the inactive side loads, a Newton-convergence risk; (c) shoehorns the
 gap through `eps0`; (d) needs a magic "large enough to never yield" value; and
-(e) does **not** reduce the model count — Gap, Wen, bilinear, multilinear and
-friction dampers would each still need their own material.
+(e) does **not** reduce the model count — Gap, Wen, bilinear and friction
+dampers would each still need their own material.
 
 **`Hysteretic` is the right fit — and it is the "one model".** It is a general
 one-sided-capable backbone (independent tension/compression branches), so one
-emitter covers Gap + Hook + bilinear + multilinear + friction dampers:
+emitter covers Gap + Hook + bilinear + friction dampers:
 
 | Behaviour | `Hysteretic` backbone |
 |---|---|
 | Hook (tension-only + gap) | tension = `Ke` after `open`; compression = 0 |
 | Gap (compression-only + gap) | compression = `Ke` after `open`; tension = 0 |
 | Damper – Bilinear | bilinear (`Ke`, `fy`, `k2_ratio`) |
-| Multilinear Elastic / Plastic | the force-deflection point list |
+| Multilinear Elastic / Plastic | unsupported — linearised (warned; `NotImplementedError` without effective stiffness) |
 | Damper – Friction (PP) | bilinear with zero post-yield |
 
 The tuning knobs (`pinchX`, `pinchY`, `damage1`, `damage2`, `beta`) are **not

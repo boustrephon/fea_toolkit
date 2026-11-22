@@ -1286,7 +1286,7 @@ time (``NotImplementedWarning`` — see ``src/fea_toolkit/_warnings.py``) with a
 request to report them, and are linearised on their effective stiffness; they
 raise ``NotImplementedError`` only when there is nothing to linearise onto.
 **Decisions (recorded in the plan):** D1–D3 the one-sided / backbone family
-(Gap, Hook, bilinear, multilinear, friction dampers) uses a single `Hysteretic`
+(Gap, Hook, bilinear, friction dampers) uses a single `Hysteretic`
 backbone with neutral pinch/damage — not `ENT`/`ElasticPPGap`/`ElasticPP`;
 **D10** Plastic (Wen) defaults to `Steel02` (smooth, explicit `Fy`, `R0`↔`n`),
 with `Hysteretic` as the opt-in sharp-bilinear alternative and `BoucWen`
@@ -1330,6 +1330,50 @@ type in OpenSeesPy (verified against the installed library).
 ``ISOLATOR3`` tokens into ``FrictionIsolatorParams``; emit with a warning that
 the tension-friction half (``SlowT``/``FastT``/``RateT``) is dropped.
 ☐ multilinear, damper directional/orthotropic.
+
+**Deferred — known limitations (P49), recorded 2026-11-22 so they read as
+tracked follow-ups, not fresh bugs:**
+
+* **Multilinear Elastic/Plastic backbones** — the `03`/`11` force-deformation
+  tables are *recognised but not imported*: the backbone points are dropped and
+  the link linearises on its effective `Ke` (warned).  No OpenSees uniaxial
+  material reproduces an arbitrary piecewise-linear backbone cleanly, so this
+  stays a warn-and-linearise path (plan §4, §9).
+* **Damper friction directional/orthotropic subtypes** — no clean 1:1 per-DOF
+  uniaxial emitter; linearised on `Ke` (warned).
+* **Nonlinear `K` for Gap / Hook / Wen** — `GapParams`/`HookParams`/`WenParams`
+  carry only `open`/`fy`/`ratio`/`n`; the SAP2000 `K` column for those tables
+  is not stored, and the emitters use the effective `Ke` (the one-sided and
+  `Steel02` backbones are slope-defined by `Ke`, so the secant `K` is not the
+  right initial slope for them).  Only the Damper and Rubber Isolator use `K`.
+* **Named coordinate systems in `CoordDir1`/`CoordDir2`** — `_direction_vector`
+  resolves global-axis tokens (`+X`, `-Y`, …) and coordinate triples only; a
+  *named* CSYS (or any unparseable token) returns `None` and the link falls
+  back to its I→J geometry axes (pinned by `test_direction_vector_parsing`).
+  Resolving SAP2000 named CSYS would need a `COORDINATE SYSTEMS`-table parser.
+* **Grounded links / bearings emitted in the builder, not the Preprocessor** —
+  the coincident fixed ground node and the `zeroLength`/bearing element are
+  created at emission time (`AnalysisBuilder._create_link_elements`), not as a
+  topology mutation; that is deliberate (the builder owns the OpenSees domain),
+  so "move grounded links into preprocessing" would only make sense if the
+  ground node had to participate in topology (it does not).
+* **Exponential damper → `Viscous` (not a Maxwell `ViscousDamper`)** — the
+  emitted `Viscous(C, α)` is a pure dashpot; SAP2000's exponential-damper `Ce`
+  is the dashpot coefficient, so the damper has no series elastic stiffness
+  (no force-relaxation transient).  Plan §4 records this; it is not a Maxwell
+  model.
+* **`check_hysteretic_backbone` runs a 1-DOF truss rig** — the cyclic check
+  drives the *material* through a cycle in a 1-DOF domain (mirroring the
+  component test) rather than re-building the full 3D `AnalysisBuilder` domain;
+  that keeps the check cheap and material-focused, at the cost of not
+  exercising the assembled element.
+* **Bearing/spring orientation & validation gaps** — the TPB
+  (`TripleFrictionPendulum`) and single-FP shear orientation, coincident-node
+  default axes, and the rubber shear-law / nonlinear-params validation are
+  exercised by the benchmark tests (`test_e_defense_tpb.py`,
+  `test_bearing_behavior.py`, `test_link_benchmarks.py`) rather than by
+  dedicated emitter-arg assertions; adding those, plus bearing/spring
+  docstrings, is a documentation/validation polish item, not a correctness gap.
 
 **Follow-up (pending external access).**  The Phase-A NLTHA currently drives
 the model with a JMA-Kobe stand-in; the measured LRB-CLB targets are the

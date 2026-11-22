@@ -16,10 +16,10 @@ pending K-NET download), so the combined modal/NLTHA entry is not fully closed.
 
 ## Reference
 
-- Sato, E., Furukawa, S., Kakehi, A., Ryan, K.L. (2011). *Full-scale shaking
+- Sato, E., Furukawa, S., Kakehi, A., Nakashima, M. (2011). *Full-scale shaking
   table test for the examination of safety and functionality of base-isolated
   medical facilities.* Earthquake Engng Struct. Dyn. 40(13):1435–1453.
-  DOI 10.1002/eqe.1116.
+  DOI 10.1002/eqe.1097.
 - Sasaki, T., Sato, E., Ryan, K.L., Okazaki, T., Mahin, S.A., Kajiwara, K.
   (2012). *NEES/E-Defense Base-Isolation Tests: Effectiveness of Friction
   Pendulum and Lead-Rubber Bearings Systems.* WCEE 2012, paper 2054 (also NRC
@@ -72,9 +72,10 @@ notes).
 
 The LRBs use the manufacturer bilinear model — K0 = 6.5 kN/mm, KF = 0.65 kN/mm,
 FU = 73 kN, vertical KC = 1500 kN/mm.  The CLBs have negligible horizontal
-stiffness and very large vertical stiffness (μ = 0.0019, ~0.9 kN friction —
-two orders below the LRB yield, so omitted).  Horizontal restoring force comes
-from the four LRBs only.
+stiffness and very large vertical stiffness (μ = 0.0019, ~0.9 kN friction — the
+source's low-friction coefficient under a 485 kN vertical compression, Ryan
+et al. 2012 WCEE paper 2054; two orders below the LRB yield, so omitted).
+Horizontal restoring force comes from the four LRBs only.
 
 ## Published targets vs. this model
 
