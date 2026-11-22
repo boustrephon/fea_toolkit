@@ -26,6 +26,7 @@ backbone).
 """
 
 import logging
+import math
 import warnings
 from typing import Optional
 
@@ -33,7 +34,7 @@ import numpy as np
 import openseespy.opensees as ops
 
 from .._warnings import REPORT_URL, NotImplementedWarning
-from ..model.geometry import get_local_axes
+from ..model.geometry import get_local_axes, rotate_about_axis
 from ..model.sap_data import (
     DamperParams,
     GapParams,
@@ -524,6 +525,13 @@ class LinkMixin:
     def _damper_dof_mat(self, prop, dof, mat_cache):
         """Material for one damper DOF, driven by the ``ce``/``ke``/``fy`` present.
 
+        ``ce > 0`` → a (viscoelastic when ``ke`` is also present) dashpot;
+        otherwise a bilinear/friction ``Hysteretic`` backbone when both the
+        initial stiffness and a yield force are present.  A DOF with only an
+        effective stiffness (no damping, no yield) falls back to an ``Elastic``
+        spring so a specified stiffness is never silently dropped, even when
+        other DOFs of the same link are nonlinear.
+
         Uncovered damper subtypes (friction directional / orthotropic / spring
         based) never reach here — ``_link_emission_family`` routes them to
         ``"unsupported"``, which warns and linearises in ``_create_link_elements``.
@@ -555,6 +563,11 @@ class LinkMixin:
             return self._cached_mat(
                 mat_cache, ("hyst", "bilin", k_init, fy, ratio), "Hysteretic", *args
             )
+        if ke > 0.0:
+            # Linear-only DOF: no damping and no yield — use the effective
+            # elastic stiffness even though other DOFs of this link are
+            # nonlinear (so a specified stiffness is never silently dropped).
+            return self._cached_mat(mat_cache, ("elastic", ke), "Elastic", ke)
         return None
 
     def _create_bearing_element(
@@ -711,8 +724,11 @@ class LinkMixin:
         axes (``coord_dir1`` / ``coord_dir2`` from ``LINK LOCAL AXES ASSIGNMENTS
         2 - ADVANCED``) take precedence — they are the only way to orient a
         zero-length link (e.g. a vertical base isolator whose U1 must be
-        vertical).  Otherwise the I→J geometry and the ``angle`` rotation
-        (``1 - TYPICAL``, degrees about local 1) define the axes.
+        vertical).  A ``coord_dir2`` that is not exactly perpendicular to
+        ``coord_dir1`` is projected onto the plane normal to it before the
+        ``angle`` rotation is applied.  Otherwise the I→J geometry and the
+        ``angle`` rotation (``1 - TYPICAL``, degrees about local 1) define the
+        axes.
 
         Returns:
             ``(vx, vy)`` as unit vectors, or ``None`` when the orientation could
@@ -722,9 +738,22 @@ class LinkMixin:
         vx = _direction_vector(link.coord_dir1)
         if vx is not None:
             vy = _direction_vector(link.coord_dir2)
-            if vy is not None and abs(float(np.dot(vx, vy))) < 1e-9:
-                # coord_dir2 is an explicit, perpendicular local-2 direction.
-                return vx, vy
+            if vy is not None:
+                # coord_dir2 may not be exactly perpendicular to vx: project it
+                # onto the plane normal to vx, then apply the TYPICAL ``angle``
+                # about vx.  For an already-orthogonal reference with angle 0
+                # this reproduces the previous result exactly.
+                proj = vy - np.dot(vy, vx) * vx
+                norm = float(np.linalg.norm(proj))
+                if norm < 1e-12:
+                    # coord_dir2 is (anti)parallel to vx — no usable local-2
+                    # reference; fall back to the CSI default axes.
+                    vx_o, vy_o, _vz = get_local_axes(vx, link.angle)
+                    return vx_o, vy_o
+                vy2 = proj / norm
+                if link.angle != 0.0:
+                    vy2 = rotate_about_axis(vy2, vx, math.radians(link.angle))
+                return vx, vy2
             vx_o, vy_o, _vz = get_local_axes(vx, link.angle)
             return vx_o, vy_o
         ni = self.mesh_model.nodes.get(link.node_i)
