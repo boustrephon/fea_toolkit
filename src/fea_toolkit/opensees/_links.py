@@ -395,12 +395,38 @@ class LinkMixin:
             orient = self._link_orient(link)
             if orient is None:
                 # Zero-length link with no reference-vector axes: fall back to
-                # global axes (SAP's local axes are unspecified).
+                # the global axes (SAP2000's default local axes for a
+                # zero-length link).  A coincident ``twoNodeLink`` has no I→J
+                # vector for OpenSees to derive local axes from, so an explicit
+                # ``-orient`` is required — without it the element's local frame
+                # is degenerate and the model solves as singular (NaN), which is
+                # exactly the failure a coincident link otherwise produces.
                 logger.debug("link %s has no local axes; using global axes", link.link_id)
+                global_orient = ("-orient", 1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
                 if grounded:
-                    ops.element("zeroLength", next_tag, j_tag, ni, "-mat", *mats, "-dir", *dirs)
+                    ops.element(
+                        "zeroLength",
+                        next_tag,
+                        j_tag,
+                        ni,
+                        "-mat",
+                        *mats,
+                        "-dir",
+                        *dirs,
+                        *global_orient,
+                    )
                 else:
-                    ops.element("twoNodeLink", next_tag, ni, j_tag, "-mat", *mats, "-dir", *dirs)
+                    ops.element(
+                        "twoNodeLink",
+                        next_tag,
+                        ni,
+                        j_tag,
+                        "-mat",
+                        *mats,
+                        "-dir",
+                        *dirs,
+                        *global_orient,
+                    )
             else:
                 vx, vy = orient
                 if grounded:

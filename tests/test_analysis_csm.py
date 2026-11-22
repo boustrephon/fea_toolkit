@@ -2054,6 +2054,78 @@ def test_linear_link_builds_and_supports():
         ops.wipe()
 
 
+def test_issue3_transke_fixed_coincident_link_builds_and_solves(tmp_path):
+    """GitHub issue #3 exact input: a coincident Linear link (``TransKE`` on
+    U2/U3, ``Fixed=Yes`` on U1/R1–R3, ``PropMod=1``) must build a non-singular
+    domain and solve — not emit a degenerate ``twoNodeLink`` with no orientation."""
+    import openseespy.opensees as ops
+
+    from fea_toolkit.io.s2k_parser import SAP2000Parser
+
+    content = (
+        "File repro_link.s2k was saved on m/d/yy at h:mm:ss\n"
+        'TABLE:  "PROGRAM CONTROL"\n'
+        '   CurrUnits="N, mm, C"\n'
+        'TABLE:  "MATERIAL PROPERTIES 01 - GENERAL"\n'
+        "   Material=STEEL   Type=Steel   SymType=Isotropic\n"
+        'TABLE:  "MATERIAL PROPERTIES 02 - BASIC MECHANICAL PROPERTIES"\n'
+        "   Material=STEEL   UnitWeight=7.85E-05   UnitMass=8.0E-09   E1=2.0E+05   G12=7.7E+04   U12=0.3\n"
+        'TABLE:  "FRAME SECTION PROPERTIES 01 - GENERAL"\n'
+        '   SectionName=SEC1   Shape="I/Wide Flange"   Material=STEEL   t3=200   t2=100   tf=10   tw=8   Area=3080   I33=1.5E+07   I22=2.0E+06   TorsConst=1.0E+06\n'
+        'TABLE:  "JOINT COORDINATES"\n'
+        "   Joint=1   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=0   Z=0\n"
+        "   Joint=2   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=0   Z=0\n"
+        "   Joint=3   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=0   Z=1000\n"
+        'TABLE:  "JOINT RESTRAINT ASSIGNMENTS"\n'
+        "   Joint=1   U1=Yes   U2=Yes   U3=Yes   R1=Yes   R2=Yes   R3=Yes\n"
+        'TABLE:  "CONNECTIVITY - FRAME"\n'
+        "   Frame=1   JointI=2   JointJ=3   IsCurved=No\n"
+        'TABLE:  "FRAME SECTION ASSIGNMENTS"\n'
+        "   Frame=1   AnalSect=SEC1\n"
+        'TABLE:  "CONNECTIVITY - LINK"\n'
+        "   Link=ISO_1   JointI=1   JointJ=2\n"
+        'TABLE:  "LINK PROPERTY ASSIGNMENTS"\n'
+        "   Link=ISO_1   LinkProp=ISO_LIN   LinkFDProp=None   PropMod=1\n"
+        'TABLE:  "LINK PROPERTY DEFINITIONS 01 - GENERAL"\n'
+        "   Link=ISO_LIN   LinkType=Linear\n"
+        'TABLE:  "LINK PROPERTY DEFINITIONS 02 - LINEAR"\n'
+        "   Link=ISO_LIN   DOF=U1   Fixed=Yes   TransKE=0   TransCE=0\n"
+        "   Link=ISO_LIN   DOF=U2   Fixed=No   TransKE=5000   TransCE=0\n"
+        "   Link=ISO_LIN   DOF=U3   Fixed=No   TransKE=5000   TransCE=0\n"
+        "   Link=ISO_LIN   DOF=R1   Fixed=Yes   Ke=0   Ce=0\n"
+        "   Link=ISO_LIN   DOF=R2   Fixed=Yes   Ke=0   Ce=0\n"
+        "   Link=ISO_LIN   DOF=R3   Fixed=Yes   Ke=0   Ce=0\n"
+    )
+    s2k = tmp_path / "issue3.s2k"
+    s2k.write_text(content)
+    md = SAP2000Parser(s2k).parse().get_model_data()
+    prop = md.link_properties["ISO_LIN"]
+    # The DOF-specific ``TransKE`` spelling and the ``Fixed=Yes`` flags parse.
+    assert prop.ke == pytest.approx([0.0, 5000.0, 5000.0, 0.0, 0.0, 0.0])
+    assert prop.fixed == [True, False, False, True, True, True]
+
+    mm = preprocess_model(md, {"element_type": "elasticBeamColumn"})
+    assert "1" in mm.nodes  # link-only node retained, not dropped
+    ab = AnalysisBuilder(mm, {"element_type": "elasticBeamColumn"})
+    try:
+        ab.build_domain()
+        ops.timeSeries("Linear", 1)
+        ops.pattern("Plain", 1, 1)
+        ops.load(3, 0.0, 1000.0, 0.0, 0.0, 0.0, 0.0)
+        ops.constraints("Transformation")
+        ops.numberer("RCM")
+        ops.system("BandGeneral")
+        ops.test("NormDispIncr", 1e-8, 30)
+        ops.algorithm("Newton")
+        ops.integrator("LoadControl", 1.0)
+        ops.analysis("Static")
+        # Non-singular: the coincident link carries an explicit global-axis
+        # orientation rather than a degenerate (zero-length) local frame.
+        assert ops.analyze(1) == 0
+    finally:
+        ops.wipe()
+
+
 def test_unsupported_link_warns_and_linearises():
     """An unsupported (multilinear) link warns and linearises; no stiffness errors."""
     import openseespy.opensees as ops

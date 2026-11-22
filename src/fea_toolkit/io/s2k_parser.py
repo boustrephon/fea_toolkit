@@ -872,8 +872,22 @@ class SAP2000Parser:
             if dof not in LINK_DOF_ORDER:
                 continue
             idx = LINK_DOF_ORDER.index(dof)
-            prop.ke[idx] = float(rec.get("Ke", 0.0) or 0.0)
-            prop.ce[idx] = float(rec.get("Ce", 0.0) or 0.0)
+            # SAP2000 spells the effective stiffness/damping ``Ke``/``Ce``, but
+            # some exports carry the DOF-specific ``TransKE``/``TransCE`` for the
+            # translational DOFs.  Read by *presence* (an explicit zero stays
+            # zero), preferring the DOF-specific spelling for U1..U3.
+            if dof in ("U1", "U2", "U3"):
+                ke_val = self._num(rec, "TransKE", None)
+                if ke_val is None:
+                    ke_val = self._num(rec, "Ke", 0.0)
+                ce_val = self._num(rec, "TransCE", None)
+                if ce_val is None:
+                    ce_val = self._num(rec, "Ce", 0.0)
+            else:
+                ke_val = self._num(rec, "Ke", 0.0)
+                ce_val = self._num(rec, "Ce", 0.0)
+            prop.ke[idx] = ke_val
+            prop.ce[idx] = ce_val
             fixed = rec.get("Fixed", False)
             if isinstance(fixed, str):
                 fixed = fixed.lower() in ("yes", "true")
