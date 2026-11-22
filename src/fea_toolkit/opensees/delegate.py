@@ -36,6 +36,7 @@ from typing import Any, Optional
 from .runtime import resolve_opensees_python, run_python
 
 __all__ = [
+    "run_check_hysteretic_out_of_process",
     "run_modal_out_of_process",
     "run_pushover_out_of_process",
     "run_rs_out_of_process",
@@ -82,6 +83,61 @@ def run_static_out_of_process(context: Any, cases: dict, config: dict) -> tuple[
         python=python,
         log=context.log,
     )
+
+
+def run_check_hysteretic_out_of_process(context: Any, tol: float) -> list[tuple]:
+    """Delegate the cyclic Hysteretic-backbone check to the runtime interpreter.
+
+    Writes the parsed ``SAPModelData`` to a JSON codec file (the check inspects
+    link properties only — no mesh is required), runs
+    :mod:`fea_toolkit.opensees.subprocess_driver` with ``--analysis
+    check_hysteretic``, and reads the ``(label, result, detail)`` rows back out
+    of ``meta.json``.
+
+    Args:
+        context: The recipe :class:`~fea_toolkit.workflow.steps.StepContext` —
+            supplies ``model_data``, ``opensees_python`` and ``log``.
+        tol: The force tolerance passed through to the check.
+
+    Returns:
+        The ``(label, result, detail)`` rows the in-process path would produce.
+
+    Raises:
+        RuntimeError: If the subprocess exits non-zero (its trailing output is
+            included in the message).
+    """
+    from ..io.stage_writer import write_model_file
+
+    python = resolve_opensees_python(context.opensees_python)
+    context.log(f"delegating check_hysteretic to {python} (no bundled OpenSees)")
+
+    with tempfile.TemporaryDirectory(prefix="fea_toolkit_check_hysteretic_") as tmp:
+        tmp_path = Path(tmp)
+        model_file = tmp_path / "model.json"
+        params_file = tmp_path / "params.json"
+        out_dir = tmp_path / "out"
+        write_model_file(str(model_file), sap=context.model_data, fmt="json")
+        params_file.write_text(json.dumps({"tol": tol}, sort_keys=True), encoding="utf-8")
+        args = [
+            "-m",
+            "fea_toolkit.opensees.subprocess_driver",
+            "--model",
+            str(model_file),
+            "--analysis",
+            "check_hysteretic",
+            "--params-file",
+            str(params_file),
+            "--out-dir",
+            str(out_dir),
+        ]
+        code, output = run_python(python, args, log=context.log)
+        if code != 0:
+            tail = "\n".join(output.splitlines()[-_TRACEBACK_TAIL:]) if output else ""
+            raise RuntimeError(
+                f"out-of-process check_hysteretic failed (exit {code}) in {python!r}:\n{tail}"
+            )
+        meta = json.loads((out_dir / "meta.json").read_text(encoding="utf-8"))
+        return [tuple(row) for row in meta["rows"]]
 
 
 def run_static_cases_out_of_process(

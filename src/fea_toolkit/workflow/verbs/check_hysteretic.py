@@ -10,6 +10,8 @@ monotonic test cannot catch a wrong pinch/damage value, so this is the cyclic
 guard (plan §7, D7/D8), exposed as a verb so a generated model's script re-runs
 it.
 
+The check logic lives in :mod:`fea_toolkit.opensees._hysteretic_check` (shared
+with the out-of-process driver); this verb is the thin recipe-facing wrapper.
 OpenSees is imported inside the function only, so importing the manifest does
 not load it.
 """
@@ -27,122 +29,12 @@ HYSTERETIC_CHECK_PARAMS: dict[str, ParamSpec] = {
 }
 
 
-def _peak_displacement(open, ke, fy) -> float:
-    """A displacement large enough to close the gap / pass the yield point."""
-    candidates = [x for x in (abs(open), fy / ke if ke > 0.0 else 0.0) if x > 0.0]
-    return 10.0 * max(candidates, default=1.0e-3)
-
-
-def _collect_backbones(model_data):
-    """Yield ``(label, args, history, symmetric)`` for every eligible DOF.
-
-    Gap/Hook are one-sided: the cycle closes the gap (transmits force), opens
-    it (releases) and re-closes it.  The bilinear backbone (a ``Plastic (Wen)``
-    link on the ``hysteretic`` path, or a bilinear damper) is symmetric.  Each
-    DOF with nonzero effective stiffness is checked, and its ``open``/``fy``
-    value is read from the *same* DOF index, so a mixed-DOF property cannot
-    pair one DOF's stiffness with another's yield force.
-    """
-    from ...model.sap_data import DamperParams, GapParams, HookParams, WenParams
-    from ...opensees._links import _hysteretic_bilinear_args, _hysteretic_one_sided_args
-
-    props = getattr(model_data, "link_properties", None) or {}
-    for name in sorted(props):
-        prop = props[name]
-        p = prop.nonlinear_params
-        for idx, ke in enumerate(prop.ke):
-            if ke <= 0.0:
-                continue
-            label = f"{name}[{idx}]"
-            if prop.link_type == "Gap" and isinstance(p, GapParams):
-                open_ = p.open[idx]
-                peak = _peak_displacement(open_, ke, 0.0)
-                args = _hysteretic_one_sided_args(ke, open_, "gap")
-                # compression (negative) closes the gap; tension opens it.
-                yield label, args, [-peak, 0.0, peak, 0.0, -peak], False
-            elif prop.link_type == "Hook" and isinstance(p, HookParams):
-                open_ = p.open[idx]
-                peak = _peak_displacement(open_, ke, 0.0)
-                args = _hysteretic_one_sided_args(ke, open_, "hook")
-                yield label, args, [peak, 0.0, -peak, 0.0, peak], False
-            elif prop.link_type == "Plastic (Wen)" and isinstance(p, WenParams):
-                fy = p.fy[idx]
-                if fy > 0.0:
-                    peak = _peak_displacement(0.0, ke, fy)
-                    args = _hysteretic_bilinear_args(ke, fy, p.ratio)
-                    yield label, args, [peak, 0.0, -peak, 0.0, 0.5 * peak, peak], True
-            elif prop.link_type.startswith("Damper") and isinstance(p, DamperParams):
-                fy = p.fy[idx]
-                if fy > 0.0:
-                    peak = _peak_displacement(0.0, ke, fy)
-                    args = _hysteretic_bilinear_args(ke, fy, 0.0)
-                    yield label, args, [peak, 0.0, -peak, 0.0, 0.5 * peak, peak], True
-
-
-def _cyclic_backbone_check(
-    ops, args: list, tol: float, history: list, symmetric: bool
-) -> tuple[bool, str]:
-    """Drive a ``Hysteretic`` material through a cycle; report pinching/degradation.
-
-    A 1-DOF truss rig mirrors the component test in
-    ``tests/test_link_nonlinear.py``.  The material is driven alongside a
-    *neutral-pinch reference* (the same backbone with ``pinchX=pinchY=1`` and
-    zero damage/beta forced): the peak checks catch strength degradation, and
-    the reload-branch comparison catches pinching, which shifts the reload
-    forces between the extrema without moving the peaks themselves.
-    """
-    neutral_args = list(args)
-    neutral_args[-5:] = [1.0, 1.0, 0.0, 0.0, 0.0]
-
-    def _drive(mat_args):
-        ops.wipe()
-        ops.model("basic", "-ndm", 1, "-ndf", 1)
-        ops.node(1, 0.0)
-        ops.node(2, 1.0)
-        ops.fix(1, 1)
-        ops.uniaxialMaterial("Hysteretic", 1, *mat_args)
-        ops.element("truss", 1, 1, 2, 1.0, 1)
-        times = list(range(len(history) + 1))
-        values = [0.0, *history]
-        ops.timeSeries("Path", 1, "-time", *times, "-values", *values, "-factor", 1.0)
-        ops.pattern("Plain", 1, 1)
-        ops.sp(2, 1, 1.0)
-        ops.constraints("Penalty", 1.0e14, 1.0e14)
-        ops.numberer("RCM")
-        ops.system("BandGeneral")
-        ops.test("NormDispIncr", 1.0e-12, 50)
-        ops.algorithm("Newton")
-        ops.integrator("LoadControl", 1.0)
-        ops.analysis("Static")
-        forces = []
-        for _ in history:
-            if ops.analyze(1) != 0:
-                return None
-            forces.append(float(ops.eleResponse(1, "axialForce")[0]))
-        return forces
-
-    forces = _drive(args)
-    if forces is None:
-        return False, "analysis failed to converge"
-    reference = _drive(neutral_args)
-    if reference is None:
-        return False, "reference analysis failed to converge"
-
-    peak_force = forces[0]
-    if abs(peak_force) < tol:
-        return False, "no force transmitted in the active direction"
-    if abs(forces[-1] - peak_force) > tol:
-        return False, "strength degraded after a cycle"
-    if symmetric and abs(forces[2] + peak_force) > tol:
-        return False, "asymmetric reverse (pinching)"
-    for i, (force, ref) in enumerate(zip(forces, reference)):
-        if abs(force - ref) > tol:
-            return False, f"non-neutral (pinched) reload at sample {i}"
-    return True, "clean cyclic backbone"
-
-
 def run_check_hysteretic_backbone(context: StepContext, step: Step) -> list[StepResult]:
     """Re-run the cyclic check on the model's ``Hysteretic``-backbone links.
+
+    In the "separate" build (no bundled ``openseespy``) the check is delegated
+    to the runtime interpreter via
+    :func:`~fea_toolkit.opensees.delegate.run_check_hysteretic_out_of_process`.
 
     Args:
         context: The run's working state; ``model_data`` is the model inspected.
@@ -152,21 +44,29 @@ def run_check_hysteretic_backbone(context: StepContext, step: Step) -> list[Step
         One :data:`~fea_toolkit.workflow.steps.TABLE` result with one row per
         checked link DOF (labelled ``<property>[<dof-index>]``).
     """
-    import openseespy.opensees as ops
+    from ...opensees._hysteretic_check import collect_backbones, cyclic_backbone_check
+    from ...opensees.runtime import opensees_available
 
     params = validate_params("check_hysteretic_backbone", HYSTERETIC_CHECK_PARAMS, step.params)
     tol = params["tol"]
 
-    rows = []
-    try:
-        for name, args, history, symmetric in _collect_backbones(context.model_data):
-            ok, detail = _cyclic_backbone_check(ops, args, tol, history, symmetric)
-            rows.append((name, "passed" if ok else "failed", detail))
-    finally:
-        # The check owns the temporary 1-DOF truss domain it creates, so wipe it
-        # even when a material build or solve raises — never leave a live domain
-        # behind for a later step to accidentally reuse.
-        ops.wipe()
+    if opensees_available():
+        import openseespy.opensees as ops
+
+        rows = []
+        try:
+            for name, args, history, symmetric in collect_backbones(context.model_data):
+                ok, detail = cyclic_backbone_check(ops, args, tol, history, symmetric)
+                rows.append((name, "passed" if ok else "failed", detail))
+        finally:
+            # The check owns the temporary 1-DOF truss domain it creates, so wipe it
+            # even when a material build or solve raises — never leave a live domain
+            # behind for a later step to accidentally reuse.
+            ops.wipe()
+    else:
+        from ...opensees.delegate import run_check_hysteretic_out_of_process
+
+        rows = run_check_hysteretic_out_of_process(context, tol)
 
     table = Table(
         title="Hysteretic backbone",

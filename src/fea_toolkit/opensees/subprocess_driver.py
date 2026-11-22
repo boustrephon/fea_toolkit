@@ -49,6 +49,38 @@ def _load_model(model_path: str) -> tuple[Any, Any]:
     return sap, mesh
 
 
+def _load_sap_json(model_path: str) -> Any:
+    """Load a ``SAPModelData`` from a JSON codec payload (``check_hysteretic``)."""
+    from ..io.model_codec import json_to_model
+    from ..model.sap_data import SAPModelData
+
+    return json_to_model(Path(model_path).read_text(encoding="utf-8"), cls=SAPModelData)
+
+
+def _run_check_hysteretic(sap: Any, tol: float) -> list:
+    """Run the cyclic backbone check, returning ``(label, result, detail)`` rows."""
+    import openseespy.opensees as ops
+
+    from ._hysteretic_check import collect_backbones, cyclic_backbone_check
+
+    rows: list = []
+    try:
+        for name, args, history, symmetric in collect_backbones(sap):
+            ok, detail = cyclic_backbone_check(ops, args, tol, history, symmetric)
+            rows.append((name, "passed" if ok else "failed", detail))
+    finally:
+        ops.wipe()
+    return rows
+
+
+def _write_check_rows(out_dir: str, rows: list) -> None:
+    """Persist the check rows as ``meta.json``."""
+    target = Path(out_dir)
+    target.mkdir(parents=True, exist_ok=True)
+    meta = {"kind": "check_rows", "rows": rows}
+    (target / "meta.json").write_text(json.dumps(meta, sort_keys=True), encoding="utf-8")
+
+
 def _run_static(
     sap: Any, mesh: Any, cases: dict, combinations: Optional[dict], config: Optional[dict]
 ) -> dict:
@@ -149,7 +181,7 @@ def main(argv: Optional[list] = None) -> int:
     parser.add_argument(
         "--analysis",
         required=True,
-        choices=("static", "modal", "rs", "pushover"),
+        choices=("static", "modal", "rs", "pushover", "check_hysteretic"),
         help="Analysis type.",
     )
     parser.add_argument("--cases", default="{}", help="JSON {case: {pattern: factor}} (static).")
@@ -166,6 +198,14 @@ def main(argv: Optional[list] = None) -> int:
     args = parser.parse_args(argv)
 
     try:
+        if args.analysis == "check_hysteretic":
+            params = json.loads(Path(args.params_file).read_text(encoding="utf-8"))
+            sap = _load_sap_json(args.model)
+            rows = _run_check_hysteretic(sap, params["tol"])
+            _write_check_rows(args.out_dir, rows)
+            print(f"subprocess_driver: checked {len(rows)} backbone(s)")
+            return 0
+
         sap, mesh = _load_model(args.model)
         if args.analysis == "static":
             cases = json.loads(args.cases)

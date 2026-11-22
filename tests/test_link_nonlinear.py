@@ -16,8 +16,9 @@ purpose-built special cases OpenSees ships:
 * ``ElasticPP`` (``epsyN = 0``) — *monotonic* reference for a **tension-only**
   Hook.
 
-The 1-DOF truss (``ndm=1, ndf=1``) is a test-only material rig; the production
-workflow stays 3-D (``.clinerules`` §3.11).
+The 1-DOF truss (``ndm=1, ndf=1``) rig lives in
+``fea_toolkit.opensees._material_rig`` (shared with the ``check_hysteretic``
+verb); the production workflow stays 3-D (``.clinerules`` §3.11).
 """
 
 import math
@@ -30,6 +31,7 @@ from fea_toolkit.opensees._links import (
     _hysteretic_one_sided_args,
     _wen_r0,
 )
+from fea_toolkit.opensees._material_rig import drive_truss_history
 
 E = 1000.0  # reference spring stiffness (force per unit displacement)
 EMAX = 1.0  # backbone extent — beyond every test displacement
@@ -88,35 +90,12 @@ def _axial_force(emit, u: float) -> float:
 def _axial_forces(emit, displacements: list[float]) -> list[float]:
     """Axial forces of a 1-DOF truss driven through a displacement history.
 
-    One model is reused across the whole history (no ``wipe`` between steps) so
-    the material's path-dependent state is preserved — the rig for the cyclic
-    (D7) check.  The history is imposed through a ``Path`` time series on a
-    unit ``sp``, which is the reliable way to reverse a displacement-controlled
-    analysis mid-run.
+    Delegates to :func:`fea_toolkit.opensees._material_rig.drive_truss_history`
+    — the shared rig the ``check_hysteretic_backbone`` verb uses for the cyclic
+    (D7) check, so the emitter and the check cannot drift apart.
     """
-    ops.wipe()
-    ops.model("basic", "-ndm", 1, "-ndf", 1)
-    ops.node(1, 0.0)
-    ops.node(2, 1.0)
-    ops.fix(1, 1)
-    emit(1)
-    ops.element("truss", 1, 1, 2, 1.0, 1)
-    times = list(range(len(displacements) + 1))
-    values = [0.0, *displacements]
-    ops.timeSeries("Path", 1, "-time", *times, "-values", *values, "-factor", 1.0)
-    ops.pattern("Plain", 1, 1)
-    ops.sp(2, 1, 1.0)
-    ops.constraints("Penalty", 1.0e14, 1.0e14)
-    ops.numberer("RCM")
-    ops.system("BandGeneral")
-    ops.test("NormDispIncr", 1.0e-12, 50)
-    ops.algorithm("Newton")
-    ops.integrator("LoadControl", 1.0)
-    ops.analysis("Static")
-    forces: list[float] = []
-    for _ in displacements:
-        assert ops.analyze(1) == 0
-        forces.append(float(ops.eleResponse(1, "axialForce")[0]))
+    forces = drive_truss_history(ops, emit, displacements)
+    assert forces is not None
     return forces
 
 
