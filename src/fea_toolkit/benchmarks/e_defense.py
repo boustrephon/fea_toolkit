@@ -31,10 +31,11 @@ References:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .._unit_scaling import g_from_units
+from .._unit_scaling import g_from_units, scale_material_dict
 from ..model.sap_data import (
     FrameElement,
     JointLoad,
@@ -49,8 +50,12 @@ from ..model.sap_data import (
     Section,
     TriplePendulumParams,
 )
-from ..opensees.analysis_builder import AnalysisBuilder
-from ..opensees.preprocessor import preprocess_model
+
+if TYPE_CHECKING:
+    # Type-checking only — importing this at runtime would pull in OpenSees
+    # (analysis_builder imports ``openseespy.opensees``), which the model-only
+    # recipe verbs must not do (see ``build_builder``'s lazy import below).
+    from ..opensees.analysis_builder import AnalysisBuilder
 
 __all__ = [
     "E_DEFENSE_UNITS",
@@ -69,9 +74,11 @@ __all__ = [
 
 E_DEFENSE_UNITS: dict[str, str] = {"F": "kN", "L": "m", "T": "C"}
 
-#: Steel elastic modulus (kN/m2) -- 200 GPa in the model's force unit.
-E_STEEL: float = 2.0e8
-#: Shear modulus (kN/m2).
+#: Steel elastic modulus (Pa) -- 200 GPa, authored in SI and scaled to the
+#: model's force/length units exactly once via :func:`scale_material_dict`
+#: (so the OpenSees domain carries 2.0e8 kN/m2).
+E_STEEL: float = 2.0e11
+#: Shear modulus (Pa).
 G_STEEL: float = E_STEEL / 2.6
 #: Poisson's ratio (steel).
 NU_STEEL: float = 0.3
@@ -93,6 +100,9 @@ STOREY_HEIGHTS: tuple[float, ...] = (3.835, 3.0, 3.0, 3.0, 3.0)
 #: Total seismic weight (kN).
 TOTAL_WEIGHT: float = 5420.0
 #: Extra roof mass (kN) -- the 56-tonne steel plate (penthouse + eccentricity).
+#: It is lumped symmetrically over the roof column lines (see
+#: :meth:`EDefenseLayout.cell_weight`), so this benchmark does not reproduce the
+#: plate-induced torsional (eccentric-mass) response.
 ROOF_EXTRA_WEIGHT: float = 560.0
 
 
@@ -185,7 +195,12 @@ class EDefenseLayout:
         return f"{level}-{i}-{j}"
 
     def cell_weight(self, level: int) -> float:
-        """Tributary seismic weight (kN) lumped at one column line of a floor."""
+        """Tributary seismic weight (kN) lumped at one column line of a floor.
+
+        The roof's extra plate weight is added uniformly across the roof column
+        lines, so the lumped centre of mass stays symmetric — the published
+        plate offset (and its torsional response) is not reproduced here.
+        """
         typical = (TOTAL_WEIGHT - ROOF_EXTRA_WEIGHT) / self.n_storeys
         w = typical
         if level == self.n_storeys:
@@ -481,10 +496,16 @@ def build_model(isolated: bool = True, config: str = "lrb-clb") -> SAPModelData:
                 added_masses[nid] = m
                 joint_loads.append(JointLoad(pattern="DEAD", node_id=nid, fz=-m * GRAVITY))
 
+    # Steel elastic constants are authored in SI (Pa) and scaled to the
+    # model's kN-m units exactly once here (§4.6 material convention).
+    steel = scale_material_dict({"E": E_STEEL, "G": G_STEEL}, E_DEFENSE_UNITS)
+
     return SAPModelData(
         nodes=nodes,
         restraints=restraints,
-        materials={"Steel": Material("Steel", "Steel", E_mod=E_STEEL, G_mod=G_STEEL, nu=NU_STEEL)},
+        materials={
+            "Steel": Material("Steel", "Steel", E_mod=steel["E"], G_mod=steel["G"], nu=NU_STEEL)
+        },
         sections=sections,
         frame_elements=frames,
         area_elements={},
@@ -499,7 +520,7 @@ def build_model(isolated: bool = True, config: str = "lrb-clb") -> SAPModelData:
         link_connectivity=link_connectivity,
         link_assignments=link_assignments,
         link_properties=link_properties,
-        units=E_DEFENSE_UNITS,
+        units=dict(E_DEFENSE_UNITS),
     )
 
 
@@ -518,6 +539,11 @@ def build_builder(
     Returns:
         An :class:`AnalysisBuilder` with :meth:`build_domain` already called.
     """
+    # Lazy import: ``build_model`` (and the model-only recipe verbs) must not
+    # require OpenSees; only the analysis entry point pulls it in.
+    from ..opensees.analysis_builder import AnalysisBuilder
+    from ..opensees.preprocessor import preprocess_model
+
     md = build_model(isolated=isolated, config=config)
     mesh = preprocess_model(md, {})
     b = AnalysisBuilder(mesh, {"link_model": link_model})
