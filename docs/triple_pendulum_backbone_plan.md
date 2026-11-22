@@ -107,7 +107,8 @@ so, from a backbone of `(u, F)` points with a known axial load `W`:
    intermediate kink is usually a *friction-transition* displacement
    (`u*_1 = 2·L_1·(μ_2 − μ_1)`, …), **not** a slider limit — so the individual
    `Ubar_i` are underdetermined from a monotonic backbone; only their weighted
-   sum is recoverable (the fit splits it equally as a documented placeholder).
+   sum is recoverable (the fit assigns a placeholder split that satisfies the
+   recovered transition bounds, pending the datasheet).
    But a kink can also be a *stop transition* — an outer sliding surface
    reaching its displacement limit `Ubar_i` before the terminal bearing
    displacement.  The three-regime fit above assumes every intermediate kink is

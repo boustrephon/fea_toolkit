@@ -1551,6 +1551,34 @@ def test_triple_pendulum_backbone_roundtrip():
     )
 
 
+def test_triple_pendulum_recovered_backbone_reproduces_transitions():
+    """The recovered ``ubar`` placeholder satisfies the transition bounds.
+
+    A first friction transition beyond ``u_cap/2`` breaks the old equal-split
+    placeholder (``2*U1 = u_cap/2 < u1``), so ``backbone()`` raised on the
+    recovered parameters.  The recovered ``ubar`` must instead cover the
+    recovered transitions and let ``backbone()`` round-trip.
+    """
+    from fea_toolkit.model.sap_data import TriplePendulumParams
+
+    params = TriplePendulumParams(
+        radius=[0.4, 3.0, 5.0],
+        ubar=[0.5, 0.1, 0.1],
+        mu=[0.02, 0.895, 0.915],
+        W=1000.0,
+    )
+    u, fw = params.backbone()
+    recovered = TriplePendulumParams.from_backbone(list(zip(u, fw)), W=1.0)
+
+    assert recovered.radius == pytest.approx(params.radius, rel=1.0e-6)
+    assert recovered.mu == pytest.approx(params.mu, rel=1.0e-6)
+    # ``backbone()`` must not raise on the placeholder ubar, and must
+    # reproduce the input transitions.
+    u2, fw2 = recovered.backbone()
+    assert u2 == pytest.approx(u, rel=1.0e-6)
+    assert fw2 == pytest.approx(fw, rel=1.0e-6)
+
+
 def test_triple_pendulum_backbone_symmetric_two_regimes():
     """The symmetric (2-regime) backbone recovers the E-Defense radius and mu."""
     from fea_toolkit.model.sap_data import TriplePendulumParams

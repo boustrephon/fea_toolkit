@@ -338,8 +338,9 @@ class TriplePendulumParams(LinkNonlinearParams):
             *underdetermined* from a monotonic backbone — its intermediate
             kinks are friction-transition displacements, not slider limits, so
             only the terminal capacity ``2*Ubar1 + Ubar2 + Ubar3`` is known;
-            the returned ``ubar`` splits it equally and must be refined from
-            the bearing datasheet.
+            the returned ``ubar`` is a placeholder that satisfies the recovered
+            transition bounds (so ``backbone()`` reproduces the input) and must
+            be refined from the bearing datasheet.
 
         The assumed force law is the three-mechanism series model with the
         inner mechanism counted double (see :meth:`backbone`).  The OpenSees
@@ -430,7 +431,25 @@ class TriplePendulumParams(LinkNonlinearParams):
                 f"backbone fit recovered non-monotonic friction coefficients "
                 f"{mu!r}; the series model requires non-decreasing mu"
             )
-        ubar = [u_cap / 4.0, u_cap / 4.0, u_cap / 4.0]
+        # The individual slider capacities are underdetermined from a monotonic
+        # backbone — its kinks are friction-transition displacements, not slider
+        # limits — so only the terminal capacity ``2*U1 + U2 + U3 = u_cap`` is
+        # known.  Assign a placeholder split that *also* satisfies the recovered
+        # transition bounds (``2*U1 >= u1``, ``2*U1 + U2 >= u2``), so
+        # ``recovered.backbone()`` reproduces the input transitions instead of
+        # raising on a placeholder whose inner capacity is too small.  The split
+        # remains arbitrary and must be refined from the bearing datasheet.
+        L1, L2, L3 = radius
+        m1, m2, m3 = mu
+        u1 = 2.0 * L1 * (m2 - m1)
+        u2 = u1 + (2.0 * L1 + L2) * (m3 - m2)
+        if u2 <= u_cap:
+            ubar = [u1 / 2.0, u2 - u1, u_cap - u2]
+        else:
+            # A recovered transition beyond the terminal capacity is not a valid
+            # triple-pendulum backbone; keep the equal split so ``backbone()``
+            # still reports the inconsistency through its own transition checks.
+            ubar = [u_cap / 4.0, u_cap / 4.0, u_cap / 4.0]
         return cls(radius=radius, ubar=ubar, mu=mu, W=W)
 
 
