@@ -13,10 +13,11 @@ Sources
   Manufacturer's bilinear model: initial stiffness ``K0 = 6.5 kN/mm``,
   post-yield stiffness ``KF = 0.65 kN/mm``, yield strength ``FU = 73 kN``;
   tributary axial load per bearing ``N = 1325 kN``.
-* Friction pendulum (first-stage single pendulum) — Morgan & Mahin (2011),
-  "The Use of Base Isolation Systems to Achieve Complex Seismic Performance
-  Objectives" (PEER 2011/06), Table 1 isolator ``TP-3-0.10``: first-stage
-  effective radius ``L1 = 11 in = 0.2794 m``, ``mu1 = 0.01``.
+* Friction pendulum (first stage) — Morgan & Mahin (2008), "The Optimization of
+  Multi-Stage Friction Pendulum Isolators for Loss Mitigation Considering a
+  Range of Seismic Hazard" (14WCEE, paper 11-0070): the first stage slides on
+  the two inner surfaces at once, so the effective radius is
+  ``2·L1 = 2 × 11 in = 0.5588 m``, ``mu1 = 0.01``.
 * Viscous damper — Constantinou & Symans (1993), "Experimental study of
   seismic response of buildings with supplemental fluid dampers", and Pekcan,
   Mander & Chen (1999), "Fundamental considerations for the design of
@@ -118,16 +119,17 @@ def test_lrb_e_defense_backbone():
 
 
 def test_fp_morgan_mahin_first_stage():
-    """Morgan & Mahin TP-3-0.10 first stage: Reff=11 in, mu=0.01 (single FP).
+    """Morgan & Mahin (2008) TP first stage: Reff = 2·L1 = 22 in, mu=0.01.
 
-    The element adds geometric stiffening (its normal force grows with lateral
-    displacement, ``N = -P + F*u/Reff``), so the *linearised* published backbone
-    ``F = mu*N + N/Reff*u`` is reproduced at small ``u/Reff``; at ``u = 0.05 m``
-    (``u/Reff = 0.18``) the stiffening is already ~3.5 %.
+    The triple pendulum's first stage slides on the two inner surfaces at once,
+    so the first-stage effective radius is ``2·L1`` and the slope is
+    ``N/(2·L1)``.  The element adds geometric stiffening (its normal force
+    grows with lateral displacement, ``N = -P + F*u/Reff``), so the *linearised*
+    backbone ``F = mu*N + N/Reff*u`` is reproduced at small ``u/Reff``.
     """
     try:
-        # F/N = mu + u/Reff = 0.01 + u/0.2794 — load-proportional, N cancels.
-        reff = 0.2794  # 11 in
+        # F/N = mu + u/Reff = 0.01 + u/(2*0.2794) — load-proportional, N cancels.
+        reff = 2 * 0.2794  # 2 × L1 (L1 = 11 in), the two inner surfaces
         mu = 0.01
         n = 1000.0  # arbitrary axial load; the normalised backbone is N-free
 
@@ -136,8 +138,8 @@ def test_fp_morgan_mahin_first_stage():
                 "singleFPBearing", [10, reff, 1.0e6], n, u, friction=("Coulomb", 10, mu)
             )[1]
 
-        assert shear(0.02) == pytest.approx(mu * n + n / reff * 0.02, rel=2.0e-2)
-        assert shear(0.03) == pytest.approx(mu * n + n / reff * 0.03, rel=2.0e-2)
+        assert shear(0.005) == pytest.approx(mu * n + n / reff * 0.005, rel=2.0e-2)
+        assert shear(0.010) == pytest.approx(mu * n + n / reff * 0.010, rel=2.0e-2)
     finally:
         import openseespy.opensees as ops
 

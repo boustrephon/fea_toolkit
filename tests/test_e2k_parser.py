@@ -1232,7 +1232,7 @@ def test_link_properties_parse():
     sections = _parse_sections(
         "$ LINK PROPERTIES\n"
         '  LINKPROP  "D20RODLINK"  TYPE "HOOK"  \n'
-        '  LINKPROP  "D20RODLINK"  DOF "U1"  KE 25556 NONLIN "Yes"  K 25556 OPEN 0 \n'
+        '  LINKPROP  "D20RODLINK"  DOF "U1"  KE 25556 NONLIN "Yes"  K 25556 OPEN 0.02 \n'
         '  LINKPROP  "LP1"  TYPE "LINEAR"  \n'
         '  LINKPROP  "LP1"  DOF "U1"  KE 1000  CE 0  FIXED "No" \n'
         '  LINKPROP  "LP1"  DOF "U2"  KE 2000  CE 0  FIXED "No" \n'
@@ -1251,7 +1251,7 @@ def test_link_properties_parse():
 
     hook = props["D20RODLINK"].nonlinear_params
     assert isinstance(hook, HookParams)
-    assert hook.open[0] == 0.0
+    assert hook.open[0] == 0.02
     assert props["LP1"].nonlinear_params is None
 
 
