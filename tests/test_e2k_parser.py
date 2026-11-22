@@ -1232,9 +1232,9 @@ def test_link_properties_parse():
     sections = _parse_sections(
         "$ LINK PROPERTIES\n"
         '  LINKPROP  "D20RODLINK"  TYPE "HOOK"  \n'
-        '  LINKPROP  "D20RODLINK"  DOF "U1"  KE 25556 NONLIN "Yes"  K 25556 OPEN 0.02 \n'
+        '  LINKPROP  "D20RODLINK"  DOF "U1"  KE 25556 NONLIN "Yes"  K 30000 OPEN 0.02 \n'
         '  LINKPROP  "LP1"  TYPE "LINEAR"  \n'
-        '  LINKPROP  "LP1"  DOF "U1"  KE 1000  CE 0  FIXED "No" \n'
+        '  LINKPROP  "LP1"  DOF "U1"  KE 1000  CE 500  FIXED "No" \n'
         '  LINKPROP  "LP1"  DOF "U2"  KE 2000  CE 0  FIXED "No" \n'
         '  LINKPROP  "LP1"  DOF "U3"  KE 3000  CE 0  FIXED "Yes" \n'
     )
@@ -1243,15 +1243,18 @@ def test_link_properties_parse():
     assert props["D20RODLINK"].ke[0] == 25556.0
     assert props["LP1"].link_type == "Linear"
     assert props["LP1"].ke[:3] == [1000.0, 2000.0, 3000.0]
-    assert props["LP1"].ce[:3] == [0.0, 0.0, 0.0]
+    assert props["LP1"].ce[:3] == [500.0, 0.0, 0.0]
     assert props["LP1"].fixed[:3] == [False, False, True]
-    # The Hook's NONLIN/K/OPEN tokens interpret into nonlinear_params; a
-    # Linear link carries none.
+    # The Hook's NONLIN/K/OPEN tokens interpret into nonlinear_params: the
+    # effective ``KE`` stays on ``ke`` while the nonlinear ``K`` lands in
+    # ``HookParams.k`` — the two stiffnesses are distinct.  A Linear link
+    # carries no nonlinear params.
     from fea_toolkit.model.sap_data import HookParams
 
     hook = props["D20RODLINK"].nonlinear_params
     assert isinstance(hook, HookParams)
     assert hook.open[0] == 0.02
+    assert hook.k[0] == 30000.0
     assert props["LP1"].nonlinear_params is None
 
 

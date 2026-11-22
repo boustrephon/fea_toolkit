@@ -840,8 +840,10 @@ def _interpret_link_nonlinear(prop: LinkProperty) -> None:
         idx = LINK_DOF_ORDER.index(dof)
         if isinstance(params, (GapParams, HookParams)):
             params.open[idx] = _as_float(attrs.get("OPEN", 0.0))
+            params.k[idx] = _as_float(attrs.get("K", 0.0))
         elif isinstance(params, WenParams):
             params.fy[idx] = _as_float(attrs.get("YIELD", attrs.get("F", 0.0)))
+            params.k[idx] = _as_float(attrs.get("K", 0.0))
             # NOTE: the Wen post-yield ``ratio`` and yield-exponent ``n`` are not
             # parsed here yet — the exact ETABS export attribute names for those
             # two values have not been confirmed against a real ``$ LINK

@@ -52,6 +52,18 @@ class TestRoundTripGuard:
         """Dataclasses nested 2+ levels deep resolve without a fallback warning."""
         assert "LoadCombinationEntry" in _CLASS_REGISTRY
         assert "StressStrainCurve" in _CLASS_REGISTRY
+        # Nonlinear link params (a non-dataclass base's subclasses) register too,
+        # so ``LinkProperty.nonlinear_params`` round-trips to its concrete type.
+        for name in (
+            "GapParams",
+            "HookParams",
+            "WenParams",
+            "DamperParams",
+            "RubberIsolatorParams",
+            "FrictionIsolatorParams",
+            "TriplePendulumParams",
+        ):
+            assert name in _CLASS_REGISTRY
 
 
 def test_union_mixed_container_skips_nonmatching_arm():
@@ -224,6 +236,74 @@ class TestMeshRoundTrip:
         mesh = _tricky_mesh()
         mesh2 = dict_to_model(model_to_dict(mesh))
         assert isinstance(mesh2.sections["UB300"], ISection)
+
+    def test_nonlinear_link_params_round_trip(self):
+        """``nonlinear_params`` subtypes survive the codec, not degraded to dicts."""
+        from fea_toolkit.model.sap_data import (
+            DamperParams,
+            FrictionIsolatorParams,
+            GapParams,
+            LinkElement,
+            LinkProperty,
+            RubberIsolatorParams,
+            TriplePendulumParams,
+            WenParams,
+        )
+
+        mesh = _tricky_mesh()
+        mesh.links = [LinkElement(link_id="ISO_1", node_i="1", node_j="2")]
+        mesh.link_assignments = {"ISO_1": "GAP"}
+        mesh.link_properties = {
+            "GAP": LinkProperty(
+                "GAP",
+                "Gap",
+                ke=[1000.0] * 6,
+                nonlinear_params=GapParams(open=[0.01] * 6, k=[2000.0] * 6),
+            ),
+            "WEN": LinkProperty(
+                "WEN",
+                "Plastic (Wen)",
+                ke=[1000.0] * 6,
+                nonlinear_params=WenParams(fy=[500.0] * 6, ratio=0.02, n=2.0, k=[2000.0] * 6),
+            ),
+            "DMP": LinkProperty(
+                "DMP",
+                "Damper",
+                ke=[0.0] * 6,
+                ce=[800.0] * 6,
+                nonlinear_params=DamperParams(cexp=0.3, c=[900.0] * 6),
+            ),
+            "RUB": LinkProperty(
+                "RUB",
+                "Rubber Isolator",
+                ke=[1000.0] * 6,
+                nonlinear_params=RubberIsolatorParams(k=[2000.0] * 6, fy=[50.0] * 6, ratio=0.1),
+            ),
+            "FRC": LinkProperty(
+                "FRC",
+                "Friction Isolator",
+                ke=[1000.0] * 6,
+                nonlinear_params=FrictionIsolatorParams(k=[2000.0] * 6, radius=2.0, mu=0.06),
+            ),
+            "TPB": LinkProperty(
+                "TPB",
+                "Triple Friction Pendulum",
+                ke=[1000.0] * 6,
+                nonlinear_params=TriplePendulumParams(
+                    radius=[0.4, 3.8, 3.8], ubar=[0.05, 0.5, 0.5], mu=[0.02, 0.08, 0.08], W=5000.0
+                ),
+            ),
+        }
+        mesh2 = json_to_model(model_to_json(mesh), cls=MeshModel)
+        assert mesh2 == mesh
+        assert {k: type(v.nonlinear_params).__name__ for k, v in mesh2.link_properties.items()} == {
+            "GAP": "GapParams",
+            "WEN": "WenParams",
+            "DMP": "DamperParams",
+            "RUB": "RubberIsolatorParams",
+            "FRC": "FrictionIsolatorParams",
+            "TPB": "TriplePendulumParams",
+        }
 
     def test_section_json_contains_type_discriminator(self):
         payload = model_to_dict(_tricky_mesh())

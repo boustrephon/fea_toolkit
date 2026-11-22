@@ -999,8 +999,10 @@ class SAP2000Parser:
         """
         if isinstance(params, (GapParams, HookParams)):
             params.open[idx] = self._num(rec, "Open")
+            params.k[idx] = self._num(rec, "K")
         elif isinstance(params, WenParams):
             params.fy[idx] = self._num(rec, "Yield")
+            params.k[idx] = self._num(rec, "K")
             _set_shared_scalar(params, "ratio", self._num(rec, "Ratio", None), idx)
             _set_shared_scalar(params, "n", self._num(rec, "YieldExp", None), idx)
         elif isinstance(params, RubberIsolatorParams):

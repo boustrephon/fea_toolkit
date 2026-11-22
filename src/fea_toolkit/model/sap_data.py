@@ -137,6 +137,7 @@ class GapParams(LinkNonlinearParams):
     """Nonlinear parameters for a Gap (compression-only) link."""
 
     open: list[float] = field(default_factory=lambda: [0.0] * 6)  # U1..R3 initial gap
+    k: list[float] = field(default_factory=lambda: [0.0] * 6)  # U1..R3 nonlinear stiffness
 
 
 @dataclass
@@ -144,6 +145,7 @@ class HookParams(LinkNonlinearParams):
     """Nonlinear parameters for a Hook (tension-only) link."""
 
     open: list[float] = field(default_factory=lambda: [0.0] * 6)  # U1..R3 initial gap
+    k: list[float] = field(default_factory=lambda: [0.0] * 6)  # U1..R3 nonlinear stiffness
 
 
 @dataclass
@@ -153,6 +155,7 @@ class WenParams(LinkNonlinearParams):
     fy: list[float] = field(default_factory=lambda: [0.0] * 6)  # U1..R3 yield force
     ratio: float = 0.0  # post-yield stiffness ratio
     n: float = 2.0  # yield (sharpness) exponent
+    k: list[float] = field(default_factory=lambda: [0.0] * 6)  # U1..R3 nonlinear stiffness
 
 
 @dataclass
@@ -380,9 +383,16 @@ class TriplePendulumParams(LinkNonlinearParams):
 
 @dataclass
 class DamperParams(LinkNonlinearParams):
-    """Nonlinear parameters for a Damper link."""
+    """Nonlinear parameters for a Damper link.
+
+    ``c`` is the *nonlinear* dashpot coefficient (units ``F·(s/L)^cexp``),
+    distinct from the effective damping ``Ce`` carried on
+    :class:`LinkProperty` (a linearised coefficient).  For a linear damper
+    (``cexp == 1``) ``c`` equals ``ce``; for an exponential damper they differ.
+    """
 
     cexp: float = 1.0  # velocity exponent (1.0 = linear, <1 = nonlinear)
+    c: list[float] = field(default_factory=lambda: [0.0] * 6)  # U1..R3 dashpot coefficient C
     k: list[float] = field(default_factory=lambda: [0.0] * 6)  # stiffness (bilinear/friction)
     fy: list[float] = field(default_factory=lambda: [0.0] * 6)  # yield force (bilinear/friction)
     ratio: float = 0.0  # post-yield stiffness ratio (bilinear/friction)

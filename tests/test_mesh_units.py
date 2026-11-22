@@ -17,6 +17,7 @@ from fea_toolkit.model.sap_data import (
     AreaGravityLoad,
     AreaUniformLoad,
     ConcreteRectangularSection,
+    DamperParams,
     FrameDistributedLoad,
     FrameElement,
     FrameElementProperties,
@@ -336,6 +337,33 @@ class TestConvertMeshUnits:
         # 1000 N/mm -> kip/in ≈ 5.710 (F/L); damping shares the F/L factor.
         assert out.link_properties["LIN"].ke[0] == pytest.approx(5.710, rel=1e-3)
         assert out.link_properties["LIN"].ce[0] == pytest.approx(0.5710, rel=1e-3)
+
+    def test_exponential_damper_ce_and_c_scale_separately(self):
+        """Effective Ce scales linearly (F/L); the nonlinear C scales by F/L^cexp."""
+        mesh = MeshModel(
+            nodes={},
+            frame_elements={},
+            frame_assignments={},
+            area_elements={},
+            area_assignments={},
+            frame_dist_loads=[],
+        )
+        mesh.units = {"L": "mm", "F": "N", "T": "C"}
+        mesh.link_properties = {
+            "DMP": LinkProperty(
+                name="DMP",
+                link_type="Damper",
+                ke=[1000.0] * 6,
+                ce=[100.0] * 6,
+                nonlinear_params=DamperParams(cexp=0.3, c=[100.0] * 6),
+            )
+        }
+        out = convert_mesh_units(mesh, KIP_IN_UNITS)
+        # Effective Ce: 100 N·s/mm -> kip·s/in (F/L, independent of cexp).
+        assert out.link_properties["DMP"].ce[0] == pytest.approx(0.5710, rel=1e-3)
+        # Nonlinear C: 100 N·(s/mm)^0.3 -> kip·(s/in)^0.3 (F/L^0.3).
+        p = out.link_properties["DMP"].nonlinear_params
+        assert p.c[0] == pytest.approx(100.0 * (1.0 / 4448.0) * 25.4**0.3, rel=1e-3)
 
 
 # ═════════════════════════════════════════════════════════════════════

@@ -469,7 +469,10 @@ class LinkMixin:
         """Material tag for one DOF of a nonlinear per-DOF link (or ``None``)."""
         params = prop.nonlinear_params
         if prop.link_type == "Gap" and isinstance(params, GapParams):
-            ke = prop.ke[dof]
+            # The nonlinear stiffness ``K`` (not the effective ``Ke``) is the
+            # backbone slope; fall back to ``Ke`` when no nonlinear K is stored
+            # (e.g. the S2K Gap table carries only the effective Ke).
+            ke = params.k[dof] if params.k[dof] > 0.0 else prop.ke[dof]
             if ke <= 0.0:
                 return None
             args = _hysteretic_one_sided_args(ke, params.open[dof], "gap")
@@ -477,7 +480,7 @@ class LinkMixin:
                 mat_cache, ("hyst", "gap", ke, params.open[dof]), "Hysteretic", *args
             )
         if prop.link_type == "Hook" and isinstance(params, HookParams):
-            ke = prop.ke[dof]
+            ke = params.k[dof] if params.k[dof] > 0.0 else prop.ke[dof]
             if ke <= 0.0:
                 return None
             args = _hysteretic_one_sided_args(ke, params.open[dof], "hook")
@@ -493,7 +496,7 @@ class LinkMixin:
     def _wen_dof_mat(self, prop, dof, wen_model, mat_cache):
         """Material for one Wen DOF — Steel02 (smooth) or Hysteretic (bilinear)."""
         params = prop.nonlinear_params
-        ke = prop.ke[dof]
+        ke = params.k[dof] if params.k[dof] > 0.0 else prop.ke[dof]
         fy = params.fy[dof]
         if ke <= 0.0:
             return None
@@ -523,9 +526,11 @@ class LinkMixin:
         )
 
     def _damper_dof_mat(self, prop, dof, mat_cache):
-        """Material for one damper DOF, driven by the ``ce``/``ke``/``fy`` present.
+        """Material for one damper DOF, driven by the ``c``/``ce``/``ke``/``fy`` present.
 
-        ``ce > 0`` → a (viscoelastic when ``ke`` is also present) dashpot;
+        ``c`` (the nonlinear dashpot coefficient, falling back to the effective
+        ``ce`` when unset) > 0 → a (viscoelastic when ``ke`` is also present)
+        dashpot;
         otherwise a bilinear/friction ``Hysteretic`` backbone when both the
         initial stiffness and a yield force are present.  A DOF with only an
         effective stiffness (no damping, no yield) falls back to an ``Elastic``
@@ -536,19 +541,26 @@ class LinkMixin:
         based) never reach here — ``_link_emission_family`` routes them to
         ``"unsupported"``, which warns and linearises in ``_create_link_elements``.
         """
-        ce = prop.ce[dof]
-        ke = prop.ke[dof]
         params = prop.nonlinear_params
         cexp = params.cexp if isinstance(params, DamperParams) else 1.0
-        if ce > 0.0:
+        # The nonlinear dashpot coefficient ``c`` (F·(s/L)^cexp) is distinct
+        # from the effective damping ``Ce`` (a linearised coefficient).  For a
+        # linear damper (cexp == 1) the two coincide, so fall back to ``ce``
+        # when ``c`` was not populated (e.g. a table carrying only Ce).
+        c_nl = params.c[dof] if isinstance(params, DamperParams) else 0.0
+        dash_c = c_nl if c_nl > 0.0 else prop.ce[dof]
+        ke = prop.ke[dof]
+        if dash_c > 0.0:
             if ke > 0.0:
                 # Viscoelastic: elastic stiffness in parallel with the damper.
                 e_tag = self._cached_mat(mat_cache, ("elastic", ke), "Elastic", ke)
-                v_tag = self._cached_mat(mat_cache, ("viscous", ce, cexp), "Viscous", ce, cexp)
+                v_tag = self._cached_mat(
+                    mat_cache, ("viscous", dash_c, cexp), "Viscous", dash_c, cexp
+                )
                 return self._cached_mat(
                     mat_cache, ("parallel", e_tag, v_tag), "Parallel", e_tag, v_tag
                 )
-            return self._cached_mat(mat_cache, ("viscous", ce, cexp), "Viscous", ce, cexp)
+            return self._cached_mat(mat_cache, ("viscous", dash_c, cexp), "Viscous", dash_c, cexp)
         fy = params.fy[dof] if isinstance(params, DamperParams) else 0.0
         ratio = params.ratio if isinstance(params, DamperParams) else 0.0
         k_nl = params.k[dof] if isinstance(params, DamperParams) else 0.0

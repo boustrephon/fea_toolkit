@@ -276,9 +276,9 @@ def _scale_link_properties(mesh: MeshModel, m: dict[str, float]) -> None:
     """Rescale link effective stiffness/damping and nonlinear params in place.
 
     ``ke``/``ce`` are force-per-length for translational DOFs and
-    force·length for rotational DOFs (time is seconds in both systems, so
-    damping shares the stiffness factor for a *linear* damper).  An
-    *exponential* damper's ``Ce`` has units ``F·(s/L)^cexp``, so its
+    force·length for rotational DOFs (time is seconds in both systems, so the
+    *effective* damping ``Ce`` shares the stiffness factor).  A damper's
+    *nonlinear* dashpot coefficient ``c`` has units ``F·(s/L)^cexp``, so its
     translational coefficient scales by ``force / length^cexp`` instead.
 
     The type-specific nonlinear params scale by their own dimensions, DOF-aware:
@@ -290,18 +290,33 @@ def _scale_link_properties(mesh: MeshModel, m: dict[str, float]) -> None:
     ftl = m["force_times_length"]
     k_factor = [fpl if i < 3 else ftl for i in range(6)]
     fy_factor = [m["force"] if i < 3 else ftl for i in range(6)]
+    # Several link properties may share one ``nonlinear_params`` object (e.g.
+    # two properties reusing a single params instance); scale each distinct
+    # object once so its radius/stiffness/force lists are not rescaled on every
+    # property that references it.  ``ke``/``ce`` stay per-property (each
+    # property owns its own lists).
+    scaled_params: set[int] = set()
     for prop in mesh.link_properties.values():
         p = prop.nonlinear_params
-        cexp = p.cexp if isinstance(p, DamperParams) else 1.0
-        ce_trans = m["force"] / m["length"] ** cexp
+        # ``ce`` is the *effective* (linearised) damping coefficient (units
+        # F·s/L): it scales like a linear damper — F/L for translational DOFs,
+        # F·L for rotational — independent of any nonlinear exponent.  The
+        # nonlinear dashpot coefficient ``c`` scales by F/L^cexp (Damper branch
+        # below).
+        ce_trans = m["force"] / m["length"]
         prop.ke = [k * k_factor[i] for i, k in enumerate(prop.ke)]
         prop.ce = [c * (ce_trans if i < 3 else ftl) for i, c in enumerate(prop.ce)]
         if p is None:
             continue
+        if id(p) in scaled_params:
+            continue
+        scaled_params.add(id(p))
         if isinstance(p, (GapParams, HookParams)):
             p.open = [o * (m["length"] if i < 3 else 1.0) for i, o in enumerate(p.open)]
+            p.k = [k * k_factor[i] for i, k in enumerate(p.k)]
         elif isinstance(p, WenParams):
             p.fy = [f * fy_factor[i] for i, f in enumerate(p.fy)]
+            p.k = [k * k_factor[i] for i, k in enumerate(p.k)]
         elif isinstance(p, RubberIsolatorParams):
             p.k = [k * k_factor[i] for i, k in enumerate(p.k)]
             p.fy = [f * fy_factor[i] for i, f in enumerate(p.fy)]
@@ -321,6 +336,8 @@ def _scale_link_properties(mesh: MeshModel, m: dict[str, float]) -> None:
             p.Kvt *= fpl
             p.minFv *= m["force"]
         elif isinstance(p, DamperParams):
+            c_trans = m["force"] / m["length"] ** p.cexp
+            p.c = [c * (c_trans if i < 3 else ftl) for i, c in enumerate(p.c)]
             p.k = [k * k_factor[i] for i, k in enumerate(p.k)]
             p.fy = [f * fy_factor[i] for i, f in enumerate(p.fy)]
 

@@ -43,7 +43,7 @@ import warnings
 import numpy as np
 
 from ..model.mesh_model import MeshModel, WallElement
-from ..model.sap_data import SAPModelData, Section
+from ..model.sap_data import LinkNonlinearParams, SAPModelData, Section
 
 # ═══════════════════════════════════════════════════════════════════
 # Schema versioning
@@ -180,6 +180,7 @@ def _collect_dataclasses() -> dict[str, type]:
             _walk_subclasses(sub)
 
     _walk_subclasses(Section)
+    _walk_subclasses(LinkNonlinearParams)
     return registry
 
 
@@ -376,6 +377,15 @@ def _decode_value(data: t.Any, hint: t.Any) -> t.Any:
     """Decode *data* against its resolved type hint *hint*."""
     if data is None:
         return None
+    # Polymorphic dispatch: a payload carrying a ``__type__`` discriminator is
+    # decoded to its concrete class even when the declared hint is a (possibly
+    # non-dataclass) base — e.g. ``Optional[LinkNonlinearParams]`` whose runtime
+    # value is a ``GapParams``.  Without this the encoded dict is returned
+    # verbatim and the subtype is silently lost.
+    if isinstance(data, dict) and isinstance(data.get(TYPE_KEY), str):
+        target = _CLASS_REGISTRY.get(data[TYPE_KEY])
+        if target is not None and dataclasses.is_dataclass(target):
+            return _decode_dataclass(data, target)
     if hint is t.Any or hint is None or hint is inspect.Parameter.empty:
         return data
 
