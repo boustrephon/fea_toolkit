@@ -219,6 +219,14 @@ def isolate_base(md, property_name, selection=None, coord_dir1="+Z"):
     link_type = getattr(prop, "link_type", "")
     if link_type not in _ISOLATOR_LINK_TYPES:
         raise ValueError(f"isolate_base: {property_name!r} is type {link_type!r}, not an isolator")
+    # A Triple Friction Pendulum's axial axis is the (vertical) I→J vector and
+    # the emitter ignores ``coord_dir1``, so a non-vertical reference direction
+    # would be silently dropped — reject it rather than mis-orient the bearing.
+    if link_type == "Triple Friction Pendulum" and coord_dir1 not in ("+Z", "-Z", ""):
+        raise ValueError(
+            f"isolate_base: {property_name!r} is a Triple Friction Pendulum, whose "
+            f"axial axis is vertical; coord_dir1={coord_dir1!r} cannot be honoured"
+        )
 
     restraints = getattr(md, "restraints", None)
     if restraints is None:

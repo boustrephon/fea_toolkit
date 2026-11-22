@@ -621,6 +621,18 @@ class LinkMixin:
         takes the same four materials *positionally* plus three friction models,
         and ignores ``-orient`` (its axial axis is I→J).
         """
+        # A bearing element models the coupled U2/U3 shear internally (kInit/qd
+        # for rubber, the friction model for FP), so a ``Fixed`` flag on those
+        # DOFs has no per-DOF representation and is ignored — warn rather than
+        # silently dropping the user's intent.
+        if prop.fixed[1] or prop.fixed[2]:
+            logger.warning(
+                "link property %r (%s) marks the shear DOF(s) U2/U3 Fixed, but "
+                "the bearing element models that shear internally; the Fixed "
+                "flag is ignored",
+                prop.name,
+                prop.link_type,
+            )
         if grounded:
             i_node, j_node = j_tag, ni  # j_tag is the coincident ground node
         else:
@@ -670,6 +682,21 @@ class LinkMixin:
                     1.0,
                 ]
         elif prop.link_type == "Triple Friction Pendulum":
+            # The TPB element orients its axial axis along I→J and ignores
+            # ``-orient``; warn when that axis is not vertical (it only models
+            # a vertical bearing).  A grounded TPB is vertical by construction.
+            ni_nd = self.mesh_model.nodes.get(link.node_i)
+            nj_nd = self.mesh_model.nodes.get(link.node_j) if link.node_j else ni_nd
+            if ni_nd is not None and nj_nd is not None:
+                axis = np.array([nj_nd.x - ni_nd.x, nj_nd.y - ni_nd.y, nj_nd.z - ni_nd.z])
+                axis_n = float(np.linalg.norm(axis))
+                if axis_n > 1e-12 and abs(abs(axis[2] / axis_n) - 1.0) > 1e-6:
+                    logger.warning(
+                        "link property %r (Triple Friction Pendulum) has a "
+                        "non-vertical axial axis; the TPB element only models a "
+                        "vertical bearing (its axial axis is I→J)",
+                        prop.name,
+                    )
             p = prop.nonlinear_params
             frn_tags = []
             for mu in p.mu:

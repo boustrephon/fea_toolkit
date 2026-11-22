@@ -72,13 +72,24 @@ For a triple pendulum in series, the normalised backbone has three piecewise
 regimes; in regime `i`:
 
 ```
-F = mu_i·W + (W / R_i) · u
+F = b_i·W + (W / R_i) · u
 ```
 
-where the composite radii accumulate as the mechanisms engage — `R_1 = 2·L_1`,
-`R_2 = 2·L_1 + L_2`, `R_3 = 2·L_1 + L_2 + L_3` (the inner mechanism slides on
-two surfaces, so its effective radius counts double; this is the series model
-in `docs/nonlinear_link_plan.md`, mirrored by `TriplePendulumParams.backbone`).
+where `b_i` is the regime's **radius-weighted composite friction intercept** —
+not `mu_i` directly — and the composite radii accumulate as the mechanisms
+engage: `R_1 = 2·L_1`, `R_2 = 2·L_1 + L_2`, `R_3 = 2·L_1 + L_2 + L_3` (the
+inner mechanism slides on two surfaces, so its effective radius counts double;
+this is the series model in `docs/nonlinear_link_plan.md`, mirrored by
+`TriplePendulumParams.backbone`).  The intercepts are:
+
+```
+b_1 = mu_1
+b_2 = (mu_1·R_1 + mu_2·L_2) / R_2
+b_3 = (mu_1·R_1 + mu_2·L_2 + mu_3·L_3) / R_3
+```
+
+so the force is continuous at the friction-transition displacement
+`u* = 2·L_1·(mu_2 − mu_1)`.
 The normalised slopes are therefore `1/(2·L_1)`, `1/(2·L_1 + L_2)` and
 `1/(2·L_1 + L_2 + L_3)`.
 
@@ -88,8 +99,10 @@ so, from a backbone of `(u, F)` points with a known axial load `W`:
    `L_2 = R_2 − R_1`, `L_3 = R_3 − R_2` — equivalently
    `L_1 = W/(2·slope_1)`, `L_2 = W/slope_2 − 2·L_1`,
    `L_3 = W/slope_3 − 2·L_1 − L_2`.
-2. **Force intercepts** (extrapolated to `u=0`) → `mu_i` (the radius-weighted
-   intercept of each regime, solved back for the per-mechanism `mu_i`).
+2. **Force intercepts** (extrapolated to `u=0`) → `b_i` (the radius-weighted
+   composite intercept of each regime), solved back for the per-mechanism
+   `mu_i` using the same intercept formula the forward model
+   (`TriplePendulumParams.backbone`) evaluates.
 3. **Terminal displacement** → capacity `2·Ubar_1 + Ubar_2 + Ubar_3`.  An
    intermediate kink is usually a *friction-transition* displacement
    (`u*_1 = 2·L_1·(μ_2 − μ_1)`, …), **not** a slider limit — so the individual

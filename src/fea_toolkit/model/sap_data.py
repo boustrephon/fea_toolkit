@@ -272,6 +272,24 @@ class TriplePendulumParams(LinkNonlinearParams):
         u1 = R1 * (m2 - m1)
         u2 = u1 + R2 * (m3 - m2)
         u_cap = 2.0 * U1 + U2 + U3
+        # An individual slider can reach its travel limit *before* a friction
+        # transition; the aggregate u_cap check alone would miss that ordering
+        # and evaluate a backbone past the point the mechanism should have
+        # locked.  Reject such parameter sets explicitly.
+        u1_cap = 2.0 * U1  # the inner mechanism slides on two surfaces
+        if u1 > u1_cap:
+            raise ValueError(
+                f"friction-transition displacement u1={u1:g} exceeds the inner "
+                f"slider capacity 2*U1={u1_cap:g}; the inner slider stops before "
+                "the first friction transition"
+            )
+        u2_cap = u1_cap + U2
+        if u2 > u2_cap:
+            raise ValueError(
+                f"friction-transition displacement u2={u2:g} exceeds the slider "
+                f"capacity 2*U1+U2={u2_cap:g}; an outer slider stops before the "
+                "second friction transition"
+            )
         if u2 > u_cap:
             raise ValueError(
                 f"friction-transition displacement u2={u2:g} exceeds the slider "
@@ -339,6 +357,16 @@ class TriplePendulumParams(LinkNonlinearParams):
             else:
                 u.append(x)
                 fw.append(y)
+        if not u:
+            raise ValueError("empty backbone")
+        # Rebase the displacement origin to the first point so the fitted
+        # intercepts are consistent with :meth:`backbone` (which evaluates from
+        # ``u = 0``).  Without this, a backbone authored with a nonzero origin
+        # fits its intercepts on the absolute displacements and then evaluates
+        # them from zero — a silent mismatch.
+        u0 = u[0]
+        if u0 != 0.0:
+            u = [x - u0 for x in u]
         segs = _fit_piecewise_linear(u, fw)
         n = len(segs)
         if n == 0:
@@ -350,9 +378,23 @@ class TriplePendulumParams(LinkNonlinearParams):
             )
         slopes = [s for (_, _, s, _) in segs]
         intercepts = [c for (_, _, _, c) in segs]
-        radii_eff = [1.0 / s if s > 0.0 else 0.0 for s in slopes]
+        # Reject backbones the series model cannot reproduce: a non-positive
+        # regime slope (a negative/zero effective radius) inverts the regime
+        # ordering and cannot be represented by a triple pendulum.
+        if any(s <= 0.0 for s in slopes):
+            raise ValueError(
+                f"backbone fit produced non-positive regime slope(s) {slopes!r}; "
+                "the series model requires strictly positive, decreasing slopes"
+            )
+        radii_eff = [1.0 / s for s in slopes]
         if n == 3:
             R1, R2, R3 = radii_eff[0], radii_eff[1], radii_eff[2]
+            if not (0.0 < R1 < R2 < R3):
+                raise ValueError(
+                    f"backbone fit produced non-monotonic effective radii "
+                    f"(R1={R1:g}, R2={R2:g}, R3={R3:g}); the series model "
+                    "requires increasing composite radii"
+                )
             L1 = R1 / 2.0
             L2 = R2 - R1
             L3 = R3 - R2
@@ -364,8 +406,14 @@ class TriplePendulumParams(LinkNonlinearParams):
             mu = [m1, m2, m3]
         elif n == 2:
             R1, R3 = radii_eff[0], radii_eff[1]
+            if R3 <= R1:
+                raise ValueError(
+                    f"backbone fit produced a non-increasing effective radius "
+                    f"(R1={R1:g}, R3={R3:g}); the two-regime series model "
+                    "cannot represent it"
+                )
             L1 = R1 / 2.0
-            L2 = L3 = max(R3 - R1, 0.0) / 2.0
+            L2 = L3 = (R3 - R1) / 2.0
             b1, b3 = intercepts[0], intercepts[1]
             m1 = b1
             m2 = m3 = (b3 * R3 - m1 * R1) / (L2 + L3) if (L2 + L3) else b3
@@ -377,6 +425,11 @@ class TriplePendulumParams(LinkNonlinearParams):
             radius = [L1, 0.0, 0.0]
             mu = [m1, m1, m1]
         u_cap = u[-1] - u[0]
+        if not (mu[0] <= mu[1] <= mu[2]):
+            raise ValueError(
+                f"backbone fit recovered non-monotonic friction coefficients "
+                f"{mu!r}; the series model requires non-decreasing mu"
+            )
         ubar = [u_cap / 4.0, u_cap / 4.0, u_cap / 4.0]
         return cls(radius=radius, ubar=ubar, mu=mu, W=W)
 
