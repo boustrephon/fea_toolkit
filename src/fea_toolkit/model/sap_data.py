@@ -252,16 +252,29 @@ class TriplePendulumParams(LinkNonlinearParams):
         double (it slides on two surfaces): the effective radii accumulate as
         ``2*L1``, ``2*L1+L2``, ``2*L1+L2+L3`` and the regime boundaries are the
         friction-transition displacements.  ``mu`` must be non-decreasing.
+
+        Raises:
+            ValueError: If ``mu`` is not non-decreasing, or a friction-transition
+                displacement exceeds the declared slider capacity (so the
+                regime endpoints would move backward).
         """
         L1, L2, L3 = self.radius
         m1, m2, m3 = self.mu
         U1, U2, U3 = self.ubar
+        if not (m1 <= m2 <= m3):
+            raise ValueError(f"mu must be non-decreasing, got {self.mu!r}")
         R1 = 2.0 * L1
         R2 = R1 + L2
         R3 = R2 + L3
         u1 = R1 * (m2 - m1)
         u2 = u1 + R2 * (m3 - m2)
         u_cap = 2.0 * U1 + U2 + U3
+        if u2 > u_cap:
+            raise ValueError(
+                f"friction-transition displacement u2={u2:g} exceeds the slider "
+                f"capacity u_cap={u_cap:g}; the regime endpoints would move "
+                "backward or exceed the declared capacity"
+            )
         b1 = m1
         b2 = (m1 * R1 + m2 * L2) / R2 if R2 else b1
         b3 = (m1 * R1 + m2 * L2 + m3 * L3) / R3 if R3 else b2
@@ -327,10 +340,15 @@ class TriplePendulumParams(LinkNonlinearParams):
         n = len(segs)
         if n == 0:
             raise ValueError("empty backbone")
+        if n > 3:
+            raise ValueError(
+                f"backbone fit produced {n} regimes; the triple-pendulum model "
+                "stores at most three (radius, mu, ubar) triplets"
+            )
         slopes = [s for (_, _, s, _) in segs]
         intercepts = [c for (_, _, _, c) in segs]
         radii_eff = [1.0 / s if s > 0.0 else 0.0 for s in slopes]
-        if n >= 3:
+        if n == 3:
             R1, R2, R3 = radii_eff[0], radii_eff[1], radii_eff[2]
             L1 = R1 / 2.0
             L2 = R2 - R1
@@ -372,8 +390,11 @@ class DamperParams(LinkNonlinearParams):
 
 
 #: Canonical link type → nonlinear-parameter dataclass (P49 Phase 2).
-#: ``Linear`` (and the not-yet-parsed multilinear types) have no entry, so
-#: :attr:`LinkProperty.nonlinear_params` stays ``None`` for them.  ``T/C
+#: ``Linear`` and the uncovered types (the multilinear backbones and the S2K
+#: triple-pendulum / high-damping-rubber tables in
+#: :data:`UNCOVERED_LINK_TYPES`) have no entry, so
+#: :attr:`LinkProperty.nonlinear_params` stays ``None`` for them — they
+#: linearise on effective stiffness.  ``T/C
 #: Friction Isolator`` reuses :class:`FrictionIsolatorParams` — it is a
 #: single-concave pendulum whose velocity-dependent friction (Slow/Fast/Rate)
 #: maps onto ``mu``/``mu_fast``/``rate``; the tension-friction half
