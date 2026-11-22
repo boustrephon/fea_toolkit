@@ -636,7 +636,9 @@ def element(elem_type: str, tag: int, *args: Any) -> None:
     or grounded bearing) require explicit ``-orient`` vectors** — with no I→J
     vector and no ``-orient`` the local frame is degenerate.  Non-coincident
     endpoints can derive the axial direction from geometry and may omit
-    ``-orient``.
+    ``-orient`` **only while that axis is nonparallel to the default local
+    y-axis** — the local z-axis is ``x × y``, so when those axes are parallel,
+    explicit nonparallel ``-orient`` vectors are required.
 
     Args:
         elem_type: Element type string.
