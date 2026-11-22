@@ -743,17 +743,36 @@ class LinkMixin:
         tiny = max((v for v in prop.ke if v > 0.0), default=1.0) * 1.0e-6
         return self._cached_mat(mat_cache, ("elastic", tiny), "Elastic", tiny)
 
-    @staticmethod
-    def _link_fixed_stiffness(prop) -> float:
-        """Stiffness for a ``Fixed`` link DOF — rigid, scaled off the link.
+    def _link_fixed_stiffness(self, prop) -> float:
+        """Stiffness for a ``Fixed`` link DOF — rigid, scaled off the model.
 
         A fixed DOF is modelled as a very stiff ``Elastic`` spring.  Scaling it
         off the link's own largest effective stiffness keeps it unit-consistent
         without an absolute magic number (which would be ill-conditioned in the
-        wrong unit system).
+        wrong unit system).  A fully-rigid link (all-zero effective stiffness)
+        scales the penalty off the stiffest effective stiffness across *all*
+        link properties; only when the model has none does it fall back to a
+        dimensionless ``1.0`` with a warning (the fixed-DOF stiffness is then
+        only approximate in the model's units).
         """
-        scale = max((k for k in prop.ke if k > 0.0), default=1.0)
+        scale = max((k for k in prop.ke if k > 0.0), default=0.0)
+        if scale <= 0.0:
+            scale = self._max_link_stiffness()
+            if scale <= 0.0:
+                logger.warning(
+                    "link property %r has fixed DOFs but no effective stiffness "
+                    "anywhere in the model to scale the penalty off; using a "
+                    "dimensionless 1.0 (the fixed-DOF stiffness is then only "
+                    "approximate in the model's units)",
+                    prop.name,
+                )
+                scale = 1.0
         return scale * 1.0e6
+
+    def _max_link_stiffness(self) -> float:
+        """Largest effective stiffness across all link properties (0 if none)."""
+        props = getattr(self.mesh_model, "link_properties", None) or {}
+        return max((k for p in props.values() for k in p.ke if k > 0.0), default=0.0)
 
     def _link_orient(self, link):
         """Return ``(vx, vy)`` orientation vectors, or ``None`` for zero length.
