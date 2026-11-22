@@ -145,24 +145,22 @@ _LINK_TABLE_SKIP = frozenset(
 
 
 def _set_shared_scalar(params: Any, attr: str, value: Optional[float], idx: int) -> None:
-    """Set a shared (non-per-DOF) nonlinear parameter, rejecting per-DOF conflicts.
+    """Set a shared (non-per-DOF) nonlinear parameter, warning on per-DOF conflicts.
 
     Some nonlinear parameters (the Wen post-yield ``ratio`` and yield exponent
-    ``n``) are stored as a single scalar rather than per-DOF.  When a numbered
-    table carries a different value for two DOFs the last row would otherwise
-    silently overwrite the first; this raises instead.  A ``None`` value
-    (column absent or empty) is a no-op so a partial export still parses, and
-    equal values across DOFs are accepted.
+    ``n``, the Rubber Isolator post-yield ``ratio``) are stored as a single
+    scalar rather than per-DOF.  When a numbered table carries a different
+    value for two DOFs the last row would otherwise silently overwrite the
+    first; this keeps the first value and logs a targeted warning instead of
+    rejecting the whole model.  A ``None`` value (column absent or empty) is a
+    no-op so a partial export still parses, and equal values across DOFs are
+    accepted.
 
     Args:
         params: The nonlinear-params object being filled.
         attr: The scalar attribute name (e.g. ``"ratio"``).
         value: The parsed column value, or ``None`` when the cell is absent.
-        idx: The 0-based DOF index (for the error message only).
-
-    Raises:
-        ValueError: If *value* conflicts with a value already recorded for a
-            different DOF.
+        idx: The 0-based DOF index (for the warning message only).
     """
     if value is None:
         return
@@ -172,11 +170,15 @@ def _set_shared_scalar(params: Any, attr: str, value: Optional[float], idx: int)
         params._shared_scalars = seen
     if attr in seen:
         if seen[attr] != value:
-            raise ValueError(
-                f"link property nonlinear parameter {attr!r} is specified "
-                f"per-DOF with conflicting values ({seen[attr]!r} at an earlier "
-                f"DOF and {value!r} at DOF {idx}); the model stores a single "
-                "shared value"
+            logging.warning(
+                "link property nonlinear parameter %r is specified per-DOF "
+                "with differing values (%r at an earlier DOF and %r at DOF %d); "
+                "the model stores a single shared value, so the first value is "
+                "retained and the per-DOF difference is not represented",
+                attr,
+                seen[attr],
+                value,
+                idx,
             )
         return
     seen[attr] = value
@@ -1022,7 +1024,7 @@ class SAP2000Parser:
         elif isinstance(params, RubberIsolatorParams):
             params.k[idx] = self._num(rec, "K")
             params.fy[idx] = self._num(rec, "Yield")
-            params.ratio = self._num(rec, "Ratio", params.ratio)
+            _set_shared_scalar(params, "ratio", self._num(rec, "Ratio", None), idx)
         elif isinstance(params, FrictionIsolatorParams):
             params.k[idx] = self._num(rec, "K")
             params.radius = self._num(rec, "Radius", params.radius)
