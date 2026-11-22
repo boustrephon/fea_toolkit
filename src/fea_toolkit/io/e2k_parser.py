@@ -737,6 +737,55 @@ def _linkprop_line(groups) -> str:
     return "  ".join(parts)
 
 
+#: ``LINKPROP`` record tokens the link-property parser consumes — the structural
+#: ``TYPE``/``DOF``, the effective ``KE``/``CE``/``FIXED``, and the nonlinear
+#: whitelist stashed into ``LinkProperty.nonlinear``.  Any other token on a
+#: ``LINKPROP`` line (a Wen ``ratio``/``n``, a damper ``C``/``Cexp``, …) is
+#: flagged by :func:`_warn_unconsumed_link_tokens` so a real export can tell us
+#: its spelling instead of it being dropped silently.
+_LINKPROP_CONSUMED_TOKENS = frozenset(
+    {
+        "TYPE",
+        "DOF",
+        "KE",
+        "CE",
+        "FIXED",
+        "NONLIN",
+        "K",
+        "OPEN",
+        "F",
+        "YIELD",
+        "R",
+        "MU",
+        "RADIUS",
+        "SLOW",
+        "FAST",
+        "RATE",
+        "SLOWT",
+        "FASTT",
+        "RATET",
+    }
+)
+
+
+def _warn_unconsumed_link_tokens(
+    raw_lines: dict[str, list[str]], unconsumed: dict[str, set[str]]
+) -> None:
+    """Warn for ``$ LINK PROPERTIES`` tokens the parser does not consume.
+
+    A ``LINKPROP`` DOF record carries only data tokens, so anything outside
+    :data:`_LINKPROP_CONSUMED_TOKENS` is a dropped field.  Naming it (rather than
+    guessing a spelling) is how the unverified Wen ``ratio``/``n`` and damper
+    ``C``/``Cexp`` tokens get reported.
+    """
+    reporter = LinkCoverageReporter()
+    for name, tokens in unconsumed.items():
+        lines = "\n".join(raw_lines.get(name, [f'LINKPROP "{name}"']))
+        for token in sorted(tokens):
+            reporter.report_field(name, token, "$ LINK PROPERTIES", lines)
+    reporter.summarise()
+
+
 def _warn_uncovered_link_types(
     props: dict[str, LinkProperty], raw_lines: dict[str, list[str]]
 ) -> None:
@@ -773,6 +822,7 @@ def _get_link_properties(sections: dict[str, list[GroupedLine]]) -> dict[str, Li
     """
     props: dict[str, LinkProperty] = {}
     raw_lines: dict[str, list[str]] = {}
+    unconsumed_tokens: dict[str, set[str]] = {}
     for groups in sections.get("LINK PROPERTIES", []):
         if not groups or groups[0][0] != "LINKPROP" or not groups[0][1]:
             continue
@@ -781,6 +831,9 @@ def _get_link_properties(sections: dict[str, list[GroupedLine]]) -> dict[str, Li
         attrs: dict[str, Any] = {}
         for kw, vals in groups[1:]:
             attrs[kw] = vals[0] if len(vals) == 1 else tuple(vals)
+        unconsumed = set(attrs) - _LINKPROP_CONSUMED_TOKENS
+        if unconsumed:
+            unconsumed_tokens.setdefault(name, set()).update(unconsumed)
         prop = props.get(name)
         if prop is None:
             prop = LinkProperty(name=name, link_type="Linear")
@@ -816,6 +869,7 @@ def _get_link_properties(sections: dict[str, list[GroupedLine]]) -> dict[str, Li
                 prop.nonlinear.setdefault(dof, {})[kw] = attrs[kw]
     for prop in props.values():
         _interpret_link_nonlinear(prop)
+    _warn_unconsumed_link_tokens(raw_lines, unconsumed_tokens)
     _warn_uncovered_link_types(props, raw_lines)
     return props
 

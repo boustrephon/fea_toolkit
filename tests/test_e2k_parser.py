@@ -1258,6 +1258,21 @@ def test_link_properties_parse():
     assert props["LP1"].nonlinear_params is None
 
 
+def test_link_unconsumed_token_warns():
+    """An unrecognised ``LINKPROP`` token (Wen ``RATIO``) is named, not dropped."""
+    from fea_toolkit._warnings import NotImplementedWarning
+    from fea_toolkit.io.e2k_parser import _get_link_properties
+
+    sections = _parse_sections(
+        "$ LINK PROPERTIES\n"
+        '  LINKPROP  "WEN1"  TYPE "PLASTICWEN"  \n'
+        '  LINKPROP  "WEN1"  DOF "U1"  KE 1000  K 2000  YIELD 30  RATIO 0.05 \n'
+    )
+    with pytest.warns(NotImplementedWarning, match="field 'RATIO'"):
+        props = _get_link_properties(sections)
+    assert props["WEN1"].nonlinear_params is not None
+
+
 def test_link_nonlinear_isolator_parse():
     """A Friction Isolator's K/MU/R tokens interpret into FrictionIsolatorParams."""
     from fea_toolkit.io.e2k_parser import _get_link_properties

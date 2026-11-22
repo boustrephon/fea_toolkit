@@ -415,6 +415,58 @@ TABLE:  "LINK PROPERTY DEFINITIONS 12 - TRIPLE PENDULUM ISOLATOR"
     assert md.link_properties["TP1"].nonlinear_params is None
 
 
+def test_link_assignment_nonidentity_propmod_warns(tmp_path):
+    """A non-identity ``PropMod`` is recognised but not applied — warn, don't drop."""
+    from fea_toolkit._warnings import NotImplementedWarning
+
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "CONNECTIVITY - LINK"
+   Link=ISO_1   JointI=1   JointJ=2
+TABLE:  "LINK PROPERTY ASSIGNMENTS"
+   Link=ISO_1   LinkProp=ISO_LIN   LinkFDProp=None   PropMod=2
+TABLE:  "LINK PROPERTY DEFINITIONS 01 - GENERAL"
+   Link=ISO_LIN   LinkType=Linear
+TABLE:  "LINK PROPERTY DEFINITIONS 02 - LINEAR"
+   Link=ISO_LIN   DOF=U1   Fixed=No   Ke=1000   Ce=0
+"""
+    s2k = tmp_path / "test_propmod.s2k"
+    s2k.write_text(content)
+    with pytest.warns(NotImplementedWarning, match="field 'PropMod'"):
+        SAP2000Parser(s2k).parse().get_model_data()
+
+
+def test_linear_link_rotke_column_warns(tmp_path):
+    """A rotational effective-stiffness spelling beyond Ke/Ce (``RotKE``) is flagged."""
+    from fea_toolkit._warnings import NotImplementedWarning
+
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "LINK PROPERTY DEFINITIONS 01 - GENERAL"
+   Link=ISO_LIN   LinkType=Linear
+TABLE:  "LINK PROPERTY DEFINITIONS 02 - LINEAR"
+   Link=ISO_LIN   DOF=R1   Fixed=No   Ke=1000   Ce=0   RotKE=5000
+"""
+    s2k = tmp_path / "test_rotke.s2k"
+    s2k.write_text(content)
+    with pytest.warns(NotImplementedWarning, match="field 'RotKE'"):
+        SAP2000Parser(s2k).parse().get_model_data()
+
+
+def test_damper_table_unconsumed_column_warns(tmp_path):
+    """An unrecognised damper-table column (the unverified ``C``) is flagged."""
+    from fea_toolkit._warnings import NotImplementedWarning
+
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "LINK PROPERTY DEFINITIONS 01 - GENERAL"
+   Link=DMP1   LinkType="Damper - Exponential"
+TABLE:  "LINK PROPERTY DEFINITIONS 04 - DAMPER"
+   Link=DMP1   DOF=U1   Fixed=No   Ke=0   Ce=50   Cexp=0.3   C=500
+"""
+    s2k = tmp_path / "test_damper_c.s2k"
+    s2k.write_text(content)
+    with pytest.warns(NotImplementedWarning, match="field 'C'"):
+        SAP2000Parser(s2k).parse().get_model_data()
+
+
 def test_multiple_uncovered_links_warn_once_then_summarise(tmp_path):
     """The full report message is emitted once; the rest are one-liners + a summary."""
     import warnings as _warnings

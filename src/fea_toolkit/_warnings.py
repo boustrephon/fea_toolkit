@@ -71,6 +71,40 @@ class LinkCoverageReporter:
             )
         self._count += 1
 
+    def report_field(self, subject: str, field: str, context: str, lines: str) -> None:
+        """Warn about a recognised-but-unparsed *field* on a link definition.
+
+        Unlike :meth:`report` (a whole uncovered link *type*), this is for a
+        single dropped field — a token, column or flag the importer recognises
+        but does not yet interpret.  The message names the field so the report
+        tells us exactly which spelling to add.  Shares the same
+        once-then-terse + summary behaviour as :meth:`report`.
+
+        Args:
+            subject: The link id or link-property name carrying the field.
+            field: The dropped field name (e.g. ``"PropMod"``, ``"RATIO"``).
+            context: Where it appeared (a table name or ``$ LINK PROPERTIES``).
+            lines: The offending raw line(s), for the report.
+        """
+        if not self._full_emitted:
+            warnings.warn(
+                f"link {subject!r} carries field {field!r} (in {context}), which the "
+                f"importer does not parse yet; it was ignored. Please send this export "
+                f"so support can be added: {REPORT_URL}\n"
+                f"Offending line(s):\n{lines}",
+                NotImplementedWarning,
+                stacklevel=2,
+            )
+            self._full_emitted = True
+        else:
+            warnings.warn(
+                f"link {subject!r} carries field {field!r} (in {context}), which the "
+                f"importer does not parse yet; it was ignored.",
+                NotImplementedWarning,
+                stacklevel=2,
+            )
+        self._count += 1
+
     def summarise(self) -> None:
         """Print a single summary line when more than one definition was skipped."""
         if self._count > 1:

@@ -144,6 +144,35 @@ _LINK_TABLE_SKIP = frozenset(
 )
 
 
+def _is_benign_cell(value: Any) -> bool:
+    """True for a cell that represents "nothing to drop" (empty/None/zero/identity)."""
+    if value is None:
+        return True
+    s = str(value).strip()
+    if s == "":
+        return True
+    return s.lower() in ("none", "0", "0.0", "1", "1.0", "no", "false")
+
+
+def _propmod_is_identity(value: Any) -> bool:
+    """True when a ``PropMod`` cell is the identity modifier (all components 1)."""
+    if value is None:
+        return True
+    s = str(value).strip()
+    if s == "":
+        return True
+    parts = [p for p in re.split(r"[,\s]+", s) if p]
+    if not parts:
+        return True
+    for p in parts:
+        try:
+            if float(p) != 1.0:
+                return False
+        except ValueError:
+            return False
+    return True
+
+
 def _set_shared_scalar(params: Any, attr: str, value: Optional[float], idx: int) -> None:
     """Set a shared (non-per-DOF) nonlinear parameter, warning on per-DOF conflicts.
 
@@ -209,6 +238,9 @@ class SAP2000Parser:
         # file contained no tables".  The ``is None`` guard in
         # :meth:`get_model_data` relies on this distinction.
         self._raw_tables: Optional[dict[str, list[dict[str, Any]]]] = None
+        # Field-level coverage reporter shared across the link extraction
+        # methods, summarised once at the end of :meth:`get_model_data`.
+        self._field_reporter = LinkCoverageReporter()
 
     @property
     def raw_tables(self) -> dict[str, list[dict[str, Any]]]:
@@ -327,6 +359,7 @@ class SAP2000Parser:
                 "No model data loaded — call parse() (or from_json()) before get_model_data()."
             )
         # Call all extraction functions
+        self._field_reporter = LinkCoverageReporter()
         nodes = self._get_all_nodes()
 
         restraints = self._get_all_restraints()
@@ -337,6 +370,7 @@ class SAP2000Parser:
         link_connectivity = self._get_link_connectivity()
         link_assignments = self._get_link_assignments()
         link_properties = self._get_link_properties()
+        self._field_reporter.summarise()
         frame_assignments = self._get_frame_assignments()
         area_assignments = self._get_area_assignments()
         groups = self._get_groups()
@@ -842,6 +876,23 @@ class SAP2000Parser:
             prop = str(raw_prop).strip()
             if link_id and prop:
                 assignments[link_id] = prop
+            # Field-level coverage: a non-identity modifier or a
+            # frequency-dependent property is recognised but not applied.
+            if not _propmod_is_identity(rec.get("PropMod")):
+                self._warn_link_field(
+                    link_id,
+                    "PropMod",
+                    "LINK PROPERTY ASSIGNMENTS",
+                    self._rec_to_line("LINK PROPERTY ASSIGNMENTS", rec),
+                )
+            fd = rec.get("LinkFDProp")
+            if fd not in (None, "") and str(fd).strip().lower() != "none":
+                self._warn_link_field(
+                    link_id,
+                    "LinkFDProp",
+                    "LINK PROPERTY ASSIGNMENTS",
+                    self._rec_to_line("LINK PROPERTY ASSIGNMENTS", rec),
+                )
         return assignments
 
     def _get_link_properties(self) -> dict[str, LinkProperty]:
@@ -900,6 +951,7 @@ class SAP2000Parser:
             props.setdefault(name, LinkProperty(name=name, link_type=link_type))
         self._parse_nonlinear_link_tables(props)
         self._warn_uncovered_link_types(props)
+        self._warn_unparsed_link_fields()
         return props
 
     @staticmethod
@@ -1067,6 +1119,61 @@ class SAP2000Parser:
                 lines_by_name.get(prop.name, f"Link={prop.name}"),
             )
         reporter.summarise()
+
+    def _rec_to_line(self, table: str, rec: dict[str, Any]) -> str:
+        """Reconstruct one raw table row as a ``table    field=value …`` line."""
+        fields = "  ".join(f"{k}={v}" for k, v in rec.items())
+        return f"{table}    {fields}"
+
+    def _warn_link_field(self, subject: str, field: str, context: str, lines: str) -> None:
+        """Emit one field-level :class:`NotImplementedWarning` (deduplicated)."""
+        self._field_reporter.report_field(subject, field, context, lines)
+
+    def _warn_unconsumed_link_columns(
+        self, table: str, consumed: set[str], lines_by_name: dict[str, str]
+    ) -> None:
+        """Warn for non-benign columns of a link table the parser does not read.
+
+        ``consumed`` is the set of columns this table's parser reads; any other
+        column whose value is non-trivial (not empty / ``None`` / identity /
+        zero) is a dropped field.  One warning per column, keyed on the first
+        link that carries a non-benign value.
+        """
+        seen: dict[str, str] = {}
+        for rec in self._raw_tables.get(table, []):
+            for col in rec:
+                if col in consumed or _is_benign_cell(rec[col]):
+                    continue
+                seen.setdefault(col, str(rec.get("Link", "")).strip())
+        for col, link_name in seen.items():
+            subject = link_name or "?"
+            self._warn_link_field(
+                subject, col, table, lines_by_name.get(subject, f"Link={subject}")
+            )
+
+    def _warn_unparsed_link_fields(self) -> None:
+        """Warn for recognised-but-unparsed columns in the link definition tables.
+
+        The ``02 - LINEAR`` table is scanned for any column beyond the effective
+        ``Ke``/``Ce``/``Fixed`` spellings (e.g. the rotational ``RotKE``/``RotCE``
+        spelling), and each damper table for any column beyond its recognised set
+        (e.g. the unverified dashpot ``C`` column).  Columns whose value is empty
+        or trivially identity/zero are not flagged.
+        """
+        lines_by_name = self._link_definition_lines_by_name()
+        self._warn_unconsumed_link_columns(
+            "LINK PROPERTY DEFINITIONS 02 - LINEAR",
+            {"Link", "DOF", "Fixed", "Ke", "Ce", "TransKE", "TransCE"},
+            lines_by_name,
+        )
+        for raw_table in self._raw_tables:
+            if _link_table_suffix(raw_table) != "DAMPER":
+                continue
+            self._warn_unconsumed_link_columns(
+                raw_table,
+                {"Link", "DOF", "Ke", "Ce", "Fixed", "K", "Yield", "Ratio", "Cexp"},
+                lines_by_name,
+            )
 
     def _link_definition_lines_by_name(self) -> dict[str, str]:
         """Index the raw ``LINK PROPERTY DEFINITIONS`` lines by property name.
