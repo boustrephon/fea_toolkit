@@ -27,14 +27,6 @@ HYSTERETIC_CHECK_PARAMS: dict[str, ParamSpec] = {
 }
 
 
-def _first_positive(values) -> float:
-    """The first positive entry of a per-DOF list, else ``0.0``."""
-    for v in values or ():
-        if v and v > 0.0:
-            return float(v)
-    return 0.0
-
-
 def _peak_displacement(open, ke, fy) -> float:
     """A displacement large enough to close the gap / pass the yield point."""
     candidates = [x for x in (abs(open), fy / ke if ke > 0.0 else 0.0) if x > 0.0]
@@ -42,11 +34,14 @@ def _peak_displacement(open, ke, fy) -> float:
 
 
 def _collect_backbones(model_data):
-    """Yield ``(name, args, history, symmetric)`` for every ``Hysteretic`` link.
+    """Yield ``(label, args, history, symmetric)`` for every eligible DOF.
 
     Gap/Hook are one-sided: the cycle closes the gap (transmits force), opens
     it (releases) and re-closes it.  The bilinear backbone (a ``Plastic (Wen)``
-    link on the ``hysteretic`` path, or a bilinear damper) is symmetric.
+    link on the ``hysteretic`` path, or a bilinear damper) is symmetric.  Each
+    DOF with nonzero effective stiffness is checked, and its ``open``/``fy``
+    value is read from the *same* DOF index, so a mixed-DOF property cannot
+    pair one DOF's stiffness with another's yield force.
     """
     from ...model.sap_data import DamperParams, GapParams, HookParams, WenParams
     from ...opensees._links import _hysteretic_bilinear_args, _hysteretic_one_sided_args
@@ -55,32 +50,33 @@ def _collect_backbones(model_data):
     for name in sorted(props):
         prop = props[name]
         p = prop.nonlinear_params
-        ke = _first_positive(prop.ke)
-        if ke <= 0.0:
-            continue
-        if prop.link_type == "Gap" and isinstance(p, GapParams):
-            open_ = _first_positive(p.open)
-            peak = _peak_displacement(open_, ke, 0.0)
-            args = _hysteretic_one_sided_args(ke, open_, "gap")
-            # compression (negative) closes the gap; tension opens it.
-            yield name, args, [-peak, 0.0, peak, 0.0, -peak], False
-        elif prop.link_type == "Hook" and isinstance(p, HookParams):
-            open_ = _first_positive(p.open)
-            peak = _peak_displacement(open_, ke, 0.0)
-            args = _hysteretic_one_sided_args(ke, open_, "hook")
-            yield name, args, [peak, 0.0, -peak, 0.0, peak], False
-        elif prop.link_type == "Plastic (Wen)" and isinstance(p, WenParams):
-            fy = _first_positive(p.fy)
-            if fy > 0.0:
-                peak = _peak_displacement(0.0, ke, fy)
-                args = _hysteretic_bilinear_args(ke, fy, p.ratio)
-                yield name, args, [peak, 0.0, -peak, 0.0, 0.5 * peak, peak], True
-        elif prop.link_type.startswith("Damper") and isinstance(p, DamperParams):
-            fy = _first_positive(p.fy)
-            if fy > 0.0:
-                peak = _peak_displacement(0.0, ke, fy)
-                args = _hysteretic_bilinear_args(ke, fy, 0.0)
-                yield name, args, [peak, 0.0, -peak, 0.0, 0.5 * peak, peak], True
+        for idx, ke in enumerate(prop.ke):
+            if ke <= 0.0:
+                continue
+            label = f"{name}[{idx}]"
+            if prop.link_type == "Gap" and isinstance(p, GapParams):
+                open_ = p.open[idx]
+                peak = _peak_displacement(open_, ke, 0.0)
+                args = _hysteretic_one_sided_args(ke, open_, "gap")
+                # compression (negative) closes the gap; tension opens it.
+                yield label, args, [-peak, 0.0, peak, 0.0, -peak], False
+            elif prop.link_type == "Hook" and isinstance(p, HookParams):
+                open_ = p.open[idx]
+                peak = _peak_displacement(open_, ke, 0.0)
+                args = _hysteretic_one_sided_args(ke, open_, "hook")
+                yield label, args, [peak, 0.0, -peak, 0.0, peak], False
+            elif prop.link_type == "Plastic (Wen)" and isinstance(p, WenParams):
+                fy = p.fy[idx]
+                if fy > 0.0:
+                    peak = _peak_displacement(0.0, ke, fy)
+                    args = _hysteretic_bilinear_args(ke, fy, p.ratio)
+                    yield label, args, [peak, 0.0, -peak, 0.0, 0.5 * peak, peak], True
+            elif prop.link_type.startswith("Damper") and isinstance(p, DamperParams):
+                fy = p.fy[idx]
+                if fy > 0.0:
+                    peak = _peak_displacement(0.0, ke, fy)
+                    args = _hysteretic_bilinear_args(ke, fy, 0.0)
+                    yield label, args, [peak, 0.0, -peak, 0.0, 0.5 * peak, peak], True
 
 
 def _cyclic_backbone_check(
@@ -154,7 +150,7 @@ def run_check_hysteretic_backbone(context: StepContext, step: Step) -> list[Step
 
     Returns:
         One :data:`~fea_toolkit.workflow.steps.TABLE` result with one row per
-        checked link property.
+        checked link DOF (labelled ``<property>[<dof-index>]``).
     """
     import openseespy.opensees as ops
 
