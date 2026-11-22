@@ -2126,6 +2126,45 @@ def test_issue3_transke_fixed_coincident_link_builds_and_solves(tmp_path):
         ops.wipe()
 
 
+def test_coincident_link_without_axes_warns_global_fallback(caplog):
+    """A coincident link with no reference-vector axes warns it is assuming
+    global axes (its I→J direction is undefined)."""
+    import logging
+
+    import openseespy.opensees as ops
+
+    from fea_toolkit.model.sap_data import LinkElement, LinkProperty
+
+    md = SAPModelData(
+        nodes={
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=0.0, y=0.0, z=0.0),
+        },
+        restraints={"1": Restraint([1, 1, 1, 1, 1, 1])},
+        materials={},
+        sections={},
+        frame_elements={},
+        area_elements={},
+        frame_assignments={},
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
+        link_connectivity=[LinkElement(link_id="ISO_1", node_i="1", node_j="2")],
+        link_assignments={"ISO_1": "ISO_LIN"},
+        link_properties={
+            "ISO_LIN": LinkProperty(name="ISO_LIN", link_type="Linear", ke=[1000.0] * 6)
+        },
+    )
+    try:
+        mm = preprocess_model(md, {"element_type": "elasticBeamColumn"})
+        ab = AnalysisBuilder(mm, {"element_type": "elasticBeamColumn"})
+        with caplog.at_level(logging.WARNING):
+            ab.build_domain()
+        assert any("assuming global axes" in r.getMessage() for r in caplog.records)
+    finally:
+        ops.wipe()
+
+
 def test_unsupported_link_warns_and_linearises():
     """An unsupported (multilinear) link warns and linearises; no stiffness errors."""
     import openseespy.opensees as ops
