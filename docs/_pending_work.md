@@ -1341,11 +1341,11 @@ tracked follow-ups, not fresh bugs:**
   stays a warn-and-linearise path (plan §4, §9).
 * **Damper friction directional/orthotropic subtypes** — no clean 1:1 per-DOF
   uniaxial emitter; linearised on `Ke` (warned).
-* **Nonlinear `K` for Gap / Hook / Wen** — `GapParams`/`HookParams`/`WenParams`
-  carry only `open`/`fy`/`ratio`/`n`; the SAP2000 `K` column for those tables
-  is not stored, and the emitters use the effective `Ke` (the one-sided and
-  `Steel02` backbones are slope-defined by `Ke`, so the secant `K` is not the
-  right initial slope for them).  Only the Damper and Rubber Isolator use `K`.
+* ~~**Nonlinear `K` for Gap / Hook / Wen**~~ ✅ resolved 2026-11-22 —
+  `GapParams`/`HookParams`/`WenParams` now carry a per-DOF nonlinear ``k``
+  (distinct from the effective ``Ke``), populated by both parsers and used as the
+  backbone slope by the emitters (falling back to ``Ke`` only when no nonlinear
+  ``K`` was stored).
 * **Named coordinate systems in `CoordDir1`/`CoordDir2`** — `_direction_vector`
   resolves global-axis tokens (`+X`, `-Y`, …) and coordinate triples only; a
   *named* CSYS (or any unparseable token) returns `None` and the link falls
@@ -1362,6 +1362,23 @@ tracked follow-ups, not fresh bugs:**
   is the dashpot coefficient, so the damper has no series elastic stiffness
   (no force-relaxation transient).  Plan §4 records this; it is not a Maxwell
   model.
+* ~~**Damper `C` vs `Ce` conflation (units bug)**~~ ✅ resolved 2026-11-22 —
+  `DamperParams` now carries a per-DOF nonlinear dashpot coefficient ``c``
+  distinct from the effective ``Ce``; `_scale_link_properties` scales ``ce``
+  linearly (F/L) and ``c`` by ``F/L^cexp`` (previously ``ce`` was scaled by
+  ``F/L^cexp`` — a units error for the *effective* coefficient), and
+  `_damper_dof_mat` uses ``c`` (falling back to ``ce`` for the linear
+  `cexp == 1` subtype).  The parser does not yet populate ``c`` from the damper
+  table's ``C`` column — blocked on a real export (interim note below).
+* ~~**`nonlinear_params` codec round-trip**~~ ✅ resolved 2026-11-22 —
+  `io/model_codec` now decodes the ``__type__`` discriminator to the concrete
+  `LinkNonlinearParams` subclass; previously a saved/reloaded model degraded
+  `nonlinear_params` to a plain dict.  Test:
+  `tests/test_model_codec.py::test_nonlinear_link_params_round_trip`.
+* ~~**Fixed-DOF penalty fallback**~~ ✅ resolved 2026-11-22 —
+  `_link_fixed_stiffness` scales a fully-rigid link's penalty off the stiffest
+  effective stiffness across *all* link properties (warning + dimensionless
+  `1.0` only when the model has none), instead of a bare `1.0e6` magic number.
 * **`check_hysteretic_backbone` runs a 1-DOF truss rig** — the cyclic check
   drives the *material* through a cycle in a 1-DOF domain (mirroring the
   component test) rather than re-building the full 3D `AnalysisBuilder` domain;
@@ -1374,6 +1391,19 @@ tracked follow-ups, not fresh bugs:**
   `test_bearing_behavior.py`, `test_link_benchmarks.py`) rather than by
   dedicated emitter-arg assertions; adding those, plus bearing/spring
   docstrings, is a documentation/validation polish item, not a correctness gap.
+
+**Interim import policy for unverified CSI columns (2026-11-22).**  Until a real
+SAP2000/ETABS export confirms the remaining token/column names (Wen ``ratio``/``n``,
+the damper ``C``/``Cexp`` columns, E2K per-DOF ``NONLIN``, E2K link axes, S2K
+``PropMod`` modifiers, the link-axis ``Plane``/``Axis`` columns), the parser must
+keep working on what it *does* know and degrade honestly on what it does not:
+parse the columns whose names are already confirmed, and when a source carries a
+field the importer does not yet interpret, emit a targeted
+``NotImplementedWarning`` ("…is not parsed yet; please send this export to …")
+and continue on the effective-stiffness linearisation — never raise for a
+recognised-but-unparsed column, and never invent a column name (`.clinerules`
+§12).  This keeps import usable for isolation-bearing models *today* while the
+fidelity gaps remain tracked here.
 
 **Follow-up (pending external access).**  The Phase-A NLTHA currently drives
 the model with a JMA-Kobe stand-in; the measured LRB-CLB targets are the

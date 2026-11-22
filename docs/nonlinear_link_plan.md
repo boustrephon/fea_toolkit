@@ -14,8 +14,9 @@ related: [_pending_work.md, modeling_guidance.md, e2k_import_plan.md, workflow_a
 > (Rubber/Friction Isolator), dispatch/warnings/runner-defaults, the
 > `check_hysteretic_backbone` and `isolate_base` verbs, and the
 > `modeling_guidance.md` §10 guidance.  See [`_pending_work.md` → P49](_pending_work.md).
-> Remaining: the §9/P2e stretch types (T/C Friction Isolator, damper
-> directional/orthotropic).  The §10 reference benchmarks (E-Defense LRB and
+> Remaining: the §9/P2e stretch types (damper directional/orthotropic); the
+> T/C Friction Isolator emitter and parser are done — its tension-friction
+> half is dropped with a warning.  The §10 reference benchmarks (E-Defense LRB and
 > TPB, Morgan & Mahin FP, viscous damper, gap/pounding) are all done.
 > This documents the design, the decisions, and the sequencing.
 
@@ -108,21 +109,21 @@ families:
 | Link type | OpenSees target | Source → target params | Fidelity |
 |---|---|---|---|
 | Linear | `twoNodeLink` + `Elastic` (unchanged) | `Ke`, `Ce` | exact |
-| Gap | `twoNodeLink` + `Hysteretic` (compression branch = `Ke`, tension ≈ 0) | `Ke`→slope, `open`→backbone shift | good |
-| Hook | `twoNodeLink` + `Hysteretic` (tension branch = `Ke`, compression ≈ 0) | `Ke`→slope, `open`→backbone shift | good |
-| Plastic (Wen) | `twoNodeLink` + `Steel02` (default) or `Hysteretic` | `Fy`→`Fy`, `Ke`→`E0`, `ratio`→`b`, `n`↔`R0` (Steel02); `Ke`/`fy`/`ratio` (Hysteretic, sharp corner) | good |
+| Gap | `twoNodeLink` + `Hysteretic` (compression branch = `K`, tension ≈ 0) | `K`→slope (fallback `Ke`), `open`→backbone shift | good |
+| Hook | `twoNodeLink` + `Hysteretic` (tension branch = `K`, compression ≈ 0) | `K`→slope (fallback `Ke`), `open`→backbone shift | good |
+| Plastic (Wen) | `twoNodeLink` + `Steel02` (default) or `Hysteretic` | `Fy`→`Fy`, `K`→`E0` (fallback `Ke`), `ratio`→`b`, `n`↔`R0` (Steel02); `K`/`fy`/`ratio` (Hysteretic, sharp corner) | good |
 | Rubber Isolator | `elastomericBearingBoucWen` (lead/HDR) or `elastomericBearingPlasticity` (bilinear) | `Ke`→`kInit`, `qd = Fy·(1 − ratio)` (the hardening-corrected post-yield intercept, not `Fy` directly), `k2_ratio`→`α1`; `-P/-T/-My/-Mz` `Elastic` | good |
 | Friction Isolator | `singleFPBearing` + `frictionModel Coulomb` (or `VelDependent`) | `radius`→`Reff`, `Ke`→`kInit`, `mu`→`μ` | good |
-| Damper – Linear | `twoNodeLink` + `Viscous(C, 1.0)` | `Ce`→`C` | exact |
-| Damper – Exponential | `twoNodeLink` + `Viscous(C, α)` | `Ce`→`C`, `Cexp`→`α` | exact |
-| Damper – Viscoelastic | `twoNodeLink` + `Parallel(Elastic(Ke), Viscous(Ce, α))` | `Ke`, `Ce` | good (freq/temp ignored) |
-| Damper – Bilinear | `twoNodeLink` + `Hysteretic` (pinch = neutral) | `Ke`, `fy`, `k2_ratio` | good |
-| Damper – Friction | no clean 1:1 — see §9 | — | gap |
+| Damper – Linear | `twoNodeLink` + `Viscous(C, 1.0)` | `c`→`C` (fallback `Ce`) | exact |
+| Damper – Exponential | `twoNodeLink` + `Viscous(C, α)` | `c`→`C` (fallback `Ce`), `Cexp`→`α` | exact |
+| Damper – Viscoelastic | `twoNodeLink` + `Parallel(Elastic(Ke), Viscous(c, α))` | `Ke`, `c` (fallback `Ce`) | good (freq/temp ignored) |
+| Damper – Bilinear | `twoNodeLink` + `Hysteretic` (pinch = neutral) | `K`→slope (fallback `Ke`), `fy`, `k2_ratio` | good |
+| Damper – Friction | `twoNodeLink` + `Hysteretic` (symmetric elastic-perfectly-plastic backbone, `ratio = 0`) | `K`→slope, `Fy`→yield force | good |
 | Multilinear Elastic/Plastic | unsupported — warned and linearised on `Ke` (`NotImplementedError` when there is no effective stiffness) | force-deflection points | not emitted |
 
 ## 5. The Hook decision — why `Hysteretic`
 
-A Hook is **tension-only** with an initial gap `open`: `F = Ke·(u − open)` in
+A Hook is **tension-only** with an initial gap `open`: `F = K·(u − open)` in
 tension, `F = 0` in compression.  It is one-sided.
 
 **`ElasticPP` is a poor fit.** `uniaxialMaterial ElasticPP $E $epsyP <$epsyN
@@ -141,15 +142,15 @@ emitter covers Gap + Hook + bilinear + friction dampers:
 
 | Behaviour | `Hysteretic` backbone |
 |---|---|
-| Hook (tension-only + gap) | tension = `Ke` after `open`; compression = 0 |
-| Gap (compression-only + gap) | compression = `Ke` after `open`; tension = 0 |
-| Damper – Bilinear | bilinear (`Ke`, `fy`, `k2_ratio`) |
+| Hook (tension-only + gap) | tension = `K` after `open`; compression = 0 |
+| Gap (compression-only + gap) | compression = `K` after `open`; tension = 0 |
+| Damper – Bilinear | bilinear (`K`, `fy`, `k2_ratio`) |
 | Multilinear Elastic / Plastic | unsupported — linearised (warned; `NotImplementedError` without effective stiffness) |
 | Damper – Friction (PP) | bilinear with zero post-yield |
 
 The tuning knobs (`pinchX`, `pinchY`, `damage1`, `damage2`, `beta`) are **not
 exposed** — the emitter pins them neutral (`1, 1, 0, 0, 0`) and derives the
-backbone from `Ke`/`open`/`fy`/`ratio`.  There is nothing to tune.
+backbone from `K`/`open`/`fy`/`ratio`.  There is nothing to tune.
 
 Disadvantages, on the record: more parameters *written* (all auto-derived);
 the neutral defaults must be pinned by a test (D7); marginally heavier than
@@ -288,5 +289,7 @@ nonlinear `K` (not the effective `Ke`) as the initial slope.
    bilinear/friction damper family (`Hysteretic`, `Ratio` parsed),
    non-axis-aligned `CoordDir2` (`_direction_vector`), and the triple friction
    pendulum (`TripleFrictionPendulum` emitter + the E-Defense TPB benchmark)
-   are implemented; the T/C Friction Isolator and the damper
-   directional/orthotropic subtypes remain (deferred, §9).
+   and the T/C Friction Isolator (`singleFPBearing` + `VelDependent`,
+   compression-only — the tension-friction half is dropped with a warning) are
+   implemented; the damper directional/orthotropic subtypes remain
+   (deferred, §9).
