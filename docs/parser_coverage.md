@@ -126,7 +126,7 @@ registry below.  Three things about how they are matched:
 
 *Generated from `src/fea_toolkit/io/table_registry.py` — do not edit by hand.  Regenerate with `python docs/_generate_parser_tables.py`.*
 
-### Handled (60 exact names)
+### Handled (62 exact names)
 
 - `AREA AUTO MESH ASSIGNMENTS`
 - `AREA EDGE CONSTRAINT ASSIGNMENTS`
@@ -175,8 +175,10 @@ registry below.  Three things about how they are matched:
 - `LINK PROPERTY DEFINITIONS 05 - GAP`
 - `LINK PROPERTY DEFINITIONS 06 - HOOK`
 - `LINK PROPERTY DEFINITIONS 07 - RUBBER ISOLATOR`
+- `LINK PROPERTY DEFINITIONS 08 - FRICTION ISOLATOR`
 - `LINK PROPERTY DEFINITIONS 08 - SLIDING ISOLATOR`
 - `LINK PROPERTY DEFINITIONS 09 - PLASTIC (WEN)`
+- `LINK PROPERTY DEFINITIONS 09 - T/C FRICTION ISOLATOR`
 - `LINK PROPERTY DEFINITIONS 09 - TC SLIDING ISOLATOR`
 - `LINK PROPERTY DEFINITIONS 10 - PLASTIC (WEN)`
 - `LOAD CASE DEFINITIONS`
