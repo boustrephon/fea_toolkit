@@ -473,6 +473,12 @@ class LinkMixin:
                 if mat_tag is None:
                     continue
             else:
+                # Elastic representation: effective-stiffness spring only.  The
+                # effective damping ``ce`` is deliberately NOT emitted here — in
+                # ``link_model="elastic"`` energy dissipation is supplied by the
+                # global Rayleigh damping, so a link-level dashpot would
+                # double-count it.  ``ce`` is only used by the nonlinear damper
+                # representation (``_damper_dof_mat``, as the ``c`` fallback).
                 k = prop.ke[dof]
                 if k <= 0.0:
                     continue

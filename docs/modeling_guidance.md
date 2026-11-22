@@ -334,7 +334,11 @@ Primary URLs: `openseesdigital.com/2020/08/21/a-marathon-not-a-sprint/`,
 >   effective stiffness.  Fine for elastic static / modal / response-spectrum
 >   runs of *any* link type; the builder **warns once per property** when the
 >   link is nonlinear, so a silently-linearised isolator is never mistaken for
->   a nonlinear one.
+>   a nonlinear one.  The effective damping ``Ce`` is intentionally **not**
+>   emitted in this mode — elastic-mode energy dissipation comes from the
+>   global Rayleigh damping, and a link-level dashpot would double-count it;
+>   ``Ce`` only feeds the nonlinear damper representation (the ``Viscous``
+>   coefficient, via the ``c`` fallback).
 > * ``"nonlinear"`` — the type-specific nonlinear material/element.  Gap, Hook,
 >   Plastic (Wen) and Damper emit one uniaxial material per active DOF; the two
 >   bearing types (Rubber/Friction Isolator) emit a dedicated bearing element.
