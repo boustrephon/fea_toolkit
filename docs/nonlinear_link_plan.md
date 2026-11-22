@@ -66,13 +66,12 @@ The free-form `LinkProperty.nonlinear: dict[str, Any]` is replaced by a
 **discriminated sub-dataclass**, one per link type, all fields optional so a
 partial parse is still valid (dataclass-first, `.clinerules` §3.3):
 
-* `RubberIsolatorParams` — `fy`, `k2_ratio` (plus the existing `ke`/`ce`).
-* `FrictionIsolatorParams` — `mu`, `mu_fast`, `rate`, `radius` (plus `ke`).
-* `GapParams` / `HookParams` — `ke`, `open`.
-* `WenParams` — `ke`, `fy`, `ratio`, `n`.
-* `DamperExponentialParams` — `ce`, `cexp`; `DamperLinearParams` — `ce`;
-  `DamperViscoelasticParams` — `ke`, `ce`; `DamperBilinearParams` — `ke`,
-  `fy`, `k2_ratio`; `DamperFrictionParams` — `mu`, `ke`, `fy`.
+* `RubberIsolatorParams` — `k`, `fy`, `ratio` (the effective `ke`/`ce` stay on `LinkProperty`).
+* `FrictionIsolatorParams` — `k`, `mu`, `mu_fast`, `rate`, `radius` (plus `ke`).
+* `GapParams` / `HookParams` — `k`, `open`.
+* `WenParams` — `k`, `fy`, `ratio`, `n`.
+* `DamperParams` — a single class for every damper subtype: `c` (dashpot
+  coefficient), `cexp`, `k`, `fy`, `ratio`, `damper_type`.
 
 Parsing normalises two formats that diverge:
 
@@ -115,7 +114,7 @@ families:
 | Rubber Isolator | `elastomericBearingBoucWen` (lead/HDR) or `elastomericBearingPlasticity` (bilinear) | `Ke`→`kInit`, `qd = Fy·(1 − ratio)` (the hardening-corrected post-yield intercept, not `Fy` directly), `k2_ratio`→`α1`; `-P/-T/-My/-Mz` `Elastic` | good |
 | Friction Isolator | `singleFPBearing` + `frictionModel Coulomb` (or `VelDependent`) | `radius`→`Reff`, `Ke`→`kInit`, `mu`→`μ` | good |
 | Damper – Linear | `twoNodeLink` + `Viscous(C, 1.0)` | `c`→`C` (fallback `Ce`) | exact |
-| Damper – Exponential | `twoNodeLink` + `Viscous(C, α)` | `c`→`C` (fallback `Ce`), `Cexp`→`α` | exact |
+| Damper – Exponential | `twoNodeLink` + `Viscous(C, α)` | `c`→`C` (fallback `Ce`), `Cexp`→`α` | approximation — the pure dashpot omits the source model's series (Maxwell) flexibility |
 | Damper – Viscoelastic | `twoNodeLink` + `Parallel(Elastic(Ke), Viscous(c, α))` | `Ke`, `c` (fallback `Ce`) | good (freq/temp ignored) |
 | Damper – Bilinear | `twoNodeLink` + `Hysteretic` (pinch = neutral) | `K`→slope (fallback `Ke`), `fy`, `k2_ratio` | good |
 | Damper – Friction | `twoNodeLink` + `Hysteretic` (symmetric elastic-perfectly-plastic backbone, `ratio = 0`) | `K`→slope, `Fy`→yield force | good |

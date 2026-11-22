@@ -630,6 +630,14 @@ def element(elem_type: str, tag: int, *args: Any) -> None:
         element('singleFPBearing', tag, iNode, jNode, frnMdlTag, Reff, kInit,
                 '-P', pTag, '-T', tTag, '-My', myTag, '-Mz', mzTag, ...)
 
+    The bearing elements (``elastomericBearingPlasticity``,
+    ``elastomericBearingBoucWen``, ``singleFPBearing``) derive their axial
+    direction from the I→J geometry, so **coincident endpoints (a zero-length
+    or grounded bearing) require explicit ``-orient`` vectors** — with no I→J
+    vector and no ``-orient`` the local frame is degenerate.  Non-coincident
+    endpoints can derive the axial direction from geometry and may omit
+    ``-orient``.
+
     Args:
         elem_type: Element type string.
         tag: Element tag.

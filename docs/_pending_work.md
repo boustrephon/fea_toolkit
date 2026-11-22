@@ -1357,11 +1357,11 @@ tracked follow-ups, not fresh bugs:**
   topology mutation; that is deliberate (the builder owns the OpenSees domain),
   so "move grounded links into preprocessing" would only make sense if the
   ground node had to participate in topology (it does not).
-* **Exponential damper → `Viscous` (not a Maxwell `ViscousDamper`)** — the
-  emitted `Viscous(C, α)` is a pure dashpot; SAP2000's exponential-damper `Ce`
-  is the dashpot coefficient, so the damper has no series elastic stiffness
-  (no force-relaxation transient).  Plan §4 records this; it is not a Maxwell
-  model.
+* **Exponential damper → `Viscous` (approximation, not a Maxwell `ViscousDamper`)**
+  — the emitted `Viscous(C, α)` is a pure dashpot, which *omits the source
+  model's series flexibility*: CSI's exponential damper couples the dashpot
+  with a series elastic spring, so its force-relaxation transient is not
+  reproduced.  Recorded in plan §4 as a fidelity limitation.
 * ~~**Damper `C` vs `Ce` conflation (units bug)**~~ ✅ resolved 2026-11-22 —
   `DamperParams` now carries a per-DOF nonlinear dashpot coefficient ``c``
   distinct from the effective ``Ce``; `_scale_link_properties` scales ``ce``

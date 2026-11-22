@@ -338,7 +338,12 @@ Primary URLs: `openseesdigital.com/2020/08/21/a-marathon-not-a-sprint/`,
 >   emitted in this mode — elastic-mode energy dissipation comes from the
 >   global Rayleigh damping, and a link-level dashpot would double-count it;
 >   ``Ce`` only feeds the nonlinear damper representation (the ``Viscous``
->   coefficient, via the ``c`` fallback).
+>   coefficient, via the ``c`` fallback).  Omitting ``Ce`` is **not neutral for
+>   response-spectrum results**: CSI treats a link's effective damping as an
+>   *additional* contribution to the specified modal damping, which global
+>   Rayleigh damping does not necessarily replace.  Elastic mode is therefore
+>   not suitable for every link — account for (or deliberately drop) the link's
+>   effective damping when linearising it.
 > * ``"nonlinear"`` — the type-specific nonlinear material/element.  Gap, Hook,
 >   Plastic (Wen) and Damper emit one uniaxial material per active DOF; the two
 >   bearing types (Rubber/Friction Isolator) emit a dedicated bearing element.
@@ -374,7 +379,7 @@ stage runs gravity first and retains the P-Δ and yield state; ``None`` skips it
 | T/C Friction Isolator | `singleFPBearing` + `VelDependent` | single-concave pendulum with velocity-dependent friction — ``Slow``/``Fast``/``Rate`` map to ``mu``/``mu_fast``/``rate``.  The tension-friction half (``SlowT``/``FastT``/``RateT``) has no `singleFPBearing` representation and is dropped with a warning. |
 | Triple Friction Pendulum | `TripleFrictionPendulum` (Dao et al. 2013) + 3× `Coulomb` | three friction-pendulum mechanisms in series; ``L`` are the effective radii ``R−h``, ``Ubar`` the slider displacement limits ``d``.  The element takes its four materials positionally and ignores ``-orient``: axial deformation uses fixed global Z and sliding uses global X/Y regardless of node alignment or ``-orient``, so axial behavior must be assigned along global Z (not a sliding direction). |
 | Plastic (Wen) | `Steel02` (default, smooth) / `Hysteretic` (`wen_model`) | `BoucWen` is rejected — no explicit ``Fy``, six unexported knobs. |
-| Gap | `Hysteretic` (compression-only) | opens at the ``open`` value; zero force in the released direction. |
+| Gap | `Hysteretic` (compression-only) | engages at the ``open`` value; the released (tension) direction carries only the tiny residual backbone stiffness (``ke·1e-6``), not exactly zero force. |
 | Hook | `Hysteretic` (tension-only) | uniform with Gap — one backbone model. |
 | Damper | `Viscous` / `Parallel` / `Hysteretic` | `Parallel` puts an elastic spring beside `Viscous` for viscoelastic dampers; bilinear/friction dampers emit a symmetric `Hysteretic` backbone (friction = elastic-perfectly-plastic). |
 
