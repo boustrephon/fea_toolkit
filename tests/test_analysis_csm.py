@@ -2054,10 +2054,11 @@ def test_linear_link_builds_and_supports():
         ops.wipe()
 
 
-def test_nonlinear_link_raises_in_nonlinear_mode():
-    """An unsupported (multilinear) link raises in nonlinear mode; elastic builds."""
+def test_unsupported_link_warns_and_linearises():
+    """An unsupported (multilinear) link warns and linearises; no stiffness errors."""
     import openseespy.opensees as ops
 
+    from fea_toolkit._warnings import NotImplementedWarning
     from fea_toolkit.model.sap_data import LinkElement, LinkProperty
 
     md = SAPModelData(
@@ -2083,11 +2084,18 @@ def test_nonlinear_link_raises_in_nonlinear_mode():
     try:
         mm = preprocess_model(md, {})
         ab = AnalysisBuilder(mm, {"link_model": "nonlinear"})
-        with pytest.raises(NotImplementedError, match="Multilinear Elastic"):
+        with pytest.warns(NotImplementedWarning, match="Multilinear Elastic"):
             ab.build_domain()
-        ab2 = AnalysisBuilder(mm, {"link_model": "elastic"})
-        ab2.build_domain()
         assert len(ops.getEleTags()) == 1
+        ops.wipe()
+
+        # With no effective stiffness (and nothing fixed) there is nothing to
+        # linearise onto — the one genuinely unbuildable case errors.
+        md.link_properties["RUB"].ke = [0.0] * 6
+        mm2 = preprocess_model(md, {})
+        ab2 = AnalysisBuilder(mm2, {"link_model": "nonlinear"})
+        with pytest.raises(NotImplementedError, match="Multilinear Elastic"):
+            ab2.build_domain()
     finally:
         ops.wipe()
 

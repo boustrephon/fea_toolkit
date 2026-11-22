@@ -296,11 +296,11 @@ def test_parse_nonlinear_link_property_tables(tmp_path):
 TABLE:  "LINK PROPERTY DEFINITIONS 01 - GENERAL"
    Link=GAP1   LinkType=Gap
    Link=HOOK1   LinkType=Hook
-   Link=RUB1   LinkType=Rubber Isolator
-   Link=ISO1   LinkType=Friction Isolator
-   Link=TC1   LinkType=T/C Friction Isolator
-   Link=WEN1   LinkType=Plastic (Wen)
-   Link=DMP1   LinkType=Damper - Exponential
+   Link=RUB1   LinkType="Rubber Isolator"
+   Link=ISO1   LinkType="Friction Isolator"
+   Link=TC1   LinkType="T/C Friction Isolator"
+   Link=WEN1   LinkType="Plastic (Wen)"
+   Link=DMP1   LinkType="Damper - Exponential"
 TABLE:  "LINK PROPERTY DEFINITIONS 05 - GAP"
    Link=GAP1   DOF=U1   Fixed=No   Ke=5000   Open=0.002
 TABLE:  "LINK PROPERTY DEFINITIONS 06 - HOOK"
@@ -340,6 +340,14 @@ TABLE:  "LINK PROPERTY DEFINITIONS 04 - DAMPER"
     assert rub_prop.ce[1] == pytest.approx(0.0)
     assert rub_prop.fixed[1] is False
 
+    # The multi-word ``LinkType`` values must survive parsing intact (quoted in
+    # the .s2k source), not be truncated at the first space.
+    assert md.link_properties["RUB1"].link_type == "Rubber Isolator"
+    assert md.link_properties["ISO1"].link_type == "Friction Isolator"
+    assert md.link_properties["TC1"].link_type == "T/C Friction Isolator"
+    assert md.link_properties["WEN1"].link_type == "Plastic (Wen)"
+    assert md.link_properties["DMP1"].link_type == "Damper - Exponential"
+
     iso = md.link_properties["ISO1"].nonlinear_params
     assert isinstance(iso, FrictionIsolatorParams)
     assert iso.k[1] == pytest.approx(5000.0)
@@ -376,7 +384,7 @@ def test_tc_friction_isolator_newer_spelling_parses(tmp_path):
 
     content = """File test.s2k was saved on m/d/yy at h:mm:ss
 TABLE:  "LINK PROPERTY DEFINITIONS 01 - GENERAL"
-   Link=TC1   LinkType=T/C Friction Isolator
+   Link=TC1   LinkType="T/C Friction Isolator"
 TABLE:  "LINK PROPERTY DEFINITIONS 09 - T/C FRICTION ISOLATOR"
    Link=TC1   DOF=U2   Fixed=No   Ke=1000   Ce=0   K=5000   Radius=2.0   Slow=0.05   Fast=0.16   Rate=0.6
 """
@@ -390,24 +398,49 @@ TABLE:  "LINK PROPERTY DEFINITIONS 09 - T/C FRICTION ISOLATOR"
     assert params.rate == pytest.approx(0.6)
 
 
-def test_unparsed_isolator_table_warns_preliminary(tmp_path, caplog):
-    """An isolator table we do not parse yet warns that processing is preliminary."""
-    import logging
+def test_unparsed_isolator_table_warns_not_implemented(tmp_path):
+    """An isolator table we do not parse yet warns (NotImplementedWarning)."""
+    from fea_toolkit._warnings import NotImplementedWarning
 
     content = """File test.s2k was saved on m/d/yy at h:mm:ss
 TABLE:  "LINK PROPERTY DEFINITIONS 01 - GENERAL"
-   Link=TP1   LinkType=Triple Pendulum Isolator
+   Link=TP1   LinkType="Triple Pendulum Isolator"
 TABLE:  "LINK PROPERTY DEFINITIONS 12 - TRIPLE PENDULUM ISOLATOR"
    Link=TP1   DOF=U2   Fixed=No   Ke=1000   Ce=0
 """
     s2k = tmp_path / "test_triple_pendulum.s2k"
     s2k.write_text(content)
-    with caplog.at_level(logging.WARNING):
+    with pytest.warns(NotImplementedWarning, match="Triple Pendulum Isolator"):
         md = SAP2000Parser(s2k).parse().get_model_data()
-    assert any(
-        "preliminary" in r.message and "TRIPLE PENDULUM" in r.message for r in caplog.records
-    )
     assert md.link_properties["TP1"].nonlinear_params is None
+
+
+def test_multiple_uncovered_links_warn_once_then_summarise(tmp_path):
+    """The full report message is emitted once; the rest are one-liners + a summary."""
+    import warnings as _warnings
+
+    from fea_toolkit._warnings import REPORT_URL, NotImplementedWarning
+
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "LINK PROPERTY DEFINITIONS 01 - GENERAL"
+   Link=TP1   LinkType="Triple Pendulum Isolator"
+   Link=HDR1  LinkType="High Damping Rubber Isolator"
+TABLE:  "LINK PROPERTY DEFINITIONS 12 - TRIPLE PENDULUM ISOLATOR"
+   Link=TP1   DOF=U2   Fixed=No   Ke=1000   Ce=0
+TABLE:  "LINK PROPERTY DEFINITIONS 14 - HIGH DAMPING RUBBER ISOLATOR"
+   Link=HDR1  DOF=U2   Fixed=No   Ke=1000   Ce=0
+"""
+    s2k = tmp_path / "test_two_uncovered.s2k"
+    s2k.write_text(content)
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        SAP2000Parser(s2k).parse().get_model_data()
+    nw = [w for w in caught if issubclass(w.category, NotImplementedWarning)]
+    messages = [str(w.message) for w in nw]
+    assert len(nw) == 3  # full + terse + summary
+    assert REPORT_URL in messages[0]
+    assert "Offending line(s)" in messages[0]
+    assert any("2 link property definitions" in m for m in messages)
 
 
 def test_parse_v8_legacy_plastic_wen_table_09(tmp_path):
@@ -416,7 +449,7 @@ def test_parse_v8_legacy_plastic_wen_table_09(tmp_path):
 
     content = """File test.s2k was saved on m/d/yy at h:mm:ss
 TABLE:  "LINK PROPERTY DEFINITIONS 01 - GENERAL"
-   Link=WEN1   LinkType=Plastic (Wen)
+   Link=WEN1   LinkType="Plastic (Wen)"
 TABLE:  "LINK PROPERTY DEFINITIONS 09 - PLASTIC (WEN)"
    Link=WEN1   DOF=U1   Fixed=No   Ke=1000   Ce=0   Yield=30   YieldExp=2   Ratio=0.05
 """
@@ -436,8 +469,8 @@ def test_parse_bilinear_friction_damper(tmp_path):
 
     content = """File test.s2k was saved on m/d/yy at h:mm:ss
 TABLE:  "LINK PROPERTY DEFINITIONS 01 - GENERAL"
-   Link=DMP2   LinkType=Damper - Bilinear
-   Link=DMP3   LinkType=Damper - Friction
+   Link=DMP2   LinkType="Damper - Bilinear"
+   Link=DMP3   LinkType="Damper - Friction"
 TABLE:  "LINK PROPERTY DEFINITIONS 02 - LINEAR"
    Link=DMP2   DOF=U1   Fixed=No   Ke=100   Ce=0
    Link=DMP3   DOF=U1   Fixed=No   Ke=100   Ce=0

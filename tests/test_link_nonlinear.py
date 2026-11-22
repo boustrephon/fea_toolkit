@@ -534,6 +534,9 @@ def test_link_emission_family():
     assert fam("Triple Friction Pendulum") == "bearing"
     assert fam("T/C Friction Isolator") == "bearing"
     assert fam("Multilinear Elastic") == "unsupported"
+    assert fam("Triple Pendulum Isolator") == "unsupported"
+    assert fam("High Damping Rubber Isolator") == "unsupported"
+    assert fam("Damper - Friction Directional") == "unsupported"
 
 
 def test_elastic_mode_linearisation_warning(caplog):
