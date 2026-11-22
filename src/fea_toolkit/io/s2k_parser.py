@@ -10,6 +10,7 @@ from typing import Any, Optional, Union
 
 import numpy as np  # noqa: F401
 
+from .._warnings import LinkCoverageReporter
 from ..model.load_combinations import classify_combination_refs
 from ..model.sap_data import (
     LINK_DOF_ORDER,
@@ -52,6 +53,7 @@ from ..model.sap_data import (
     WenParams,
     is_null_section,
     is_opening_section,
+    link_type_status,
 )
 from ._table_text import parse_table_file, read_file_with_encodings
 
@@ -125,15 +127,21 @@ _LINK_TABLE_SUFFIXES: dict[str, str] = {
     "PLASTIC (WEN)": "Plastic (Wen)",
 }
 
-#: Isolator suffixes recognised but **not yet parsed** — warn that the
-#: processing is preliminary rather than silently dropping them.
-_LINK_TABLE_ISOLATOR_PENDING: dict[str, str] = {
-    "TRIPLE PENDULUM ISOLATOR": "triple friction pendulum (force-deformation backbone)",
-    "HIGH DAMPING RUBBER ISOLATOR": "high-damping rubber bearing",
-}
-
-#: Suffixes read elsewhere or tracked as known gaps — skip silently.
-_LINK_TABLE_SKIP = frozenset({"GENERAL", "LINEAR", "MULTILINEAR", "MULTILINEAR PLASTIC"})
+#: Suffixes read elsewhere or tracked as known gaps — skip silently.  The
+#: uncovered link *types* these tables belong to (multilinear backbones, the
+#: S2K triple-pendulum / high-damping-rubber isolator tables) are surfaced by
+#: the coverage warning in ``_warn_uncovered_link_types`` (keyed on the ``01 -
+#: GENERAL`` ``LinkType``), so the tables themselves need no per-row warning.
+_LINK_TABLE_SKIP = frozenset(
+    {
+        "GENERAL",
+        "LINEAR",
+        "MULTILINEAR",
+        "MULTILINEAR PLASTIC",
+        "TRIPLE PENDULUM ISOLATOR",
+        "HIGH DAMPING RUBBER ISOLATOR",
+    }
+)
 
 
 class SAP2000Parser:
@@ -792,14 +800,16 @@ class SAP2000Parser:
         return assignments
 
     def _get_link_properties(self) -> dict[str, LinkProperty]:
-        """Parse ``LINK PROPERTY DEFINITIONS 01/02`` into link properties.
+        """Parse ``LINK PROPERTY DEFINITIONS`` tables into link properties.
 
         ``01 - GENERAL`` gives the link type; ``02 - LINEAR`` gives the six
         directional properties (effective stiffness ``Ke``, effective damping
         ``Ce`` and a ``Fixed`` flag) that every link type carries.  For the
         nonlinear types (Rubber/Friction Isolator, Gap, Hook, Wen, …) these
         are the *effective* (linearised) values used by elastic analyses; the
-        type-specific ``03+`` tables are a later phase.
+        type-specific ``03+`` tables populate ``nonlinear_params`` (see
+        :meth:`_parse_nonlinear_link_tables`).  Uncovered types are warned by
+        :meth:`_warn_uncovered_link_types`.
         """
         props: dict[str, LinkProperty] = {}
         types: dict[str, str] = {}
@@ -830,6 +840,7 @@ class SAP2000Parser:
         for name, link_type in types.items():
             props.setdefault(name, LinkProperty(name=name, link_type=link_type))
         self._parse_nonlinear_link_tables(props)
+        self._warn_uncovered_link_types(props)
         return props
 
     @staticmethod
@@ -854,7 +865,8 @@ class SAP2000Parser:
         ISOLATOR``, ``TC SLIDING ISOLATOR``) rather than their number, because
         SAP2000 renumbered these tables as link types were added (``09`` was
         ``PLASTIC (WEN)`` in v8 and ``TC SLIDING ISOLATOR`` since v9).  Isolator
-        tables we do not yet parse warn that the processing is *preliminary*.
+        tables we do not yet parse are skipped here and surfaced as a coverage
+        warning by :meth:`_warn_uncovered_link_types`.
         """
         for raw_table in list(self._raw_tables):
             suffix = _link_table_suffix(raw_table)
@@ -890,14 +902,6 @@ class SAP2000Parser:
                         params = LINK_NONLINEAR_PARAMS[link_type]()
                         prop.nonlinear_params = params
                     self._fill_nonlinear_row(params, link_type, idx, rec)
-            elif suffix in _LINK_TABLE_ISOLATOR_PENDING:
-                logging.warning(
-                    "preliminary link/support parsing: %r is recognised but not "
-                    "yet processed (%s).  If you can share a real SAP2000 export, "
-                    "this mapping can be completed and updated.",
-                    raw_table,
-                    _LINK_TABLE_ISOLATOR_PENDING[suffix],
-                )
             else:
                 logging.warning(
                     "preliminary link/support parsing: %r has an unrecognised "
@@ -935,6 +939,41 @@ class SAP2000Parser:
             params.k[idx] = self._num(rec, "K")
             params.fy[idx] = self._num(rec, "Yield")
             params.ratio = self._num(rec, "Ratio", params.ratio)
+
+    def _warn_uncovered_link_types(self, props: dict[str, LinkProperty]) -> None:
+        """Warn for link types the importer cannot parse, with a report link.
+
+        Runs after :meth:`_parse_nonlinear_link_tables`.  A *covered* type is
+        silent; an uncovered type (multilinear backbones, the S2K
+        triple-pendulum / high-damping-rubber isolator tables, unsupported
+        damper subtypes, or an unknown ``LinkType``) emits a
+        :class:`~fea_toolkit._warnings.NotImplementedWarning` carrying the
+        offending ``Link=… LinkType=…`` line(s) reconstructed from the raw
+        tables.  The full report-request message (with the GitHub issues URL)
+        is printed for the first property only; the rest are one-liners and a
+        single summary line reports the total.
+        """
+        reporter = LinkCoverageReporter()
+        for prop in props.values():
+            reason = link_type_status(prop.link_type)
+            if reason is None:
+                continue
+            reporter.report(
+                prop.name, prop.link_type, reason, self._link_definition_lines(prop.name)
+            )
+        reporter.summarise()
+
+    def _link_definition_lines(self, name: str) -> str:
+        """Reconstruct the raw ``LINK PROPERTY DEFINITIONS`` lines for a property."""
+        lines: list[str] = []
+        for raw_table in self._raw_tables:
+            if not raw_table.startswith("LINK PROPERTY DEFINITIONS"):
+                continue
+            for rec in self._raw_tables.get(raw_table, []):
+                if str(rec.get("Link", "")).strip() == name:
+                    fields = "  ".join(f"{k}={v}" for k, v in rec.items())
+                    lines.append(f"{raw_table}    {fields}")
+        return "\n".join(lines) if lines else f"Link={name}"
 
     def _get_link_local_axes(self) -> dict[str, dict[str, Any]]:
         """Parse ``LINK LOCAL AXES ASSIGNMENTS 1 - TYPICAL`` / ``2 - ADVANCED``.

@@ -103,8 +103,8 @@ class LinkProperty:
     Isolator, Gap, Hook, Plastic-Wen, …) the ``02 - LINEAR`` table holds their
     *effective* (linearised) stiffness and damping, which elastic static /
     modal / response-spectrum analyses use.  Type-specific nonlinear
-    parameters (``LINK PROPERTY DEFINITIONS 03+``) are parsed by a later phase
-    and kept in :attr:`nonlinear`.
+    parameters (``LINK PROPERTY DEFINITIONS 03+``) are parsed into
+    :attr:`nonlinear_params` (see :data:`LINK_NONLINEAR_PARAMS`).
     """
 
     name: str
@@ -389,6 +389,78 @@ LINK_NONLINEAR_PARAMS: dict[str, type[LinkNonlinearParams]] = {
     "Triple Friction Pendulum": TriplePendulumParams,
     "Damper": DamperParams,
 }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Link-type import coverage (single source of truth for "can we parse this?")
+# ═══════════════════════════════════════════════════════════════════════════
+
+#: Canonical link types the importer *and* emitter fully handle.  ``Linear``
+#: carries no nonlinear parameters but is emitted; the nonlinear types map to a
+#: params dataclass in :data:`LINK_NONLINEAR_PARAMS` and an emitter family in
+#: ``opensees._links``.
+COVERED_LINK_TYPES: frozenset[str] = frozenset(
+    {
+        "Linear",
+        "Gap",
+        "Hook",
+        "Plastic (Wen)",
+        "Rubber Isolator",
+        "Friction Isolator",
+        "T/C Friction Isolator",
+        "Triple Friction Pendulum",
+    }
+)
+
+#: Damper subtypes emitted as per-DOF uniaxial materials.  ETABS canonicalises
+#: the exponential damper to the bare ``"Damper"`` token; SAP2000 writes
+#: ``"Damper - Exponential"`` / ``"Damper - Linear"`` / …
+COVERED_DAMPER_SUBTYPES: frozenset[str] = frozenset(
+    {"", "Exponential", "Linear", "Bilinear", "Friction"}
+)
+
+#: Damper subtypes recognised but with no clean per-DOF uniaxial emitter.
+UNCOVERED_DAMPER_SUBTYPES: frozenset[str] = frozenset(
+    {"Friction Spring Based", "Friction Directional", "Friction Orthotropic"}
+)
+
+#: Link types recognised but not yet imported — mapped to a short reason string
+#: for the ``NotImplementedWarning``.  These are the silent data-loss edges: the
+#: parser currently drops their type-specific data (force-deformation backbones
+#: and the newer isolator tables).
+UNCOVERED_LINK_TYPES: dict[str, str] = {
+    "Multilinear Elastic": "multilinear force-deformation backbone",
+    "Multilinear Plastic": "multilinear-plastic force-deformation backbone",
+    "Triple Pendulum Isolator": "triple pendulum force-deformation backbone",
+    "High Damping Rubber Isolator": "high-damping rubber bearing",
+}
+
+
+def link_type_status(link_type: str) -> Optional[str]:
+    """Return ``None`` if a link type is fully imported + emitted, else a reason.
+
+    Classifies the canonical ``link_type`` string (SAP2000 ``LinkType``, or the
+    ETABS token normalised through ``_normalize_link_type``) into:
+
+    * ``None`` — covered: a linear / isolator / damper type the toolkit imports
+      and emits.
+    * a short reason string — uncovered: recognised but not imported (the
+      multilinear backbones, the S2K triple-pendulum / high-damping-rubber
+      isolator tables, unsupported damper subtypes) or an unknown type.
+
+    Both parsers and the emitter consult this, so adding a newly supported type
+    is a one-line edit here.
+    """
+    if link_type in COVERED_LINK_TYPES:
+        return None
+    if link_type.startswith("Damper"):
+        subtype = link_type[len("Damper") :].strip(" -")
+        if subtype in COVERED_DAMPER_SUBTYPES:
+            return None
+        if subtype in UNCOVERED_DAMPER_SUBTYPES:
+            return f"damper subtype {subtype!r}"
+        return f"unknown damper subtype {subtype!r}"
+    return UNCOVERED_LINK_TYPES.get(link_type, f"unrecognised link type {link_type!r}")
 
 
 @dataclass

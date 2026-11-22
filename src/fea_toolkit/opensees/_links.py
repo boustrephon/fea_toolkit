@@ -15,8 +15,10 @@ node i to a coincident fixed ground node via ``zeroLength``.
   bearing isolators emit dedicated bearing elements: Rubber Isolator →
   ``elastomericBearingPlasticity``/``elastomericBearingBoucWen``, Friction
   Isolator (and T/C Friction Isolator, compression-only) → ``singleFPBearing``,
-  and Triple Friction Pendulum → ``TripleFrictionPendulum``.  Only genuinely
-  unsupported link types still raise :class:`NotImplementedError`.
+  and Triple Friction Pendulum → ``TripleFrictionPendulum``.  A link type the
+  toolkit does not cover is *warned* (``NotImplementedWarning``) and linearised
+  on its effective stiffness; it raises ``NotImplementedError`` only when there
+  is no effective stiffness to linearise onto.
 
 ``wen_model`` selects the Plastic (Wen) material: ``"steel02"`` (default,
 smooth Giuffré–Menegotto-Pinto transition) or ``"hysteretic"`` (sharp bilinear
@@ -24,11 +26,13 @@ backbone).
 """
 
 import logging
+import warnings
 from typing import Optional
 
 import numpy as np
 import openseespy.opensees as ops
 
+from .._warnings import REPORT_URL, NotImplementedWarning
 from ..model.geometry import get_local_axes
 from ..model.sap_data import (
     DamperParams,
@@ -36,6 +40,7 @@ from ..model.sap_data import (
     HookParams,
     RubberIsolatorParams,
     WenParams,
+    link_type_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -91,10 +96,11 @@ def _direction_vector(token: str) -> Optional[np.ndarray]:
 
 #: Nonlinear link emission policy — the single source of truth for which link
 #: type gets which emitter.  ``"per-dof"`` types get one uniaxial spring per
-#: direction; ``"bearing"`` types get a dedicated bearing element.  Damper
-#: subtypes (``"Damper - …"``) resolve to ``"per-dof"`` via the ``startswith``
-#: check in :func:`_link_emission_family`; ``Linear`` resolves to ``"linear"``;
-#: anything else is ``"unsupported"`` (raises under ``link_model="nonlinear"``).
+#: direction; ``"bearing"`` types get a dedicated bearing element.  ``Linear``
+#: resolves to ``"linear"``; anything else is classified through
+#: :func:`fea_toolkit.model.sap_data.link_type_status` — a covered damper
+#: subtype (``"Damper - …"``) resolves to ``"per-dof"``, an uncovered type to
+#: ``"unsupported"`` (warned and linearised in ``_create_link_elements``).
 _LINK_EMISSION_FAMILY: dict[str, str] = {
     "Gap": "per-dof",
     "Hook": "per-dof",
@@ -109,12 +115,6 @@ _LINK_EMISSION_FAMILY: dict[str, str] = {
 #: Link types with a nonlinear emitter (derived — never hand-edited).
 _SUPPORTED_NONLINEAR_LINK_TYPES = frozenset(_LINK_EMISSION_FAMILY)
 
-#: Damper subtypes with no clean per-DOF uniaxial emitter (plan §9).  The
-#: simple ``"Friction"`` damper is *not* here — it emits ``Hysteretic`` (EPP).
-_DAMPER_UNSUPPORTED = frozenset(
-    {"Friction Spring Based", "Friction Directional", "Friction Orthotropic"}
-)
-
 #: Steel02 (Giuffré–Menegotto-Pinto) transition-curvature defaults.
 _STEEL02_CR1 = 0.925
 _STEEL02_CR2 = 0.15
@@ -124,7 +124,13 @@ _LINK_FRICTION_BASE = 710000
 
 
 def _link_emission_family(prop) -> str:
-    """Emission family: ``"linear"`` / ``"per-dof"`` / ``"bearing"`` / ``"unsupported"``."""
+    """Emission family: ``"linear"`` / ``"per-dof"`` / ``"bearing"`` / ``"unsupported"``.
+
+    Uncovered link types (see :func:`fea_toolkit.model.sap_data.link_type_status`)
+    resolve to ``"unsupported"``; covered types resolve through the family table.
+    """
+    if link_type_status(prop.link_type) is not None:
+        return "unsupported"
     if prop.link_type == "Linear":
         return "linear"
     family = _LINK_EMISSION_FAMILY.get(prop.link_type)
@@ -138,23 +144,6 @@ def _link_emission_family(prop) -> str:
 def _is_per_dof_nonlinear(prop) -> bool:
     """True if the link type is emitted per-DOF in the nonlinear representation."""
     return _link_emission_family(prop) == "per-dof"
-
-
-def _damper_subtype(prop) -> str:
-    """Damper subtype (``"Exponential"`` / ``"Linear"`` / …) for a damper link.
-
-    ETABS canonicalises ``"DAMPER"`` → ``"Damper"`` (the exponential damper);
-    SAP2000 writes ``"Damper - Exponential"`` / ``"Damper - Linear"`` / …  The
-    subtype is recovered from the ``link_type`` string, or from the parsed
-    ``DamperParams.damper_type`` when present.
-    """
-    if isinstance(prop.nonlinear_params, DamperParams) and prop.nonlinear_params.damper_type:
-        return prop.nonlinear_params.damper_type
-    if prop.link_type.startswith("Damper"):
-        rest = prop.link_type[len("Damper") :].strip(" -")
-        if rest:
-            return rest
-    return "Exponential"
 
 
 def _wen_r0(n: float) -> float:
@@ -322,6 +311,7 @@ class LinkMixin:
         mat_cache: dict[tuple, int] = {}
         friction_count = [0]
         warned_linearised: set[str] = set()
+        warned_unsupported: set[str] = set()
 
         for link in links:
             prop = props.get(assigns.get(link.link_id, ""))
@@ -331,19 +321,34 @@ class LinkMixin:
                 )
                 continue
             family = _link_emission_family(prop)
-            if model == "elastic" and family != "linear" and prop.name not in warned_linearised:
+            if family == "unsupported":
+                # Uncovered link type — warn (once per property) and linearise on
+                # the effective stiffness.  Error only when there is nothing to
+                # linearise onto (a zero-stiffness link would silently drop the
+                # member from the model).
+                if not any(prop.ke) and not any(prop.fixed):
+                    raise NotImplementedError(
+                        f"link property {prop.name!r} has type {prop.link_type!r}, "
+                        f"which has no nonlinear emitter and no effective stiffness "
+                        f"to linearise onto — cannot build it. Please report this "
+                        f"at {REPORT_URL}"
+                    )
+                if prop.name not in warned_unsupported:
+                    warned_unsupported.add(prop.name)
+                    warnings.warn(
+                        f"link property {prop.name!r} has type {prop.link_type!r}, "
+                        f"which has no nonlinear emitter; it is represented by "
+                        f"effective stiffness. Please report this at {REPORT_URL}",
+                        NotImplementedWarning,
+                        stacklevel=2,
+                    )
+            elif model == "elastic" and family != "linear" and prop.name not in warned_linearised:
                 warned_linearised.add(prop.name)
                 logger.warning(
                     "link property %r (%s) represented by effective stiffness; "
                     "set link_model='nonlinear' for nonlinear response",
                     prop.name,
                     prop.link_type,
-                )
-            if model == "nonlinear" and family == "unsupported":
-                raise NotImplementedError(
-                    f"link property {prop.name!r} is type {prop.link_type!r}; "
-                    "nonlinear emission is not implemented for this type yet "
-                    '(use link_model="elastic" for the effective-stiffness representation)'
                 )
 
             ni = self._node_tag_from_id(link.node_i)
@@ -517,13 +522,12 @@ class LinkMixin:
         )
 
     def _damper_dof_mat(self, prop, dof, mat_cache):
-        """Material for one damper DOF, driven by the ``ce``/``ke``/``fy`` present."""
-        subtype = _damper_subtype(prop)
-        if subtype in _DAMPER_UNSUPPORTED:
-            raise NotImplementedError(
-                f"damper subtype {subtype!r} on link property {prop.name!r} has no "
-                "per-DOF uniaxial emitter yet (plan §9)"
-            )
+        """Material for one damper DOF, driven by the ``ce``/``ke``/``fy`` present.
+
+        Uncovered damper subtypes (friction directional / orthotropic / spring
+        based) never reach here — ``_link_emission_family`` routes them to
+        ``"unsupported"``, which warns and linearises in ``_create_link_elements``.
+        """
         ce = prop.ce[dof]
         ke = prop.ke[dof]
         params = prop.nonlinear_params

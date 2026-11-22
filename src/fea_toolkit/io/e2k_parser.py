@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 from .._unit_scaling import force_unit_label, length_unit_label
+from .._warnings import LinkCoverageReporter
 from ..model.sap_data import (
     LINK_DOF_ORDER,
     LINK_NONLINEAR_PARAMS,
@@ -97,6 +98,7 @@ from ..model.sap_data import (
     WenParams,
     is_null_section,
     is_opening_section,
+    link_type_status,
 )
 from ..model.section_profiles import _rotate_loops_about, _signed_loop_properties
 from ..model.section_properties import (
@@ -716,10 +718,46 @@ def _normalize_link_type(raw: str) -> str:
     ``LinkProperty.link_type`` uses SAP2000-style names (``"Linear"``,
     ``"Rubber Isolator"``, …); ETABS writes them compact and upper-case
     (``"HOOK"``) or with an ``IsolatorN`` alias.  Unknown types pass through
-    unchanged so Phase 1 still reports them faithfully.
+    unchanged so the coverage warning (``NotImplementedWarning``) can surface
+    them by their original spelling.
     """
     key = str(raw).strip().upper().replace(" ", "").replace("-", "").replace("_", "")
     return _LINK_TYPE_MAP.get(key, str(raw).strip())
+
+
+def _linkprop_line(groups) -> str:
+    """Reconstruct one ``LINKPROP …`` line from its parsed token groups."""
+    parts: list[str] = []
+    for kw, vals in groups:
+        for v in vals:
+            if isinstance(v, str):
+                parts.append(f'{kw} "{v}"')
+            else:
+                parts.append(f"{kw} {v}")
+    return "  ".join(parts)
+
+
+def _warn_uncovered_link_types(
+    props: dict[str, LinkProperty], raw_lines: dict[str, list[str]]
+) -> None:
+    """Warn for link types the importer cannot parse, with a report link.
+
+    A covered type is silent; an uncovered type (an unknown ETABS ``TYPE``
+    token, a multilinear link, or an unsupported damper subtype) emits a
+    :class:`~fea_toolkit._warnings.NotImplementedWarning` carrying the offending
+    ``LINKPROP`` line(s).  The full report-request message is printed for the
+    first property only; the rest are one-liners plus a single summary line.
+    """
+    reporter = LinkCoverageReporter()
+    for prop in props.values():
+        reason = link_type_status(prop.link_type)
+        if reason is None:
+            continue
+        lines = "\n".join(
+            raw_lines.get(prop.name, [f'LINKPROP "{prop.name}"  TYPE "{prop.link_type}"'])
+        )
+        reporter.report(prop.name, prop.link_type, reason, lines)
+    reporter.summarise()
 
 
 def _get_link_properties(sections: dict[str, list[GroupedLine]]) -> dict[str, LinkProperty]:
@@ -728,14 +766,18 @@ def _get_link_properties(sections: dict[str, list[GroupedLine]]) -> dict[str, Li
     Each property spans a ``TYPE`` line plus one ``DOF`` line per enabled
     degree of freedom (``DOF "U1" KE … CE … FIXED …``).  ``KE``/``CE`` are the
     effective (linearised) stiffness/damping used by elastic analyses; the
-    type-specific nonlinear tokens (``NONLIN``/``K``/``OPEN``/…) are stashed in
-    :attr:`LinkProperty.nonlinear` for Phase 2.
+    type-specific nonlinear tokens (``NONLIN``/``K``/``OPEN``/…) are
+    interpreted into :attr:`LinkProperty.nonlinear_params` by
+    :func:`_interpret_link_nonlinear`.  Uncovered types are then warned by
+    :func:`_warn_uncovered_link_types`.
     """
     props: dict[str, LinkProperty] = {}
+    raw_lines: dict[str, list[str]] = {}
     for groups in sections.get("LINK PROPERTIES", []):
         if not groups or groups[0][0] != "LINKPROP" or not groups[0][1]:
             continue
         name = str(groups[0][1][0])
+        raw_lines.setdefault(name, []).append(_linkprop_line(groups))
         attrs: dict[str, Any] = {}
         for kw, vals in groups[1:]:
             attrs[kw] = vals[0] if len(vals) == 1 else tuple(vals)
@@ -774,6 +816,7 @@ def _get_link_properties(sections: dict[str, list[GroupedLine]]) -> dict[str, Li
                 prop.nonlinear.setdefault(dof, {})[kw] = attrs[kw]
     for prop in props.values():
         _interpret_link_nonlinear(prop)
+    _warn_uncovered_link_types(props, raw_lines)
     return props
 
 
