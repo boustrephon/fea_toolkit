@@ -467,6 +467,59 @@ TABLE:  "LINK PROPERTY DEFINITIONS 04 - DAMPER"
         SAP2000Parser(s2k).parse().get_model_data()
 
 
+def test_link_axes_advanced_without_direction_warns(tmp_path):
+    """Advanced axes with no coordinate direction (two-joint/user-vector) is flagged."""
+    from fea_toolkit._warnings import NotImplementedWarning
+
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "CONNECTIVITY - LINK"
+   Link=ISO_1   JointI=1   JointJ=2
+TABLE:  "LINK LOCAL AXES ASSIGNMENTS 2 - ADVANCED"
+   Link=ISO_1   AdvanceAxes=Yes   CoordSys=GLOBAL
+"""
+    s2k = tmp_path / "test_link_axes_advanced.s2k"
+    s2k.write_text(content)
+    with pytest.warns(NotImplementedWarning, match="field 'AdvanceAxes'"):
+        SAP2000Parser(s2k).parse().get_model_data()
+
+
+def test_link_axes_named_csys_warns(tmp_path):
+    """A named coordinate system in the advanced axes is flagged."""
+    from fea_toolkit._warnings import NotImplementedWarning
+
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "CONNECTIVITY - LINK"
+   Link=ISO_1   JointI=1   JointJ=2
+TABLE:  "LINK LOCAL AXES ASSIGNMENTS 2 - ADVANCED"
+   Link=ISO_1   CoordSys=NAMED   CoordDir1=+Z
+"""
+    s2k = tmp_path / "test_link_axes_named_csys.s2k"
+    s2k.write_text(content)
+    with pytest.warns(NotImplementedWarning, match="field 'CoordSys'"):
+        SAP2000Parser(s2k).parse().get_model_data()
+
+
+def test_link_axes_coord_dir_not_warned(tmp_path):
+    """The honoured coordinate-direction method (with GLOBAL) produces no warning."""
+    import warnings as _warnings
+
+    from fea_toolkit._warnings import NotImplementedWarning
+
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "CONNECTIVITY - LINK"
+   Link=ISO_1   JointI=1   JointJ=2
+TABLE:  "LINK LOCAL AXES ASSIGNMENTS 2 - ADVANCED"
+   Link=ISO_1   AdvanceAxes=Yes   CoordSys=GLOBAL   CoordDir1=+Z   CoordDir2=+X
+"""
+    s2k = tmp_path / "test_link_axes_coord_dir.s2k"
+    s2k.write_text(content)
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        SAP2000Parser(s2k).parse().get_model_data()
+    nw = [w for w in caught if issubclass(w.category, NotImplementedWarning)]
+    assert nw == []
+
+
 def test_multiple_uncovered_links_warn_once_then_summarise(tmp_path):
     """The full report message is emitted once; the rest are one-liners + a summary."""
     import warnings as _warnings

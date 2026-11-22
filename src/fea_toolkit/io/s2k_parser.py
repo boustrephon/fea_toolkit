@@ -1203,7 +1203,11 @@ class SAP2000Parser:
 
         Returns ``{link_id: {"angle", "coord_dir1", "coord_dir2"}}``.  The
         reference-vector directions (``2 - ADVANCED``) are what orient a
-        zero-length link (e.g. a base isolator whose U1 must be vertical).
+        zero-length link (e.g. a base isolator whose U1 must be vertical).  The
+        ``Coord Dir`` method is honoured through ``CoordDir1``/``CoordDir2``; a
+        reference vector defined by a method the importer does not parse (a
+        two-joint or user-vector reference, or a named coordinate system) is
+        flagged rather than silently defaulted to the link's I-J geometry.
         """
         axes: dict[str, dict[str, Any]] = {}
         for rec in self._raw_tables.get("LINK LOCAL AXES ASSIGNMENTS 1 - TYPICAL", []):
@@ -1226,6 +1230,29 @@ class SAP2000Parser:
                 entry["coord_dir1"] = coord_dir1
             if coord_dir2:
                 entry["coord_dir2"] = coord_dir2
+            # The advanced axes reference vector can be defined by a method the
+            # importer does not parse.  Two of them are name-agnostic and so are
+            # detected directly: (a) advanced axes with *no* ``CoordDir1`` — the
+            # axis reference must be a two-joint or user-vector definition; and
+            # (b) a named coordinate system, in which ``CoordDir1`` is relative
+            # to a CSYS we cannot resolve as a global direction.  Flag rather
+            # than silently defaulting the link to its I-J geometry.
+            advance = str(rec.get("AdvanceAxes", "")).strip().lower()
+            if advance in ("yes", "true", "1") and not coord_dir1:
+                self._warn_link_field(
+                    link_id,
+                    "AdvanceAxes",
+                    "LINK LOCAL AXES ASSIGNMENTS 2 - ADVANCED",
+                    self._rec_to_line("LINK LOCAL AXES ASSIGNMENTS 2 - ADVANCED", rec),
+                )
+            csys = rec.get("CoordSys")
+            if csys not in (None, "") and str(csys).strip().upper() != "GLOBAL":
+                self._warn_link_field(
+                    link_id,
+                    "CoordSys",
+                    "LINK LOCAL AXES ASSIGNMENTS 2 - ADVANCED",
+                    self._rec_to_line("LINK LOCAL AXES ASSIGNMENTS 2 - ADVANCED", rec),
+                )
         return axes
 
     def _get_link_connectivity(self) -> list[LinkElement]:
