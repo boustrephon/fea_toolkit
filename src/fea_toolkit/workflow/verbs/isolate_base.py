@@ -56,7 +56,6 @@ def run_isolate_base(context: StepContext, step: Step) -> list[StepResult]:
     count, node_ids = isolate_base(
         model, params["property"], selection=step.selection, coord_dir1=params["coord_dir1"]
     )
-    context.model_data = model
 
     if count:
         context.log(
@@ -65,4 +64,7 @@ def run_isolate_base(context: StepContext, step: Step) -> list[StepResult]:
         )
     else:
         context.log("isolate_base: no fully-restrained base nodes to isolate")
+    # Commit the edited model only after the (fallible) log call succeeds, so a
+    # logging failure leaves the previous model and mesh intact.
+    context.model_data = model
     return [StepResult(kind=MODEL, label="Base isolated", payload=model)]
