@@ -1367,8 +1367,9 @@ tracked follow-ups, not fresh bugs:**
   distinct from the effective ``Ce``; `_scale_link_properties` scales ``ce``
   linearly (F/L) and ``c`` by ``F/L^cexp`` (previously ``ce`` was scaled by
   ``F/L^cexp`` — a units error for the *effective* coefficient), and
-  `_damper_dof_mat` uses ``c`` (falling back to ``ce`` for the linear
-  `cexp == 1` subtype).  The parser does not yet populate ``c`` from the damper
+  `_damper_dof_mat` uses ``c`` (falling back to ``ce`` with exponent ``1.0``
+  when ``c`` is unset — only a supplied nonlinear ``c`` uses ``cexp``).  The
+  parser does not yet populate ``c`` from the damper
   table's ``C`` column — blocked on a real export (interim note below).
 * ~~**`nonlinear_params` codec round-trip**~~ ✅ resolved 2026-11-22 —
   `io/model_codec` now decodes the ``__type__`` discriminator to the concrete
