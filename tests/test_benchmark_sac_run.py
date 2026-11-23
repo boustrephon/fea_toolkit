@@ -10,7 +10,13 @@ import json
 import numpy as np
 import pytest
 
-from fea_toolkit.benchmarks.sac_run import compute_metrics, floor_levels, write_manifest
+from fea_toolkit.benchmarks.sac_run import (
+    _metrics_from_npz,
+    _save_npz,
+    compute_metrics,
+    floor_levels,
+    write_manifest,
+)
 
 
 def _synthetic_result(n: int = 5) -> dict:
@@ -116,3 +122,49 @@ def test_write_manifest_roundtrips_and_omits_cache_keys(tmp_path):
     assert payload[0]["converged"] is True
     assert payload[0]["F_max"] == pytest.approx(1.028e7)
     assert "_fingerprint" not in payload[0]
+
+
+def test_save_npz_writes_a_schema_transient_block(tmp_path):
+    """The cache now also carries a schema-shaped ``transient/case`` block (B.5)."""
+    from fea_toolkit.io.npz_reader import read_results_npz
+    from fea_toolkit.io.results_schema import make_transient_key
+
+    n = 3
+    res = {
+        "times": np.arange(n, dtype=float) * 0.01,
+        "displacements": {
+            10: np.column_stack([np.arange(n, dtype=float), np.zeros(n), np.zeros(n)])
+        },
+        "base_shear": np.linspace(0.0, 10.0, n),
+        "direction": "X",
+    }
+    metrics = {
+        "roof_disp": 0.02,
+        "d_max": 0.02,
+        "xdd_max": 5.0,
+        "F_max_frame": 10.0,
+        "F_max": 20.0,
+        "N_d": 2,
+        "peak_plastic_rotation": 0.001,
+        "max_dissipated_energy": 3.0,
+        "converged_steps": n,
+        "num_steps": n,
+        "period_1": 1.0,
+        "period_2": 0.3,
+        "_fingerprint": "abc123",
+        "_building": 3,
+        "_record": "LA21",
+        "_intensity": 1.0,
+        "_hinge_model": "lumped",
+        "_backbone": "trilinear",
+    }
+    path = tmp_path / "case.npz"
+    _save_npz(path, metrics, res, [(0.0, 1), (4.0, 10)])
+
+    data = read_results_npz(str(path))
+    assert make_transient_key("case", "transient/{case}/time") in data
+    assert make_transient_key("case", "transient/{case}/node_disp_x") in data
+    # The flat metrics survive for the existing read path.
+    rebuilt = _metrics_from_npz(data)
+    assert rebuilt["roof_disp"] == 0.02
+    assert rebuilt["_fingerprint"] == "abc123"

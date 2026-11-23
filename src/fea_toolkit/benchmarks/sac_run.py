@@ -28,7 +28,7 @@ import numpy as np
 
 from .._unit_scaling import g_from_units
 from ..io.npz_reader import read_results_npz
-from ..io.npz_writer import save_results_arrays
+from ..io.npz_writer import collect_transient_arrays, save_results_arrays
 from ..model.csm import bilinearize_equal_energy
 from . import sac
 from .sac_response_data import CASE_ORDER
@@ -382,10 +382,10 @@ def run_case(
     out_path = _case_path(building, record_id, intensity, hinge_model, backbone)
 
     if not force and out_path.exists():
-        # Stop-gap (P43): this per-case cache is a private, non-schema NPZ
-        # (flat scalar metrics + a few histories), not a unified results
-        # archive.  It still reads through the storage seam so ``np.load``
-        # stays confined to ``io/`` — see ``docs/_pending_work.md``.
+        # The cache reads through the storage seam so ``np.load`` stays
+        # confined to ``io/``.  Besides the flat scalar metrics it now also
+        # carries a schema-shaped ``transient/case`` block (B.5), so the
+        # history can be replayed without re-running the analysis.
         data = read_results_npz(str(out_path))
         if str(data["_fingerprint"].item()) == fingerprint:
             return _metrics_from_npz(data)
@@ -476,7 +476,15 @@ def _metrics_from_npz(data: Any) -> dict[str, Any]:
 def _save_npz(
     path: Path, metrics: dict[str, Any], res: dict[str, Any], levels: list[tuple[float, int]]
 ) -> None:
-    """Write a case NPZ: the scalar metrics plus the roof history for figures."""
+    """Write a case NPZ: the scalar metrics plus the roof history for figures.
+
+    The scalar metrics and fingerprint stay flat (they are benchmark cache
+    metadata, not schema results); the time-history itself is *also* written as
+    a schema-shaped ``transient/case/...`` block via
+    :func:`~fea_toolkit.io.npz_writer.collect_transient_arrays`, so a standalone
+    consumer (``plot_transient_animation(path, case="case")``) can read the
+    cached run through the repository seam without re-running it (P43/B.5).
+    """
     roof_tag = levels[-1][1]
     n = int(metrics["converged_steps"])
     arrays: dict[str, Any] = {}
@@ -491,7 +499,9 @@ def _save_npz(
     ]
     arrays["base_shear"] = np.asarray(res.get("base_shear", np.zeros(n)))[:n]
     arrays["roof_tag"] = np.array(roof_tag)
-    # Stop-gap (P43): write through the seam — see the read site in run_case().
+    # Schema-shaped transient block (B.5) — the same histories, under the
+    # unified ``transient/<case>/...`` keys, so the seam can serve them.
+    arrays.update(collect_transient_arrays({"case": res}))
     save_results_arrays(str(path), arrays)
 
 
