@@ -37,6 +37,7 @@ from .results_schema import (
     STATIC_LOCAL_FORCE_ARRAYS,
     STATIC_NODAL_ARRAYS,
     STATIC_SHELL_COMPONENT_ARRAYS,
+    transient_case_names,
 )
 
 __all__ = ["NpzResultsRepository", "ResultsRepository", "mesh_model_from_geometry"]
@@ -53,6 +54,12 @@ _FORCE_COMPONENTS = ("fx", "fy", "fz", "mx", "my", "mz")
 #: block.  Spelled out (not derived from the schema names) so the two lists
 #: fail loudly side by side — the same rule as :data:`_FORCE_COMPONENTS`.
 _SHELL_COMPONENTS = ("fx", "fy", "fxy", "mx", "my", "mxy")
+
+#: Transient nodal displacement components, in the array spelling used by the
+#: per-case ``transient/<case>/node_disp_*`` block.  Spelled out (not derived
+#: from the schema names) so the two fail loudly side by side — the same rule
+#: as :data:`_FORCE_COMPONENTS`.
+_TRANSIENT_DISP_COMPONENTS = ("node_disp_x", "node_disp_y", "node_disp_z")
 
 
 def _array_length(arrays: dict, name: str) -> int:
@@ -250,6 +257,14 @@ class ResultsRepository(ABC):
         """The dense result blocks for one case, keyed by array name."""
 
     @abstractmethod
+    def transient_cases(self) -> list:
+        """Transient (time-history) case labels present in the archive."""
+
+    @abstractmethod
+    def transient_arrays_for(self, case: str) -> dict:
+        """The transient result block for one case, keyed by array name."""
+
+    @abstractmethod
     def display_geometry(self) -> dict:
         """Node coordinates, frame/shell connectivity and ids — enough to draw."""
 
@@ -342,6 +357,78 @@ class ResultsRepository(ABC):
                 [_at(component, index, 0.0) for component in components], dtype=float
             )
         return displacements
+
+    def has_transient_displacements(self, case: str) -> bool:
+        """Whether *case* carries transient nodal displacement history.
+
+        The time-history counterpart of :meth:`has_displacements`: recording is
+        optional, so a caller deciding whether to *offer* a transient animation
+        asks here rather than building the arrays.
+
+        Args:
+            case: Transient case label, as in :meth:`transient_cases`.
+
+        Returns:
+            ``True`` when any ``node_disp_*`` column is present for *case*.
+        """
+        arrays = self.transient_arrays_for(case)
+        return any(name in arrays for name in _TRANSIENT_DISP_COMPONENTS)
+
+    def transient_nodal_displacements(self, case: str) -> tuple:
+        """``(times, base_shear, {node_id: (N_t, 3)})`` for *case*.
+
+        Re-keys the dense ``node_disp_*`` columns (``N_t × N_rec`` over the
+        recorded subset, column order given by ``node_tag``) and maps each
+        ``node_tag`` to its ``node_id`` via :meth:`display_geometry` — exactly
+        the tag→id join :meth:`nodal_displacements` performs, so the ids are the
+        ones :meth:`as_model` names its nodes with.  Unrecorded nodes are
+        omitted (the writer records exactly the nodes in ``node_tag`` and never
+        NaN-fills displacements), so a caller degrades to "gray for missing"
+        rather than fabricating zeros.
+
+        Args:
+            case: Transient case label, as in :meth:`transient_cases`.
+
+        Returns:
+            ``(times, base_shear, displacements)`` — ``times`` and ``base_shear``
+            are the 1-D ``N_t`` histories (``None`` when absent);
+            ``displacements`` maps each recorded node id to its ``(N_t, 3)``
+            history.  The dict is empty when *case* carries no displacement
+            history — a normal state, not an error.
+        """
+        arrays = self.transient_arrays_for(case)
+        times = arrays.get("time")
+        base_shear = arrays.get("base_shear")
+        if not any(name in arrays for name in _TRANSIENT_DISP_COMPONENTS):
+            return times, base_shear, {}
+
+        geometry = self.display_geometry()
+        node_ids = _texts(geometry.get("node_sap_id"))
+        node_tags = _ints(geometry.get("node_tag"))
+        id_of_tag = {
+            str(tag): _at(node_ids, index) or str(tag) for index, tag in enumerate(node_tags)
+        }
+
+        recorded_tags = _ints(arrays.get("node_tag"))
+        columns = []
+        for name in _TRANSIENT_DISP_COMPONENTS:
+            values = arrays.get(name)
+            if values is None:
+                columns.append(None)
+                continue
+            column = np.asarray(values, dtype=float)
+            columns.append(column[:, None] if column.ndim == 1 else column)
+        n_t = max((column.shape[0] for column in columns if column is not None), default=0)
+
+        displacements: dict = {}
+        for column_index, tag in enumerate(recorded_tags):
+            node_id = id_of_tag.get(str(tag), str(tag))
+            history = np.zeros((n_t, 3), dtype=float)
+            for axis, column in enumerate(columns):
+                if column is not None and column.shape[1] > column_index:
+                    history[: column.shape[0], axis] = column[:, column_index]
+            displacements[node_id] = history
+        return times, base_shear, displacements
 
     def has_forces(self, case: str) -> bool:
         """Whether *case* carries frame end forces — the cheap pre-check.
@@ -569,6 +656,10 @@ class NpzResultsRepository(ResultsRepository):
         labels = self._data.get("static_case_labels")
         return [] if labels is None else [str(label) for label in labels]
 
+    def transient_cases(self) -> list:
+        """Transient case labels, sorted — the schema's own discovery order."""
+        return transient_case_names(self._data)
+
     def case_meta(self, case: str) -> dict:
         """``group`` / ``family`` / ``coords`` for *case*, where recorded."""
         labels = self.cases()
@@ -587,6 +678,15 @@ class NpzResultsRepository(ResultsRepository):
     def arrays_for(self, case: str) -> dict:
         """The arrays under ``static/<case>/``, keyed without that prefix."""
         prefix = f"static/{case}/"
+        return {
+            key[len(prefix) :]: value
+            for key, value in self._data.items()
+            if key.startswith(prefix) and isinstance(value, np.ndarray)
+        }
+
+    def transient_arrays_for(self, case: str) -> dict:
+        """The arrays under ``transient/<case>/``, keyed without that prefix."""
+        prefix = f"transient/{case}/"
         return {
             key[len(prefix) :]: value
             for key, value in self._data.items()

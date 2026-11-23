@@ -319,6 +319,115 @@ class TestNodalDisplacements:
 
 
 # ═══════════════════════════════════════════════════════════════════
+# Transient (time-history) displacement — the animation input
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _transient_archive() -> dict:
+    """Geometry (with ``node_sap_id``) plus a transient ``ELC`` displacement block.
+
+    The ``node_disp_*`` columns are ``N_t × N_rec`` over the recorded subset
+    (nodes 1 and 3), so node 2 — present in the geometry but not recorded — is
+    exactly the "gray for missing" case a reader must omit rather than zero-fill.
+    """
+    n_t = 4
+    return {
+        "node_tag": np.array([1, 2, 3], dtype=int),
+        "node_sap_id": np.array(["1", "2", "3"], dtype=str),
+        "node_x": np.zeros(3),
+        "node_y": np.zeros(3),
+        "node_z": np.array([0.0, 10.0, 20.0]),
+        "frame_eid": np.array([1, 2], dtype=int),
+        "frame_node_i": np.array([1, 2], dtype=int),
+        "frame_node_j": np.array([2, 3], dtype=int),
+        "transient/ELC/time": np.linspace(0.0, 0.03, n_t),
+        "transient/ELC/base_shear": np.linspace(0.0, 40.0, n_t),
+        "transient/ELC/node_tag": np.array([1, 3], dtype=int),
+        "transient/ELC/node_disp_x": np.column_stack(
+            [np.arange(n_t, dtype=float), np.full(n_t, 10.0)]
+        ),
+        "transient/ELC/node_disp_y": np.zeros((n_t, 2)),
+        "transient/ELC/node_disp_z": np.full((n_t, 2), -0.5),
+    }
+
+
+class TestTransientDisplacements:
+    """The NLTHA animation's input: node-keyed time series, tied to the model."""
+
+    def test_transient_cases_are_discovered(self):
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        assert NpzResultsRepository(_transient_archive()).transient_cases() == ["ELC"]
+
+    def test_transient_arrays_for_strips_the_case_prefix(self):
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        arrays = NpzResultsRepository(_transient_archive()).transient_arrays_for("ELC")
+
+        assert set(arrays) == {
+            "time",
+            "base_shear",
+            "node_tag",
+            "node_disp_x",
+            "node_disp_y",
+            "node_disp_z",
+        }
+        assert arrays["node_disp_x"].shape == (4, 2)
+
+    def test_has_transient_displacements_is_the_cheap_pre_check(self):
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        repository = NpzResultsRepository(_transient_archive())
+        assert repository.has_transient_displacements("ELC") is True
+        assert repository.has_transient_displacements("NOT_A_CASE") is False
+
+    def test_node_histories_are_rekeyed_by_id(self):
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        times, base_shear, displacements = NpzResultsRepository(
+            _transient_archive()
+        ).transient_nodal_displacements("ELC")
+
+        assert times.shape == (4,)
+        assert base_shear.shape == (4,)
+        assert set(displacements) == {"1", "3"}
+        assert displacements["1"].shape == (4, 3)
+        assert displacements["1"][:, 0].tolist() == [0.0, 1.0, 2.0, 3.0]
+        assert displacements["3"][:, 0].tolist() == [10.0, 10.0, 10.0, 10.0]
+        assert np.allclose(displacements["3"][:, 2], -0.5)
+
+    def test_unrecorded_nodes_are_omitted_not_zero_filled(self):
+        """Node 2 is in the geometry but not in the transient ``node_tag``."""
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        _, _, displacements = NpzResultsRepository(
+            _transient_archive()
+        ).transient_nodal_displacements("ELC")
+
+        assert "2" not in displacements
+
+    def test_the_id_falls_back_to_the_node_tag_without_sap_ids(self):
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        arrays = _transient_archive()
+        del arrays["node_sap_id"]
+
+        _, _, displacements = NpzResultsRepository(arrays).transient_nodal_displacements("ELC")
+
+        assert set(displacements) == {"1", "3"}
+
+    def test_an_archive_without_transient_displacement_returns_empty(self):
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        times, base_shear, displacements = NpzResultsRepository(
+            _geometry()
+        ).transient_nodal_displacements("ELC")
+
+        assert times is None and base_shear is None
+        assert displacements == {}
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Element end forces — the flag-diagram input
 # ═══════════════════════════════════════════════════════════════════
 
