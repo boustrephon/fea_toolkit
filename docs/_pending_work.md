@@ -1074,9 +1074,12 @@ rules.
 **Step 4 — done (Absolute Add).**  `_generate_absolute()` expands an
 `Absolute Add` into a single `operator="absolute"` magnitude composite
 (`max = Σ|factorᵢ·xᵢ|`, `min = −max`), and `apply_composite_load_case()` reduces
-it as an element-wise sum of absolute values.  Like SRSS it forks `±` when a
-Linear-Add parent mixes it with signed terms, and its per-case metadata carries
-`family="absolute"` with no coordinate.
+it as an element-wise sum of absolute values.  A reference that itself expands
+to several variants is first grouped into one `operator="abs_max"` child, so its
+alternatives contribute a single element-wise maximum absolute value rather than
+one term each.  Like SRSS it forks `±` when a Linear-Add parent mixes it with
+signed terms, and its per-case metadata carries `family="absolute"` with no
+coordinate.
 
 **Remaining.**
 
@@ -1139,9 +1142,11 @@ Source: repo-root `README.md` §7 (Medium) "Improved Load Handling".
 
 **What.** `FRAME LOADS - POINT` (point loads on frames) is now **parsed**
 into ``frame_point_loads``, carried through the Preprocessor, visualised by
-``extract_load_glyphs``, and **applied** to OpenSees (transverse forces via
-``eleLoad -beamPoint``; axial forces and moments via a statically-equivalent
-nodal load, warned).  Temperature loads are closed (no current demand).
+``extract_load_glyphs``, and **applied** to OpenSees (transverse *and* axial
+forces via ``eleLoad -beamPoint`` — the ``Py Pz xL Px`` form; moments via a
+statically-equivalent nodal pair split by ``rdist``, warned; under
+``Corotational`` the forces fall back to the same nodal pair, warned).
+Temperature loads are closed (no current demand).
 Note: the pushover `lateral_load_type='point'` is a synthetic unit point
 load for benchmark pushes — distinct from parsing user-supplied
 `FRAME LOADS - POINT` data.
@@ -1149,8 +1154,9 @@ load for benchmark pushes — distinct from parsing user-supplied
 **Outline steps.** 1) ✅ **done 2026-10-16** — `FRAME LOADS - POINT` parsing into
 a new `frame_point_loads` field (carried through the Preprocessor and
 visualised by ``extract_load_glyphs``); 2) ✅ **done 2026-11-23** — propagate
-to OpenSees: transverse forces via `eleLoad -beamPoint`, axial forces and
-moments via a statically-equivalent nodal load (warned once per member+type);
+to OpenSees: transverse + axial forces via `eleLoad -beamPoint` (``Py Pz xL
+Px``), moments via a statically-equivalent nodal pair split by ``rdist``, and
+a `Corotational` fallback to nodal loads (warned once per member+type);
 3) ~~temperature loads~~ ✅ **closed 2026-10-14 — no current demand**
 (do not implement until a model actually needs them).
 

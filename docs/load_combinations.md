@@ -99,7 +99,10 @@ way a response-spectrum case does.
 
 `generate_combination_results()` emits a single `operator="absolute"`
 composite (`family="absolute"`, no coordinate), and `apply_composite_load_case()`
-reduces it as an element-wise sum of absolute values.  A Linear-Add parent that
+reduces it as an element-wise sum of absolute values — each reference's own
+alternatives first collapsed to one element-wise maximum absolute value (an
+`operator="abs_max"` child), so a reference that expands to several variants
+contributes once, not once per alternative.  A Linear-Add parent that
 references it forks `±` exactly like an SRSS term.
 
 ### SRSS
