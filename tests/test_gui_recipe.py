@@ -666,6 +666,43 @@ class TestResultViews:
         window._on_animate_toggled(False)
         assert not window._anim_timer.isActive()
 
+    def test_reopening_a_project_restores_the_nld_transient_history(self, window):
+        """The transient block is re-keyed into ``_nld_frames`` on reopen (B.4)."""
+        import numpy as np
+
+        from fea_toolkit.io.npz_writer import collect_transient_arrays
+        from fea_toolkit.io.results_repository import NpzResultsRepository
+
+        node_ids = list(window._model.nodes)
+        node_tags = [window._model.nodes[nid].node_tag for nid in node_ids]
+        n_steps = 4
+        history = {
+            tag: np.column_stack(
+                (np.arange(n_steps, dtype=float) * 0.001, np.zeros(n_steps), np.zeros(n_steps))
+            )
+            for tag in node_tags
+        }
+        case = "Nonlinear dynamic"
+        arrays = collect_transient_arrays(
+            {
+                case: {
+                    "times": np.arange(n_steps, dtype=float) * 0.005,
+                    "displacements": history,
+                    "base_shear": np.linspace(0.0, 10.0, n_steps),
+                    "direction": "X",
+                }
+            }
+        )
+        arrays["node_tag"] = np.array(node_tags, dtype=int)
+        arrays["node_sap_id"] = np.array(node_ids, dtype=str)
+
+        window._restore_transient_histories(NpzResultsRepository(arrays))
+
+        key = "table:nonlinear-dynamic"
+        assert len(window._nld_frames[key]) == n_steps
+        assert set(window._nld_frames[key].frame(0)) == set(node_ids)
+        assert window._nld_times[key] == [0.0, 0.005, 0.01, 0.015]
+
     def test_switching_views_stops_the_animation(self, window):
         """Switching to a different view stops a running animation and clears the toggle."""
         import numpy as np

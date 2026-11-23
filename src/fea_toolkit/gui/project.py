@@ -30,7 +30,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Optional
 
-from ..workflow.steps import CASES, IDA, MODAL, PUSHOVER, RS
+from ..workflow.steps import CASES, IDA, MODAL, NLD, PUSHOVER, RS
 from .controllers._atomic import atomic_write_text
 
 __all__ = [
@@ -201,6 +201,7 @@ def collect_project_results(results: list) -> dict:
     pushover_results: dict = {}
     pushover_step_results: dict = {}
     ida: Optional[dict] = None
+    transient: dict = {}
 
     for result in results:
         kind = getattr(result, "kind", None)
@@ -249,6 +250,10 @@ def collect_project_results(results: list) -> dict:
                                 pushover_step_results[key] = step_results
         elif kind == IDA and isinstance(payload, dict):
             ida = payload
+        elif kind == NLD:
+            data = getattr(payload, "data", None) or {}
+            if isinstance(data, dict) and data.get("displacements"):
+                transient[getattr(result, "label", "Nonlinear dynamic")] = data
 
     return {
         "static_arrays": static_arrays,
@@ -262,6 +267,7 @@ def collect_project_results(results: list) -> dict:
         "pushover_results": pushover_results,
         "pushover_step_results": pushover_step_results,
         "ida": ida,
+        "transient": transient,
     }
 
 

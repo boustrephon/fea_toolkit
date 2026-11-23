@@ -374,6 +374,17 @@ class Session:
             if ida_transient:
                 _merge_ida_transient(arrays, ida_transient)
                 self._append_analysis_type(arrays, "transient")
+
+        # ── Nonlinear-dynamic transient history ──
+        # The NLD verb's per-node displacement history is persisted under its
+        # result label as a ``transient/<label>/...`` block, so the animate
+        # toggle rebuilds on reopen without re-running the analysis.
+        transient = collected.get("transient") or {}
+        if transient:
+            from ..io.npz_writer import collect_transient_arrays
+
+            arrays.update(collect_transient_arrays(transient))
+            self._append_analysis_type(arrays, "transient")
         return arrays
 
     @staticmethod

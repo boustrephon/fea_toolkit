@@ -33,7 +33,7 @@ from fea_toolkit.gui.project import (
     write_project_zip,
     zip_project,
 )
-from fea_toolkit.workflow.steps import CASES, MODAL, PUSHOVER, RS, StepResult, Table
+from fea_toolkit.workflow.steps import CASES, MODAL, NLD, PUSHOVER, RS, StepResult, Table
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -94,6 +94,28 @@ def _pushover_step() -> StepResult:
                     "pp": {"S_dp": 0.1, "S_ap": 1.0, "S_dy": 0.05, "S_ay": 0.9},
                     "spectrum": {"T": [0.0, 1.0], "Sa": [1.0, 1.0]},
                 },
+            },
+        ),
+    )
+
+
+def _nld_step() -> StepResult:
+    n = 3
+    return StepResult(
+        kind=NLD,
+        label="Nonlinear dynamic (X)",
+        payload=AnalysisResult(
+            name="NonlinearDynamic",
+            analysis_type="NonlinearDynamicAnalysis",
+            data={
+                "times": np.arange(n, dtype=float) * 0.01,
+                "displacements": {
+                    1: np.column_stack([np.arange(n, dtype=float), np.zeros(n), np.zeros(n)]),
+                    2: np.column_stack([np.full(n, 0.1), np.zeros(n), np.zeros(n)]),
+                },
+                "base_shear": np.linspace(0.0, 10.0, n),
+                "direction": "X",
+                "converged_steps": n,
             },
         ),
     )
@@ -161,6 +183,29 @@ def test_collect_project_results_captures_rs_nodal_displacements():
     assert collected["rs_nodal_displacements"] == {"X": field}
     # A direction that recorded no field leaves the slot empty.
     assert collect_project_results([_rs_step("Y")])["rs_nodal_displacements"] == {}
+
+
+def test_collect_project_results_captures_nld_transient():
+    collected = collect_project_results([_nld_step()])
+    assert set(collected["transient"]) == {"Nonlinear dynamic (X)"}
+    data = collected["transient"]["Nonlinear dynamic (X)"]
+    assert list(data["times"]) == [0.0, 0.01, 0.02]
+    assert set(data["displacements"]) == {1, 2}
+
+
+def test_nld_transient_is_serialised_into_results_arrays():
+    """The NLD transient block lands in ``results.npz`` under its label."""
+    from fea_toolkit.gui.session import Session
+    from fea_toolkit.io.results_schema import make_transient_key
+
+    collected = collect_project_results([_nld_step()])
+    session = Session()
+    session.store = None
+    arrays = session._project_results_arrays(collected)
+
+    key = make_transient_key("Nonlinear dynamic (X)", "transient/{case}/node_disp_x")
+    assert key in arrays
+    assert "transient" in [str(v) for v in arrays["analysis_types"]]
 
 
 def test_rs_displacement_arrays_build_static_shaped_cases():
@@ -372,6 +417,7 @@ def test_collect_project_results_empty_run():
         "pushover_results": {},
         "pushover_step_results": {},
         "ida": None,
+        "transient": {},
     }
 
 

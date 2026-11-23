@@ -2727,6 +2727,34 @@ class MainWindow(QMainWindow):
         )
         return _NldStepHistory(arrays), time_labels
 
+    def _restore_transient_histories(self, repository) -> None:
+        """Restore transient animation histories from a reopened project's archive.
+
+        A saved project persists the nonlinear-dynamic transient block (via
+        :func:`~fea_toolkit.io.npz_writer.collect_transient_arrays`) under each
+        run's result label; on reopen the summary table is rebuilt but its
+        animation history is not, so this re-keys the block back into
+        ``_nld_frames`` / ``_nld_times`` — the same dicts the live path fills —
+        so Results ▸ Animate works without re-running the analysis.
+        """
+        from .controllers.view_registry import _table_key
+
+        restored = 0
+        for case in repository.transient_cases():
+            if not repository.has_transient_displacements(case):
+                continue
+            times, _base_shear, displacements = repository.transient_nodal_displacements(case)
+            if not displacements:
+                continue
+            key = _table_key(case)
+            self._nld_frames[key] = _NldStepHistory(displacements)
+            self._nld_times[key] = (
+                [float(t) for t in np.asarray(times, dtype=float)] if times is not None else []
+            )
+            restored += 1
+        if restored:
+            self._set_view_actions_enabled()
+
     def _ensure_analysis_mesh_displayed(self) -> None:
         """Render the geometry the active step history is keyed to.
 
@@ -4055,6 +4083,8 @@ class MainWindow(QMainWindow):
         # re-point it at the loaded one so recipe results and external archives
         # register in the displayed project's session.
         self._results_presenter.set_session(session)
+        if bundle.get("results") is not None:
+            self._restore_transient_histories(bundle["results"])
         panel = self._recipe_controller.panel
         if panel is not None:
             panel.set_session(session)
