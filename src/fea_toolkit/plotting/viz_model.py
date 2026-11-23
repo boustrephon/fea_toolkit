@@ -37,8 +37,8 @@ def _build_deformed_mesh(
     Args:
         segments: List of ``(p1, p2, di, dj)`` tuples — each entry holds
             the two endpoints and their displacement vectors.
-        seg_npoints: Number of subdivision points per segment (fixed from
-            undeformed length, so point count is invariant w.r.t. *amp*).
+        seg_npoints: Number of subdivision points per segment (fixed when the
+            mesh is built, so the point count is invariant w.r.t. *amp*).
         all_quads: List of ``(p1, p2, p3, p4, d1, d2, d3, d4)`` tuples —
             four corners and their displacement vectors.
         sec_idxs: Per-quad section index (one per entry in *all_quads*).
@@ -2449,10 +2449,12 @@ def plot_transient_animation(
             p1 = p1 + (m - p1) * shrink
             p2 = p2 + (m - p2) * shrink
         frame_geo.append((p1, p2, ni["tag"], nj["tag"]))
-        seg_npoints.append(max(2, int(np.linalg.norm(p2 - p1) * 2)))
+        seg_npoints.append(2)
 
     shell_geo = []
     for sh in data["shells"]:
+        if sh.get("inactive"):
+            continue  # inactive parent shells are wireframe overlays, not deformable
         pts = []
         tags = []
         for ref in (sh.get("node_ids") or sh.get("node_tags") or [])[:4]:
@@ -2501,6 +2503,24 @@ def plot_transient_animation(
                 line_width=1,
                 opacity=0.5,
             )
+        if shell_geo:
+            # Shell-only models would otherwise show no undeformed geometry
+            # behind the deformed shell; draw a grey shell mesh at zero
+            # displacement through the same mesh-rendering path.
+            zero = np.zeros(3)
+            orig_quads = [
+                (p1, p2, p3, p4, zero, zero, zero, zero) for (p1, p2, p3, p4, *_tags) in shell_geo
+            ]
+            _, orig_shell = _build_deformed_mesh([], [], orig_quads, [], 1.0, 0.0, shrink=shrink)
+            if orig_shell is not None and orig_shell.n_points:
+                plotter.add_mesh(
+                    orig_shell,
+                    color="#999999",
+                    show_edges=True,
+                    edge_color="#555555",
+                    opacity=0.35,
+                    lighting=False,
+                )
 
     # Non-animated display shows the peak-displacement step; animated display
     # initialises from step 0 and steps forward.
@@ -2537,7 +2557,9 @@ def plot_transient_animation(
             if not _timer_renders[0]:
                 plotter.render()
 
-        _timer_renders[0] = _add_animation_timer(plotter, callback, max_steps=3600, interval_ms=50)
+        _timer_renders[0] = _add_animation_timer(
+            plotter, callback, max_steps=max(n_steps, 3600), interval_ms=50
+        )
         plotter.show(auto_close=False)
     else:
         plotter.show()
