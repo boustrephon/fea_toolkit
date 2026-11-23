@@ -10,6 +10,63 @@ category: [archive]
 > [`_pending_work.md`](../_pending_work.md) on 2026-10-27.  Nothing here is
 > open work; the live plan lives in `_pending_work.md`.
 
+## DONE (2026-11-23 — planning-spine refresh: P41/P42/P48/P49 landed parts archived)
+
+Relocated from `_pending_work.md` on 2026-11-23.  The workflow/GUI front is
+complete (P31 / P35 / P46 — summarised in place there), and P49 (link elements)
+landed 2026-11-22.  P41 and P48 are fully relocated here; P42 and P49 keep slim
+"remaining" stubs in `_pending_work.md`.
+
+#### P48 — Recipe-panel ownership: A′ (panel-as-view)
+
+Source: the Session refactor (R1, 2026-11-17); `docs/_pending_work.md` (P48).
+
+**Status (2026-11-18).** ✅ Done — option **A′ (panel-as-view)** landed in R6:
+`RecipePanel.set_session()` binds the panel to the session, `panel.recipe`
+returns `session.recipe`, and `_sync_recipe_to_session` plus its `changed`
+connect are deleted.  The window rebinds the panel wherever it reassigns the
+session (`_build_recipe_dock`, `open_project_path`).  This upgrades Option B's
+convention-held invariant (in-place edits share the object; only rebinds needed
+the signal) to one held by construction — the panel can no longer diverge from
+`to_bundle()`.
+
+#### P42 (completed part) — IMK calibration + collapse: A0/A1/A2/A3
+
+Source: `docs/benchmark_roadmap.md` §3; `docs/imk_deterioration_model.md` §5;
+`docs/_pending_work.md` (P42).  (The A3 IDA-driver sub-item was archived
+2026-10-30; this records the full A0–A3 landing.)
+
+**Status (2026-10-30).** ✅ Landed — A0 (Lignos–Krawinkler 2011 beam and Lignos
+et al. 2019 column calibration equations), A1 (the `hinge_backbone="imk"`
+`IMKBilin` material in `opensees/_elements.py`), A2 (single-member cyclic M-θ
+checks, `tests/test_benchmark_sac_imk_cyclic.py`), and A3 (collapse detection
+`collapse_intensity`, the `run_ida` driver, bisection to 1 %, and
+`sdof_spectral_acceleration` + `collapse_capacity_sa` in `Sa(T1)` terms).  The
+beam-unbraced-length and Λ-validation questions were resolved 2026-10-30 (keep
+`Lb = L`; Eq. 13 transcription + cap unit-tested), and the residual-stiffness
+floor was dropped in favour of the benchmark's non-convergence criterion.
+**Remaining** (kept in `_pending_work.md`): the `enrich_hinge` build-time route.
+
+#### P49 (completed part) — Link element support: Phases 1 + 2a–2e
+
+Source: GitHub issue #3; `docs/nonlinear_link_plan.md`;
+`docs/_pending_work.md` (P49).
+
+**Status (2026-11-22).** ✅ Landed — linear link emission (Phase 1); nonlinear
+parsing + per-DOF emitters (Gap/Hook, Plastic-Wen, viscous/parallel dampers,
+bilinear/friction dampers) and bearing elements (rubber, single-FP, T/C FP,
+Triple Friction Pendulum) (Phase 2a/2b); dispatch + warnings + runner defaults
+(2c); the `check_hysteretic_backbone` and `isolate_base` workflow verbs (2d);
+and the reference benchmarks — E-Defense 5-storey LRB-CLB, E-Defense TPB,
+Morgan & Mahin FP, a viscous damper and gap/pounding (P49 §10) — plus the
+full-model E-Defense LRB-CLB shake-table check and the TPB configuration.
+Uncovered link types (multilinear, damper directional/orthotropic, unknown)
+warn + linearise on `Ke`.  **Remaining** (kept in `_pending_work.md`): the
+deferred-limitations list (multilinear backbones, exponential-damper fidelity,
+named CSYS), the interim CSI-column import policy, and the Iwanuma K-NET
+follow-up.
+
+
 ## DONE (2026-10-30 — P41 damage normalisation + the A3 IDA collapse driver)
 
 #### P41 — A4 damage normalisation (φj = θ/θ_y, dEj = E/(My·θ_y))

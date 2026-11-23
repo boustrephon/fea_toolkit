@@ -5,17 +5,18 @@ status: "draft"
 tags: [planning, work-log, internal]
 category: [planning]
 ---
-# Pending work — fea_toolkit (2026-10-27)
+# Pending work — fea_toolkit (2026-11-23)
 
 ## Strategy — the next steps
 
 > This log is the single source of truth for pending work; this section is the
-> *sequencing layer* over it (maintained 2026-11-20).  The standalone plan
+> *sequencing layer* over it (maintained 2026-11-23).  The standalone plan
 > documents are historical records — `analysis_builder_migration_plan.md`,
 > `csm_test_model_plan.md`, `deprecation_plan.md` and `linting_fix_plan.md`
 > are ✅ complete and tagged `category: [archive]` (P9's Phase 3 triage resolved 2026-10-11 — baseline renewed,
 > the remaining diagnostics accepted as known-benign per `.clinerules` §11).
-> The workflow/GUI front (P31, P35) is complete.
+> The workflow/GUI front (P31, P35, P46) is complete; P49 (link elements)
+> landed 2026-11-22.
 
 **Near term — finish the workflow layer.**
 
@@ -50,13 +51,20 @@ category: [planning]
    the `Ctrl+K` palette, the command echo and `Recipe.from_python` (see the P31
    entry below).
 
-**Next — GUI/workflow follow-ups, then physics.**  A six-item GUI follow-up
-batch precedes the physics tranche: ~~**P46** (benchmark library panel, below)~~ ✅,
-~~the P35 `SESSION`-result follow-up~~ ✅, ~~per-verb doc/DOI links~~ ✅,
-~~drag-and-drop NPZ/H5 results~~ ✅, ~~the mission-statement / `llm_guide` GUI
-docs~~ ✅, and ~~the quad-view milestone~~ ✅.  **Then — physics / feature gaps:**
-P6b, P7 (fibre patches, Python-native NLD), then P19 / P23 / P25, and P49
-(link-element support — currently rejected at preprocess, see the entry).
+**Next — physics / feature gaps (re-ranked 2026-11-23).**  The workflow/GUI
+front is complete: the near-term workflow-layer items, the six-item GUI
+follow-up batch and **P31 / P35 / P46** all landed, and **P49 — link-element
+support — landed 2026-11-22** ahead of the physics tranche (GitHub issue #3:
+parsing, per-DOF emitters, bearing elements, the `check_hysteretic_backbone` +
+`isolate_base` verbs, and the E-Defense LRB-CLB / TPB + Morgan & Mahin FP
+benchmarks — only its *deferred limitations* remain, see the P49 entry).  The
+remaining physics/feature tranche, in order: **P43 items 5–6** (make the
+schema-v4 transient result block consumable — the primary next feature, plan
+below), **P19** (member-interior force stations), **P6b / P39** (SD-section
+fidelity), **P7** (Python-native NLD), then **P23 / P25** (GUI polish +
+classic support symbols) and **P42b** (the IK-2005 collapse investigation —
+research, not a fixable defect).  **P50** and **P25** each need a decision
+before implementation.
 
 **Opportunistic — Tier 4.**  ~~P9 (linting Phase 3 triage)~~ ✅ **resolved
 2026-10-11** — fresh `npx pyright src/` baseline recorded, no new real bugs,
@@ -200,36 +208,29 @@ warranted — `pushover_step_stride` and the per-block flags are the answer):
 
 ## PENDING (active — not yet done)
 
-> Priority-ordered register of **open** work (maintained 2026-10-14).  Every
+> Priority-ordered register of **open** work (maintained 2026-11-23).  Every
 > item is cross-referenced to its source document.  Completed work — the
 > Tier 1–2 physics items, the Tier 3 workflow/GUI batch (P20–P38), and the
 > deferred-housekeeping closures — is recorded in the
 > [`history/_done_log.md`](history/_done_log.md) archive, so
-> this list shows only what remains.
+> this list shows only what remains.  **P41** and **P48** landed and are fully
+> relocated to the archive; **P42** and **P49** landed and keep only their
+> *remaining* stubs below (P42's `enrich_hinge` route; P49's deferred
+> limitations + Iwanuma follow-up) — their completed parts are archived too.
 
 ### Tier 3 — Feature gaps (placeholders / partial)
-
-#### P41 — A4 damage normalization (φj = θ/θ_y, dEj = E/(My·θ_y))
-
-Source: `docs/sac_nonlinear_benchmark.md`;
-`src/fea_toolkit/opensees/_runner_dynamic.py`.
-
-**What.** The peak extraction and `.mat` comparison landed 2026-10-26 (see
-`history/_done_log.md`).  ~~**Remaining:** the runner still returns the *raw*
-damage quantities — normalize them to the benchmark's φj = θ/θ_y and
-dEj = E/(My·θ_y).~~ ✅ **Landed 2026-10-30** — the runner now reads the
-already-instrumented `_hinge_yield_moments` and returns `peak_damage_rotation`
-(max hinge `θ/θ_y`) and `max_damage_energy` (max hinge `E/(My·θ_y)`), both
-dimensionless; asserted in `tests/test_benchmark_sac3_nltha.py`
-(`test_transient_recorders_hinge_damage`).
-
-**Where.** `opensees/_runner_dynamic.py`; `opensees/_elements.py`
-(`_create_lumped_hinges` hinge instrumentation); tests
-`tests/test_benchmark_sac3_nltha.py` (`test_transient_recorders_*`).
 
 #### P42 — IMK calibration equations + A2/A3 (Krawinkler collapse)
 
 Source: `docs/benchmark_roadmap.md` §3 (canonical); `docs/imk_deterioration_model.md`.
+
+> **Status: ✅ Landed (2026-10-30)** — A0 (the Lignos–Krawinkler 2011 beam and
+> Lignos et al. 2019 column calibration equations), A1 (the
+> `hinge_backbone="imk"` `IMKBilin` material), A2 (single-member cyclic M-θ
+> checks) and A3 (the IDA driver + collapse detection + bisection + the
+> `Sa(T1)` collapse capacity) all landed and are archived in
+> [`history/_done_log.md`](history/_done_log.md).  The **only remaining item**
+> is the `enrich_hinge` build-time route (named at the end of this entry).
 
 **Status (2026-10-27).** A1 machinery landed — `hinge_backbone="imk"` builds an
 `IMKBilin` steel hinge (energy-based cyclic deterioration) in `opensees/_elements.py`.
@@ -330,6 +331,17 @@ essentially correct and is **not** the explanation.
 Source: `docs/results_schema.md`; `docs/dev_notes.md` → *Results repository
 and the NumPy-typed seam*; `docs/nonlinear_dynamic_analysis.md`; P7.
 
+> **Status: ✅ Landed (2026-11-23)** — items 1–6, the project-bundle
+> follow-up, and the optional `sac_run.py` cache migration all landed.  Items
+> 1–4 (schema v4 + `collect_transient_arrays`) landed 2026-10-28; items 5–6
+> (2026-11-23) added the repository accessors (`transient_cases` /
+> `transient_arrays_for` / `transient_nodal_displacements` /
+> `has_transient_displacements`), `plot_transient_animation`, the report +
+> Rhino consumers (`transient_history_df` / `plot_transient_history` /
+> `transient_nodal_magnitudes` / `colour_nodes_from_npz`), and the
+> project-bundle persistence.  The *Detailed plan* below is retained as the
+> implementation record.
+
 **What.**  `AnalysisBuilder.run_transient_analysis()` (and
 `analysis/nonlinear_dynamic.py`) return an in-process time-history result —
 ``times``, per-node ``displacements`` / ``velocities`` / ``accelerations``
@@ -379,10 +391,10 @@ unified schema, and it must not.
 4. ✅ Add a ``collect_transient_arrays`` producer and wire it into
    ``unified_writer.write_results`` and ``npz_writer.write_results_npz``
    (``stage_writer`` is geometry-only, not a results archive).
-5. Extend ``ResultsRepository`` / ``NpzResultsRepository`` to list and serve
+5. ✅ Extend ``ResultsRepository`` / ``NpzResultsRepository`` to list and serve
    transient cases so the GUI / report / Rhino can consume them through the
    seam.
-6. Drive the block with a **real consumer** — NLTHA animation in the viewer
+6. ✅ Drive the block with a **real consumer** — NLTHA animation in the viewer
    and per-node / per-element histories in the report and Rhino — not the
    benchmark cache.  Only then migrate `benchmarks/sac_run.py` to read its
    peak scalars from a unified transient archive (optional follow-on, not a
@@ -401,6 +413,80 @@ unified schema, and it must not.
 `opensees/_runner_dynamic.py`, `analysis/nonlinear_dynamic.py`,
 `benchmarks/sac_run.py` (stop-gap only).  Tests: `tests/test_storage_seam.py`,
 `tests/test_stage_file.py` (schema coverage), `tests/test_runner_dynamic.py`.
+
+### P43 — Detailed plan (items 5–6): serve + consume the transient block (2026-11-23)
+
+Items 1–4 landed (schema v4, the `transient/<case>/...` block, the
+`TRANSIENT_*_ARRAYS` declaration + validation, and `collect_transient_arrays()`
+wired into `write_results()` / `write_results_npz()`).  This plan is the
+remaining two items, ordered so each lands with its own tests.
+
+**Item 5 — `ResultsRepository` lists and serves transient cases.**  Today
+`NpzResultsRepository.cases()` reads only `static_case_labels` and
+`arrays_for()` serves only the `static/<case>/` prefix, so a transient archive
+is invisible to every seam consumer (the GUI, the report, Rhino).  Add, beside
+the static accessors and in the same NumPy-typed style:
+
+1. `transient_cases() -> list[str]` — reuse `results_schema.transient_case_names`
+   (the same single source of truth `describe_results_npz` already uses) over
+   the archive's key set; no new column or key-prefix scan.
+2. `transient_arrays_for(case) -> dict` — the `transient/<case>/` block keyed
+   without the prefix, mirroring `arrays_for()` (keys are the flattened
+   `make_transient_key(case, template)` names).
+3. `transient_nodal_displacements(case) -> (times, {node_id: (N_t, 3)})` — re-key
+   the dense `node_disp_*` columns (N_t × N_rec over the **recorded** subset,
+   column order given by `transient/<case>/node_tag`) and map each `node_tag` to
+   its `node_id` via `display_geometry()` — exactly the tag→id join
+   `nodal_displacements()` already performs.  Unrecorded nodes are **omitted**
+   (the writer does not NaN-fill), so a caller degrades to "gray for missing"
+   rather than fabricating zeros.  Return `times` and `base_shear` alongside.
+4. `has_transient_displacements(case) -> bool` — the cheap pre-check, reading
+   the presence of any `node_disp_*` column.
+
+The additions to `ResultsRepository` must be **concrete** (like
+`nodal_displacements`), not abstract, so a non-NPZ backend inherits them for
+free.  Tests: `tests/test_results_repository.py` (transient listing + re-keying)
+and `tests/test_transient_schema.py` (shape/validation coverage).
+
+**Item 6 — a real consumer drives the block.**  Once the seam serves transient
+cases, the canonical NPZ must be *used*, not just written:
+
+1. **Standalone NLTHA animation in the viewer.**  Add a
+   `plot_transient_animation(source, case)` in `plotting/` that accepts an
+   `AnalysisBuilder` + result dict, **or** an NPZ path (the multi-format
+   pattern in `.clinerules` §3.8/§3.10) — reading the transient block through
+   `NpzResultsRepository.transient_nodal_displacements` — and reuses the
+   existing animation machinery (`plot_mode_animation`'s loop and the
+   `_add_animation_timer` contract).  This is what the GUI's live in-process
+   `_nld_frames` animation already does; the standalone path closes the
+   "homeless results" gap for a saved archive.
+2. **Per-node / per-element histories in the report and Rhino.**  Extend the
+   report's pandas-backed helpers to plot a node's `node_disp_*` time series and
+   the `base_shear` history from the block, and extend the Rhino export to
+   colour a frame/node at a chosen time index (or emit the peak envelope).
+   Both consumers read the same `transient_nodal_displacements` accessor, so
+   there is one reading path.
+3. **(Optional follow-on, not a prerequisite)** migrate `benchmarks/sac_run.py`'s
+   private content-addressed NLTHA cache to read its peak scalars from a
+   unified transient archive.
+
+**Follow-up — project-bundle persistence.**  The GUI animates NLD live
+in-process, but a saved project restores only the summary table — `_nld_frames`
+/ `_nld_times` do not survive reopen.  Persist the NLD transient block in the
+project bundle (via `collect_transient_arrays` into `results.npz`, through
+`collect_project_results`) and restore `_nld_frames` / `_nld_times` under
+`_table_key(label)` in `open_project_path`, mirroring the IDA-curve figure
+persistence, so the animate toggle works after reopening without re-running the
+analysis.  Test: `tests/test_gui_project.py` (a transient block round-trips a
+bundle and restores the animation frames).
+
+**Acceptance.**  (a) a `write_results_npz` archive with a `transient/<case>`
+block lists its case via `transient_cases()` and serves re-keyed per-node
+histories with no `np.load` outside the seam; (b)
+`plot_transient_animation(path, case)` renders an animation from the NPZ alone;
+(c) the report/Rhino consumers read the same accessor; (d) the project-bundle
+follow-up restores `_nld_frames`/`_nld_times` after reopen; (e) no new required
+dependency.
 
 #### P25 — classic support symbols on top of the per-DOF glyphs
 
@@ -985,14 +1071,17 @@ combinations reference need to have been run; a missing case raises a clear
 `docs/load_combinations.md` for the full operator reference and the sign-fork
 rules.
 
+**Step 4 — done (Absolute Add).**  `_generate_absolute()` expands an
+`Absolute Add` into a single `operator="absolute"` magnitude composite
+(`max = Σ|factorᵢ·xᵢ|`, `min = −max`), and `apply_composite_load_case()` reduces
+it as an element-wise sum of absolute values.  Like SRSS it forks `±` when a
+Linear-Add parent mixes it with signed terms, and its per-case metadata carries
+`family="absolute"` with no coordinate.
+
 **Remaining.**
 
 - **Bulk run driver** — run exactly the load cases a requested set of
   combinations references (ergonomic, not structural).
-- **`Absolute Add` operator** — per quantity ``max = Σ|factor·xᵢ|``,
-  ``min = −max`` (a magnitude, so it forks `±` when mixed with signed loads).
-  **Not implemented** — `generate_combination_results()` currently raises it as
-  unsupported.  Drop-in: no new result representation required.
 - **`Range Add` operator** — per quantity ``max = Σ max(0, xᵢ⁺)``,
   ``min = Σ min(0, xᵢ⁻)``; emits **two** composites like `Envelope`.  **Not
   implemented.**  Its CSI definition assumes each contributing case carries its
@@ -1049,18 +1138,20 @@ offsets.
 Source: repo-root `README.md` §7 (Medium) "Improved Load Handling".
 
 **What.** `FRAME LOADS - POINT` (point loads on frames) is now **parsed**
-into ``frame_point_loads`` and carried through the Preprocessor and
-visualised by ``extract_load_glyphs``; the only remaining gap is propagating
-it to OpenSees ``eleLoad`` point loads (display-only for now).  Temperature
-loads are closed (no current demand).  Note: the pushover
-`lateral_load_type='point'` is a synthetic unit point load for benchmark
-pushes — distinct from parsing user-supplied `FRAME LOADS - POINT` data.
+into ``frame_point_loads``, carried through the Preprocessor, visualised by
+``extract_load_glyphs``, and **applied** to OpenSees (transverse forces via
+``eleLoad -beamPoint``; axial forces and moments via a statically-equivalent
+nodal load, warned).  Temperature loads are closed (no current demand).
+Note: the pushover `lateral_load_type='point'` is a synthetic unit point
+load for benchmark pushes — distinct from parsing user-supplied
+`FRAME LOADS - POINT` data.
 
 **Outline steps.** 1) ✅ **done 2026-10-16** — `FRAME LOADS - POINT` parsing into
 a new `frame_point_loads` field (carried through the Preprocessor and
-visualised by ``extract_load_glyphs``); 2) propagate to OpenSees `eleLoad`
-point loads — **still open** (display-only for now, see the load-display
-work); 3) ~~temperature loads~~ ✅ **closed 2026-10-14 — no current demand**
+visualised by ``extract_load_glyphs``); 2) ✅ **done 2026-11-23** — propagate
+to OpenSees: transverse forces via `eleLoad -beamPoint`, axial forces and
+moments via a statically-equivalent nodal load (warned once per member+type);
+3) ~~temperature loads~~ ✅ **closed 2026-10-14 — no current demand**
 (do not implement until a model actually needs them).
 
 
@@ -1207,56 +1298,17 @@ real-backend probe pattern in `local/gui_pick_probe.py`).
 **Status.** **Optional** — no demand yet.  Do not schedule until click-target
 accuracy on large sections is reported as a real problem.
 
-#### P48 — Recipe-panel ownership: A′ (done, R6)
-
-Source: the Session refactor (R1, 2026-11-17) — the GUI's document state
-consolidated onto a Qt-free `gui/session.py` `Session` object (store / views /
-recipe / named selections / hidden set / last run) with `to_bundle` /
-`from_bundle` / `reset` round-tripping it.
-
-**What.** The recipe's *live* owner is still the `RecipePanel`; the session
-follows via a `changed` → `_sync_recipe_to_session` write-back (Option B).  The
-panel edits the session's recipe *in place*, and the two rebind points
-(`set_recipe` / `clear`) resync through the signal, so
-`session.recipe is panel.recipe` holds after every change.  Persistence/run
-reads go through `session.recipe`; `_set_recipe_actions_enabled` still reads the
-panel because it is a `changed` handler and must see the live editor.
-
-**Why it might be worth upgrading.** Option B's single-object invariant is held
-by *convention* (in-place edits share the object; only rebinds need the signal),
-not by construction.  A future panel method that rebinds without emitting
-`changed` would silently desynchronise `to_bundle()`.
-
-**Options** (both leave `Session` and its bundle methods untouched — the
-migration is a delete-plus-repoint):
-
-- **A′ (panel-as-view).** Give `RecipePanel` a session reference (or a
-  getter/setter); `panel.recipe` *returns* `session.recipe`; `add_step` /
-  `set_recipe` / `clear` operate on `session.recipe` directly; delete
-  `_sync_recipe_to_session` and its `connect`.  The panel can then no longer
-  diverge.
-- **A (in-place `set_recipe`).** Keep the panel decoupled; make `set_recipe` /
-  `clear` replace `steps[:]` / `name` *in place* instead of rebinding, and have
-  `Session.from_bundle` mutate `self.recipe.steps[:]` rather than rebinding.
-
-**When.** Natural home is R6 (when `RecipePanel` is re-homed under a
-`RecipeController`), or earlier if the "`changed` as correctness carrier" smell
-bites.  Keep the two disciplines B established — the sync lives in exactly one
-method, and `RecipePanel.set_recipe` / `recipe`'s public contract stays stable —
-so the later move stays small.
-
-**Where.** `gui/main_window.py` (`_sync_recipe_to_session` + the `changed`
-connect), `gui/views/recipe_panel.py`.
-
-**Status.** **Done** — option **A′ (panel-as-view)** landed in R6 (2026-11-18):
-`RecipePanel.set_session()` binds the panel to the session, `panel.recipe`
-returns `session.recipe`, and `_sync_recipe_to_session` plus its `changed`
-connect are deleted.  The window rebinds the panel wherever it reassigns the
-session (`_build_recipe_dock`, `open_project_path`).
-
 #### P49 — Link (connection / isolator / damper) element support
 Source: GitHub issue #3 — "Link objects are ignored: link-only nodes are dropped
 while their restraints are kept, producing an unsupported (singular) model".
+
+> **Status: ✅ Landed 2026-11-22** — Phases 1 and 2a–2e (parsing, per-DOF
+> emitters, bearing elements, dispatch/warnings/runner defaults, the
+> `check_hysteretic_backbone` + `isolate_base` verbs, and the E-Defense
+> LRB-CLB / TPB + Morgan & Mahin FP benchmarks) are complete and archived in
+> [`history/_done_log.md`](history/_done_log.md).  The **active** remainder is
+> the *Deferred — known limitations* list, the *Interim import policy*, and the
+> *Follow-up (pending external access)* below.
 
 **What.** Link objects are parsed and, since **Phase 1**, **emitted** as
 OpenSees elements.  `LINK PROPERTY DEFINITIONS 01 - GENERAL` / `02 - LINEAR`
