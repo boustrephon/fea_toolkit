@@ -4083,6 +4083,11 @@ class MainWindow(QMainWindow):
         # re-point it at the loaded one so recipe results and external archives
         # register in the displayed project's session.
         self._results_presenter.set_session(session)
+        # The newly opened project owns the transient histories — clear the
+        # window's cached frames/times in place first (even when the project
+        # carries no results repository), then restore only from this project.
+        self._nld_frames.clear()
+        self._nld_times.clear()
         if bundle.get("results") is not None:
             self._restore_transient_histories(bundle["results"])
         panel = self._recipe_controller.panel

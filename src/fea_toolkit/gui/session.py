@@ -50,6 +50,11 @@ class Session:
     #: reopened session has ``last_run`` unset, so :meth:`to_bundle` cannot
     #: rebuild the pushover / IDA figures from a run).
     _retained_figures: dict = field(default_factory=dict, repr=False)
+    #: The loaded project's results-archive arrays, retained independently of
+    #: the static RESULTS views so an NLD-only (or otherwise view-less) result
+    #: block survives a reopen → re-save round-trip.  :meth:`to_bundle` merges
+    #: these under any results from a new run.
+    _retained_results_arrays: dict = field(default_factory=dict, repr=False)
 
     def reset(self) -> None:
         """Clear the document state, leaving the workflow recipe untouched.
@@ -66,6 +71,7 @@ class Session:
         self.named_selections.clear()
         self.hidden_elem_ids.clear()
         self.last_run = None
+        self._retained_results_arrays.clear()
 
     def to_bundle(
         self, *, name: str, source_label: str, camera: Any = None, display: Optional[dict] = None
@@ -118,11 +124,18 @@ class Session:
             hidden_elem_ids=sorted(self.hidden_elem_ids),
             display=display or {},
         )
+        results_arrays = self._project_results_arrays(collected)
+        if self._retained_results_arrays:
+            # A reopened project keeps the arrays it was loaded with; a new
+            # run's results take precedence over the retained copy.
+            merged = dict(self._retained_results_arrays)
+            merged.update(results_arrays)
+            results_arrays = merged
         return {
             "manifest": manifest,
             "sap": store.raw(),
             "mesh": store.preprocessed(),
-            "results_arrays": self._project_results_arrays(collected),
+            "results_arrays": results_arrays,
             "figures": figures,
             "tables": tables,
         }
@@ -133,8 +146,10 @@ class Session:
 
         Reconstructs the store, the registered views, the recipe and the hidden
         set from the bundle :func:`~fea_toolkit.gui.project.read_project`
-        returned — nothing is re-run.  The named selections are not part of the
-        project bundle, so a reopened project starts with none (as before).
+        returned — nothing is re-run — and retains the loaded results arrays so
+        a reopened project can be re-saved without re-running its analyses.  The
+        named selections are not part of the project bundle, so a reopened
+        project starts with none (as before).
 
         Args:
             bundle: The ``read_project`` result (manifest + sap + mesh +
@@ -157,6 +172,12 @@ class Session:
 
         session = cls()
         session._retained_figures = dict(figures)
+        # Retain the archive's arrays so a reopened project can be re-saved
+        # without re-running anything — including NLD-only results, whose
+        # transient block is not represented by a static RESULTS view.
+        session._retained_results_arrays = (
+            dict(repository.to_arrays()) if repository is not None else {}
+        )
         project = manifest.get("project") or {}
         source_label = project.get("source_label", "")
         if sap is not None:
@@ -269,7 +290,7 @@ class Session:
 
     def _project_results_arrays(self, collected: dict) -> dict:
         """Merge the collected static archive arrays with modal + RS + pushover
-        + IDA.
+        + IDA + transient.
 
         RS displacement fields, modal mode shapes and pushover directions are
         persisted as static-shaped cases (``static/RS-<direction>/node_*``,
@@ -279,7 +300,11 @@ class Session:
         A single-record IDA contributes its scalar ladder / collapse provenance
         (``ida/<record>/…``) plus the retained collapse-rung transient block
         (``transient/ida_<record>/…``), so the IDA view and its history rebuild
-        on load without re-running the analysis.
+        on load without re-running the analysis.  The NLD transient history is
+        persisted as ``transient/<label>/…``; when it is the project's only
+        result, the analysis mesh's display geometry is folded in too, so the
+        restored displacements key back to mesh node ids rather than stringified
+        tags.
         """
         from ..io.npz_writer import collect_pushover_arrays
         from ..io.unified_writer import (
@@ -385,6 +410,15 @@ class Session:
 
             arrays.update(collect_transient_arrays(transient))
             self._append_analysis_type(arrays, "transient")
+            # An NLD-only project has no static results to supply the display
+            # geometry, so its tag-keyed transient block would restore as
+            # stringified tags instead of mesh node ids.  Fold in the analysis
+            # mesh's geometry unless another result already supplied it.
+            if mesh is not None:
+                from ..io._serial import collect_geometry_arrays
+
+                for key, value in collect_geometry_arrays(mesh).items():
+                    arrays.setdefault(key, value)
         return arrays
 
     @staticmethod
