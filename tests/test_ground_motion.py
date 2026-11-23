@@ -14,6 +14,7 @@ from fea_toolkit.io.ground_motion import (
     read_peer_record,
     record_summary,
     save_manifest_registry,
+    select_component_by_pga,
     source_extension,
 )
 from fea_toolkit.utils import DEFAULT_GRAVITY_MS2
@@ -157,3 +158,43 @@ class TestSourceExtension:
     def test_non_direct_url_falls_back_to_at2(self):
         assert source_extension("https://example.org/portal") == ".at2"
         assert source_extension("https://example.org/record.zip") == ".at2"
+
+
+class TestReadPeerRecordHeaderVariants:
+    """NGA-West2 headers can write DT in scientific notation or leading-dot form."""
+
+    def test_dt_scientific_notation(self, tmp_path):
+        f = tmp_path / "sci.at2"
+        f.write_text("NPTS=3\nDT=5.0E-03\n0.1\n0.1\n0.1\n", encoding="utf-8")
+        times, accel = read_peer_record(str(f))
+        assert times.tolist() == pytest.approx([0.0, 0.005, 0.01])
+        assert accel.tolist() == pytest.approx([0.1 * DEFAULT_GRAVITY_MS2] * 3)
+
+    def test_dt_leading_dot(self, tmp_path):
+        f = tmp_path / "dot.at2"
+        f.write_text("NPTS=2\nDT= .00500\n0.2\n0.2\n", encoding="utf-8")
+        times, _accel = read_peer_record(str(f))
+        assert times.tolist() == pytest.approx([0.0, 0.005])
+
+    def test_npts_mismatch_warns(self, tmp_path):
+        f = tmp_path / "trunc.at2"
+        f.write_text("NPTS=5\nDT=0.005\n0.1\n0.1\n0.1\n", encoding="utf-8")
+        with pytest.warns(UserWarning, match="truncated"):
+            times, _accel = read_peer_record(str(f))
+        assert len(times) == 3
+
+
+class TestSelectComponentByPGA:
+    """``select_component_by_pga`` picks the component matching a paper's PGA."""
+
+    def test_picks_closest_pga(self):
+        times = np.arange(5) * 0.005
+        candidates = {
+            "a": (times, np.array([0.0, 0.1, -0.05, 0.02, 0.0]) * DEFAULT_GRAVITY_MS2),
+            "b": (times, np.array([0.0, 0.3, -0.3, 0.1, 0.0]) * DEFAULT_GRAVITY_MS2),
+        }
+        assert select_component_by_pga(candidates, 0.12) == "a"
+        assert select_component_by_pga(candidates, 0.28) == "b"
+
+    def test_empty_returns_none(self):
+        assert select_component_by_pga({}, 0.1) is None

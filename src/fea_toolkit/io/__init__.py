@@ -38,6 +38,7 @@ from .ground_motion import (
     save_manifest_registry,
     scale_to_pga,
     scale_to_target_sa,
+    select_component_by_pga,
 )
 from .model_loader import load_model_data
 from .model_store import InMemoryModelStore, ModelHeader, ModelStore, model_header
@@ -213,6 +214,7 @@ __all__ = [
     "scale_to_pga",
     "scale_to_target_sa",
     "section_summary",
+    "select_component_by_pga",
     "summarise_load_cases",
     "summarise_load_patterns",
     "summarise_mass_sources",

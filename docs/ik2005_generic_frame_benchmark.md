@@ -749,6 +749,13 @@ Valley 1979 plus four Loma Prieta stations) come from the USGS NSMP archive via
    horizontal) is essential.  Mind the download caps (~200 records / 2 weeks,
    400 / month) — 7 records ≈ 14 files is well inside.
 
+**Automation.**  `scripts/fetch_peer_records.py` drives this flow — Selenium
+login → download by RSN → PGA-based component selection → rename to
+`data/ground_motion/local/<record_id>.AT2`.  Run `--list` for the 7 records and
+their Table-4.2 PGAs, then `--download --rsns …` with `NGA_W2_USER` /
+`NGA_W2_PASS` set (or `--select <dir>` to finish a manual download).  See
+`docs/nga_west2_download_guidance.md`.
+
 **Route C — FEMA P-695 far-field (public-domain fallback).**  If CESMD stays
 down, the **44-record FEMA P-695 far-field set** (ATC-63) is the documented
 public-domain alternative — free, widely mirrored, and a standard

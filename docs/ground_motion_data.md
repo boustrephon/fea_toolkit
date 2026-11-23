@@ -82,6 +82,11 @@ for a JSON manifest registry, and carries no waveform data.
 - **PEER NGA-West2 only** — 7 of the 40 LMSR-N records exist only in PEER
   NGA-West2 (Agnews, Salinas, Leona Valley #6, Pico & Sentous, Brawley,
   El Centro Imp. Co., Plaster City); see `ik2005_generic_frame_benchmark.md`.
+- **PEER NGA-West2 download** — `scripts/fetch_peer_records.py` (Selenium, via
+  the `[nga-download]` extra) drives the interactive login and download for
+  those 7 records and copies the PGA-matching horizontal to
+  `data/ground_motion/local/<record_id>.AT2`; see
+  `nga_west2_download_guidance.md`.
 - **Gated providers** — where the provider requires an interactive login (e.g.
   PEER NGA-West2), the script prints the metadata and portal URL and the user
   downloads the waveform manually to `data/ground_motion/local/<record_id>.at2`.

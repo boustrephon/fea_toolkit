@@ -36,6 +36,9 @@ fea-gui = "fea_toolkit.gui.app:main"
 mesh-remesh = [
     "gmsh>=4.12",
     ]
+nga-download = [
+    "selenium>=4",
+    ]
 report = [
     "pandas>=1.5",
     "imageio>=2.36",   # animated GIF export (report figures / examples)

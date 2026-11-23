@@ -10,9 +10,11 @@ converted to m/s² at read time (see :func:`read_peer_record`).
 """
 
 import pathlib
+import re
 import urllib.parse
+import warnings
 from dataclasses import dataclass, fields
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 
@@ -207,13 +209,25 @@ def is_direct_url(url: str) -> bool:
 # ── PEER NGA record reader ───────────────────────────────────────
 
 
+#: A signed floating-point value, including scientific notation (``5.0E-03``)
+#: and a leading-dot form (``.005``) — the two ways NGA-West2 writes ``DT``.
+_FLOAT_VALUE_RE = r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?"
+
+#: ``DT = <value>`` on a header line (whitespace around ``=`` tolerated).
+_DT_RE = re.compile(rf"(?:^|\s)DT\s*=\s*({_FLOAT_VALUE_RE})", re.IGNORECASE)
+
+#: ``NPTS = <int>`` on a header line.
+_NPTS_RE = re.compile(r"(?:^|\s)NPTS\s*=\s*(\d+)", re.IGNORECASE)
+
+
 def read_peer_record(path: str) -> tuple[np.ndarray, np.ndarray]:
     """Read a PEER NGA strong motion record.
 
-    PEER NGA format (``.AT2``) has a header with metadata followed
-    by acceleration values in g, one per line.  This function
-    auto-detects the header length by searching for a line that
-    contains ``NPTS`` or a data line.
+    PEER NGA format (``.AT2``) has a header with metadata followed by
+    acceleration values in g, one per line.  ``DT`` (time step) and
+    ``NPTS`` (sample count) are read from the header; ``DT`` tolerates
+    scientific notation and a leading-dot form, and ``NPTS`` is checked
+    against the number of values parsed so a truncated record warns.
 
     Args:
         path: Path to the ``.AT2`` file.
@@ -227,30 +241,27 @@ def read_peer_record(path: str) -> tuple[np.ndarray, np.ndarray]:
     Raises:
         ValueError: If the file cannot be parsed.
     """
-    import re
-
     with open(path, encoding="utf-8", errors="replace") as f:
         lines = f.readlines()
 
-    # Skip header — search for the first numeric data line
     data_lines: list[str] = []
     dt = 0.005  # default time step (fallback if no DT header)
+    npts: Optional[int] = None
     for line in lines:
         stripped = line.strip()
         if not stripped:
             continue
-        # Try to detect header metadata
         low = stripped.lower()
         if "npts" in low or "dt" in low:
-            # Extract DT from header lines, handling NPTS+DT on same line
-            # Only attempt fallback extraction when "dt" is explicitly present
-            m_dt = re.search(r"(?:^|\s)DT\s*=\s*([\d.]+)", stripped, re.IGNORECASE)
-            if not m_dt and "dt" in low:
-                m_dt = re.search(r"([\d.]+)", stripped[stripped.lower().find("dt") :])
+            # Parse DT and NPTS from the header (possibly on the same line),
+            # tolerating scientific notation and a leading-dot DT value.
+            m_dt = _DT_RE.search(stripped)
             if m_dt:
                 dt = float(m_dt.group(1))
+            m_npts = _NPTS_RE.search(stripped)
+            if m_npts:
+                npts = int(m_npts.group(1))
             continue  # skip recognized header metadata
-        # Check if this line starts with a number (data)
         try:
             float(stripped.split()[0])
             data_lines.extend(stripped.split())
@@ -264,8 +275,13 @@ def read_peer_record(path: str) -> tuple[np.ndarray, np.ndarray]:
         raise ValueError(f"No numeric data found in PEER record: {path}")
 
     accel = np.array([float(v) for v in data_lines], dtype=np.float64)
-    npts = len(accel)
-    times = np.arange(npts, dtype=np.float64) * dt
+    if npts is not None and npts != len(accel):
+        warnings.warn(
+            f"PEER record {path}: header NPTS={npts} but {len(accel)} values "
+            "were parsed — the record may be truncated.",
+            stacklevel=2,
+        )
+    times = np.arange(len(accel), dtype=np.float64) * dt
     # PEER NGA .AT2 stores acceleration in g — convert to the module's
     # canonical SI system (m/s²) so every reader/processor shares one unit.
     accel = accel * DEFAULT_GRAVITY_MS2
@@ -530,3 +546,32 @@ def record_summary(times: np.ndarray, accel: np.ndarray) -> dict:
         "ai": float(ai),
         "cav": float(cav),
     }
+
+
+def select_component_by_pga(
+    candidates: dict[str, tuple[np.ndarray, np.ndarray]],
+    target_pga_g: float,
+) -> Optional[str]:
+    """Return the component whose PGA (in g) is closest to *target_pga_g*.
+
+    Used to pick the horizontal component of a station whose recorded peak
+    ground acceleration matches a published value (e.g. IK-2005 Table 4.2),
+    since a paper often reports one component without its azimuth.
+
+    Args:
+        candidates: Mapping of component label → ``(times, accel)`` with
+            ``accel`` in m/s² (the module's canonical unit).
+        target_pga_g: Target peak ground acceleration in g.
+
+    Returns:
+        The label of the closest component, or ``None`` when *candidates*
+        is empty.
+    """
+    if not candidates:
+        return None
+    return min(
+        candidates,
+        key=lambda label: abs(
+            record_summary(*candidates[label])["pga"] / DEFAULT_GRAVITY_MS2 - target_pga_g
+        ),
+    )
