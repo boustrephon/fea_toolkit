@@ -454,7 +454,7 @@ def make_static_key(case_name: str, array_name: str) -> str:
 #: ``group`` names the combination a case was generated from — every variant of
 #: that combination carries the same value; ``family`` says what the variants of
 #: that group vary along (``"single"`` / ``"fork"`` / ``"envelope"`` / ``"path"``
-#: / ``"srss"``) and ``coords`` is a variant's position on that axis, joined with
+#: / ``"srss"`` / ``"absolute"``) and ``coords`` is a variant's position on that axis, joined with
 #: ``"|"`` (``"+RSX|-RSY"``, ``"max"``, ``"SUB|DEAD"``) — the stable identity a
 #: renderer groups and labels by, and the name is derived from it.  A field is
 #: written **only** when a caller supplies it.

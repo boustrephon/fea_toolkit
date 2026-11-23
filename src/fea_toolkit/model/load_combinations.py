@@ -67,6 +67,8 @@ _LINEAR_OPERATORS = frozenset({"", "add", "linear add"})
 _ENVELOPE_OPERATORS = frozenset({"envelope", "env"})
 #: Combination types that produce a magnitude (root-sum-square).
 _SRSS_OPERATORS = frozenset({"srss"})
+#: Combination types that sum absolute values (also a magnitude).
+_ABSOLUTE_OPERATORS = frozenset({"absolute", "absolute add"})
 
 #: Valid ``envelope_mode`` values for :func:`generate_combination_results`.
 ENVELOPE_MODES = ("maxmin", "per_path")
@@ -76,7 +78,8 @@ def _operator_of(combo: LoadCombination) -> str:
     """Normalise *combo*'s type string to an operator name.
 
     Returns:
-        ``"linear"``, ``"envelope"``, ``"srss"`` or ``"unsupported"``.
+        ``"linear"``, ``"envelope"``, ``"srss"``, ``"absolute"`` or
+        ``"unsupported"``.
     """
     op = (combo.combo_type or "").strip().lower()
     if op in _LINEAR_OPERATORS:
@@ -85,6 +88,8 @@ def _operator_of(combo: LoadCombination) -> str:
         return "envelope"
     if op in _SRSS_OPERATORS:
         return "srss"
+    if op in _ABSOLUTE_OPERATORS:
+        return "absolute"
     return "unsupported"
 
 
@@ -108,18 +113,20 @@ class CompositeLoadCase:
     Attributes:
         name: Composite name, unique within one generation call.
         operator: ``"linear"`` (weighted sum), ``"max"`` / ``"min"``
-            (per-quantity extreme selection) or ``"srss"``
-            (per-quantity root-sum-square).
+            (per-quantity extreme selection), ``"srss"``
+            (per-quantity root-sum-square) or ``"absolute"``
+            (per-quantity sum of absolute values).
         cases: For ``"linear"`` — ``{load_case: combined_factor}``.
         children: Scaled sub-composites.  For ``"linear"`` these are extra
-            signed terms; for ``"max"`` / ``"min"`` / ``"srss"`` they are
-            the alternatives that get reduced.  Each element is
-            ``(factor, composite)``.
+            signed terms; for ``"max"`` / ``"min"`` / ``"srss"`` /
+            ``"absolute"`` they are the alternatives that get reduced.  Each
+            element is ``(factor, composite)``.
         source: Name of the combination this composite was generated from.
         family: The collection the composite belongs to — ``"single"`` (one
             composite, no fork), ``"fork"`` (2ⁿ signed senses of a magnitude),
             ``"envelope"`` (a ``max`` / ``min`` pair), ``"path"`` (one
-            composite per envelope branch) or ``"srss"``.  Assigned where the
+            composite per envelope branch), ``"srss"`` or ``"absolute"``.
+            Assigned where the
             variants are produced, then propagated through a parent Linear Add
             (a Linear Add over an Envelope is an envelope pair, not a fork), so
             it describes the **variant axis** rather than the operator that
@@ -656,7 +663,7 @@ def _is_magnitude_combo(
         return False
     seen = _seen | {combo.name}
     operator = _operator_of(combo)
-    if operator == "srss":
+    if operator in ("srss", "absolute"):
         return True
     if operator != "linear" or not combo.entries:
         return False
@@ -1020,6 +1027,46 @@ def _generate_srss(
     )
 
 
+def _generate_absolute(
+    combo: LoadCombination,
+    load_cases: dict[str, LoadCase],
+    load_combinations: dict[str, LoadCombination],
+    envelope_mode: str,
+    active: frozenset,
+) -> list[CompositeLoadCase]:
+    """Expand an Absolute-Add combination into a single magnitude composite.
+
+    ``max = Σ|factorᵢ·xᵢ|`` and ``min = −max``, so the result is a magnitude —
+    exactly like SRSS it is emitted once, and forks ``±`` when a Linear-Add
+    parent mixes it with signed terms (see :func:`_is_magnitude_combo`).
+    """
+    children: list[tuple[float, CompositeLoadCase]] = []
+    for entry in combo.entries:
+        for variant in _entry_variants(
+            entry,
+            combo,
+            load_cases,
+            load_combinations,
+            envelope_mode,
+            active,
+            fork_magnitudes=False,
+        ):
+            children.append((1.0, variant))
+    return _name_variants(
+        combo.name,
+        [
+            CompositeLoadCase(
+                name="",
+                operator="absolute",
+                children=children,
+                source=combo.name,
+                family="absolute",
+                coords=(),
+            )
+        ],
+    )
+
+
 def generate_combination_results(
     combo: LoadCombination,
     load_cases: dict[str, LoadCase],
@@ -1065,6 +1112,8 @@ def generate_combination_results(
         return _generate_envelope(combo, load_cases, load_combinations, envelope_mode, active)
     if operator == "srss":
         return _generate_srss(combo, load_cases, load_combinations, envelope_mode, active)
+    if operator == "absolute":
+        return _generate_absolute(combo, load_cases, load_combinations, envelope_mode, active)
     raise ValueError(f"Unsupported combination type {combo.combo_type!r} for {combo.name!r}")
 
 
@@ -1150,7 +1199,7 @@ def _is_magnitude_shape(
     around an SRSS result, or the single-sense variant of a forked spectrum
     case.
     """
-    if composite.operator in ("srss", "max", "min"):
+    if composite.operator in ("srss", "absolute", "max", "min"):
         return True
     if composite.operator != "linear" or id(composite) in _seen:
         return False
@@ -1227,7 +1276,7 @@ def combination_case_meta(
         ``{composite_name: {"group", "family", "coords"}}`` — ready to hand to
         ``write_results(..., case_meta=...)``.  ``group`` is the combination the
         variant came from; ``family`` is ``"single"`` / ``"fork"`` /
-        ``"envelope"`` / ``"path"`` / ``"srss"``; ``coords`` is the
+        ``"envelope"`` / ``"path"`` / ``"srss"`` / ``"absolute"``; ``coords`` is the
         :func:`fork_coords` tuple joined with ``"|"`` so it fits one string
         array, and is ``""`` for a family with a single member (there is no axis
         position to record — see :func:`fork_coords`).
@@ -1246,13 +1295,15 @@ def combination_case_meta(
                 family = "envelope"
             elif composite.operator == "srss":
                 family = "srss"
+            elif composite.operator == "absolute":
+                family = "absolute"
             elif any(coord[:1] in ("+", "-") for coord in coords):
                 family = "fork"
             else:
                 family = "single"
-        if family in ("single", "srss"):
+        if family in ("single", "srss", "absolute"):
             # A one-member family has no axis position to record — a pure
-            # magnitude sum has no coordinate either.
+            # magnitude sum (SRSS or absolute) has no coordinate either.
             coords = ()
         meta[composite.name] = {
             "group": composite.source or composite.name,
@@ -1280,8 +1331,9 @@ def apply_composite_load_case(
 
     Returns:
         The combined array: a weighted sum (``"linear"``), an element-wise
-        extreme (``"max"`` / ``"min"``) or an element-wise root-sum-square
-        (``"srss"``).
+        extreme (``"max"`` / ``"min"``), an element-wise root-sum-square
+        (``"srss"``) or an element-wise sum of absolute values
+        (``"absolute"``).
 
     Raises:
         KeyError: If a referenced load case has no supplied array.
@@ -1316,6 +1368,8 @@ def apply_composite_load_case(
         return np.minimum.reduce(parts)
     if composite.operator == "srss":
         return np.sqrt(np.sum([part * part for part in parts], axis=0))
+    if composite.operator == "absolute":
+        return np.sum([np.abs(part) for part in parts], axis=0)
     raise ValueError(f"Unknown composite operator {composite.operator!r}")
 
 

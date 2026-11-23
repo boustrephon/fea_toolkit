@@ -246,6 +246,78 @@ def test_srss_child_forks_in_linear_parent(model):
     assert all(r.children[0][1].operator == "srss" for r in results)
 
 
+# ── Generation: Absolute Add ───────────────────────────────────────────
+
+
+def test_absolute_add_generates_a_single_magnitude(model):
+    cases, combos = model
+    combos = {**combos, "ABS": _combo("ABS", "Absolute Add", [("WIND", 1.0), ("RSX", 0.3)])}
+    classify_combination_refs(combos, cases)
+
+    results = generate_combination_results(combos["ABS"], cases, combos)
+
+    assert len(results) == 1
+    assert results[0].operator == "absolute"
+    assert [c.cases for _f, c in results[0].children] == [{"WIND": 1.0}, {"RSX": 0.3}]
+
+
+def test_absolute_add_child_forks_in_linear_parent(model):
+    """An Absolute-Add result is a magnitude, so it forks when mixed with statics."""
+    cases, combos = model
+    combos = {**combos, "ABS": _combo("ABS", "Absolute Add", [("WIND", 1.0)])}
+    combos["MIX_ABS"] = _combo("MIX_ABS", "Linear Add", [("DEAD", 1.2), ("ABS", 1.0)])
+    classify_combination_refs(combos, cases)
+
+    results = generate_combination_results(combos["MIX_ABS"], cases, combos)
+
+    assert len(results) == 2
+    assert all(r.operator == "linear" for r in results)
+    assert all(r.cases == {"DEAD": 1.2} for r in results)
+    assert [r.children[0][0] for r in results] == [1.0, -1.0]
+    assert all(r.children[0][1].operator == "absolute" for r in results)
+
+
+def test_apply_absolute_sums_absolute_values():
+    composite = CompositeLoadCase(
+        name="ABS",
+        operator="absolute",
+        children=[(1.0, _linear(A=1.0)), (1.0, _linear(B=-1.0))],
+    )
+    result = apply_composite_load_case(
+        composite, {"A": np.array([3.0, -4.0]), "B": np.array([2.0, 5.0])}
+    )
+    assert result == pytest.approx([5.0, 9.0])
+
+
+def test_absolute_add_meta(model):
+    """A one-member magnitude family has no coordinate to record."""
+    cases, combos = model
+    combos = {**combos, "ABS": _combo("ABS", "Absolute Add", [("WIND", 1.0)])}
+    classify_combination_refs(combos, cases)
+
+    meta = combination_case_meta(
+        generate_combination_results(combos["ABS"], cases, combos), cases, combos
+    )
+
+    assert meta["ABS"] == {"group": "ABS", "family": "absolute", "coords": ""}
+
+
+def test_absolute_add_forked_meta(model):
+    cases, combos = model
+    combos = {**combos, "ABS": _combo("ABS", "Absolute Add", [("WIND", 1.0)])}
+    combos["MIX_ABS"] = _combo("MIX_ABS", "Linear Add", [("DEAD", 1.2), ("ABS", 1.0)])
+    classify_combination_refs(combos, cases)
+
+    meta = combination_case_meta(
+        generate_combination_results(combos["MIX_ABS"], cases, combos), cases, combos
+    )
+
+    assert set(meta) == {"MIX_ABS [+ABS]", "MIX_ABS [-ABS]"}
+    assert meta["MIX_ABS [+ABS]"]["family"] == "fork"
+    assert meta["MIX_ABS [+ABS]"]["coords"] == "+ABS"
+    assert meta["MIX_ABS [-ABS]"]["coords"] == "-ABS"
+
+
 # ── Generation: Envelope ───────────────────────────────────────────────
 
 
@@ -322,10 +394,10 @@ def test_bad_envelope_mode(model):
 
 def test_unsupported_combination_type(model):
     cases, combos = model
-    combos["ABS"] = _combo("ABS", "Absolute Add", [("DEAD", 1.0)])
+    combos["RANGE"] = _combo("RANGE", "Range Add", [("DEAD", 1.0)])
     classify_combination_refs(combos, cases)
     with pytest.raises(ValueError, match="Unsupported combination type"):
-        generate_combination_results(combos["ABS"], cases, combos)
+        generate_combination_results(combos["RANGE"], cases, combos)
 
 
 def test_unknown_reference_kind(model):

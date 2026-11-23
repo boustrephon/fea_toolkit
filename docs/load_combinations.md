@@ -47,7 +47,7 @@ CSI defines five combination types. The toolkit's support status:
 |---|---|---|---|
 | Linear Add | Σ xᵢ | Σ xᵢ | ✅ implemented |
 | Envelope | max(xᵢ) | min(xᵢ) | ✅ implemented |
-| Absolute Add | Σ \|xᵢ\| | −Σ \|xᵢ\| | 🚧 not implemented |
+| Absolute Add | Σ \|xᵢ\| | −Σ \|xᵢ\| | ✅ implemented |
 | SRSS | √(Σxᵢ²) | −√(Σxᵢ²) | ✅ implemented |
 | Range Add | Σ max(0, xᵢ⁺) | Σ min(0, xᵢ⁻) | 🚧 not implemented |
 
@@ -97,9 +97,10 @@ Per quantity `max = Σ|factorᵢ·xᵢ|` and `min = −max`. The result is a
 **magnitude**, so when it is mixed with signed loads it forks `±` in the same
 way a response-spectrum case does.
 
-**Not yet implemented.** It is a drop-in operator — it needs no new result
-representation, only a branch in `generate_combination_results()` and the
-corresponding reduction in the evaluation layer.
+`generate_combination_results()` emits a single `operator="absolute"`
+composite (`family="absolute"`, no coordinate), and `apply_composite_load_case()`
+reduces it as an element-wise sum of absolute values.  A Linear-Add parent that
+references it forks `±` exactly like an SRSS term.
 
 ### SRSS
 
