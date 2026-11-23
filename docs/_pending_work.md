@@ -1143,9 +1143,11 @@ Source: repo-root `README.md` §7 (Medium) "Improved Load Handling".
 **What.** `FRAME LOADS - POINT` (point loads on frames) is now **parsed**
 into ``frame_point_loads``, carried through the Preprocessor, visualised by
 ``extract_load_glyphs``, and **applied** to OpenSees (transverse *and* axial
-forces via ``eleLoad -beamPoint`` — the ``Py Pz xL Px`` form; moments via a
-statically-equivalent nodal pair split by ``rdist``, warned; under
-``Corotational`` the forces fall back to the same nodal pair, warned).
+forces via ``eleLoad -beamPoint`` — the ``Py Pz xL Px`` form; point moments via
+their consistent nodal loads — bending through the cubic-Hermite shape-function
+derivatives, torsion via a linear ``rdist`` split — warned; under
+``Corotational`` the forces fall back to the same consistent nodal loads,
+warned).
 Temperature loads are closed (no current demand).
 Note: the pushover `lateral_load_type='point'` is a synthetic unit point
 load for benchmark pushes — distinct from parsing user-supplied
@@ -1155,8 +1157,9 @@ load for benchmark pushes — distinct from parsing user-supplied
 a new `frame_point_loads` field (carried through the Preprocessor and
 visualised by ``extract_load_glyphs``); 2) ✅ **done 2026-11-23** — propagate
 to OpenSees: transverse + axial forces via `eleLoad -beamPoint` (``Py Pz xL
-Px``), moments via a statically-equivalent nodal pair split by ``rdist``, and
-a `Corotational` fallback to nodal loads (warned once per member+type);
+Px``), point moments via consistent nodal loads (bending via shape-function
+derivatives, torsion via a linear ``rdist`` split), and a `Corotational`
+fallback to consistent nodal loads (warned once per member+type);
 3) ~~temperature loads~~ ✅ **closed 2026-10-14 — no current demand**
 (do not implement until a model actually needs them).
 

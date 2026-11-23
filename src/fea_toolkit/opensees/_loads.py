@@ -22,6 +22,44 @@ from ..model.tree_utils import collect_descendants
 logger = logging.getLogger(__name__)
 
 
+def _beam_point_force_consistent(a: float, length: float) -> tuple[float, float, float, float]:
+    """Cubic-Hermite interpolation factors for a point transverse force.
+
+    A point transverse force ``P`` at parametric position *a* (0..1) on a
+    prismatic beam of *length* yields consistent nodal loads ``P*N1`` (force at
+    the I-end), ``P*N2`` (moment at the I-end), ``P*N3`` (force at the J-end)
+    and ``P*N4`` (moment at the J-end) — the standard work-equivalent pair for
+    the cubic Euler-Bernoulli shape functions, reproducing both the resultant
+    and its first moment.
+    """
+    a2 = a * a
+    a3 = a2 * a
+    n1 = 1.0 - 3.0 * a2 + 2.0 * a3
+    n2 = length * (a - 2.0 * a2 + a3)
+    n3 = 3.0 * a2 - 2.0 * a3
+    n4 = length * (-a2 + a3)
+    return n1, n2, n3, n4
+
+
+def _beam_point_moment_consistent(a: float, length: float) -> tuple[float, float, float, float]:
+    """Bending shape-function derivatives for a point *moment* (dN/dx).
+
+    A point bending moment ``M`` at parametric position *a* (0..1) on a
+    prismatic beam of *length* yields consistent nodal loads ``M*dN1`` (force
+    at the I-end), ``M*dN2`` (moment at the I-end), ``M*dN3`` (force at the
+    J-end) and ``M*dN4`` (moment at the J-end), using the derivative of the
+    cubic Hermite shape functions w.r.t. ``x``.  A pure moment therefore
+    produces a self-equilibrating transverse force pair plus the two end
+    bending moments.
+    """
+    a2 = a * a
+    dn1 = 6.0 * (a2 - a) / length
+    dn2 = 1.0 - 4.0 * a + 3.0 * a2
+    dn3 = 6.0 * (a - a2) / length
+    dn4 = -2.0 * a + 3.0 * a2
+    return dn1, dn2, dn3, dn4
+
+
 class LoadMixin:
     """Load-pattern creation, gravity axial-load derivation, and rigid-diaphragm application."""
 
@@ -284,9 +322,11 @@ class LoadMixin:
         """True when the current domain's frames use a Corotational transformation.
 
         ``Corotational`` does not support ``eleLoad`` in 3D (the element drops
-        the load), so beam-distributed and beam-point loads must fall back to
-        statically-equivalent nodal loads.  The transformation type is read from
-        the most recent ``build_domain()`` overrides — the same source
+        the load), so beam-distributed loads must fall back to
+        statically-equivalent nodal loads and beam-point loads to their
+        consistent nodal loads (transverse via the cubic-Hermite shape
+        functions, axial via linear interpolation).  The transformation type is
+        read from the most recent ``build_domain()`` overrides — the same source
         :meth:`_rejects_partial_span_eleload` uses.
         """
         overrides = getattr(self, "_last_build_overrides", None) or {}
@@ -301,11 +341,13 @@ class LoadMixin:
 
         Point forces — transverse *and* axial — use ``eleLoad -beamPoint`` (the
         ``Py Pz xL Px`` form, an exact interior diagram).  Point moments have no
-        ``-beamPoint`` form, so they fall back to a statically-equivalent nodal
-        pair split between the two ends by ``pl.rdist`` (torsion — a moment
-        about the member axis — uses ``1-rdist`` / ``rdist``).  Under a
-        ``Corotational`` transformation neither eleLoad form works in 3D, so the
-        forces fall back to the same nodal pair, warned once per member+type.
+        ``-beamPoint`` form, so the bending components fall back to their
+        consistent nodal loads (transverse forces plus end moments) via the
+        cubic-Hermite shape-function derivatives, while the torsion component
+        keeps a linear ``1-rdist`` / ``rdist`` split.  Under a ``Corotational``
+        transformation neither eleLoad form works in 3D, so forces fall back to
+        the same consistent nodal loads — transverse via the shape functions,
+        axial via linear interpolation — warned once per member+type.
         """
         total = 0.0
         warned = getattr(self, "_warned_point_fallback", None)
@@ -354,18 +396,34 @@ class LoadMixin:
             if pl.load_type == "Moment":
                 mx, my, mz = (value * g_global).tolist()
                 rdist = max(0.0, min(1.0, float(pl.rdist)))
-                wi = 1.0 - rdist
-                wj = rdist
-                # A point moment is split into a statically-equivalent end pair:
-                # torsion — a moment about the member axis — distributes like a
-                # bar quantity, ``M(1-rdist)`` at the I-end and ``M·rdist`` at
-                # the J-end, so a midpoint torque on a member restrained against
-                # torsion at both ends yields equal support moments.  The
-                # transverse (bending) components use the same weights, which
-                # preserves the resultant.
-                ops.load(ni.node_tag, 0.0, 0.0, 0.0, mx * wi, my * wi, mz * wi)
+                length = (
+                    math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z) if nj is not None else 0.0
+                )
+                # Decompose the global moment into torsion (about the member
+                # axis, local X) and the two bending components (about local Y
+                # and local Z).
+                m_local = T.T @ np.array([mx, my, mz])
+                m_t, m_by, m_bz = float(m_local[0]), float(m_local[1]), float(m_local[2])
+                if length > 0.0:
+                    dn1, dn2, dn3, dn4 = _beam_point_moment_consistent(rdist, length)
+                    f_i_local = np.array([0.0, m_bz * dn1, m_by * dn1])
+                    f_j_local = np.array([0.0, m_bz * dn3, m_by * dn3])
+                    m_i_local = np.array([m_t * (1.0 - rdist), m_by * dn2, m_bz * dn2])
+                    m_j_local = np.array([m_t * rdist, m_by * dn4, m_bz * dn4])
+                else:
+                    # Degenerate element (no J-end or zero length): keep only
+                    # the torsion split; the bending terms have no span.
+                    f_i_local = np.zeros(3)
+                    f_j_local = np.zeros(3)
+                    m_i_local = np.array([m_t * (1.0 - rdist), 0.0, 0.0])
+                    m_j_local = np.array([m_t * rdist, 0.0, 0.0])
+                f_i = (T @ f_i_local).tolist()
+                f_j = (T @ f_j_local).tolist()
+                m_i = (T @ m_i_local).tolist()
+                m_j = (T @ m_j_local).tolist()
+                ops.load(ni.node_tag, f_i[0], f_i[1], f_i[2], m_i[0], m_i[1], m_i[2])
                 if nj is not None:
-                    ops.load(nj.node_tag, 0.0, 0.0, 0.0, mx * wj, my * wj, mz * wj)
+                    ops.load(nj.node_tag, f_j[0], f_j[1], f_j[2], m_j[0], m_j[1], m_j[2])
                 totals["mx"] += mx
                 totals["my"] += my
                 totals["mz"] += mz
@@ -373,8 +431,9 @@ class LoadMixin:
                 if key not in warned:
                     warned.add(key)
                     logger.warning(
-                        "Frame point moment on %s has no eleLoad form — applied as a "
-                        "statically-equivalent nodal pair (interior diagram approximate).",
+                        "Frame point moment on %s has no eleLoad form — applied as "
+                        "consistent nodal loads (bending via the shape-function "
+                        "derivatives, torsion via a linear end split).",
                         pl.frame_id,
                     )
                 total += abs(value)
@@ -386,19 +445,39 @@ class LoadMixin:
             gfx, gfy, gfz = (value * g_global).tolist()
             if self._uses_corotational_transform():
                 # Corotational drops eleLoad in 3D — replace the beam point
-                # load with a statically-equivalent nodal pair at both ends.
-                wi = 1.0 - rdist
-                wj = rdist
-                ops.load(ni.node_tag, gfx * wi, gfy * wi, gfz * wi, 0.0, 0.0, 0.0)
+                # load with its consistent nodal loads: transverse components
+                # via the cubic-Hermite shape functions (nodal forces *and* end
+                # moments), the axial component via linear interpolation.
+                length = (
+                    math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z) if nj is not None else 0.0
+                )
+                if length > 0.0:
+                    n1, n2, n3, n4 = _beam_point_force_consistent(rdist, length)
+                    f_i_local = np.array([lx * (1.0 - rdist), ly * n1, lz * n1])
+                    f_j_local = np.array([lx * rdist, ly * n3, lz * n3])
+                    m_i_local = np.array([0.0, lz * n2, ly * n2])
+                    m_j_local = np.array([0.0, lz * n4, ly * n4])
+                else:
+                    # Degenerate element: keep only the axial linear split.
+                    f_i_local = np.array([lx * (1.0 - rdist), 0.0, 0.0])
+                    f_j_local = np.array([lx * rdist, 0.0, 0.0])
+                    m_i_local = np.zeros(3)
+                    m_j_local = np.zeros(3)
+                f_i = (T @ f_i_local).tolist()
+                f_j = (T @ f_j_local).tolist()
+                m_i = (T @ m_i_local).tolist()
+                m_j = (T @ m_j_local).tolist()
+                ops.load(ni.node_tag, f_i[0], f_i[1], f_i[2], m_i[0], m_i[1], m_i[2])
                 if nj is not None:
-                    ops.load(nj.node_tag, gfx * wj, gfy * wj, gfz * wj, 0.0, 0.0, 0.0)
+                    ops.load(nj.node_tag, f_j[0], f_j[1], f_j[2], m_j[0], m_j[1], m_j[2])
                 key = (pl.frame_id, "Force")
                 if key not in warned:
                     warned.add(key)
                     logger.warning(
                         "Frame point force on %s has no eleLoad form under a "
-                        "Corotational transformation — applied as statically-equivalent "
-                        "nodal loads (interior diagram approximate).",
+                        "Corotational transformation — applied as consistent nodal "
+                        "loads (transverse via shape functions, axial via linear "
+                        "interpolation).",
                         pl.frame_id,
                     )
             elif abs(lx) > 1e-12 or abs(ly) > 1e-12 or abs(lz) > 1e-12:
