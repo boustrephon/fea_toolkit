@@ -55,6 +55,11 @@ class Session:
     #: block survives a reopen → re-save round-trip.  :meth:`to_bundle` merges
     #: these under any results from a new run.
     _retained_results_arrays: dict = field(default_factory=dict, repr=False)
+    #: Completed nonlinear-dynamic transient payloads, accumulated across runs
+    #: so a later run (e.g. a modal pass) cannot erase them from the next save.
+    #: :meth:`to_bundle` folds these into the collected transient block, and
+    #: :meth:`reset` clears them with the rest of the document state.
+    _retained_transient: dict = field(default_factory=dict, repr=False)
 
     def reset(self) -> None:
         """Clear the document state, leaving the workflow recipe untouched.
@@ -72,6 +77,7 @@ class Session:
         self.hidden_elem_ids.clear()
         self.last_run = None
         self._retained_results_arrays.clear()
+        self._retained_transient.clear()
 
     def to_bundle(
         self, *, name: str, source_label: str, camera: Any = None, display: Optional[dict] = None
@@ -101,6 +107,13 @@ class Session:
         collected = collect_project_results(
             self.last_run.results if self.last_run is not None else []
         )
+        # Fold in nonlinear-dynamic payloads retained from earlier completed
+        # runs, so a later (e.g. modal) run cannot erase them.  The current
+        # run's transient (already collected above) takes precedence.
+        if self._retained_transient:
+            merged_transient = dict(self._retained_transient)
+            merged_transient.update(collected.get("transient") or {})
+            collected["transient"] = merged_transient
         self._merge_results_view_arrays(collected["static_arrays"])
 
         figures = dict(self._retained_figures)
@@ -139,6 +152,24 @@ class Session:
             "figures": figures,
             "tables": tables,
         }
+
+    def record_run(self, run: Any) -> None:
+        """Record a completed run, retaining its nonlinear-dynamic payloads.
+
+        Sets ``last_run`` and folds any completed NLD transient payloads into
+        :attr:`_retained_transient`, so a later run — e.g. a modal pass that
+        overwrites ``last_run`` — cannot erase the time-history results from
+        the next :meth:`to_bundle` save.  ``run=None`` clears the last run
+        without touching the retained payloads.
+        """
+        self.last_run = run
+        if run is None:
+            return
+        from .project import collect_project_results
+
+        transient = collect_project_results(run.results).get("transient") or {}
+        if transient:
+            self._retained_transient.update(transient)
 
     @classmethod
     def from_bundle(cls, bundle: dict) -> "Session":

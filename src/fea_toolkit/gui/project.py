@@ -252,7 +252,11 @@ def collect_project_results(results: list) -> dict:
             ida = payload
         elif kind == NLD:
             data = getattr(payload, "data", None) or {}
-            if isinstance(data, dict) and data.get("displacements"):
+            if isinstance(data, dict) and (
+                data.get("displacements")
+                or data.get("times") is not None
+                or data.get("base_shear") is not None
+            ):
                 transient[getattr(result, "label", "Nonlinear dynamic")] = data
 
     return {

@@ -363,7 +363,7 @@ class RecipeController:
             # entries the run changed back into the window's store, so selections
             # the user added or edited while the run was in flight survive.
             self._merge_named_selections(run.document)
-        self._window._session.last_run = run
+        self._window._session.record_run(run)
         # Persist each step's outcome onto the recipe (a step that ran "ok" is
         # unchecked), so the run state survives save → reopen.  Only when the
         # recipe is still the one the run started from — an edited recipe would
