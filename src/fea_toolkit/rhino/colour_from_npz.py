@@ -794,9 +794,14 @@ def colour_nodes_from_npz(
         logger.warning("No transient displacement data for case %r in %s", case, npz_path)
         return 0
 
-    vmin, vmax = min(values.values()), max(values.values())
+    # Displacement magnitudes are non-negative norms, so anchor the range at
+    # zero: a constant positive history must still map its nonzero magnitudes
+    # to colour (not white), and percentile clipping must not lift the floor
+    # off zero.  An all-zero history keeps ``vmax == 0`` and stays white.
+    vmin = 0.0
+    vmax = max(values.values())
     if clip_pct:
-        vmin, vmax = _percentile_range(values, clip_pct)
+        _, vmax = _percentile_range(values, clip_pct)
 
     coloured = _colour_doc_objects(
         values,

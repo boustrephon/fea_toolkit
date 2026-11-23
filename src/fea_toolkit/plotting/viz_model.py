@@ -2330,6 +2330,26 @@ def _rekey_transient_history_to_tag(data: dict, by_id: dict) -> dict:
     return out
 
 
+def _peak_transient_step(history_by_tag: dict, n_steps: int) -> int:
+    """The step whose largest nodal displacement norm is greatest.
+
+    Each history is ``(n_steps, 3)``; the per-step maximum norm is reduced
+    across nodes, and the first maximum step wins (matching
+    :class:`_NldStepHistory.peak_frame`).  Returns ``0`` for an empty history.
+    """
+    if n_steps == 0:
+        return 0
+    step_max = np.full(n_steps, -np.inf)
+    for hist in history_by_tag.values():
+        arr = np.asarray(hist, dtype=float)
+        if arr.ndim != 2 or arr.shape[0] == 0:
+            continue
+        norms = np.linalg.norm(arr[:, :3], axis=1)
+        n = min(arr.shape[0], n_steps)
+        step_max[:n] = np.maximum(step_max[:n], norms[:n])
+    return int(np.argmax(step_max))
+
+
 def plot_transient_animation(
     source,
     case: Optional[str] = None,
@@ -2460,10 +2480,10 @@ def plot_transient_animation(
                 p2,
                 p3,
                 p4,
-                field.get(t1, (0, 0, 0)),
-                field.get(t2, (0, 0, 0)),
-                field.get(t3, (0, 0, 0)),
-                field.get(t4, (0, 0, 0)),
+                field.get(t1, np.zeros(3)),
+                field.get(t2, np.zeros(3)),
+                field.get(t3, np.zeros(3)),
+                field.get(t4, np.zeros(3)),
             )
             for (p1, p2, p3, p4, t1, t2, t3, t4) in shell_geo
         ]
@@ -2482,7 +2502,10 @@ def plot_transient_animation(
                 opacity=0.5,
             )
 
-    segments, quads = _geometry_at(0)
+    # Non-animated display shows the peak-displacement step; animated display
+    # initialises from step 0 and steps forward.
+    start_step = 0 if animate else _peak_transient_step(history_by_tag, n_steps)
+    segments, quads = _geometry_at(start_step)
     frame_mesh, shell_mesh = _build_deformed_mesh(
         segments, seg_npoints, quads, [], factor, 1.0, shrink=shrink
     )

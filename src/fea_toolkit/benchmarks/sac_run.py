@@ -384,8 +384,10 @@ def run_case(
     if not force and out_path.exists():
         # The cache reads through the storage seam so ``np.load`` stays
         # confined to ``io/``.  Besides the flat scalar metrics it now also
-        # carries a schema-shaped ``transient/case`` block (B.5), so the
-        # history can be replayed without re-running the analysis.
+        # carries a schema-shaped ``transient/case`` block (B.5); that block
+        # holds only the time-history (``node_tag`` + displacement columns), so
+        # replaying it still needs a geometry source — the cache does not
+        # serialize node coordinates or frame/shell connectivity.
         data = read_results_npz(str(out_path))
         if str(data["_fingerprint"].item()) == fingerprint:
             return _metrics_from_npz(data)
@@ -481,9 +483,11 @@ def _save_npz(
     The scalar metrics and fingerprint stay flat (they are benchmark cache
     metadata, not schema results); the time-history itself is *also* written as
     a schema-shaped ``transient/case/...`` block via
-    :func:`~fea_toolkit.io.npz_writer.collect_transient_arrays`, so a standalone
-    consumer (``plot_transient_animation(path, case="case")``) can read the
-    cached run through the repository seam without re-running it (P43/B.5).
+    :func:`~fea_toolkit.io.npz_writer.collect_transient_arrays`.  That block
+    carries the per-node displacement history (and ``node_tag``) only — it does
+    **not** serialize the node coordinates or frame/shell connectivity that
+    ``plot_transient_animation`` needs — so the cached run is replayable only
+    when a geometry source is supplied alongside it (P43/B.5).
     """
     roof_tag = levels[-1][1]
     n = int(metrics["converged_steps"])
