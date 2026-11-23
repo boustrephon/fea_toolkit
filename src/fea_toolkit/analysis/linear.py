@@ -214,7 +214,7 @@ def static_load_verification(md, mesh_model, config: Optional[dict] = None):
     ab = AnalysisBuilder(mesh_model, config)
     ab.build_domain()
     # Apply ALL load patterns once so the per-pattern applied totals
-    # (_sw/_gravity/_joint/_dist) are populated for every pattern.
+    # (_sw/_gravity/_joint/_dist/_point) are populated for every pattern.
     ab.create_loads()
 
     def _clean(v):
@@ -232,6 +232,7 @@ def static_load_verification(md, mesh_model, config: Optional[dict] = None):
         getattr(ab, "_gravity_load_totals", {}),
         getattr(ab, "_joint_load_totals", {}),
         getattr(ab, "_dist_load_totals", {}),
+        getattr(ab, "_point_load_totals", {}),
     ):
         for pname, t in _src.items():
             d = applied.setdefault(pname, dict.fromkeys(("fx", "fy", "fz", "mx", "my", "mz"), 0.0))
@@ -292,11 +293,11 @@ def _applied_load_totals(ab) -> dict[str, dict[str, float]]:
     """Merge a builder's per-source applied-load totals into one per-pattern dict.
 
     :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.create_loads`
-    populates four ``{pattern: {fx, fy, fz, mx, my, mz}}`` dicts — self-weight,
-    gravity, joint and distributed — each already scaled by the pattern factor.
-    This merges them into ``{pattern: {6 components}}`` so callers can read the
-    total applied load per pattern (or per case) without knowing which source
-    contributed.
+    populates five ``{pattern: {fx, fy, fz, mx, my, mz}}`` dicts — self-weight,
+    gravity, joint, distributed and point — each already scaled by the pattern
+    factor.  This merges them into ``{pattern: {6 components}}`` so callers can
+    read the total applied load per pattern (or per case) without knowing which
+    source contributed.
 
     Args:
         ab: A built :class:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder`
@@ -312,6 +313,7 @@ def _applied_load_totals(ab) -> dict[str, dict[str, float]]:
         getattr(ab, "_gravity_load_totals", {}),
         getattr(ab, "_joint_load_totals", {}),
         getattr(ab, "_dist_load_totals", {}),
+        getattr(ab, "_point_load_totals", {}),
     ):
         for pname, t in (src or {}).items():
             d = applied.setdefault(pname, dict.fromkeys(("fx", "fy", "fz", "mx", "my", "mz"), 0.0))

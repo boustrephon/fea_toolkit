@@ -253,7 +253,7 @@ registry below.  Three things about how they are matched:
 | Coordinate-system geometry | (model layer, not parser-populated) | `CoordSys.coord_type`, `.xx`, `.yy`, `.zz` | Only `default_coord_sys` is used. |
 | Load-combination container | (parser reads nothing — see `_pending_work.md` P12) | `LoadCombination.combo_type` (+ the whole dataclass) | The `LOAD COMBINATIONS` table is not parsed at all, so the dataclass is unreachable from a real model. |
 | Load-case design metadata | `LOAD CASE DEFINITIONS` | `LoadCase.design_type_option`, `.design_action_option`, `.initial_condition`, `.modal_case`, `.run_case` | Parsed; only the case name/type drive the analysis runners. |
-| Frame point loads | `FRAME LOADS - POINT` | `SAPModelData.frame_point_loads` (→ `FramePointLoad`) | Parsed and carried through the Preprocessor and visualised by `extract_load_glyphs`, but not yet applied as OpenSees `eleLoad` point loads (`_pending_work.md` P14). |
+| Frame point loads | `FRAME LOADS - POINT` | `SAPModelData.frame_point_loads` (→ `FramePointLoad`) | Parsed, carried through the Preprocessor, visualised by `extract_load_glyphs`, and applied to OpenSees — transverse forces via `eleLoad -beamPoint`, axial forces and moments as statically-equivalent nodal loads (`_pending_work.md` P14). |
 
 ## Consumed only *inside* the parser
 

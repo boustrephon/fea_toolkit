@@ -280,6 +280,99 @@ class LoadMixin:
         )
         return elem_type == "dispBeamColumn"
 
+    def _apply_point_loads(
+        self, pname: str, point_loads: list, elements: dict, scale: float
+    ) -> float:
+        """Emit one pattern's frame point loads, returning their ``|value|`` total.
+
+        Transverse point forces use ``eleLoad -beamPoint`` (an exact interior
+        diagram); axial forces and point moments have no ``-beamPoint`` form, so
+        they fall back to a statically-equivalent nodal load at the near end —
+        exact for reactions, approximate mid-span — warned once per member+type.
+        """
+        total = 0.0
+        warned = getattr(self, "_warned_point_fallback", None)
+        if warned is None:
+            warned = self._warned_point_fallback = set()
+
+        local_map = {
+            "LocalX": (1.0, 0.0, 0.0),
+            "LocalY": (0.0, 1.0, 0.0),
+            "LocalZ": (0.0, 0.0, 1.0),
+        }
+        dir_map = {
+            "Gravity": (0.0, 0.0, -1.0),
+            "X": (1.0, 0.0, 0.0),
+            "Y": (0.0, 1.0, 0.0),
+            "Z": (0.0, 0.0, 1.0),
+        }
+
+        for pl in point_loads:
+            if pl.pattern != pname:
+                continue
+            tag = self.frame_tag_map.get(pl.frame_id)
+            if tag is None:
+                continue
+            elem = elements.get(pl.frame_id)
+            if elem is None or getattr(elem, "inactive", False):
+                continue
+            ni = self.mesh_model.nodes.get(elem.node_i)
+            if ni is None:
+                continue
+
+            value = pl.value * scale
+            vx, vy, vz = self.get_local_axes(elem)
+            T = np.column_stack([vx, vy, vz])
+            if pl.direction in local_map:
+                g_local = np.array(local_map[pl.direction])
+                g_global = T @ g_local
+            else:
+                g_global = np.array(dir_map.get(pl.direction, (0.0, 0.0, 0.0)))
+                g_local = np.linalg.solve(T, g_global)
+
+            totals = self._point_load_totals.setdefault(
+                pname, dict.fromkeys(("fx", "fy", "fz", "mx", "my", "mz"), 0.0)
+            )
+            if pl.load_type == "Moment":
+                mx, my, mz = (value * g_global).tolist()
+                ops.load(ni.node_tag, 0.0, 0.0, 0.0, mx, my, mz)
+                totals["mx"] += mx
+                totals["my"] += my
+                totals["mz"] += mz
+                key = (pl.frame_id, "Moment")
+                if key not in warned:
+                    warned.add(key)
+                    logger.warning(
+                        "Frame point moment on %s has no eleLoad form — applied as a "
+                        "statically-equivalent nodal moment (interior diagram approximate).",
+                        pl.frame_id,
+                    )
+                total += abs(value)
+                continue
+
+            local = value * g_local
+            lx, ly, lz = float(local[0]), float(local[1]), float(local[2])
+            rdist = max(0.0, min(1.0, float(pl.rdist)))
+            if abs(ly) > 1e-12 or abs(lz) > 1e-12:
+                ops.eleLoad("-ele", tag, "-type", "-beamPoint", ly, lz, rdist)
+            if abs(lx) > 1e-12:
+                ops.load(ni.node_tag, lx * vx[0], lx * vx[1], lx * vx[2], 0.0, 0.0, 0.0)
+                key = (pl.frame_id, "Force-axial")
+                if key not in warned:
+                    warned.add(key)
+                    logger.warning(
+                        "Frame point force on %s has an axial component with no eleLoad "
+                        "form — applied as a statically-equivalent nodal load (interior "
+                        "diagram approximate).",
+                        pl.frame_id,
+                    )
+            gfx, gfy, gfz = (value * g_global).tolist()
+            totals["fx"] += gfx
+            totals["fy"] += gfy
+            totals["fz"] += gfz
+            total += abs(value)
+        return total
+
     def _create_loads(
         self,
         pattern_scales: Optional[dict[str, float]] = None,
@@ -292,19 +385,9 @@ class LoadMixin:
         edge_loads = self.edge_loads_from_areas
         openings = collect_opening_areas(self.mesh_model.area_elements)
 
-        # Frame point loads (FRAME LOADS - POINT) are parsed and visualised but
-        # not yet propagated to OpenSees ``eleLoad`` — warn once per builder so
-        # the coverage report does not imply the loads are applied.
+        # Frame point loads (FRAME LOADS - POINT) are parsed and visualised;
+        # they are now propagated to OpenSees (see _apply_point_loads).
         _point_loads = getattr(self.mesh_model, "frame_point_loads", None) or []
-        if _point_loads and not getattr(self, "_warned_frame_point_loads", False):
-            self._warned_frame_point_loads = True
-            logger.warning(
-                "The model carries %d frame point load(s) (FRAME LOADS - POINT); "
-                "they are parsed and visualised but not yet applied as OpenSees "
-                "eleLoad point loads (see docs/parser_coverage.md and "
-                "_pending_work.md P14).",
-                len(_point_loads),
-            )
 
         patterns_created: set = set()
         self.load_totals = {}
@@ -312,6 +395,7 @@ class LoadMixin:
         self._gravity_load_totals = {}
         self._joint_load_totals = {}
         self._dist_load_totals = {}
+        self._point_load_totals = {}
         # Tags of the load patterns / time-series created by this pass, so
         # remove_load_patterns() can delete them before the next build-once case.
         self._created_pattern_tags: list[int] = []
@@ -379,6 +463,8 @@ class LoadMixin:
             all_patterns.add(ld.pattern)
         for ld in edge_loads:
             all_patterns.add(ld.pattern)
+        for pl in _point_loads:
+            all_patterns.add(pl.pattern)
         for jl in getattr(self.mesh_model, "joint_loads", []):
             all_patterns.add(jl.pattern)
         for gl in getattr(self.mesh_model, "frame_gravity_loads", []):
@@ -571,6 +657,9 @@ class LoadMixin:
                     self._dist_load_totals[pname]["fx"] += _avg * gx
                     self._dist_load_totals[pname]["fy"] += _avg * gy
                     self._dist_load_totals[pname]["fz"] += _avg * gz
+
+            # Frame point loads (FRAME LOADS - POINT)
+            load_total += self._apply_point_loads(pname, _point_loads, elements, scale)
 
             # Edge loads (from area-to-frame conversion)
             for ld in edge_loads:
