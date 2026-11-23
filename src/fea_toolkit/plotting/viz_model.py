@@ -2273,6 +2273,257 @@ def plot_mode_animation(
     return None
 
 
+def _resolve_transient_history(
+    source,
+    case: Optional[str] = None,
+    transient: Optional[dict] = None,
+    collapse_to_parents: bool = False,
+) -> tuple[dict, Optional[np.ndarray], dict, int]:
+    """Resolve a transient animation's inputs to a tag-keyed per-node history.
+
+    Returns ``(data, times, history_by_tag, n_steps)`` where *data* is the
+    :func:`_resolve_mesh_data` geometry and *history_by_tag* maps each node's
+    OpenSees **tag** to its ``(N_t, 3)`` displacement array.  Three inputs are
+    accepted: an NPZ path, a unified NPZ dict (the transient block read through
+    the repository seam), or an ``AnalysisBuilder`` (+ the in-process
+    ``transient`` result dict whose ``displacements`` are already tag-keyed).
+    """
+    if isinstance(source, (str, Path)):
+        from ..io.results_repository import NpzResultsRepository
+
+        repository = NpzResultsRepository(str(source))
+        data = _resolve_mesh_data(repository.to_arrays(), collapse_to_parents=collapse_to_parents)
+        times, _base_shear, by_id = repository.transient_nodal_displacements(case)
+        history_by_tag = _rekey_transient_history_to_tag(data, by_id)
+    elif isinstance(source, _NPZ_TYPES):
+        from ..io.results_repository import NpzResultsRepository
+
+        repository = NpzResultsRepository(source)
+        data = _resolve_mesh_data(source, collapse_to_parents=collapse_to_parents)
+        times, _base_shear, by_id = repository.transient_nodal_displacements(case)
+        history_by_tag = _rekey_transient_history_to_tag(data, by_id)
+    else:
+        data = _resolve_mesh_data(source, collapse_to_parents=collapse_to_parents)
+        transient = transient or {}
+        times = transient.get("times")
+        history_by_tag = {
+            tag: np.asarray(hist, dtype=float)
+            for tag, hist in (transient.get("displacements") or {}).items()
+        }
+
+    n_steps = max((int(hist.shape[0]) for hist in history_by_tag.values()), default=0)
+    return data, times, history_by_tag, n_steps
+
+
+def _rekey_transient_history_to_tag(data: dict, by_id: dict) -> dict:
+    """Re-key an id-keyed ``{node_id: (N_t, 3)}`` history back to node tags."""
+    out: dict = {}
+    for node_id, hist in by_id.items():
+        node = data["nodes"].get(node_id)
+        if node is None:
+            try:
+                node = data["nodes"].get(int(node_id))
+            except (ValueError, TypeError):
+                node = None
+        tag = node["tag"] if node is not None else node_id
+        out[tag] = np.asarray(hist, dtype=float)
+    return out
+
+
+def plot_transient_animation(
+    source,
+    case: Optional[str] = None,
+    transient: Optional[dict] = None,
+    *,
+    scale: Optional[float] = None,
+    amplitude: float = 5.0,
+    animate: bool = True,
+    show_original: bool = True,
+    shrink: float = 0.0,
+    collapse_to_parents: bool = False,
+    notebook: bool = False,
+    **kwargs,
+):
+    """Animate a nonlinear-dynamic (time-history) displacement history.
+
+    Steps through the recorded time steps of one ``transient/<case>`` block —
+    an ``AnalysisBuilder`` + in-process result, a unified NPZ dict, or an NPZ
+    path — drawing the **actual** displacement of each step (uniformly
+    magnified), never a normalised mode shape.
+
+    ``scale`` is the single magnification knob:
+
+    * ``scale=None`` (default) — **auto**: the peak displacement over the whole
+      time history is drawn at ``amplitude`` percent of the model's span, and
+      every step uses that same factor, so the relative growth/decay between
+      steps is preserved exactly.
+    * ``scale=<number>`` — a fixed multiplier on the raw displacements.
+
+    Args:
+        source: ``AnalysisBuilder`` (+ *transient*), a unified NPZ dict, or an
+            NPZ path.
+        case: Transient case label when *source* is an NPZ (dict or path).
+        transient: The in-process ``run_transient_analysis`` result dict when
+            *source* is a builder (``times`` + tag-keyed ``displacements``).
+        scale: Fixed multiplier on the raw displacements (``None`` → auto via
+            *amplitude*).
+        amplitude: Peak-displacement target, as a percentage of the model span
+            (used only when ``scale is None``).
+        animate: Step through the recorded history; else show the peak frame.
+        show_original: Draw the undeformed model in grey behind the deformed one.
+        shrink: Fraction to shrink frame lines toward their midpoint.
+        collapse_to_parents: Show unsplit parent elements.
+        notebook: Return the plotter for Jupyter.
+
+    Returns:
+        ``pv.Plotter`` if *notebook*, else ``None``.
+
+    Examples:
+        >>> from fea_toolkit.plotting import plot_transient_animation
+        >>> plot_transient_animation("results.npz", case="Nonlinear dynamic (X)")
+    """
+    try:
+        import pyvista as pv
+    except ImportError:
+        logger.warning("pyvista not installed — install with: pip install pyvista")
+        return None
+
+    data, _times, history_by_tag, n_steps = _resolve_transient_history(
+        source, case=case, transient=transient, collapse_to_parents=collapse_to_parents
+    )
+    if not history_by_tag or n_steps == 0:
+        logger.warning("No transient displacement history to animate.")
+        return None
+
+    # ── Uniform magnification: peak over the whole history ──
+    _node_xyz = list(data["nodes"].values())
+    _span = (
+        max(
+            (max(nd[k] for nd in _node_xyz) - min(nd[k] for nd in _node_xyz))
+            for k in ("x", "y", "z")
+        )
+        if _node_xyz
+        else 0.0
+    )
+    peak = max(
+        (float(np.max(np.abs(hist[:, :3]))) for hist in history_by_tag.values()),
+        default=0.0,
+    )
+    if scale is None:
+        factor = (float(amplitude) / 100.0) * max(_span, 1e-12) / max(peak, 1e-12)
+    else:
+        factor = float(scale)
+
+    # ── Static geometry: frame segments and shell quads ──
+    frame_geo = []
+    seg_npoints = []
+    for fr in data["frames"]:
+        ni = _resolve_frame_node(data["nodes"], fr, "i")
+        nj = _resolve_frame_node(data["nodes"], fr, "j")
+        if ni is None or nj is None:
+            continue
+        p1 = np.array([ni["x"], ni["y"], ni["z"]])
+        p2 = np.array([nj["x"], nj["y"], nj["z"]])
+        if shrink:
+            m = (p1 + p2) / 2
+            p1 = p1 + (m - p1) * shrink
+            p2 = p2 + (m - p2) * shrink
+        frame_geo.append((p1, p2, ni["tag"], nj["tag"]))
+        seg_npoints.append(max(2, int(np.linalg.norm(p2 - p1) * 2)))
+
+    shell_geo = []
+    for sh in data["shells"]:
+        pts = []
+        tags = []
+        for ref in (sh.get("node_ids") or sh.get("node_tags") or [])[:4]:
+            nd = data["nodes"].get(ref)
+            if nd is None:
+                break
+            pts.append(np.array([nd["x"], nd["y"], nd["z"]]))
+            tags.append(nd["tag"])
+        if len(pts) == 4:
+            shell_geo.append((*pts, *tags))
+
+    def _geometry_at(k: int) -> tuple[list, list]:
+        """Build ``(segments, all_quads)`` at step *k* with per-node displacements."""
+        field = {
+            tag: (hist[k] if k < hist.shape[0] else np.zeros(3))
+            for tag, hist in history_by_tag.items()
+        }
+        segments = [
+            (p1, p2, field.get(it, (0, 0, 0)), field.get(jt, (0, 0, 0)))
+            for (p1, p2, it, jt) in frame_geo
+        ]
+        quads = [
+            (
+                p1,
+                p2,
+                p3,
+                p4,
+                field.get(t1, (0, 0, 0)),
+                field.get(t2, (0, 0, 0)),
+                field.get(t3, (0, 0, 0)),
+                field.get(t4, (0, 0, 0)),
+            )
+            for (p1, p2, p3, p4, t1, t2, t3, t4) in shell_geo
+        ]
+        return segments, quads
+
+    pv.set_plot_theme("document")
+    plotter = pv.Plotter(notebook=notebook, **kwargs)
+
+    if show_original:
+        for p1, p2, _it, _jt in frame_geo:
+            n = max(2, int(np.linalg.norm(p2 - p1) * 2))
+            plotter.add_mesh(
+                pv.lines_from_points(np.linspace(p1, p2, n)),
+                color="#999999",
+                line_width=1,
+                opacity=0.5,
+            )
+
+    segments, quads = _geometry_at(0)
+    frame_mesh, shell_mesh = _build_deformed_mesh(
+        segments, seg_npoints, quads, [], factor, 1.0, shrink=shrink
+    )
+    if shell_mesh is not None and shell_mesh.n_points:
+        plotter.add_mesh(
+            shell_mesh, color="#4c72b0", show_edges=True, edge_color="#333333", opacity=0.85
+        )
+    if frame_mesh is not None and frame_mesh.n_points:
+        plotter.add_mesh(frame_mesh, color="#555555", line_width=3, opacity=0.8)
+
+    plotter.add_text(
+        f"{case or 'Transient'} — {n_steps} steps", position="upper_edge", font_size=14
+    )
+    plotter.show_grid()
+    _set_isometric_view(plotter)
+
+    if animate:
+        state = {"k": 0}
+        _timer_renders = [True]
+
+        def callback(step):
+            state["k"] = (state["k"] + 1) % n_steps
+            segs, qs = _geometry_at(state["k"])
+            nfm, nsm = _build_deformed_mesh(segs, seg_npoints, qs, [], factor, 1.0, shrink=shrink)
+            if nfm is not None and nfm.n_points and frame_mesh.n_points:
+                frame_mesh.points = nfm.points
+            if shell_mesh is not None and nsm is not None and nsm.n_points:
+                shell_mesh.points = nsm.points
+            if not _timer_renders[0]:
+                plotter.render()
+
+        _timer_renders[0] = _add_animation_timer(plotter, callback, max_steps=3600, interval_ms=50)
+        plotter.show(auto_close=False)
+    else:
+        plotter.show()
+
+    if notebook:
+        return plotter
+    return None
+
+
 def plot_building_views(md, mesh_model=None, window_size=(1200, 900)):
     """Return a 2×2 matplotlib figure with plan, two elevations, isometric.
 

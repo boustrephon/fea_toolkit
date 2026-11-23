@@ -57,6 +57,7 @@ from .viz_model import (
     plot_mesh,
     plot_mode_animation,
     plot_model_comparison,
+    plot_transient_animation,
 )
 from .viz_pushover import (
     _compute_hinge_ratios,
@@ -129,4 +130,5 @@ __all__ = [
     "plot_pushover_curve_enhanced",
     "plot_pushover_envelope",
     "plot_shell_damage_map",
+    "plot_transient_animation",
 ]

@@ -114,6 +114,7 @@ _LAZY_IMPORTS: dict[str, str] = {
     "plot_deformed_displacement_3d": "fea_toolkit.plotting.viz",
     "plot_mesh": "fea_toolkit.plotting.viz",
     "plot_mode_animation": "fea_toolkit.plotting.viz",
+    "plot_transient_animation": "fea_toolkit.plotting.viz",
     "plot_model_comparison": "fea_toolkit.plotting.viz",
     "plot_pushover_curve": "fea_toolkit.plotting.viz",
     # Report
@@ -185,6 +186,7 @@ __all__ = [
     # Visualisation
     "plot_model_comparison",
     "plot_pushover_curve",
+    "plot_transient_animation",
     "preprocess_model",
     "pushover_rc_openseespy",
     "review_model",

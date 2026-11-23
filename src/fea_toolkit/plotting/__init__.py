@@ -44,6 +44,7 @@ from .viz import (
     plot_pushover_curve_enhanced,
     plot_pushover_envelope,
     plot_shell_damage_map,
+    plot_transient_animation,
 )
 from .viz_ida import (
     plot_collapse_fragility,
@@ -86,5 +87,6 @@ __all__ = [
     "plot_shell_damage_map",
     # Reports
     "plot_storey_forces",
+    "plot_transient_animation",
     "print_disconnect_report",
 ]
