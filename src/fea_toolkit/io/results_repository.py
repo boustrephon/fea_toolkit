@@ -256,25 +256,46 @@ class ResultsRepository(ABC):
     def arrays_for(self, case: str) -> dict:
         """The dense result blocks for one case, keyed by array name."""
 
-    @abstractmethod
     def transient_cases(self) -> list:
-        """Transient (time-history) case labels present in the archive."""
+        """Transient (time-history) case labels present in the archive.
 
-    @abstractmethod
+        Concrete default: derived from the archive's key set via
+        :func:`~fea_toolkit.io.results_schema.transient_case_names`, so a
+        backend that serves :meth:`to_arrays` inherits it for free.
+        """
+        return transient_case_names(self.to_arrays())
+
     def transient_arrays_for(self, case: str) -> dict:
-        """The transient result block for one case, keyed by array name."""
+        """The transient result block for one case, keyed by array name.
+
+        Concrete default: reads the ``transient/<case>/`` prefix out of
+        :meth:`to_arrays`, mirroring the static :meth:`arrays_for` seam.
+        """
+        prefix = f"transient/{case}/"
+        return {
+            key[len(prefix) :]: value
+            for key, value in self.to_arrays().items()
+            if key.startswith(prefix) and isinstance(value, np.ndarray)
+        }
 
     @abstractmethod
     def display_geometry(self) -> dict:
         """Node coordinates, frame/shell connectivity and ids — enough to draw."""
 
-    @abstractmethod
     def geometry_counts(self) -> dict:
         """Geometry size, from array shapes: ``n_nodes`` / ``n_frames`` / ``n_shells``.
 
         Read without converting anything, so a view can report what an archive
-        holds without materialising it.
+        holds without materialising it.  Concrete default: derived from
+        :meth:`display_geometry`, so a backend that serves geometry inherits it.
         """
+        geometry = self.display_geometry()
+        n_frames = _array_length(geometry, "frame_node_i")
+        return {
+            "n_nodes": _array_length(geometry, "node_tag"),
+            "n_frames": n_frames,
+            "n_shells": _array_length(geometry, "shell_node_1"),
+        }
 
     @abstractmethod
     def metadata(self, name: str, default: Any = None) -> Any:
