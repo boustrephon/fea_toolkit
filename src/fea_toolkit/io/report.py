@@ -788,6 +788,51 @@ def save_modal_participation_html(
     return str(path)
 
 
+def transient_history_df(
+    source, case: str, node_id: Optional[str] = None
+) -> Optional[pd.DataFrame]:
+    """Build a time-history table for one node of a transient case.
+
+    Reads the ``transient/<case>`` block through the results-repository seam
+    (so a consumer never calls ``np.load``), re-keying the dense node
+    kinematics to the node ids the archive draws.  When *node_id* is given the
+    table carries that node's ``dx`` / ``dy`` / ``dz`` columns; otherwise only
+    the ``time`` and ``base_shear`` histories are returned.
+
+    Args:
+        source: An NPZ/HDF5 results path, or a flat ``{name: array}`` dict.
+        case: Transient case label (see ``describe_results_npz``'s
+            ``transient_cases``).
+        node_id: Optional node id to extract (the id ``as_model`` names nodes
+            with).  ``None`` returns only ``time`` / ``base_shear``.
+
+    Returns:
+        A ``DataFrame`` indexed by step, or ``None`` when *case* has no
+        displacement history.
+
+    Raises:
+        KeyError: If *node_id* is not among the recorded nodes.
+    """
+    from .results_repository import NpzResultsRepository
+
+    repository = NpzResultsRepository(source)
+    times, base_shear, displacements = repository.transient_nodal_displacements(case)
+    if not displacements:
+        return None
+    columns: dict[str, Any] = {}
+    if times is not None:
+        columns["time"] = times
+    if node_id is not None:
+        hist = displacements.get(node_id)
+        if hist is None:
+            raise KeyError(f"node {node_id!r} is not recorded in transient case {case!r}")
+        for axis, name in enumerate(("dx", "dy", "dz")):
+            columns[name] = hist[:, axis]
+    if base_shear is not None:
+        columns["base_shear"] = base_shear
+    return pd.DataFrame(columns)
+
+
 # ========================================================================
 # Linear analysis table formatting
 # ========================================================================

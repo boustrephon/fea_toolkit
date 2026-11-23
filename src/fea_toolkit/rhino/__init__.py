@@ -3,6 +3,7 @@
 from .colour_from_npz import (
     colour_frame_by_npz_ratio,
     colour_from_npz,
+    colour_nodes_from_npz,
     create_all_result_flags,
     create_result_flags,
     mark_unconnected_edges,
@@ -21,6 +22,7 @@ __all__ = [
     "colour_frame_by_npz_ratio",
     "colour_frames_from_results",
     "colour_from_npz",
+    "colour_nodes_from_npz",
     "colour_shells_from_results",
     "create_all_result_flags",
     "create_deformed_geometry",

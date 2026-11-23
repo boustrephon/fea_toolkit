@@ -635,6 +635,42 @@ def _colour_doc_objects(
     return coloured
 
 
+def transient_nodal_magnitudes(source, case: str, k: Optional[int] = None) -> dict:
+    """Return ``{node_id: displacement magnitude}`` for a transient case.
+
+    A thin reader over the results-repository seam: the magnitude is the
+    per-step displacement norm at step *k* (``k=None`` → each node's own peak
+    over the whole history).  The ids are the ones ``as_model`` names the
+    archive's nodes with, ready to colour Rhino node objects by displacement
+    at a chosen instant (or by the peak envelope).
+
+    Args:
+        source: An NPZ/HDF5 results path, or a flat ``{name: array}`` dict.
+        case: Transient case label.
+        k: Time-step index; ``None`` selects each node's peak step.
+
+    Returns:
+        ``{node_id: float}`` — empty when *case* has no displacement history.
+    """
+    import numpy as np
+
+    from ..io.results_repository import NpzResultsRepository
+
+    _times, _base_shear, displacements = NpzResultsRepository(source).transient_nodal_displacements(
+        case
+    )
+    if not displacements:
+        return {}
+    out: dict = {}
+    for node_id, hist in displacements.items():
+        h = hist[:, :3]
+        if k is not None:
+            out[node_id] = float(np.linalg.norm(h[k])) if k < h.shape[0] else 0.0
+        else:
+            out[node_id] = float(np.max(np.linalg.norm(h, axis=1)))
+    return out
+
+
 def colour_from_npz(
     npz_path: str,
     quantity: str = "Mz",
@@ -718,6 +754,63 @@ def colour_from_npz(
         mode = f"stepped ({bands} bands)" if bands else "continuous"
         print(f"{label}Coloured {coloured} objects by {quantity} ({mode})")
 
+    return coloured
+
+
+def colour_nodes_from_npz(
+    npz_path: str,
+    case: str,
+    k: Optional[int] = None,
+    layer_filter: str = "",
+    skip_locked: bool = True,
+    verbose: bool = True,
+    scale_mode: str = "continuous",
+    n_steps: int = 9,
+    clip_pct: float = 0.0,
+) -> int:
+    """Colour Rhino joint points by a transient case's displacement magnitude.
+
+    Reads the ``transient/<case>`` block through the repository seam and colours
+    every joint point whose ``SAP_JointID`` UserString matches a recorded node.
+    The magnitude is the per-step displacement norm at step *k* (``k=None`` →
+    each node's own peak over the whole history).
+
+    Args:
+        npz_path: Path to the unified ``.npz`` results file.
+        case: Transient case label.
+        k: Time-step index; ``None`` colours each node by its peak step.
+        layer_filter: Optional glob filter on the layer full path.
+        skip_locked: Skip points on locked layers (default ``True``).
+        verbose: Print progress messages.
+        scale_mode: ``"continuous"`` (default) or ``"stepped"``.
+        n_steps: Band count for ``"stepped"`` (odd ≥ 3).
+        clip_pct: Percent clipped off each end of the value range.
+
+    Returns:
+        Number of joint points coloured.
+    """
+    values = transient_nodal_magnitudes(npz_path, case, k=k)
+    if not values:
+        logger.warning("No transient displacement data for case %r in %s", case, npz_path)
+        return 0
+
+    vmin, vmax = min(values.values()), max(values.values())
+    if clip_pct:
+        vmin, vmax = _percentile_range(values, clip_pct)
+
+    coloured = _colour_doc_objects(
+        values,
+        "SAP_JointID",
+        vmin,
+        vmax,
+        layer_filter=layer_filter,
+        skip_locked=skip_locked,
+        bands=_bands_from_scale_mode(scale_mode, n_steps),
+    )
+    if verbose:
+        bands = _bands_from_scale_mode(scale_mode, n_steps)
+        mode = f"stepped ({bands} bands)" if bands else "continuous"
+        print(f"[{case}] Coloured {coloured} joint points by transient displacement ({mode})")
     return coloured
 
 

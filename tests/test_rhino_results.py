@@ -464,3 +464,48 @@ class TestFlagGeometry:
         h2 = np.linalg.norm(verts[2] - verts[1])
         assert abs(h1 - h2) < 1e-9
         assert h1 == 500.0
+
+
+def test_colour_nodes_from_npz_dispatches_with_joint_id_key(tmp_path, monkeypatch):
+    """Node colouring matches on ``SAP_JointID`` and forwards the magnitude range."""
+    import importlib
+
+    import numpy as np
+
+    from examples.sample_model import make_sample_model
+    from fea_toolkit.io.npz_writer import write_results_npz
+
+    cfn = importlib.import_module("fea_toolkit.rhino.colour_from_npz")
+
+    md = make_sample_model()
+    tags = sorted(nd.node_tag for nd in md.nodes.values())
+    n = 4
+    res = {
+        "times": np.arange(n, dtype=float) * 0.01,
+        "displacements": {
+            tag: np.column_stack([np.arange(n, dtype=float), np.zeros(n), np.zeros(n)])
+            for tag in tags
+        },
+        "base_shear": np.linspace(0.0, 10.0, n),
+        "direction": "X",
+    }
+    path = str(tmp_path / "t.npz")
+    write_results_npz(path, md, transient_results={"ELC": res})
+
+    captured = {}
+
+    def fake_colour(values, id_key, vmin, vmax, **kwargs):
+        captured["values"] = values
+        captured["id_key"] = id_key
+        captured["vmin"] = vmin
+        captured["vmax"] = vmax
+        return 7
+
+    monkeypatch.setattr(cfn, "_colour_doc_objects", fake_colour)
+
+    count = cfn.colour_nodes_from_npz(path, "ELC", verbose=False)
+
+    assert count == 7
+    assert captured["id_key"] == "SAP_JointID"
+    assert set(captured["values"]) == set(md.nodes)
+    assert captured["vmax"] == 3.0  # peak displacement magnitude

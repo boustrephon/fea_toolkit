@@ -720,6 +720,48 @@ def plot_storey_forces(
     return fig
 
 
+def plot_transient_history(source, case: str, node_id: Optional[str]) -> Optional[Any]:
+    """Plot one node's displacement and the base shear of a transient case.
+
+    Two stacked panels sharing a time axis — the node's ``dx`` / ``dy`` /
+    ``dz`` histories above, the ``base_shear`` history below.
+
+    Args:
+        source: An NPZ/HDF5 results path, or a flat ``{name: array}`` dict.
+        case: Transient case label.
+        node_id: The node id to plot (as ``as_model`` names it).
+
+    Returns:
+        ``matplotlib.figure.Figure`` or ``None`` (matplotlib absent, or the
+        case carries no displacement history).
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return None
+    from ..io.report import transient_history_df
+
+    df = transient_history_df(source, case, node_id)
+    if df is None or "time" not in df:
+        return None
+    t = df["time"]
+    fig, axes = plt.subplots(2, 1, sharex=True, figsize=(8, 6))
+    if "dx" in df:
+        for comp, label in (("dx", "X"), ("dy", "Y"), ("dz", "Z")):
+            axes[0].plot(t, df[comp], label=f"{label} displacement")
+        axes[0].set_ylabel("Displacement")
+        axes[0].legend()
+    else:
+        axes[0].axis("off")
+    if "base_shear" in df:
+        axes[1].plot(t, df["base_shear"], color="tab:red")
+        axes[1].set_ylabel("Base shear")
+    axes[1].set_xlabel("Time (s)")
+    fig.suptitle(f"{case} — {node_id}")
+    fig.tight_layout()
+    return fig
+
+
 def _resolve_elevation_column(df: pd.DataFrame) -> Optional[str]:
     """Return the elevation column name, or ``None`` if not found.
 
