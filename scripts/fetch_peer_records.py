@@ -136,7 +136,14 @@ def _dir_size(directory: Path) -> int:
 def _wait_for_download_stable(
     directory: Path, interval: float, stable_checks: int, timeout: float
 ) -> None:
-    """Poll until the download directory stops growing for *stable_checks* polls."""
+    """Poll until a new ``PEERNGARecords_Unscaled*.zip`` finishes downloading.
+
+    A stable directory size only counts as "complete" once a ZIP has actually
+    appeared: a directory that is merely idle (no archive yet) must keep
+    waiting, so the run's own download — not a stale archive left by an
+    earlier run — is what completes.  The configured *timeout* bounds the
+    whole wait.
+    """
     start = time.time()
     stable = 0
     last = _dir_size(directory)
@@ -145,7 +152,8 @@ def _wait_for_download_stable(
             raise TimeoutError(f"download did not finish within {timeout:.0f}s")
         time.sleep(interval)
         size = _dir_size(directory)
-        stable = 0 if size > last else stable + 1
+        has_zip = any(directory.glob(_ZIP_PREFIX + "*.zip"))
+        stable = stable + 1 if (has_zip and size <= last) else 0
         last = size
 
 
@@ -303,16 +311,22 @@ def main(argv: Optional[list[str]] = None) -> int:
                 file=sys.stderr,
             )
             return 2
-        download_dir = Path(args.dir)
+        download_dir = Path(args.dir).resolve()
         download_dir.mkdir(parents=True, exist_ok=True)
+        # Chrome ignores a relative ``download.default_directory``, so resolve
+        # to an absolute path and use the *same* resolved directory for the
+        # browser preference, the size-stable polling and the archive discovery.
+        # A run-specific subdirectory also makes the returned ZIP unambiguous:
+        # it can only be the one this run downloaded, never a stale archive
+        # already sitting in ``download_dir``.
+        run_dir = download_dir / f"run-{time.time_ns()}"
+        run_dir.mkdir(parents=True, exist_ok=True)
         try:
-            zip_path = download_rsns(
-                user, password, rsns, download_dir, headless=not args.no_headless
-            )
+            zip_path = download_rsns(user, password, rsns, run_dir, headless=not args.no_headless)
         except (RuntimeError, FileNotFoundError, TimeoutError) as exc:
             print(f"download failed: {exc}", file=sys.stderr)
             return 1
-        extract_dir = download_dir / "extracted"
+        extract_dir = run_dir / "extracted"
         extract_dir.mkdir(exist_ok=True)
         with zipfile.ZipFile(zip_path) as zf:
             zf.extractall(extract_dir)
