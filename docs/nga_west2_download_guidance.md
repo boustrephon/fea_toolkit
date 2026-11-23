@@ -14,8 +14,11 @@ related: [ground_motion_data.md, ik2005_generic_frame_benchmark.md, _pending_wor
 NGA-West2 is only reachable **Mon–Fri, 8 AM–8 PM PST**.  Within that window:
 
 ```bash
-cd /Users/andrew/Projects/fea_toolkit
-source /Users/andrew/Projects/OpenSeesPy/venv_opensees/bin/activate   # selenium is already installed here
+cd <your fea_toolkit checkout>          # e.g. ~/Projects/fea_toolkit
+source <your virtualenv>/bin/activate    # the project's own environment
+
+# Install the optional Selenium extra (once) using the project's declared extra:
+pip install -e ".[nga-download]"
 
 export NGA_W2_USER="<your PEER email>"
 export NGA_W2_PASS="<your PEER password>"
