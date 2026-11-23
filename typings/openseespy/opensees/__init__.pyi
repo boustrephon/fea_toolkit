@@ -295,7 +295,7 @@ def eleLoad(*args: Any) -> None:
     Usage::
 
         ops.eleLoad('-ele', eleTag1, ..., '-type', '-beamUniform', wy, wz[, wx])
-        ops.eleLoad('-ele', eleTag1, ..., '-type', '-beamPoint', Py, Pz, xL)
+        ops.eleLoad('-ele', eleTag1, ..., '-type', '-beamPoint', Py, Pz, xL[, Px])
 
     Args:
         *args: Element load arguments per the OpenSees eleLoad command.

@@ -280,15 +280,32 @@ class LoadMixin:
         )
         return elem_type == "dispBeamColumn"
 
+    def _uses_corotational_transform(self) -> bool:
+        """True when the current domain's frames use a Corotational transformation.
+
+        ``Corotational`` does not support ``eleLoad`` in 3D (the element drops
+        the load), so beam-distributed and beam-point loads must fall back to
+        statically-equivalent nodal loads.  The transformation type is read from
+        the most recent ``build_domain()`` overrides — the same source
+        :meth:`_rejects_partial_span_eleload` uses.
+        """
+        overrides = getattr(self, "_last_build_overrides", None) or {}
+        config = getattr(self, "config", None) or {}
+        transf = overrides.get("geom_transf_type") or config.get("geom_transf_type", "Linear")
+        return transf == "Corotational"
+
     def _apply_point_loads(
         self, pname: str, point_loads: list, elements: dict, scale: float
     ) -> float:
         """Emit one pattern's frame point loads, returning their ``|value|`` total.
 
-        Transverse point forces use ``eleLoad -beamPoint`` (an exact interior
-        diagram); axial forces and point moments have no ``-beamPoint`` form, so
-        they fall back to a statically-equivalent nodal load at the near end —
-        exact for reactions, approximate mid-span — warned once per member+type.
+        Point forces — transverse *and* axial — use ``eleLoad -beamPoint`` (the
+        ``Py Pz xL Px`` form, an exact interior diagram).  Point moments have no
+        ``-beamPoint`` form, so they fall back to a statically-equivalent nodal
+        pair split between the two ends by ``pl.rdist`` (torsion — a moment
+        about the member axis — uses ``1-rdist`` / ``rdist``).  Under a
+        ``Corotational`` transformation neither eleLoad form works in 3D, so the
+        forces fall back to the same nodal pair, warned once per member+type.
         """
         total = 0.0
         warned = getattr(self, "_warned_point_fallback", None)
@@ -317,6 +334,7 @@ class LoadMixin:
             if elem is None or getattr(elem, "inactive", False):
                 continue
             ni = self.mesh_model.nodes.get(elem.node_i)
+            nj = self.mesh_model.nodes.get(elem.node_j)
             if ni is None:
                 continue
 
@@ -335,7 +353,19 @@ class LoadMixin:
             )
             if pl.load_type == "Moment":
                 mx, my, mz = (value * g_global).tolist()
-                ops.load(ni.node_tag, 0.0, 0.0, 0.0, mx, my, mz)
+                rdist = max(0.0, min(1.0, float(pl.rdist)))
+                wi = 1.0 - rdist
+                wj = rdist
+                # A point moment is split into a statically-equivalent end pair:
+                # torsion — a moment about the member axis — distributes like a
+                # bar quantity, ``M(1-rdist)`` at the I-end and ``M·rdist`` at
+                # the J-end, so a midpoint torque on a member restrained against
+                # torsion at both ends yields equal support moments.  The
+                # transverse (bending) components use the same weights, which
+                # preserves the resultant.
+                ops.load(ni.node_tag, 0.0, 0.0, 0.0, mx * wi, my * wi, mz * wi)
+                if nj is not None:
+                    ops.load(nj.node_tag, 0.0, 0.0, 0.0, mx * wj, my * wj, mz * wj)
                 totals["mx"] += mx
                 totals["my"] += my
                 totals["mz"] += mz
@@ -344,7 +374,7 @@ class LoadMixin:
                     warned.add(key)
                     logger.warning(
                         "Frame point moment on %s has no eleLoad form — applied as a "
-                        "statically-equivalent nodal moment (interior diagram approximate).",
+                        "statically-equivalent nodal pair (interior diagram approximate).",
                         pl.frame_id,
                     )
                 total += abs(value)
@@ -353,20 +383,26 @@ class LoadMixin:
             local = value * g_local
             lx, ly, lz = float(local[0]), float(local[1]), float(local[2])
             rdist = max(0.0, min(1.0, float(pl.rdist)))
-            if abs(ly) > 1e-12 or abs(lz) > 1e-12:
-                ops.eleLoad("-ele", tag, "-type", "-beamPoint", ly, lz, rdist)
-            if abs(lx) > 1e-12:
-                ops.load(ni.node_tag, lx * vx[0], lx * vx[1], lx * vx[2], 0.0, 0.0, 0.0)
-                key = (pl.frame_id, "Force-axial")
+            gfx, gfy, gfz = (value * g_global).tolist()
+            if self._uses_corotational_transform():
+                # Corotational drops eleLoad in 3D — replace the beam point
+                # load with a statically-equivalent nodal pair at both ends.
+                wi = 1.0 - rdist
+                wj = rdist
+                ops.load(ni.node_tag, gfx * wi, gfy * wi, gfz * wi, 0.0, 0.0, 0.0)
+                if nj is not None:
+                    ops.load(nj.node_tag, gfx * wj, gfy * wj, gfz * wj, 0.0, 0.0, 0.0)
+                key = (pl.frame_id, "Force")
                 if key not in warned:
                     warned.add(key)
                     logger.warning(
-                        "Frame point force on %s has an axial component with no eleLoad "
-                        "form — applied as a statically-equivalent nodal load (interior "
-                        "diagram approximate).",
+                        "Frame point force on %s has no eleLoad form under a "
+                        "Corotational transformation — applied as statically-equivalent "
+                        "nodal loads (interior diagram approximate).",
                         pl.frame_id,
                     )
-            gfx, gfy, gfz = (value * g_global).tolist()
+            elif abs(lx) > 1e-12 or abs(ly) > 1e-12 or abs(lz) > 1e-12:
+                ops.eleLoad("-ele", tag, "-type", "-beamPoint", ly, lz, rdist, lx)
             totals["fx"] += gfx
             totals["fy"] += gfy
             totals["fz"] += gfz
