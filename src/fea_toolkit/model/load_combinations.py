@@ -114,13 +114,16 @@ class CompositeLoadCase:
         name: Composite name, unique within one generation call.
         operator: ``"linear"`` (weighted sum), ``"max"`` / ``"min"``
             (per-quantity extreme selection), ``"srss"``
-            (per-quantity root-sum-square) or ``"absolute"``
-            (per-quantity sum of absolute values).
+            (per-quantity root-sum-square), ``"absolute"``
+            (per-quantity sum of absolute values) or ``"abs_max"``
+            (per-quantity maximum of absolute values).
         cases: For ``"linear"`` — ``{load_case: combined_factor}``.
         children: Scaled sub-composites.  For ``"linear"`` these are extra
             signed terms; for ``"max"`` / ``"min"`` / ``"srss"`` /
-            ``"absolute"`` they are the alternatives that get reduced.  Each
-            element is ``(factor, composite)``.
+            ``"absolute"`` they are the alternatives that get reduced, and for
+            ``"abs_max"`` they are the alternatives reduced to their
+            element-wise maximum absolute value.  Each element is
+            ``(factor, composite)``.
         source: Name of the combination this composite was generated from.
         family: The collection the composite belongs to — ``"single"`` (one
             composite, no fork), ``"fork"`` (2ⁿ signed senses of a magnitude),
@@ -1038,11 +1041,14 @@ def _generate_absolute(
 
     ``max = Σ|factorᵢ·xᵢ|`` and ``min = −max``, so the result is a magnitude —
     exactly like SRSS it is emitted once, and forks ``±`` when a Linear-Add
-    parent mixes it with signed terms (see :func:`_is_magnitude_combo`).
+    parent mixes it with signed terms (see :func:`_is_magnitude_combo`).  Each
+    reference's alternatives are grouped into one ``abs_max`` child, so an
+    entry that itself expands to several variants contributes a single
+    element-wise maximum absolute value rather than one term per alternative.
     """
     children: list[tuple[float, CompositeLoadCase]] = []
     for entry in combo.entries:
-        for variant in _entry_variants(
+        variants = _entry_variants(
             entry,
             combo,
             load_cases,
@@ -1050,8 +1056,27 @@ def _generate_absolute(
             envelope_mode,
             active,
             fork_magnitudes=False,
-        ):
-            children.append((1.0, variant))
+        )
+        if len(variants) == 1:
+            children.append((1.0, variants[0]))
+        else:
+            # A single entry's alternatives are one contribution, not several:
+            # group them so they reduce to one element-wise maximum absolute
+            # value (``max(|v₁|, |v₂|, …)``) before the per-entry contributions
+            # are summed.  Repeated entries still produce separate groups, so
+            # adding the same entry twice counts it twice.
+            children.append(
+                (
+                    1.0,
+                    CompositeLoadCase(
+                        name="",
+                        operator="abs_max",
+                        children=[(1.0, variant) for variant in variants],
+                        source=combo.name,
+                        family="absolute",
+                    ),
+                )
+            )
     return _name_variants(
         combo.name,
         [
@@ -1332,8 +1357,9 @@ def apply_composite_load_case(
     Returns:
         The combined array: a weighted sum (``"linear"``), an element-wise
         extreme (``"max"`` / ``"min"``), an element-wise root-sum-square
-        (``"srss"``) or an element-wise sum of absolute values
-        (``"absolute"``).
+        (``"srss"``), an element-wise sum of absolute values
+        (``"absolute"``), or an element-wise maximum of absolute values
+        (``"abs_max"``).
 
     Raises:
         KeyError: If a referenced load case has no supplied array.
@@ -1366,6 +1392,8 @@ def apply_composite_load_case(
         return np.maximum.reduce(parts)
     if composite.operator == "min":
         return np.minimum.reduce(parts)
+    if composite.operator == "abs_max":
+        return np.maximum.reduce([np.abs(part) for part in parts])
     if composite.operator == "srss":
         return np.sqrt(np.sum([part * part for part in parts], axis=0))
     if composite.operator == "absolute":

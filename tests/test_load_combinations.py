@@ -289,6 +289,52 @@ def test_apply_absolute_sums_absolute_values():
     assert result == pytest.approx([5.0, 9.0])
 
 
+def test_apply_absolute_groups_alternatives_and_counts_repeats():
+    """One entry's alternatives reduce to a single max-abs; repeats stay separate."""
+    composite = CompositeLoadCase(
+        name="ABS",
+        operator="absolute",
+        children=[
+            (
+                1.0,
+                CompositeLoadCase(
+                    name="",
+                    operator="abs_max",
+                    children=[(1.0, _linear(A=1.0)), (1.0, _linear(A=-1.0))],
+                ),
+            ),
+            (1.0, _linear(B=1.0)),
+            (1.0, _linear(B=1.0)),
+        ],
+    )
+    result = apply_composite_load_case(
+        composite,
+        {"A": np.array([3.0, -4.0]), "B": np.array([1.0, 5.0])},
+    )
+    # max(|3|, |-3|) + |1| + |1| = 5 ; max(|-4|, |4|) + |5| + |5| = 14
+    assert result == pytest.approx([5.0, 14.0])
+
+
+def test_absolute_add_groups_a_nested_envelopes_alternatives(model):
+    """A nested envelope's max/min alternatives become one ``abs_max`` child."""
+    cases, combos = model
+    combos = {
+        **combos,
+        "ENV": _combo("ENV", "Envelope", [("WIND", 1.0), ("SDL", 1.0)]),
+        "ABS": _combo("ABS", "Absolute Add", [("ENV", 1.0)]),
+    }
+    classify_combination_refs(combos, cases)
+
+    results = generate_combination_results(combos["ABS"], cases, combos)
+
+    assert len(results) == 1
+    assert results[0].operator == "absolute"
+    assert len(results[0].children) == 1  # one grouped entry, not two terms
+    _factor, group = results[0].children[0]
+    assert group.operator == "abs_max"
+    assert len(group.children) == 2  # the envelope's max/min alternatives
+
+
 def test_absolute_add_meta(model):
     """A one-member magnitude family has no coordinate to record."""
     cases, combos = model
