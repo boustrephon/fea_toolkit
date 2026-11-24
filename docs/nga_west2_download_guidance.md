@@ -30,6 +30,10 @@ python scripts/fetch_peer_records.py --list
 #    EVENT + STATION (not the old hand-guessed RSNs) and note its RSN, then:
 python scripts/fetch_peer_records.py --download --rsns <n1>,<n2>,...,<n7> --no-headless
 
+#    To fetch them one at a time (recommended while looking RSNs up), add
+#    --limit N and give exactly N RSNs, e.g. the first record alone:
+#    python scripts/fetch_peer_records.py --download --rsns 737 --limit 1 --no-headless
+
 # 3. Confirm all 40 records are now present (expect "40 records"):
 python -c "from fea_toolkit.benchmarks.ik2005_records import fetched_ids; print(len(fetched_ids()), 'records')"
 
@@ -100,6 +104,7 @@ python scripts/fetch_peer_records.py --list                          # the 7 rec
 python scripts/fetch_peer_records.py --download --rsns 763,779,...   # login + download
 python scripts/fetch_peer_records.py --download --rsns … --no-headless  # visible browser
 python scripts/fetch_peer_records.py --select <dir> --rsns 763,779,...  # select from a dir you downloaded manually
+python scripts/fetch_peer_records.py --download --rsns 737 --limit 1   # just the first record (1 RSN for 1 record)
 ```
 
 `--download` logs in, enters the RSNs, clicks **Download**, accepts the two

@@ -22,6 +22,10 @@ Usage::
     python scripts/fetch_peer_records.py --list
     python scripts/fetch_peer_records.py --download --rsns 763,779,... [--no-headless]
     python scripts/fetch_peer_records.py --select <dir-of-at2-files> --rsns 763,779,...
+
+To download (or select) only the first N records, pass ``--limit N``; the
+``--rsns`` list must then hold exactly N RSNs in ``PEER_RECORDS`` order, e.g.
+``--download --rsns 763 --limit 1`` for the first record alone.
 """
 
 from __future__ import annotations
