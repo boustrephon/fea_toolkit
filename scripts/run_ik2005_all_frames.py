@@ -78,11 +78,24 @@ def _seed_existing(summary: dict, out_dir: str) -> None:
         z.close()
 
 
+def _record_count_suffix(rows: list) -> str:
+    """The ``" (N LMSR-N records)"`` suffix from the frames' actual record counts.
+
+    Uses the count when every row that reports one agrees on it, and omits the
+    number when the rows disagree or none reports a count — so a ``--limit`` run
+    (or a summary mixing archived and re-run frames) never claims a fixed 40.
+    """
+    counts = {r.get("n_records") for r in rows if r.get("n_records") is not None}
+    if len(counts) == 1:
+        return f" ({next(iter(counts))} LMSR-N records)"
+    return ""
+
+
 def _write_table(summary: dict, out_dir: str) -> None:
     rows = [summary[c] for c in FRAME_CODES if c in summary]
     rows.sort(key=lambda r: (r.get("N") or 0, r.get("T1") or 0.0))
     lines = [
-        "# IK-2005 collapse — all frames (40 LMSR-N records)",
+        f"# IK-2005 collapse — all frames{_record_count_suffix(rows)}",
         "",
         "| code | N | T1 (s) | median (Sa,c/g)/γ | σ_ln | notes |",
         "|---|---|---|---|---|---|",
@@ -142,7 +155,7 @@ def _write_plot(summary: dict, out_dir: str) -> None:
         )
     ax.set_xlabel("T1 (s)")
     ax.set_ylabel("median (Sa,c/g)/γ")
-    ax.set_title("IK-2005 generic-frame collapse capacity vs period (40 LMSR-N records)")
+    ax.set_title(f"IK-2005 generic-frame collapse capacity vs period{_record_count_suffix(rows)}")
     ax.grid(alpha=0.3)
     ax.legend()
     fig.tight_layout()
