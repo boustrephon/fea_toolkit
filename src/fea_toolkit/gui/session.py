@@ -60,6 +60,11 @@ class Session:
     #: :meth:`to_bundle` folds these into the collected transient block, and
     #: :meth:`reset` clears them with the rest of the document state.
     _retained_transient: dict = field(default_factory=dict, repr=False)
+    #: ``{node_tag: (x, y, z)}`` of the mesh that produced the retained transient
+    #: histories, kept so :meth:`record_run` can invalidate them when a later run
+    #: uses an incompatible geometry (a tag that moved would otherwise map an
+    #: earlier node's displacement onto a different node).
+    _retained_transient_geometry: dict = field(default_factory=dict, repr=False)
 
     def reset(self) -> None:
         """Clear the document state, leaving the workflow recipe untouched.
@@ -78,6 +83,7 @@ class Session:
         self.last_run = None
         self._retained_results_arrays.clear()
         self._retained_transient.clear()
+        self._retained_transient_geometry.clear()
 
     def to_bundle(
         self, *, name: str, source_label: str, camera: Any = None, display: Optional[dict] = None
@@ -140,8 +146,12 @@ class Session:
         results_arrays = self._project_results_arrays(collected)
         if self._retained_results_arrays:
             # A reopened project keeps the arrays it was loaded with; a new
-            # run's results take precedence over the retained copy.
+            # run's results take precedence over the retained copy.  A transient
+            # case is replaced as a whole block — its retained ``transient/<case>/``
+            # arrays are dropped before the new payload is merged, so fields the
+            # re-run omitted cannot be revived from the retained archive.
             merged = dict(self._retained_results_arrays)
+            self._drop_transient_blocks(merged, results_arrays)
             merged.update(results_arrays)
             results_arrays = merged
         return {
@@ -161,6 +171,12 @@ class Session:
         overwrites ``last_run`` — cannot erase the time-history results from
         the next :meth:`to_bundle` save.  ``run=None`` clears the last run
         without touching the retained payloads.
+
+        The retained histories are tag-keyed, so they only stay valid while the
+        mesh they were recorded against keeps its node tags at the same
+        coordinates; a run over an incompatible mesh first invalidates them, so
+        :meth:`to_bundle` cannot fold an earlier node's displacement onto a
+        different node.
         """
         self.last_run = run
         if run is None:
@@ -168,8 +184,51 @@ class Session:
         from .project import collect_project_results
 
         transient = collect_project_results(run.results).get("transient") or {}
-        if transient:
-            self._retained_transient.update(transient)
+        if not transient:
+            return
+        mesh = self.store.preprocessed() if self.store is not None else None
+        if self._retained_transient and not self._transient_geometry_compatible(mesh):
+            self._retained_transient.clear()
+            self._retained_transient_geometry.clear()
+        self._retained_transient.update(transient)
+        self._retained_transient_geometry = self._node_tag_geometry(mesh)
+
+    def _node_tag_geometry(self, mesh: Any) -> dict:
+        """``{node_tag: (x, y, z)}`` of *mesh*'s nodes — the geometry transient
+        histories are keyed against."""
+        if mesh is None:
+            return {}
+        return {nd.node_tag: (nd.x, nd.y, nd.z) for nd in getattr(mesh, "nodes", {}).values()}
+
+    def _transient_geometry_compatible(self, mesh: Any) -> bool:
+        """Whether *mesh*'s nodes still sit where the retained histories expect.
+
+        The retained histories are keyed by node tag; they stay valid only while
+        every tag they reference still exists at the same coordinate.  An empty
+        signature (nothing was recorded, or the mesh is unavailable) cannot be
+        verified, so it reads as incompatible.
+        """
+        signature = self._retained_transient_geometry
+        if not signature:
+            return False
+        current = self._node_tag_geometry(mesh)
+        return all(current.get(tag) == coord for tag, coord in signature.items())
+
+    @staticmethod
+    def _drop_transient_blocks(base: dict, incoming: dict) -> None:
+        """Remove from *base* the transient blocks that *incoming* replaces.
+
+        A transient case is one ``transient/<case>/...`` block.  When *incoming*
+        carries that case, its whole block is replaced, so any stale arrays the
+        base still holds under the case are dropped before *incoming* is merged
+        back in; cases present only in *base* are left untouched.
+        """
+        from ..io.results_schema import transient_case_names
+
+        for case in transient_case_names(incoming):
+            prefix = f"transient/{case}/"
+            for key in [k for k in base if k.startswith(prefix)]:
+                del base[key]
 
     @classmethod
     def from_bundle(cls, bundle: dict) -> "Session":
