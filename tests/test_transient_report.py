@@ -78,6 +78,7 @@ def test_transient_nodal_magnitudes_peak_and_at_index(tmp_path):
 
 def test_plot_transient_history_returns_a_figure(tmp_path):
     pytest.importorskip("pandas")
+    pytest.importorskip("matplotlib.pyplot")
 
     from fea_toolkit.plotting.report import plot_transient_history
 
