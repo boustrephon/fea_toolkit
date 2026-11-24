@@ -48,6 +48,12 @@ def test_is_vertical():
     assert fetch._is_vertical("RSN763_LOMAP_AGW-UP.AT2")
     assert fetch._is_vertical("RSN763_LOMAP_AGW_UP.AT2")
     assert fetch._is_vertical("RSN763_LOMAP_AGWUP.AT2")
+    assert fetch._is_vertical("RSN763_LOMAP_AGW-UD.AT2")
+    assert fetch._is_vertical("RSN763_LOMAP_AGW_UD.AT2")
+    assert fetch._is_vertical("RSN763_LOMAP_AGWUD.AT2")
+    assert fetch._is_vertical("RSN763_LOMAP_AGW-DWN.AT2")
+    assert fetch._is_vertical("RSN763_LOMAP_AGW_DWN.AT2")
+    assert fetch._is_vertical("RSN763_LOMAP_AGWDWN.AT2")
     assert not fetch._is_vertical("RSN763_LOMAP_AGW000.AT2")
     assert not fetch._is_vertical("RSN763_LOMAP_AGW090.AT2")
 
@@ -91,3 +97,24 @@ def test_select_records_writes_named_at2(tmp_path, monkeypatch):
     out = tmp_path / "local" / "LP89agw.AT2"
     assert out.exists()
     assert "0.17" in out.read_text()
+
+
+def test_select_records_excludes_closest_vertical(tmp_path, monkeypatch):
+    """A vertical component closest to the target PGA is still not selected."""
+    fetch = _load_fetch_script()
+    monkeypatch.setattr(fetch, "LOCAL", tmp_path / "local")
+    src = tmp_path / "src"
+    src.mkdir()
+    # The vertical matches the target PGA best; it must be excluded, so the
+    # (further) horizontal is the one selected and copied.
+    (src / "RSN763_LOMAP_AGW000.AT2").write_text(
+        "NPTS=2\nDT=0.005\n0.10\n-0.10\n", encoding="utf-8"
+    )
+    (src / "RSN763_LOMAP_AGW-UD.AT2").write_text(
+        "NPTS=2\nDT=0.005\n0.172\n-0.172\n", encoding="utf-8"
+    )
+    failed = fetch.select_records([("LP89agw", "Loma Prieta", "Agnews", 0.172)], [763], src)
+    assert failed == 0
+    out = tmp_path / "local" / "LP89agw.AT2"
+    assert out.exists()
+    assert "0.10" in out.read_text()

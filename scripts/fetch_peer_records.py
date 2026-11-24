@@ -72,15 +72,32 @@ _SEARCH_URL = "https://ngawest2.berkeley.edu/spectras/new?sourceDb_flag=1"
 _ZIP_PREFIX = "PEERNGARecords_Unscaled"
 
 _RSN_RE = re.compile(r"RSN(\d+)", re.IGNORECASE)
-_VERTICAL_SUFFIXES = ("-UP", "_UP", "UP", "-V", "_V", "-VERT", "_VERT", "-VRT", "_VRT")
+_VERTICAL_SUFFIXES = (
+    "-UP",
+    "_UP",
+    "UP",
+    "-V",
+    "_V",
+    "-VERT",
+    "_VERT",
+    "-VRT",
+    "_VRT",
+    "-UD",
+    "_UD",
+    "UD",
+    "-DWN",
+    "_DWN",
+    "DWN",
+)
 
 
 def _is_vertical(filename: str) -> bool:
     """Whether *filename* names a vertical (non-horizontal) ``.AT2`` component.
 
-    NGA-West2 writes the vertical channel as a trailing ``-UP`` / ``_UP`` (or
-    ``-V``) marker; a trailing bare ``UP`` is also covered because a horizontal
-    azimuth suffix (e.g. ``…090``) never ends in ``UP``.
+    NGA-West2 writes the vertical channel as a trailing ``-UP`` / ``_UP`` /
+    ``-UD`` / ``-DWN`` (or ``-V``) marker; the trailing bare ``UP`` / ``UD`` /
+    ``DWN`` forms are also covered because a horizontal azimuth suffix (e.g.
+    ``…090``) never ends in any of them.
     """
     return Path(filename).stem.upper().endswith(_VERTICAL_SUFFIXES)
 
@@ -189,6 +206,7 @@ def download_rsns(
         driver.find_element(By.ID, "user_email").send_keys(username)
         driver.find_element(By.ID, "user_password").send_keys(password)
         driver.find_element(By.ID, "user_submit").click()
+        _wait_for_login(driver, headless)
 
         driver.get(_SEARCH_URL)
         # terms-of-use confirmation shown on first entry
@@ -237,6 +255,31 @@ def _new_driver(download_dir: Path, headless: bool):
         },
     )
     return webdriver.Chrome(options=opts)
+
+
+def _wait_for_login(driver, headless: bool) -> None:
+    """Wait for the sign-in to redirect away from the members sign-in page.
+
+    A successful login navigates the browser off the sign-in URL, so this
+    returns immediately once that happens; a failed one (or a pending human
+    verification) leaves the browser there.  Headless runs get a short window —
+    verification cannot be completed headless, so a timeout means the run
+    should be retried visibly — while ``--no-headless`` runs get a longer one
+    so a human can complete any CAPTCHA / two-factor check.
+    """
+    from selenium.common.exceptions import TimeoutException
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.webdriver.support.ui import WebDriverWait
+
+    timeout = 30.0 if headless else 300.0
+    try:
+        WebDriverWait(driver, timeout).until(EC.url_changes(_SIGN_IN_URL))
+    except TimeoutException as exc:
+        raise RuntimeError(
+            "Login did not complete — the browser stayed on the sign-in page.  "
+            "Check the credentials, then retry with --no-headless and complete "
+            "any CAPTCHA / verification manually."
+        ) from exc
 
 
 def _parse_rsns(s: str) -> list[int]:
