@@ -243,11 +243,17 @@ class StepResult:
         payload: The output itself — a ``MeshModel``, a ``SAPModelData``,
             ``{case_name: result_dict}``, a :class:`Table`, or a matplotlib
             ``Figure``.
+        model_independent: ``True`` when the result records *declared intent*
+            rather than a computation over the model — it stays valid after a
+            :data:`MODEL` step replaces the working model.  Only the ``select``
+            verb sets it; a check or analysis result is derived from the model
+            and must be dropped on a model edit.
     """
 
     kind: str
     label: str
     payload: Any
+    model_independent: bool = False
 
 
 def validate_params(

@@ -441,7 +441,11 @@ class RecipeRun:
             contribute several.  A document-lifecycle step (``open`` / ``close``
             / ``build_model``) discards the results the previous document
             produced, so a caller never registers A's mesh / tables after B was
-            opened.
+            opened.  A :data:`~fea_toolkit.workflow.steps.MODEL` step
+            (``scale_sections`` / ``isolate_base`` / ``fix_shell_only_base``)
+            drops every model-derived result and keeps only a model-independent
+            one (the ``select`` table), so a ``select → scale_sections`` recipe
+            still shows the selection beside the scaled model.
         failures: ``(step index, verb, message)`` for each *optional* step that
             failed and was tolerated.  A non-optional failure does not appear
             here — it raises :class:`~fea_toolkit.workflow.steps.StepError`, so
@@ -566,7 +570,6 @@ def run_recipe(
         MODAL,
         MODEL,
         SESSION,
-        TABLE,
         StepContext,
         StepError,
     )
@@ -661,15 +664,16 @@ def run_recipe(
                 # must re-mesh rather than solve a mesh of the old model, and
                 # drop those stale results from ``run.results`` so a caller
                 # never registers A's mesh/analysis alongside B's MODEL.  A
-                # model-independent ``table`` (a ``select`` / check report)
-                # survives, so a ``select → scale_sections`` recipe still shows
-                # the selection report beside the new model.
+                # model-independent result — the ``select`` table, which
+                # records a declared selection rather than a computation over
+                # the model — survives; a derived check/analysis result does
+                # not.
                 produced.difference_update((GEOMETRY, CASES, MODAL, FIGURE))
                 context.model = None
                 context.case_results.clear()
                 context.results.clear()
                 run.results[:prior_results] = [
-                    r for r in run.results[:prior_results] if r.kind == TABLE
+                    r for r in run.results[:prior_results] if r.model_independent
                 ]
             if spec.kind == SESSION and spec.resets_document:
                 # A document-lifecycle step (``open`` / ``close`` /

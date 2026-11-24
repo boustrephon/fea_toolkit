@@ -238,6 +238,25 @@ def test_a_recipe_step_referencing_a_named_selection_expands_it():
     assert pytest.approx(original_A * 0.5) == scaled.sections["UB300"].A
 
 
+def test_a_model_step_drops_a_model_derived_check_table():
+    """A MODEL step discards a check table computed from the old model.
+
+    The ``select`` table survives a ``scale_sections`` step (it records declared
+    intent, not a computation over the model), but a derived check table does
+    not — its numbers describe the model that was just replaced.
+    """
+    from fea_toolkit.workflow import Recipe, Step, run_recipe
+
+    recipe = Recipe(
+        steps=[
+            Step("check_connectivity"),
+            Step("scale_sections", selection=Selection(sections=["UB300"]), params={"factor": 0.5}),
+        ]
+    )
+    run = run_recipe(recipe, make_sample_model())
+    assert [result.kind for result in run.results] == ["model"]
+
+
 def test_next_version_path_increments(tmp_path):
     from fea_toolkit.io.model_loader import next_version_path
 

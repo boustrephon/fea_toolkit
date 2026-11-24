@@ -79,5 +79,6 @@ def run_select(context: StepContext, step: Step) -> list[StepResult]:
             kind=TABLE,
             label=f"Selection {name}",
             payload=Table(title=f"Selection {name}", columns=("quantity", "value"), rows=rows),
+            model_independent=True,
         )
     ]
