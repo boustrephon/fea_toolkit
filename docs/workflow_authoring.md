@@ -147,6 +147,28 @@ previous produced:
   `run_static` solves *that*;
 * `run_static` fills `case_results`, which `combine` reduces.
 
+### Selections, and the id-stability contract
+
+A `select` step stores a **named selection** on the context — the workflow
+layer's scoping primitive — and a later step references it through its
+`Selection.selections` field.  A selection is *declared intent*, not a computed
+result: `select` records the criterion (the expression) and any explicit picks
+verbatim, and the consuming step re-resolves it against the **current** model at
+run time.  That is why a `MODEL` step (`scale_sections`, `isolate_base`,
+`fix_shell_only_base`) drops every model-derived result but keeps the `select`
+report (`StepResult.model_independent`) — and why a derived check or analysis
+table does **not** survive it.
+
+That retention is sound only because the three `MODEL` verbs edit properties and
+restraints while **preserving element ids** — an explicit pick (`pick_elements`)
+is a handle into the element table, so it stays valid only if that table is not
+re-tagged or renumbered.  The document-lifecycle verbs that replace or clear the
+model (`build_model`, `open`, `close`) are document resets that **clear or
+replace the selection store** outright.  The contract: **a `MODEL` step must not
+re-tag or renumber elements without also refreshing
+`context.named_selections`** — a future verb that does must clear or re-resolve
+the store the way `build_model` / `open` do.
+
 ### Precursors — what a step needs, and what it produces
 
 A step's output and its inputs are declared, not implicit.  `StepSpec.kind`
