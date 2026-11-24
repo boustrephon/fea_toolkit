@@ -2426,7 +2426,7 @@ def plot_transient_animation(
         else 0.0
     )
     peak = max(
-        (float(np.max(np.abs(hist[:, :3]))) for hist in history_by_tag.values()),
+        (float(np.max(np.linalg.norm(hist[:, :3], axis=1))) for hist in history_by_tag.values()),
         default=0.0,
     )
     if scale is None:
@@ -2496,9 +2496,8 @@ def plot_transient_animation(
 
     if show_original:
         for p1, p2, _it, _jt in frame_geo:
-            n = max(2, int(np.linalg.norm(p2 - p1) * 2))
             plotter.add_mesh(
-                pv.lines_from_points(np.linspace(p1, p2, n)),
+                pv.lines_from_points(np.array([p1, p2])),
                 color="#999999",
                 line_width=1,
                 opacity=0.5,
