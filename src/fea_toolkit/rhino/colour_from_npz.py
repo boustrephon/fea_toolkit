@@ -778,7 +778,8 @@ def colour_nodes_from_npz(
     Args:
         npz_path: Path to the unified ``.npz`` results file.
         case: Transient case label.
-        k: Time-step index; ``None`` colours each node by its peak step.
+        k: Time-step index; ``None`` colours each node by its peak step.  A
+            negative index counts from the end of the history (Python indexing).
         layer_filter: Optional glob filter on the layer full path.
         skip_locked: Skip points on locked layers (default ``True``).
         verbose: Print progress messages.
@@ -788,7 +789,25 @@ def colour_nodes_from_npz(
 
     Returns:
         Number of joint points coloured.
+
+    Raises:
+        IndexError: If *k* is outside the history's valid index range.
     """
+    if k is not None:
+        from ..io.results_repository import NpzResultsRepository
+
+        _times, _base_shear, displacements = NpzResultsRepository(
+            npz_path
+        ).transient_nodal_displacements(case)
+        if displacements:
+            history_len = max(int(hist.shape[0]) for hist in displacements.values())
+            if not -history_len <= k < history_len:
+                raise IndexError(
+                    f"step index k={k} is outside the {case!r} history "
+                    f"(n_steps={history_len}); "
+                    f"valid indices are -{history_len}..{history_len - 1}"
+                )
+
     values = transient_nodal_magnitudes(npz_path, case, k=k)
     if not values:
         logger.warning("No transient displacement data for case %r in %s", case, npz_path)
