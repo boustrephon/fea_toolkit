@@ -566,6 +566,7 @@ def run_recipe(
         MODAL,
         MODEL,
         SESSION,
+        TABLE,
         StepContext,
         StepError,
     )
@@ -658,13 +659,18 @@ def run_recipe(
                 # previous model — and the results that depended on it — are
                 # stale.  Invalidate them so a later geometry-dependent step
                 # must re-mesh rather than solve a mesh of the old model, and
-                # drop the prior document's results from ``run.results`` so a
-                # caller never registers A's mesh/analysis alongside B's MODEL.
+                # drop those stale results from ``run.results`` so a caller
+                # never registers A's mesh/analysis alongside B's MODEL.  A
+                # model-independent ``table`` (a ``select`` / check report)
+                # survives, so a ``select → scale_sections`` recipe still shows
+                # the selection report beside the new model.
                 produced.difference_update((GEOMETRY, CASES, MODAL, FIGURE))
                 context.model = None
                 context.case_results.clear()
                 context.results.clear()
-                del run.results[:prior_results]
+                run.results[:prior_results] = [
+                    r for r in run.results[:prior_results] if r.kind == TABLE
+                ]
             if spec.kind == SESSION and spec.resets_document:
                 # A document-lifecycle step (``open`` / ``close`` /
                 # ``build_model``) replaced or closed the working document, so
