@@ -25,7 +25,7 @@ from fea_toolkit.benchmarks.ik2005_records import LMSR_N_IDS, USGS_CHANNELS
 
 
 def _available_records(limit: int | None) -> list[str]:
-    """The locally-fetched LMSR-N records (skip the 7 PEER-only, honour *limit*)."""
+    """The locally-fetched LMSR-N records (honour *limit*)."""
     available: list[str] = []
     for rid in LMSR_N_IDS:
         try:

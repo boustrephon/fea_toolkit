@@ -2,8 +2,7 @@
 """Run the IK-2005 generic-frame median collapse capacity over the LMSR-N records.
 
 Drives :func:`~fea_toolkit.benchmarks.generic_frame_run.collapse_capacity_sa`
-over the 33 locally-available LMSR-N records (the 40-record IK-2005 Table 4.2
-set minus the 7 records that only exist in PEER NGA-West2 — see
+over the full 40-record LMSR-N set (IK-2005 Table 4.2; see
 ``docs/ik2005_generic_frame_benchmark.md``).  The headline number is the median
 ``(Sa,c/g)/γ``, benchmarked at ``≈ 3.3`` for ``T1 ≈ 1 s`` (§5.5); the ``0909``
 frame (N = 9, T1 = 0.9 s) is the first target.

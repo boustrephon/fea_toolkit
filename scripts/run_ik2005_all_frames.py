@@ -3,7 +3,7 @@
 
 Extends ``scripts/run_ik2005_npz.py`` (single frame) to all 12 frames
 (``0303 … 1836``: N = 3/6/9/12/15/18 storeys × stiff/flexible).  Each frame is
-run over the 33 locally-available LMSR-N records, its ``ida`` block is archived
+run over the 40 LMSR-N records, its ``ida`` block is archived
 to ``<out-dir>/ik2005_<code>.npz``, and the per-frame summary (median
 ``(Sa,c/g)/γ``, σ_ln) is appended to ``<out-dir>/ik2005_all_frames_summary.json``
 **incrementally** — so the run is safe to kill and resume: a frame whose archive
@@ -82,7 +82,7 @@ def _write_table(summary: dict, out_dir: str) -> None:
     rows = [summary[c] for c in FRAME_CODES if c in summary]
     rows.sort(key=lambda r: (r.get("N") or 0, r.get("T1") or 0.0))
     lines = [
-        "# IK-2005 collapse — all frames (33 LMSR-N records)",
+        "# IK-2005 collapse — all frames (40 LMSR-N records)",
         "",
         "| code | N | T1 (s) | median (Sa,c/g)/γ | σ_ln | notes |",
         "|---|---|---|---|---|---|",
@@ -142,7 +142,7 @@ def _write_plot(summary: dict, out_dir: str) -> None:
         )
     ax.set_xlabel("T1 (s)")
     ax.set_ylabel("median (Sa,c/g)/γ")
-    ax.set_title("IK-2005 generic-frame collapse capacity vs period (33 LMSR-N records)")
+    ax.set_title("IK-2005 generic-frame collapse capacity vs period (40 LMSR-N records)")
     ax.grid(alpha=0.3)
     ax.legend()
     fig.tight_layout()

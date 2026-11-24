@@ -10,7 +10,7 @@ the FEA-GUI's "Open results" path consume.
 Usage::
 
     python scripts/run_ik2005_npz.py --code 0909 --limit 3   # smoke test
-    python scripts/run_ik2005_npz.py --code 0909              # full 33 records
+    python scripts/run_ik2005_npz.py --code 0909              # full 40 records
 """
 
 import argparse
