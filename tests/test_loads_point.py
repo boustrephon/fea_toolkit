@@ -215,3 +215,85 @@ def test_midpoint_torsion_moment_gives_equal_support_moments():
         assert r_i == pytest.approx(r_j)
     finally:
         ops.wipe()
+
+
+def test_corotational_offcenter_localz_force_resultant_and_moment(monkeypatch):
+    """An off-centre LocalZ point force under Corotational falls back to
+    consistent nodal loads that reproduce the resultant and its first moment."""
+    from fea_toolkit.model.sap_data import (
+        FrameElement,
+        Material,
+        Node,
+        Restraint,
+        SAPModelData,
+        Section,
+    )
+
+    L = 5.0
+    md = SAPModelData(
+        nodes={
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=L, y=0.0, z=0.0),
+        },
+        restraints={
+            "1": Restraint([1, 1, 1, 1, 1, 1]),
+            "2": Restraint([1, 1, 1, 1, 1, 1]),
+        },
+        materials={"Steel": Material(name="Steel", type="Steel", E_mod=2e11, G_mod=8e10)},
+        sections={
+            "UB100": Section(
+                name="UB100",
+                shape="I/Wide Flange",
+                material="Steel",
+                A=0.01,
+                I33=1e-4,
+                I22=1e-5,
+                J=1e-5,
+            )
+        },
+        frame_elements={"1": FrameElement(elem_id="1", elem_tag=1, node_i="1", node_j="2")},
+        area_elements={},
+        frame_assignments={"1": "UB100"},
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
+        frame_point_loads=[
+            FramePointLoad(
+                pattern="P",
+                frame_id="1",
+                direction="LocalZ",
+                load_type="Force",
+                value=10.0,
+                rdist=0.3,
+                dist=0.0,
+            )
+        ],
+    )
+    mixin = LoadMixin()
+    mixin.mesh_model = md
+    mixin.frame_tag_map = {"1": 1}
+    mixin._point_load_totals = {}
+    identity = (
+        np.array([1.0, 0.0, 0.0]),
+        np.array([0.0, 1.0, 0.0]),
+        np.array([0.0, 0.0, 1.0]),
+    )
+    monkeypatch.setattr(mixin, "get_local_axes", lambda elem: identity, raising=False)
+    monkeypatch.setattr(mixin, "_uses_corotational_transform", lambda: True)
+
+    rec = _RecordingOps()
+    monkeypatch.setattr(loads_mod, "ops", rec)
+
+    mixin._apply_point_loads("P", [md.frame_point_loads[0]], md.frame_elements, 1.0)
+
+    loads = [c for c in rec.calls if c[0] == "load"]
+    assert len(loads) == 2
+    fi, fj = loads[0][1], loads[1][1]
+    fz_i, fz_j = fi[3], fj[3]
+    my_i, my_j = fi[5], fj[5]
+
+    # Force resultant: the nodal transverse forces sum to the applied load.
+    assert fz_i + fz_j == pytest.approx(10.0)
+    # First moment about node i (y-axis): the load at x = 0.3 * L yields
+    # M_y = -10 * 0.3 * L, reproduced by the end moments plus the J-end force.
+    assert my_i + my_j - L * fz_j == pytest.approx(-10.0 * 0.3 * L)

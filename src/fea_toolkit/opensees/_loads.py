@@ -406,8 +406,8 @@ class LoadMixin:
                 m_t, m_by, m_bz = float(m_local[0]), float(m_local[1]), float(m_local[2])
                 if length > 0.0:
                     dn1, dn2, dn3, dn4 = _beam_point_moment_consistent(rdist, length)
-                    f_i_local = np.array([0.0, m_bz * dn1, m_by * dn1])
-                    f_j_local = np.array([0.0, m_bz * dn3, m_by * dn3])
+                    f_i_local = np.array([0.0, m_bz * dn1, -m_by * dn1])
+                    f_j_local = np.array([0.0, m_bz * dn3, -m_by * dn3])
                     m_i_local = np.array([m_t * (1.0 - rdist), m_by * dn2, m_bz * dn2])
                     m_j_local = np.array([m_t * rdist, m_by * dn4, m_bz * dn4])
                 else:
@@ -455,8 +455,8 @@ class LoadMixin:
                     n1, n2, n3, n4 = _beam_point_force_consistent(rdist, length)
                     f_i_local = np.array([lx * (1.0 - rdist), ly * n1, lz * n1])
                     f_j_local = np.array([lx * rdist, ly * n3, lz * n3])
-                    m_i_local = np.array([0.0, lz * n2, ly * n2])
-                    m_j_local = np.array([0.0, lz * n4, ly * n4])
+                    m_i_local = np.array([0.0, -lz * n2, ly * n2])
+                    m_j_local = np.array([0.0, -lz * n4, ly * n4])
                 else:
                     # Degenerate element: keep only the axial linear split.
                     f_i_local = np.array([lx * (1.0 - rdist), 0.0, 0.0])
