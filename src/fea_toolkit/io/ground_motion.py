@@ -209,9 +209,10 @@ def is_direct_url(url: str) -> bool:
 # ── PEER NGA record reader ───────────────────────────────────────
 
 
-#: A signed floating-point value, including scientific notation (``5.0E-03``)
-#: and a leading-dot form (``.005``) — the two ways NGA-West2 writes ``DT``.
-_FLOAT_VALUE_RE = r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?"
+#: A signed floating-point value, including scientific notation (``5.0E-03``),
+#: a leading-dot form (``.005``) and a trailing-dot form (``5.``, as in
+#: ``DT=5.E-03``) — the ways NGA-West2 writes ``DT``.
+_FLOAT_VALUE_RE = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?"
 
 #: ``DT = <value>`` on a header line (whitespace around ``=`` tolerated).
 _DT_RE = re.compile(rf"(?:^|\s)DT\s*=\s*({_FLOAT_VALUE_RE})", re.IGNORECASE)
@@ -226,8 +227,9 @@ def read_peer_record(path: str) -> tuple[np.ndarray, np.ndarray]:
     PEER NGA format (``.AT2``) has a header with metadata followed by
     acceleration values in g, one per line.  ``DT`` (time step) and
     ``NPTS`` (sample count) are read from the header; ``DT`` tolerates
-    scientific notation and a leading-dot form, and ``NPTS`` is checked
-    against the number of values parsed so a truncated record warns.
+    scientific notation, a leading-dot form and a trailing-dot form (as in
+    ``DT=5.E-03``), and ``NPTS`` is checked against the number of values
+    parsed so a truncated record warns.
 
     Args:
         path: Path to the ``.AT2`` file.
@@ -254,7 +256,8 @@ def read_peer_record(path: str) -> tuple[np.ndarray, np.ndarray]:
         low = stripped.lower()
         if "npts" in low or "dt" in low:
             # Parse DT and NPTS from the header (possibly on the same line),
-            # tolerating scientific notation and a leading-dot DT value.
+            # tolerating scientific notation, leading-dot and trailing-dot DT
+            # values (e.g. ``5.0E-03``, ``.005``, ``5.E-03``).
             m_dt = _DT_RE.search(stripped)
             if m_dt:
                 dt = float(m_dt.group(1))

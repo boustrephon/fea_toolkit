@@ -161,7 +161,8 @@ class TestSourceExtension:
 
 
 class TestReadPeerRecordHeaderVariants:
-    """NGA-West2 headers can write DT in scientific notation or leading-dot form."""
+    """NGA-West2 headers can write DT in scientific notation, leading-dot or
+    trailing-dot form."""
 
     def test_dt_scientific_notation(self, tmp_path):
         f = tmp_path / "sci.at2"
@@ -175,6 +176,14 @@ class TestReadPeerRecordHeaderVariants:
         f.write_text("NPTS=2\nDT= .00500\n0.2\n0.2\n", encoding="utf-8")
         times, _accel = read_peer_record(str(f))
         assert times.tolist() == pytest.approx([0.0, 0.005])
+
+    def test_dt_trailing_dot_exponent(self, tmp_path):
+        """``DT=5.E-03`` (digits then a dot with no fractional digit) parses in full."""
+        f = tmp_path / "trailing_dot.at2"
+        f.write_text("NPTS=3\nDT=5.E-03\n0.1\n0.1\n0.1\n", encoding="utf-8")
+        times, accel = read_peer_record(str(f))
+        assert times.tolist() == pytest.approx([0.0, 0.005, 0.01])
+        assert accel.tolist() == pytest.approx([0.1 * DEFAULT_GRAVITY_MS2] * 3)
 
     def test_npts_mismatch_warns(self, tmp_path):
         f = tmp_path / "trunc.at2"
