@@ -209,6 +209,16 @@ def test_rayleigh_coefficients_mass_proportional():
     assert a0 == pytest.approx(4.0 * math.pi * 0.05 / 0.9)
 
 
+def test_rayleigh_coefficients_tangent_matches_two_period():
+    """``rayleigh_tangent`` shares the two-period ``(a0, a1)`` of ``rayleigh``."""
+    from fea_toolkit.opensees._runner_dynamic import rayleigh_coefficients
+
+    a0_r, a1_r = rayleigh_coefficients(0.05, 1.0, 0.5, "rayleigh")
+    a0_t, a1_t = rayleigh_coefficients(0.05, 1.0, 0.5, "rayleigh_tangent")
+    assert a0_t == pytest.approx(a0_r)
+    assert a1_t == pytest.approx(a1_r)
+
+
 def test_rayleigh_coefficients_rejects_unknown_type():
     from fea_toolkit.opensees._runner_dynamic import rayleigh_coefficients
 

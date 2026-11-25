@@ -326,11 +326,14 @@ drift proxy dropped) — see "Next steps".
    (σ_ln 0.45) vs the paper's ≈ 3.4 — the `0909` overshoot that motivated the
    "Collapse criterion" analysis below.
 
-### 40-record re-run (pending NGA-West2)
+### 40-record re-run (in progress)
 
-The medians above are 33-record numbers (7 PEER-only records absent).  Once the
-7 NGA-West2 records are fetched (search by event + station — see "Downloading
-them" below), re-run:
+The medians above are 33-record numbers (7 PEER-only records absent at the
+time, and the Rayleigh anchor was ``T1 × 0.5`` — see the T95 fix below).  The 7
+NGA-West2 records are now fetched (``.AT2`` in the mirror) and the full
+12-frame × 40-record re-run is in progress under the correct ``(T1, T95)``
+Rayleigh anchor (`output/ik2005_40record/`); the 7.94 median quoted above is
+the *pre-T95* value and will be superseded once `0909` completes.  Re-run:
 
 ```bash
 python scripts/run_ik2005_collapse.py --code 0909 --max-scale 128 \
@@ -542,6 +545,42 @@ criterion-implementation difference between DRAIN-2DX (event-to-event stall at
 the tangent-stiffness singularity) and OpenSees (Newton "converging" the
 flatline) can flip the frame across the cliff.
 
+**Two-record damping sweep (done).**  `ik2005_damping_probe.py` re-ran both
+bracketing records over four damping configurations (same ladder / bisection /
+non-convergence):
+
+| record | Rayleigh 5 % | Rayleigh 2.5 % | Rayleigh 1 % | mass-prop 5 % |
+|---|---|---|---|---|
+| `IV79cal` | 72.750 | 52.750 | 38.875 | 41.625 |
+| `IV79e13` | 77.750 | 72.250 | 15.938 | 15.438 |
+
+Two facts: (i) mass-proportional 5 % lands at the same collapse as Rayleigh
+1 % for **both** records (41.6 vs 38.9; 15.4 vs 15.9) — the βK leg is the
+over-damping term; (ii) the cliff is **record-dependent** — `IV79e13` crashes
+4.5× between ξ = 2.5 % and 1 %, while `IV79cal` declines only 1.9× with no
+cliff, so a median-central record sits closer to `IV79cal` (consistent with
+the 33-record mass-prop median of 4.67 being only 1.7× below Rayleigh).
+
+**Tangent-stiffness βK (done — refuted).**  A `rayleigh_tangent` damping type
+was added (`ops.rayleigh(a0, a1, 0, 0)` → `C = a0·M + a1·K_t`) and probed on
+both records: `IV79cal` 71.750 (vs 72.750 initial-βK), `IV79e13` 77.750 (vs
+77.750, identical).  The tangent-βK leg is a **no-op** — the `zeroLength`
+hinge springs carry no βK (`doRayleighDamping = 0`), so hinge yielding cannot
+reduce the stiffness-proportional damping, and the only difference (the P-Δ
+geometric stiffness on the elastic members) is ≤ 1.4 %.  The "βK decays as the
+hinges yield" reading of DRAIN-2DX is therefore **refuted**, exactly as
+Appendix B.4's zero-βK-on-springs rule implies.
+
+**Strength-coefficient γ verification (done).**  `ik2005_strength_check.py`
+reads the analytic first-yield `Vy/W` off the Medina tables and runs the actual
+OpenSees pushover.  `Vy/W = 1.0` for all 12 frames (to ≤ 2 %); the pushover
+peak `Vmax/W = 1.05–1.19` (the `αs = 0.03` hardening adds ≤ ~19 % overstrength).
+For `0909`: `Vy/W = 1.002`, `Vmax/W = 1.162` (no P-Δ) / 1.120 (P-Δ + held
+gravity).  So the `γ = 1.0` divisor in `(Sa,c/g)/γ` is correct, and even a
+peak-strength normalisation would shift the ratio ≤ 1.19× — nowhere near the
+2.3× gap.  (`median_collapse_sa_gamma` now divides by `_GAMMA` explicitly
+rather than relying on `γ == 1.0`.)
+
 **Mass-proportional 33-record median (done).**  The full 33-record LMSR-N run
 was repeated with `damping_type="mass_proportional"` (ξ = 5 %,
 `a0 = 4πξ/T1`, `a1 = 0`) and no drift proxy:
@@ -610,7 +649,63 @@ reports collapse *later* (``IV79wsm``: 44 vs 38.9).  The 4.67 vs 3.4 gap is a
 collapse IM is ~4.67, and the only lever found that moves it by more than ~15 %
 is the **higher-mode damping content** (the 5× cliff) — the leading remaining
 candidate, not the collapse criterion, the record set, P-∆ magnitude, αc, the
-hinge material or the integrator.
+hinge material, the integrator or the tangent-stiffness βK formulation (a
+no-op — the hinge springs carry no βK, Appendix B.4), the hinge-stiffness
+factor (a no-op — the backbone's plastic rotations are fixed by the table), and
+the record set (processing ≤ 1.3 %, component errors now fixed, missing-record
+bound).  The residual 4.67-vs-3.4 gap is therefore a **genuine cross-code
+(DRAIN-2DX vs OpenSees) discrepancy** that no OpenSees-side modelling, damping,
+criterion, record or normalisation factor we have tested explains; the only
+remaining explanation is a DRAIN-2DX-internal detail (the one-component model
+formulation or the event-to-event solver), not reproducible without the
+modified DRAIN-2DX source.
+
+## Record-processing check and component fixes
+
+**CESMD Vol2 vs PEER NGA-West2 `Sa(T1)` (done — exonerated).**
+`scripts/ik2005_record_processing_check.py` compares the 5 %-damped
+`Sa(T1 = 0.9 s)` of every record available in both the CESMD mirror (`.csv`)
+and as a PEER NGA `.AT2`.  The seven *unambiguous* "clean" records match NGA to
+**≤ 1.3 %** (`NR94cen`, `NR94cnp`, `NR94fle`, `NR94glp`, `NR94lv2`, `NR94nya`,
+`NR94ver`), so **CESMD Vol2 processing does not shift the collapse IM** — the
+record-processing hypothesis for the 4.67-vs-3.4 gap is refuted.  The
+already-fixed records show the expected large ratios (`NR94stc` 0.415,
+`SH87wsm` 0.438, `LP89gmr` 1.312, `NR94lh1` 1.279) — all component/outlier
+issues, not processing.
+
+**Two more wrong-component records found and fixed.**  The check also surfaced
+`NR94far` and `NR94stn`, whose CESMD `CH1` pick is the wrong horizontal
+component (the fetch script always takes `CH1`; Table 4.2 lists no azimuth):
+
+| record | CESMD `.csv` (old) | correct NGA component | `Sa(0.9)` over-stated by |
+|---|---|---|---|
+| `NR94stn` | `STN110` (PGA 0.429) | `STN020` (PGA 0.468; Table 0.474) | +28 % |
+| `NR94far` | `FAR090` (PGA 0.262) | `FAR000` (PGA 0.28; Table 0.273) | +50 % |
+
+Both now carry the correct `.AT2` in the mirror (`NR94far.AT2`, `NR94stn.AT2`;
+`_load_record` prefers `.AT2`).  This is a **~2–3 % median** effect (2 of 40
+records, both previously over-stated so the fix lowers the median slightly), so
+it does **not** close the gap — but it removes the last known record-side error.
+All 40 LMSR-N records are now fetched and the mirror is complete.
+
+## Geometric-response probe (hinge stiffness)
+
+**Hinge-stiffness factor (done — refuted).**  `scripts/ik2005_hinge_stiffness_probe.py`
+swept the spring-stiffness multiplier ``Ks = factor × 6EI/L`` on the two
+bracketing records (baseline factor 100 = near-rigid; the IK-2005 Appendix B.4
+value is ``n = 10``):
+
+| record | n=10 (paper) | n=20 | baseline (×100) |
+|---|---|---|---|
+| `IV79cal` | 73.750 | 74.250 | 72.750 |
+| `IV79e13` | 75.750 | 77.750 | 77.750 |
+
+The factor is a **no-op** (±3 %, run-to-run noise): the IMK backbone's plastic
+rotations (``θp``, ``θpc``) are fixed by the table's ``Kb``/``Kc``, so the
+spring's elastic stiffness only moves the (negligible) elastic ``θy`` — the
+post-capping response, and hence the collapse timing, is unchanged.  The
+"near-rigid spring delays the post-yield softening" reading of the gap is
+therefore **refuted**.
 
 ## LMSR-N record set (IK-2005 Table 4.2)
 
@@ -669,10 +764,11 @@ printed in IK-2005 Table 4.2, verified against the report's PDF text layer
 the table: "Agnes" → **Agnews** State Hospital, ``NR94cmp`` → **``NR94cnp``**,
 ``NR94flc`` → **``NR94fle``**.
 
-### Acquisition status — 33/40 fetched
+### Acquisition status — 40/40 fetched
 
-33 records are in the local mirror (`data/ground_motion/local/`), fetched from
-two open archives; the other 7 exist only in PEER NGA-West2:
+All 40 records are in the local mirror (`data/ground_motion/local/`), fetched
+from two open archives plus the 7 PEER NGA-West2 records (now ``.AT2``).  The
+40-record re-run needs no further downloads:
 
 | Source | Count | Records |
 |---|---|---|
@@ -695,10 +791,9 @@ component whose PGA matches Table 4.2: `LP89agw` (Agnews, PGA 0.172 g),
 0.156 g), `SH87icc` (El Centro Imp. Co. Cent, 0.358 g), `SH87pls` (Plaster
 City, 0.186 g).
 
-**40-record re-run is automatic.**  Drop the 7 waveforms into
-`data/ground_motion/local/` as ``<record_id>.AT2`` (e.g. ``LP89agw.AT2``) and
-the runners pick them up with no code change — `fetched_ids()` returns 40 once
-the files are present.  See "40-record re-run (pending NGA-West2)" under
+**40-record re-run.**  The 7 PEER-only waveforms are now in the mirror as
+``<record_id>.AT2`` (e.g. ``LP89agw.AT2``); `fetched_ids()` returns 40, and the
+runners pick them up with no code change.  See "40-record re-run" under
 "Results".
 
 ### Downloading them (you, not the repo)

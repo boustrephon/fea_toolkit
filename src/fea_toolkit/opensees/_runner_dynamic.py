@@ -26,7 +26,9 @@ def rayleigh_coefficients(
         period_2: Second retained period (s) for two-period Rayleigh; ``None``
             falls back to ``period_1 * 0.5`` (the single-mode convention).
         damping_type: ``"rayleigh"`` (default, mass + initial-stiffness
-            proportional) or ``"mass_proportional"`` (``a1 = 0``,
+            proportional), ``"rayleigh_tangent"`` (mass + tangent-stiffness
+            proportional — the same ``(a0, a1)``, applied to the current
+            stiffness) or ``"mass_proportional"`` (``a1 = 0``,
             ``a0 = 4πξ/T1`` — the IK-2005 §4.3 convention: damping proportional
             to mass only).
 
@@ -38,14 +40,15 @@ def rayleigh_coefficients(
     """
     if damping_type == "mass_proportional":
         return 4.0 * math.pi * damping_ratio / period_1, 0.0
-    if damping_type == "rayleigh":
+    if damping_type in ("rayleigh", "rayleigh_tangent"):
         if period_2 is None:
             period_2 = period_1 * 0.5
         a0 = 4.0 * math.pi * damping_ratio / (period_1 + period_2)
         a1 = damping_ratio * period_1 * period_2 / (math.pi * (period_1 + period_2))
         return a0, a1
     raise ValueError(
-        f"unknown damping_type {damping_type!r} (expected 'rayleigh' or 'mass_proportional')"
+        f"unknown damping_type {damping_type!r} "
+        "(expected 'rayleigh', 'rayleigh_tangent' or 'mass_proportional')"
     )
 
 
@@ -115,8 +118,10 @@ class TransientRunnerMixin:
             dt: Time step (s).
             direction: Excitation direction — ``"X"``, ``"Y"`` or ``"Z"``.
             damping_ratio: Damping ratio ξ (Rayleigh or mass-proportional).
-            damping_type: ``"rayleigh"`` (default) or ``"mass_proportional"``
-                (``a1 = 0``, ``a0 = 4πξ/T1`` — the IK-2005 §4.3 convention).
+            damping_type: ``"rayleigh"`` (default, initial-stiffness βK₀),
+                ``"rayleigh_tangent"`` (tangent-stiffness βK) or
+                ``"mass_proportional"`` (``a1 = 0``, ``a0 = 4πξ/T1`` — the
+                IK-2005 §4.3 convention).
             period_1: First Rayleigh period (s); ``None`` → from a 2-mode
                 modal solve.
             period_2: Second Rayleigh period (s); ``None`` → from a 2-mode
@@ -221,15 +226,20 @@ class TransientRunnerMixin:
             ops.remove("loadPattern", pattern_tag)
         with contextlib.suppress(Exception):
             ops.remove("timeSeries", ts_tag)
-        # ── Damping: C = a0·M + a1·K₀ (initial-stiffness Rayleigh) ──
-        # The lumped-hinge zeroLength springs need no βK exclusion: OpenSees
-        # ZeroLength elements ignore stiffness-proportional Rayleigh damping by
-        # default (``doRayleighDamping = 0`` at element creation), so the βK₀
-        # term lands on the elastic members only — exactly the IK-2005 Appendix
-        # B.4 / MK-2003 Appendix A.4 prescription of zero βK on the plastic-hinge
-        # springs.  (DRAIN-2DX needs an explicit zero-βK rule because its springs
-        # carry βK; OpenSees gives it for free.)
-        ops.rayleigh(a0, 0.0, a1, 0.0)
+        # ── Damping: C = a0·M + a1·K ──
+        # ``rayleigh`` (default) uses the *initial*-stiffness βK₀ (IK-2005
+        # Appendix B.4 Eq B.8); ``rayleigh_tangent`` uses the *tangent*-stiffness
+        # βK (C = a0·M + a1·K_t), whose stiffness-proportional leg decays as the
+        # structure softens (P-Δ geometric stiffness).  The lumped-hinge
+        # zeroLength springs carry no βK in either case: OpenSees ZeroLength
+        # elements ignore stiffness-proportional Rayleigh damping by default
+        # (``doRayleighDamping = 0``), so βK lands on the elastic members only —
+        # the IK-2005 Appendix B.4 / MK-2003 Appendix A.4 zero-βK-on-springs rule
+        # (DRAIN-2DX needs it manually; OpenSees gives it for free).
+        if damping_type == "rayleigh_tangent":
+            ops.rayleigh(a0, a1, 0.0, 0.0)
+        else:
+            ops.rayleigh(a0, 0.0, a1, 0.0)
         ops.timeSeries("Path", ts_tag, "-dt", dt, "-values", *accel)
         ops.pattern("UniformExcitation", pattern_tag, dof, "-accel", ts_tag)
 

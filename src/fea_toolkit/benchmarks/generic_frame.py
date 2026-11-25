@@ -354,12 +354,19 @@ def add_pdelta_gravity(md: SAPModelData, factor: float = 1.4) -> SAPModelData:
     return md
 
 
-def builder_config(*, pdelta: bool = False) -> dict[str, Any]:
+def builder_config(
+    *, pdelta: bool = False, hinge_stiffness_factor: float = 100.0
+) -> dict[str, Any]:
     """The ``AnalysisBuilder`` config for the IK-2005 generic frame.
 
     Args:
         pdelta: When True, emit the ``PDelta`` geometric transformation (global
             P-Δ) instead of ``Linear``.
+        hinge_stiffness_factor: Spring-stiffness multiplier ``Ks / (6EI/L)`` for
+            the near-rigid beam-end hinge springs (default 100).  The IK-2005
+            Appendix B.4 prescription is ``n = 10`` (spring = 10× the member);
+            lowering this toward 10 lets the hinge post-yield softening feed into
+            the structure sooner (the geometric-response sensitivity probe).
     """
     return {
         "element_type": "elasticBeamColumn",
@@ -369,7 +376,7 @@ def builder_config(*, pdelta: bool = False) -> dict[str, Any]:
         # spring/beam-column split is internal — IK-2005 Appendix B) — a large
         # factor keeps the near-rigid spring ~rigid so the elastic member carries
         # the full Ke (residual softening < 1 %).
-        "hinge_stiffness_factor": 100.0,
+        "hinge_stiffness_factor": hinge_stiffness_factor,
         "geom_transf_type": "PDelta" if pdelta else "Linear",
     }
 
@@ -384,6 +391,7 @@ def build_builder(
     *,
     pdelta: bool = False,
     pdelta_gravity: bool = False,
+    hinge_stiffness_factor: float = 100.0,
 ):
     """Build the generic frame into an ``AnalysisBuilder`` (domain already built).
 
@@ -392,6 +400,9 @@ def build_builder(
         pdelta: When True, use the ``PDelta`` geometric transformation.
         pdelta_gravity: When True, add the held ``1.4 × seismic mass`` gravity
             loads (pair with ``pdelta=True`` for a P-Δ collapse comparison).
+        hinge_stiffness_factor: Spring-stiffness multiplier (default 100; the
+            IK-2005 Appendix B.4 value is ``n = 10``) — passed to
+            :func:`builder_config`.
 
     Returns:
         An ``AnalysisBuilder`` with ``build_domain()`` already called.
@@ -404,6 +415,9 @@ def build_builder(
     if pdelta_gravity:
         add_pdelta_gravity(md)
     mesh = preprocess_model(md, preprocess_config())
-    builder = AnalysisBuilder(mesh, builder_config(pdelta=pdelta))
+    builder = AnalysisBuilder(
+        mesh,
+        builder_config(pdelta=pdelta, hinge_stiffness_factor=hinge_stiffness_factor),
+    )
     builder.build_domain()
     return builder

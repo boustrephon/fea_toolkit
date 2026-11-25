@@ -45,6 +45,14 @@ _DAMPING = 0.05
 #: remains available for the SAC path via ``sac_run``'s default.
 _COLLAPSE_DRIFT: Optional[float] = None
 
+#: Strength coefficient ``γ = Vy/W`` — the IK-2005 Appendix-B design value.
+#: Every generic frame is designed for simultaneous first yield at ``Vy = W``,
+#: so the collapse intensity ``(Sa,c/g)/γ`` divides by ``γ = 1.0``.  Kept as a
+#: named constant (rather than an inline ``1.0``) so the normalisation is
+#: explicit and auditable in both ``median_collapse_sa_gamma`` and the record
+#: scaling in :func:`drift_demands`.
+_GAMMA = 1.0
+
 
 def period_1(code: str) -> float:
     """The frame's fundamental period ``T1 = 0.1N`` / ``0.2N`` (s)."""
@@ -241,7 +249,7 @@ def drift_demands(
         accel_base, dt_ = _load_record(rid, dt, channel=channel)
         sa = sdof_spectral_acceleration(accel_base, dt_, t1, zeta=0.05)
         for r in ratios:
-            im = float(r) * 1.0 * g / sa  # γ = 1.0
+            im = float(r) * _GAMMA * g / sa
             accel = np.asarray(accel_base, dtype=float) * im
             wipe()
             try:
@@ -353,6 +361,7 @@ def _ida_run(
     pdelta: bool = True,
     pdelta_gravity: bool = True,
     damping_type: str = "rayleigh",
+    hinge_stiffness_factor: float = 100.0,
 ) -> dict[str, Any]:
     """Run one IDA ladder for *code* (a base record scaled over *intensities*).
 
@@ -389,7 +398,12 @@ def _ida_run(
 
     wipe()
     try:
-        builder = gf.build_builder(code, pdelta=pdelta, pdelta_gravity=pdelta_gravity)
+        builder = gf.build_builder(
+            code,
+            pdelta=pdelta,
+            pdelta_gravity=pdelta_gravity,
+            hinge_stiffness_factor=hinge_stiffness_factor,
+        )
         levels = floor_levels(builder)
         tags = [t for _, t in levels]
         builder.config["transient_record_node_tags"] = tags
@@ -486,6 +500,7 @@ def run_ida(
     pdelta_gravity: bool = True,
     channel: Optional[str] = None,
     damping_type: str = "rayleigh",
+    hinge_stiffness_factor: float = 100.0,
 ) -> dict[str, Any]:
     """Incremental dynamic analysis of one record over an IM ladder.
 
@@ -526,6 +541,7 @@ def run_ida(
         pdelta=pdelta,
         pdelta_gravity=pdelta_gravity,
         damping_type=damping_type,
+        hinge_stiffness_factor=hinge_stiffness_factor,
     )
 
 
@@ -715,7 +731,7 @@ def collapse_ida_curves(
     return {
         "code": code,
         "T1": t1,
-        "gamma": 1.0,  # the Appendix-B design value Vy/W
+        "gamma": _GAMMA,  # the Appendix-B design value Vy/W
         "g": float(g),
         "ladder": [float(im) for im in intensities],
         "max_scale": max_scale,
@@ -727,7 +743,7 @@ def collapse_ida_curves(
         "collapse_Sa_T1_g": collapse_sa_g,
         "survivor_limits": survivor_limits,
         "median_collapse_sa": median,
-        "median_collapse_sa_gamma": (median / g) if median is not None else None,
+        "median_collapse_sa_gamma": (median / (g * _GAMMA)) if median is not None else None,
         "sigma_ln": sigma_ln,
         "n_records": len(record_ids),
         "n_collapsed": n_collapsed,

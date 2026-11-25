@@ -53,7 +53,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--limit", type=int, default=None, help="run only the first N records")
     parser.add_argument(
         "--damping-type",
-        choices=["rayleigh", "mass_proportional"],
+        choices=["rayleigh", "rayleigh_tangent", "mass_proportional"],
         default="rayleigh",
         help="damping formulation (default rayleigh)",
     )
