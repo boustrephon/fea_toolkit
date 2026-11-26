@@ -10,21 +10,81 @@ category: [archive]
 > [`_pending_work.md`](../_pending_work.md) on 2026-10-27.  Nothing here is
 > open work; the live plan lives in `_pending_work.md`.
 
-## DONE (2026-11-26 — IK-2005 generic-frame collapse: investigation closed)
+## DONE (2026-11-26 — IK-2005 collapse closed + the P43 transient block archived)
 
-P42b (IK-2005 generic-frame collapse) was brought to a close.  The 40-record ×
-12-frame re-run under the paper-correct `(T1, T95)` Rayleigh damping is complete
-(`output/ik2005_40record/`); the conclusion — recorded in
-`ik2005_generic_frame_benchmark.md` → "Study summary and conclusions" — is that
-the paper's median collapse curve is **not reproducible from the OpenSees side**:
-only `0303` (4.396) and `0306` (6.628) pin a median, every frame with N ≥ 6 is
-*censored*, and the root cause is a genuine cross-code (DRAIN-2DX vs OpenSees)
-discrepancy, not a fixable modelling error.  Validated and passing: modal T1
-(≤ 0.5 %), `γ = Vy/W = 1.0` (≤ 2 %), the IMK backbone, the MK-2003 modal tables,
-the IK-2003 drift anchor (+2–13 %), and the IDA driver (ladder + bisection +
-censored median).  P42b stays in `_pending_work.md` as ⚠️ partial — the
-collapse-capacity calibration remains open — with the close-out status recorded
-there.
+P42b (IK-2005 generic-frame collapse) was brought to a close and P43 (the
+transient time-history results block) is fully landed.  Relocated from
+`_pending_work.md`; P42b keeps a thin "collapse-capacity calibration remains
+open" stub there, P43 keeps none.
+
+#### P42b (completed part) — IK-2005 generic-frame collapse (Medina frames, Fig 5.16)
+
+Source: `docs/ik2005_generic_frame_benchmark.md`; `docs/benchmark_roadmap.md` §3.
+
+**Status (2026-11-02 → closed 2026-11-26).**  The like-for-like IK-2005 match —
+the 12 Medina (2002) generic single-bay frames (`generic_frame_data.py`), the
+`IMKPeakOriented` hinge, the `generic_frame` generator (spring placement: 18 beam
++ 2 column-base, no elastic column springs) and the IDA runner (P-Δ + held
+`1.4 × seismic mass`, Rayleigh on T1+T95).  Record-free checks green: modal
+T1 ≤ 0.5 %, pushover `γ = 1.0` ≤ 2 %, MK-2003 modal tables (A.1–A.6) ≤ 0.002,
+the IK-2003 drift anchor `θr,max/[Sd/H] ≈ PF1`.  The root cause of the
+33-record `0909` overshoot (`(Sa,c/g)/γ ≈ 7.9` vs ≈ 3.4) was narrowed through the
+"Collapse criterion" analysis (see the benchmark doc): the collapse detector, the
+integrator, P-Δ magnitude and the hinge material were each exonerated; the `αc`
+post-capping slope is the dominant model lever (αc −0.1→−0.3 → 2.4× lower
+collapse) and a ~5× **damping cliff** between ξ ≈ 1 % and 2.5 % makes the result
+ill-conditioned to higher-mode damping; the mass-proportional hypothesis was
+refuted (median 4.67 vs 7.94), the missing-record bound [4.27, 5.61] cannot
+explain the gap, and the record set is essentially correct.
+
+**Close-out (2026-11-26).**  The 40-record × 12-frame re-run under the correct
+`(T1, T95)` Rayleigh anchor is complete (`output/ik2005_40record/`).  Only the
+two 3-storey frames pin a median (`0303` 4.396, `0306` 6.628); every frame with
+N ≥ 6 is *censored* (more than half its records survive the `max_scale = 128`
+ladder).  A Rayleigh-anchor probe confirmed the correct T95 anchor is one lever
+(`IV79cal` 62.25 → 72.75, +17 %) but not the whole story.  **Conclusion:** the
+IK-2005 collapse curve is **not reproducible from the OpenSees side** — a genuine
+cross-code (DRAIN-2DX vs OpenSees) discrepancy, not a fixable error here;
+reproducing it would need the modified DRAIN-2DX source.  The modal / pushover /
+drift-demand checks all pass (see the benchmark doc's "Study summary and
+conclusions"), so the tools are validated for linear and moderate-nonlinear use;
+collapse-capacity calibration remains open (kept as the P42b stub in
+`_pending_work.md`).
+
+**Where.** `benchmarks/generic_frame*.py`; `benchmarks/ik2005_records.py`;
+`opensees/_elements.py` (`hinge_backbone="imk_peak"`);
+`tests/test_generic_frame*.py`.
+
+#### P43 — Transient (time-history) results block in the unified NPZ schema
+
+Source: `docs/results_schema.md`; `docs/dev_notes.md` → *Results repository and
+the NumPy-typed seam*; `docs/nonlinear_dynamic_analysis.md`; P7.
+
+**Status: ✅ Landed (2026-11-23).**  `AnalysisBuilder.run_transient_analysis()`
+(and `analysis/nonlinear_dynamic.py`) return an in-process time-history result —
+`times`, per-node `displacements` / `velocities` / `accelerations`
+(`{node_tag: (n, 3)}`), `base_shear`, the peak reductions and the Rayleigh
+`period_1` / `period_2` — that previously had no unified writer (the schema's
+`analysis_types` covered only `static` / `modal` / `rs` / `pushover`).  Schema v4
+gave it a first-class `transient/<case>/...` block.  Items 1–4 (the discriminator
+bump 3 → 4, the block definition, the `TRANSIENT_*_ARRAYS` declaration +
+validation, and `collect_transient_arrays` wired into `write_results` /
+`write_results_npz`) landed 2026-10-28; items 5–6 (2026-11-23) added the
+repository accessors (`transient_cases` / `transient_arrays_for` /
+`transient_nodal_displacements` / `has_transient_displacements`),
+`plot_transient_animation`, the report + Rhino consumers (`transient_history_df`
+/ `plot_transient_history` / `transient_nodal_magnitudes` /
+`colour_nodes_from_npz`), and the project-bundle persistence.  **Follow-up
+(2026-11-26):** `base_shear` was made **optional** in the transient block (the
+required global arrays are now just `time` / `direction`; `base_shear` is
+validated separately when present).
+
+**Where.** `io/results_schema.py`, `io/npz_writer.py`, `io/unified_writer.py`,
+`io/stage_writer.py`, `io/npz_reader.py`, `io/results_repository.py`,
+`opensees/_runner_dynamic.py`, `analysis/nonlinear_dynamic.py`,
+`benchmarks/sac_run.py` (stop-gap only).  Tests: `tests/test_storage_seam.py`,
+`tests/test_stage_file.py`, `tests/test_runner_dynamic.py`,
+`tests/test_results_repository.py`, `tests/test_transient_schema.py`.
 
 ## DONE (2026-11-23 — planning-spine refresh: P41/P42/P48/P49 landed parts archived)
 

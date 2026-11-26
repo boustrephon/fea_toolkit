@@ -267,245 +267,18 @@ cyclic-deterioration `Λ` Eq. 13, 2026-10-28).
 **Where.** `benchmarks/imk_calibration.py`; `opensees/_elements.py`
 (`hinge_backbone="imk"`); `tests/test_benchmark_sac_imk.py`.
 
-#### P42b — IK-2005 generic-frame collapse (Medina frames, Fig 5.16)
+#### P42b — IK-2005 generic-frame collapse: collapse-capacity calibration (open)
 
 Source: `docs/ik2005_generic_frame_benchmark.md`; `docs/benchmark_roadmap.md` §3.
 
-**Status (2026-11-02).** The like-for-like IK-2005 match — the 12 Medina (2002)
-generic single-bay frames (`generic_frame_data.py`), the `IMKPeakOriented`
-hinge, the `generic_frame` generator (spring placement: 18 beam + 2 column-base,
-no elastic column springs) and the IDA runner (P-Δ + held `1.4 × seismic mass`,
-Rayleigh on T1+T95).  Record-free checks green: modal T1 ≤ 0.5 %, pushover
-`γ = 1.0` ≤ 2 %, MK-2003 modal tables (A.1–A.6) ≤ 0.002, the IK-2003 drift
-anchor `θr,max/[Sd/H] ≈ PF1`.  **Open:** the 33-record `0909` IDA overshoots —
-`(Sa,c/g)/γ ≈ 7.9` vs the paper's ≈ 3.4.  Root-cause (see the benchmark doc
-"Collapse criterion"): the collapse detector is only a minor factor (drift
-threshold sensitivity 2 %→2.1, 10 %→7.5, ∞→7.9), and the integrator is ruled
-out (halving `dt` 0.005→0.0025 and a √2-ratio ladder leave the `IV79e13`
-collapse unchanged: 77.75 / 77.75 / 77.46).  Model-lever bracket (single
-records): P-Δ off → **no collapse** (the destabiliser), 2× gravity → only
-−15 %, but **αc −0.1→−0.3 → 2.4× lower collapse** (77.75→31.875 `IV79e13`,
-≈2.9–4.0 in `(Sa,c/g)/γ`) — the dominant lever.  **Hinge M–θ instrumentation
-(done)**: at im=32 the roof beam is at 7.2·θy with M fallen to 0.66·My and the
-column bases at 4.45·θy (Mc) — the hinges genuinely enter post-capping, so the
-material/backbone is correct and the frame destabilises only near `θu ≈ 15·θy`
-(complete exhaustion; `θu ∝ 1/|αc|` explains the αc lever).  **Damping is the
-dominant lever (done)**: `IV79e13` collapses at 77.75 (Rayleigh 5 %), 73.0
-(2.5 %), **16.0 (1 %)** and 15.5 (mass-proportional 5 %) — a ~5× **damping
-cliff** between ξ ≈ 1 % and 2.5 %, i.e. the capacity is ~5×-sensitive to the
-higher-mode damping.  Appendix B.4 (paper) fixes spring stiffness n = 10× and
-β×1.1; our n = 100 is damping-equivalent, so the damping *prescription* is not
-the gap — the cliff makes the result ill-conditioned, and the gap is the
-DRAIN-2DX event-to-event collapse stall (flatline) vs OpenSees Newton
-non-convergence.  P-Δ magnitude, the integrator and the hinge material are
-exonerated.  **Mass-proportional 33-record median (done 2026-11-02)**: the full
-33-record `0909` IDA re-run with `damping_type="mass_proportional"` (no drift
-proxy) gives median **4.67** (σ_ln 0.605) vs 7.94 (Rayleigh) and ≈ 3.4 (paper)
-— the mass-proportional hypothesis is **refuted**.  **Missing-record bound**:
-with 7 of 40 absent, the 40-record median lies in **[4.27, 5.61]**
-(a13/a14 → a20/a21), so 3.4 is below the lower bound — the missing records
-*cannot* explain the gap.  **Collapse-criterion probe (done 2026-11-02,
-refuted)**: traced `ops.eigen("-fullGenLapack", 1)` through the time loop under
-mass-proportional damping — for `IV79e13` the tangent *never* goes non-positive
-(ω² ≈ 45 up to non-convergence), and for `IV79wsm` it goes singular (ω² = −87)
-at im=64 **after** the bisected non-convergence (38.9), with a transient
-negative at im=36 that still fully converges (false positive); a
-stiffness-singularity detector would *raise* the median, not lower it.  The
-collapse criterion is **exonerated** — the 4.67-vs-3.4 gap is a genuine
-response difference, with the **higher-mode damping content** (the 5× cliff) as
-the leading remaining candidate.  **Record-identity verification (done
-2026-11-02, exonerated too)**: reduced all 33 records to Table 4.2's scalar
-columns — PGA matches within ~2 % (USGS) / ~5–15 % (CESMD, 2 known-wrong
-components excepted), PGV within ~10–20 %; record *length* is systematically
-longer than Table 4.2 (51–92 s vs 36–40 s) but a truncation test shows the coda
-*raises* the collapse (e.g. `IV79wsm` 38.9→49.8, `IV79qkp` 15.7→19.2), i.e. the
-length difference already pushes us *toward* 3.4, not away — the record set is
-essentially correct and is **not** the explanation.
-
-**Close-out (2026-11-26).**  The 40-record × 12-frame re-run under the correct
-`(T1, T95)` Rayleigh anchor is complete (`output/ik2005_40record/`).  Only the
-two 3-storey frames pin a median (`0303` 4.396, `0306` 6.628); every frame with
-N ≥ 6 is *censored* (more than half its records survive the `max_scale = 128`
-ladder).  A Rayleigh-anchor probe confirmed the correct T95 anchor is one lever
-(`IV79cal` 62.25 → 72.75, +17 %) but not the whole story — the completed record
-set and the `NR94far`/`NR94stn` component fixes also contribute survivors.
-**Conclusion:** the IK-2005 collapse curve is **not reproducible from the
-OpenSees side** — a genuine cross-code (DRAIN-2DX vs OpenSees) discrepancy, not a
-fixable error here; reproducing it would need the modified DRAIN-2DX source.  The
-modal / pushover / drift-demand checks all pass (see the benchmark doc's "Study
-summary and conclusions"), so the tools are validated for linear and
-moderate-nonlinear use; collapse-capacity calibration remains open.
-
-**Where.** `benchmarks/generic_frame*.py`; `benchmarks/ik2005_records.py`;
-`opensees/_elements.py` (`hinge_backbone="imk_peak"`);
-`tests/test_generic_frame*.py`.
-
-#### P43 — Transient (time-history) results block in the unified NPZ schema
-
-Source: `docs/results_schema.md`; `docs/dev_notes.md` → *Results repository
-and the NumPy-typed seam*; `docs/nonlinear_dynamic_analysis.md`; P7.
-
-> **Status: ✅ Landed (2026-11-23)** — items 1–6, the project-bundle
-> follow-up, and the optional `sac_run.py` cache migration all landed.  Items
-> 1–4 (schema v4 + `collect_transient_arrays`) landed 2026-10-28; items 5–6
-> (2026-11-23) added the repository accessors (`transient_cases` /
-> `transient_arrays_for` / `transient_nodal_displacements` /
-> `has_transient_displacements`), `plot_transient_animation`, the report +
-> Rhino consumers (`transient_history_df` / `plot_transient_history` /
-> `transient_nodal_magnitudes` / `colour_nodes_from_npz`), and the
-> project-bundle persistence.  The *Detailed plan* below is retained as the
-> implementation record.
->
-> **Follow-up (2026-11-26).**  ``base_shear`` was made **optional** in the
-> transient block (a run may record only the displacement history): the
-> required global arrays are now just ``time`` / ``direction``, and
-> ``base_shear`` is validated separately when present.
-
-**What.**  `AnalysisBuilder.run_transient_analysis()` (and
-`analysis/nonlinear_dynamic.py`) return an in-process time-history result —
-``times``, per-node ``displacements`` / ``velocities`` / ``accelerations``
-(``{node_tag: (n, 3)}``), ``base_shear`` (n,), and the peak reductions
-(``peak_displacement`` / ``peak_base_shear`` / ``peak_plastic_rotation`` /
-``max_dissipated_energy`` / ``num_yielded_hinges``) plus Rayleigh
-``period_1`` / ``period_2`` — but **no unified writer serialises it**: the
-schema's ``analysis_types`` covers only ``static`` / ``modal`` / ``rs`` /
-``pushover``.  Transient results are therefore "homeless" in the canonical
-exchange format.
-
-**Stop-gap already in place (2026-10-27).**  `benchmarks/sac_run.py`'s
-content-addressed NLTHA cache writes a *private, non-schema* flat NPZ (peak
-scalars + ``times`` / ``roof_disp_hist`` / ``base_shear``) and now reads and
-writes it through the storage seam (``io.npz_reader.read_results_npz`` /
-``io.npz_writer.save_results_arrays``) — this only satisfies
-`tests/test_storage_seam.py`; it does **not** promote the cache into the
-unified schema, and it must not.
-
-**What is required (schema v4).**
-
-> **Status (2026-10-28).**  Items 1–4 landed as the first draft:
-> `"transient"` is in the discriminator, `SCHEMA_VERSION` is 4, the
-> `transient/<case>/...` block (``time`` / ``base_shear`` / ``direction`` +
-> recorded ``node_tag`` + dense ``node_disp_*`` / ``node_vel_*`` /
-> ``node_accel_*`` + the peak scalars and Rayleigh periods) is declared and
-> validated, `collect_transient_arrays()` is wired into
-> `write_results()` / `write_results_npz()`, `describe_results_npz()` reports
-> `transient_cases`, and `analysis/nonlinear_dynamic.py` now carries the full
-> payload so its `data` feeds the collector directly.  Two deliberate
-> deviations from the candidate layout: (a) `stage_writer.write_model_stages`
-> is **not** touched — a stage file holds geometry, not time-history results;
-> (b) the node kinematics use `node_disp_*` (matching the pushover block's
-> spelling) rather than `node_dx`.  Items 5–6 remain open.  Tests:
-> `tests/test_transient_schema.py`.
-
-1. ✅ Add ``"transient"`` to the ``analysis_types`` discriminator and bump
-   ``results_schema.SCHEMA_VERSION`` 3 → 4 (with the same "old files still
-   read" note as the 2→3 bump).
-2. ✅ Define a ``transient/<case>/...`` block — ``time`` (N_t,), recorded
-   ``node_tag`` (N_rec,) with dense ``node_disp_*`` / ``node_vel_*`` /
-   ``node_accel_*`` (N_t × N_rec), ``base_shear`` (N_t,), the peak scalars
-   (0-d), and Rayleigh ``period_1`` / ``period_2``.
-3. ✅ Add ``TRANSIENT_*_ARRAYS`` to ``io/results_schema.py`` and extend
-   ``validate_npz`` / ``npz_reader.describe_results_npz`` (mirroring how ``rs``
-   and ``pushover`` were added).
-4. ✅ Add a ``collect_transient_arrays`` producer and wire it into
-   ``unified_writer.write_results`` and ``npz_writer.write_results_npz``
-   (``stage_writer`` is geometry-only, not a results archive).
-5. ✅ Extend ``ResultsRepository`` / ``NpzResultsRepository`` to list and serve
-   transient cases so the GUI / report / Rhino can consume them through the
-   seam.
-6. ✅ Drive the block with a **real consumer** — NLTHA animation in the viewer
-   and per-node / per-element histories in the report and Rhino — not the
-   benchmark cache.  Only then migrate `benchmarks/sac_run.py` to read its
-   peak scalars from a unified transient archive (optional follow-on, not a
-   prerequisite).
-   **Follow-up (project-bundle persistence).**  The GUI animates NLD live
-   in-process, but a saved project restores only the summary *table*, not the
-   transient histories — `_nld_frames` / `_nld_times` do not survive reopen.
-   Persist the NLD transient block in the project bundle (via
-   `collect_transient_arrays` into `results.npz`) and restore
-   `_nld_frames` / `_nld_times` under `_table_key(label)` in
-   `open_project_path`, mirroring the IDA-curve figure persistence, so the
-   animate toggle works after reopening without re-running the analysis.
-
-**Where.** `io/results_schema.py`, `io/npz_writer.py`, `io/unified_writer.py`,
-`io/stage_writer.py`, `io/npz_reader.py`, `io/results_repository.py`,
-`opensees/_runner_dynamic.py`, `analysis/nonlinear_dynamic.py`,
-`benchmarks/sac_run.py` (stop-gap only).  Tests: `tests/test_storage_seam.py`,
-`tests/test_stage_file.py` (schema coverage), `tests/test_runner_dynamic.py`.
-
-### P43 — Detailed plan (items 5–6): serve + consume the transient block (2026-11-23)
-
-Items 1–4 landed (schema v4, the `transient/<case>/...` block, the
-`TRANSIENT_*_ARRAYS` declaration + validation, and `collect_transient_arrays()`
-wired into `write_results()` / `write_results_npz()`).  This plan is the
-remaining two items, ordered so each lands with its own tests.
-
-**Item 5 — `ResultsRepository` lists and serves transient cases.**  Today
-`NpzResultsRepository.cases()` reads only `static_case_labels` and
-`arrays_for()` serves only the `static/<case>/` prefix, so a transient archive
-is invisible to every seam consumer (the GUI, the report, Rhino).  Add, beside
-the static accessors and in the same NumPy-typed style:
-
-1. `transient_cases() -> list[str]` — reuse `results_schema.transient_case_names`
-   (the same single source of truth `describe_results_npz` already uses) over
-   the archive's key set; no new column or key-prefix scan.
-2. `transient_arrays_for(case) -> dict` — the `transient/<case>/` block keyed
-   without the prefix, mirroring `arrays_for()` (keys are the flattened
-   `make_transient_key(case, template)` names).
-3. `transient_nodal_displacements(case) -> (times, {node_id: (N_t, 3)})` — re-key
-   the dense `node_disp_*` columns (N_t × N_rec over the **recorded** subset,
-   column order given by `transient/<case>/node_tag`) and map each `node_tag` to
-   its `node_id` via `display_geometry()` — exactly the tag→id join
-   `nodal_displacements()` already performs.  Unrecorded nodes are **omitted**
-   (the writer does not NaN-fill), so a caller degrades to "gray for missing"
-   rather than fabricating zeros.  Return `times` and `base_shear` alongside.
-4. `has_transient_displacements(case) -> bool` — the cheap pre-check, reading
-   the presence of any `node_disp_*` column.
-
-The additions to `ResultsRepository` must be **concrete** (like
-`nodal_displacements`), not abstract, so a non-NPZ backend inherits them for
-free.  Tests: `tests/test_results_repository.py` (transient listing + re-keying)
-and `tests/test_transient_schema.py` (shape/validation coverage).
-
-**Item 6 — a real consumer drives the block.**  Once the seam serves transient
-cases, the canonical NPZ must be *used*, not just written:
-
-1. **Standalone NLTHA animation in the viewer.**  Add a
-   `plot_transient_animation(source, case)` in `plotting/` that accepts an
-   `AnalysisBuilder` + result dict, **or** an NPZ path (the multi-format
-   pattern in `.clinerules` §3.8/§3.10) — reading the transient block through
-   `NpzResultsRepository.transient_nodal_displacements` — and reuses the
-   existing animation machinery (`plot_mode_animation`'s loop and the
-   `_add_animation_timer` contract).  This is what the GUI's live in-process
-   `_nld_frames` animation already does; the standalone path closes the
-   "homeless results" gap for a saved archive.
-2. **Per-node / per-element histories in the report and Rhino.**  Extend the
-   report's pandas-backed helpers to plot a node's `node_disp_*` time series and
-   the `base_shear` history from the block, and extend the Rhino export to
-   colour a frame/node at a chosen time index (or emit the peak envelope).
-   Both consumers read the same `transient_nodal_displacements` accessor, so
-   there is one reading path.
-3. **(Optional follow-on, not a prerequisite)** migrate `benchmarks/sac_run.py`'s
-   private content-addressed NLTHA cache to read its peak scalars from a
-   unified transient archive.
-
-**Follow-up — project-bundle persistence.**  The GUI animates NLD live
-in-process, but a saved project restores only the summary table — `_nld_frames`
-/ `_nld_times` do not survive reopen.  Persist the NLD transient block in the
-project bundle (via `collect_transient_arrays` into `results.npz`, through
-`collect_project_results`) and restore `_nld_frames` / `_nld_times` under
-`_table_key(label)` in `open_project_path`, mirroring the IDA-curve figure
-persistence, so the animate toggle works after reopening without re-running the
-analysis.  Test: `tests/test_gui_project.py` (a transient block round-trips a
-bundle and restores the animation frames).
-
-**Acceptance.**  (a) a `write_results_npz` archive with a `transient/<case>`
-block lists its case via `transient_cases()` and serves re-keyed per-node
-histories with no `np.load` outside the seam; (b)
-`plot_transient_animation(path, case)` renders an animation from the NPZ alone;
-(c) the report/Rhino consumers read the same accessor; (d) the project-bundle
-follow-up restores `_nld_frames`/`_nld_times` after reopen; (e) no new required
-dependency.
+**Status: ⚠️ Partial — investigation closed 2026-11-26.**  The 40-record ×
+12-frame re-run is complete and the paper's median collapse curve is **not
+reproducible from the OpenSees side** (a genuine DRAIN-2DX vs OpenSees
+discrepancy).  The completed investigation — root-cause analysis, the close-out,
+and the modal / pushover / drift-demand validation — is archived in
+[`history/_done_log.md`](history/_done_log.md).  **Remaining:** the broader
+*collapse-capacity calibration* question (a reliable collapse-capacity model
+calibrated against benchmark data) stays open.
 
 #### P25 — classic support symbols on top of the per-DOF glyphs
 
@@ -986,8 +759,8 @@ offered as a builder in the same *File ▸ Open example…* chooser.
    table can hold).
 
 **Status is a badge, not a filter.**  Every benchmark is listed, validated or
-not: in-progress studies (e.g. the IK-2005 generic-frame collapse, P42b, whose
-33-record IDA still overshoots the paper) appear with a ⚠️/🚧 badge and a
+not: in-progress studies (e.g. the IK-2005 generic-frame collapse, P42b) appear
+with a ⚠️/🚧 badge and a
 Notes pointer to the per-benchmark doc, never hidden.
 
 **Deferred (future consideration).**  A ground-motion *suite* / repeated NLTHA
