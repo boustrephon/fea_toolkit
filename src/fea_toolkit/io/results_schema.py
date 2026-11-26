@@ -40,10 +40,11 @@ SCHEMA_VERSION_LEGACY = 1
 #:   design (see ``docs/model_stage_file.md``).
 #: * ``4`` — a first-class ``transient`` block for time-history results (P43).
 #:   ``analysis_types`` may now contain ``"transient"``; each
-#:   ``transient/<case>/...`` carries ``time`` / ``base_shear`` (``N_t``), a
-#:   recorded-node subset ``node_tag`` with dense ``node_disp_*`` / ``node_vel_*``
-#:   / ``node_accel_*`` (``N_t × N_rec``), the peak reductions and the Rayleigh
-#:   ``period_1`` / ``period_2``.  A ``3`` archive still reads — it simply has no
+#:   ``transient/<case>/...`` carries ``time`` (``N_t``) and an optional
+#:   ``base_shear`` (``N_t``), a recorded-node subset ``node_tag`` with dense
+#:   ``node_disp_*`` / ``node_vel_*`` / ``node_accel_*`` (``N_t × N_rec``), the
+#:   peak reductions and the Rayleigh ``period_1`` / ``period_2``.  A ``3``
+#:   archive still reads — it simply has no
 #:   ``transient`` block, so ``"transient"`` is absent from its ``analysis_types``.
 #: * ``5`` — a first-class ``ida`` block for incremental-dynamic-analysis
 #:   collapse results (the IK-2005 generic-frame benchmark).  ``analysis_types``
@@ -357,9 +358,12 @@ PUSHOVER_SECTION_ARRAYS: dict[str, tuple] = {
 # reader can animate any recorded node from ``node_tag`` without the geometry.
 TRANSIENT_GLOBAL_ARRAYS: dict[str, tuple] = {
     "transient/{case}/time": ("N_t", "float"),
-    "transient/{case}/base_shear": ("N_t", "float"),
     "transient/{case}/direction": ("", "str"),
 }
+
+#: ``base_shear`` is optional (a run may record only the displacement history),
+#: so it is validated separately rather than as a required global array.
+TRANSIENT_BASE_SHEAR_ARRAY: tuple[str, str] = ("N_t", "float")
 
 TRANSIENT_SCALAR_ARRAYS: dict[str, tuple] = {
     "transient/{case}/dt": ("", "float"),
@@ -998,6 +1002,16 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
                         messages.append(f"Missing transient array: {key}")
                         continue
                     _check_shape(key, arr, shape_desc, dtype_str)
+
+                # ── Optional: base_shear (recorded only when present) ──
+                base_shear_key = make_transient_key(case, "transient/{case}/base_shear")
+                base_shear_arr = data.get(base_shear_key)
+                if base_shear_arr is not None:
+                    _check_shape(
+                        base_shear_key,
+                        base_shear_arr,
+                        *TRANSIENT_BASE_SHEAR_ARRAY,
+                    )
 
                 # ── Optional: peak scalars / provenance / Rayleigh periods ──
                 for template, (shape_desc, dtype_str) in TRANSIENT_SCALAR_ARRAYS.items():

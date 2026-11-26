@@ -355,6 +355,11 @@ and the NumPy-typed seam*; `docs/nonlinear_dynamic_analysis.md`; P7.
 > `transient_nodal_magnitudes` / `colour_nodes_from_npz`), and the
 > project-bundle persistence.  The *Detailed plan* below is retained as the
 > implementation record.
+>
+> **Follow-up (2026-11-26).**  ``base_shear`` was made **optional** in the
+> transient block (a run may record only the displacement history): the
+> required global arrays are now just ``time`` / ``direction``, and
+> ``base_shear`` is validated separately when present.
 
 **What.**  `AnalysisBuilder.run_transient_analysis()` (and
 `analysis/nonlinear_dynamic.py`) return an in-process time-history result —

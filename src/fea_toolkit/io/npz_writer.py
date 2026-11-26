@@ -1140,10 +1140,11 @@ def collect_transient_arrays(transient_results: dict[str, Any]) -> dict[str, np.
     (or the enriched ``data`` of
     :func:`fea_toolkit.analysis.nonlinear_dynamic.run_nonlinear_dynamic_analysis`) —
     ``times``, per-node ``displacements`` / ``velocities`` / ``accelerations``
-    (``{node_tag: (n, 3)}``), ``base_shear``, the peak reductions and the Rayleigh
-    ``period_1`` / ``period_2`` — and emits the arrays declared by
+    (``{node_tag: (n, 3)}``), the optional ``base_shear``, the peak reductions and
+    the Rayleigh ``period_1`` / ``period_2`` — and emits the arrays declared by
     :data:`~fea_toolkit.io.results_schema.TRANSIENT_GLOBAL_ARRAYS` /
-    ``TRANSIENT_SCALAR_ARRAYS`` / ``TRANSIENT_NODE_ARRAYS``.
+    ``TRANSIENT_SCALAR_ARRAYS`` / ``TRANSIENT_NODE_ARRAYS``, plus ``base_shear``
+    when present (``TRANSIENT_BASE_SHEAR_ARRAY``).
 
     The recorded-node subset is the sorted union of the keys of
     ``displacements`` (the runner records exactly those nodes); unrecorded
@@ -1178,18 +1179,17 @@ def collect_transient_arrays(transient_results: dict[str, Any]) -> dict[str, np.
         times = np.asarray(res["times"], dtype=float)
         n_t = int(times.size)
 
-        if "base_shear" not in res:
-            raise ValueError(
-                f"transient case {case!r} is missing the required 'base_shear' history"
-            )
-
         if "direction" not in res:
             raise ValueError(f"transient case {case!r} is missing the required 'direction'")
 
         arrays[make_transient_key(case, "transient/{case}/time")] = times
-        arrays[make_transient_key(case, "transient/{case}/base_shear")] = np.asarray(
-            res["base_shear"], dtype=float
-        )
+        # ``base_shear`` is optional: a re-run that records only displacements
+        # must omit the field, so a previously-saved base_shear is dropped by the
+        # caller's whole-block merge rather than revived from a stale archive.
+        if res.get("base_shear") is not None:
+            arrays[make_transient_key(case, "transient/{case}/base_shear")] = np.asarray(
+                res["base_shear"], dtype=float
+            )
         arrays[make_transient_key(case, "transient/{case}/direction")] = np.asarray(
             str(res["direction"]), dtype=str
         )

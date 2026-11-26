@@ -190,12 +190,23 @@ def test_collect_transient_arrays_rejects_slash_in_case_label():
         collect_transient_arrays({"a/b": res})
 
 
-def test_collect_transient_arrays_requires_base_shear():
-    """A transient run without a ``base_shear`` history is rejected before writing."""
+def test_collect_transient_arrays_omits_absent_base_shear():
+    """A transient run without a ``base_shear`` history omits that array."""
     res = _synthetic_transient([11], n_steps=3)
     del res["base_shear"]
-    with pytest.raises(ValueError, match="base_shear"):
-        collect_transient_arrays({"ELC": res})
+    arrays = collect_transient_arrays({"ELC": res})
+
+    assert make_transient_key("ELC", "transient/{case}/time") in arrays
+    assert make_transient_key("ELC", "transient/{case}/base_shear") not in arrays
+
+
+def test_validate_arrays_accepts_absent_base_shear():
+    """A base_shear-less transient block is not flagged (base_shear optional)."""
+    res = _synthetic_transient([11, 22], n_steps=4)
+    del res["base_shear"]
+    arrays = collect_transient_arrays({"ELC": res})
+    arrays["analysis_types"] = np.array(["transient"])
+    assert not any("base_shear" in m for m in validate_arrays(arrays))
 
 
 def test_transient_case_names_discovers_cases_without_time():
