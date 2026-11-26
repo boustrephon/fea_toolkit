@@ -260,3 +260,49 @@ def test_reconcile_analysis_types_keeps_transient_only_when_a_block_remains():
     }
     Session._reconcile_analysis_types(arrays)
     assert list(arrays["analysis_types"]) == ["static", "transient"]
+
+
+def test_merge_transient_histories_drops_both_sources_when_mesh_moved():
+    """Both the retained and last-run histories are dropped on a re-mesh."""
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    session = Session()
+    session._retained_transient = {
+        "A": {"times": np.arange(2), "displacements": {7: np.zeros((2, 3))}}
+    }
+    session._retained_transient_geometry = {7: (1.0, 2.0, 3.0)}
+
+    collected = {
+        "transient": {"B": {"times": np.arange(2), "displacements": {7: np.zeros((2, 3))}}}
+    }
+    moved = SimpleNamespace(node_tag=7, x=9.0, y=9.0, z=9.0)
+    mesh = SimpleNamespace(nodes={7: moved})
+
+    session._merge_transient_histories(collected, mesh)
+
+    assert collected["transient"] == {}
+
+
+def test_merge_transient_histories_preserves_both_sources_when_mesh_unchanged():
+    """Both the retained and last-run histories survive a compatible mesh."""
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    session = Session()
+    session._retained_transient = {
+        "A": {"times": np.arange(2), "displacements": {7: np.zeros((2, 3))}}
+    }
+    session._retained_transient_geometry = {7: (1.0, 2.0, 3.0)}
+
+    collected = {
+        "transient": {"B": {"times": np.arange(2), "displacements": {7: np.zeros((2, 3))}}}
+    }
+    node = SimpleNamespace(node_tag=7, x=1.0, y=2.0, z=3.0)
+    mesh = SimpleNamespace(nodes={7: node})
+
+    session._merge_transient_histories(collected, mesh)
+
+    assert set(collected["transient"]) == {"A", "B"}

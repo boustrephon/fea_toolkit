@@ -122,17 +122,14 @@ class Session:
         )
         # Fold in nonlinear-dynamic payloads retained from earlier completed
         # runs, so a later (e.g. modal) run cannot erase them.  The current
-        # run's transient (already collected above) takes precedence.  The
-        # retained histories are tag-keyed to the mesh they were recorded
-        # against, so they are folded in only while that mesh still matches the
-        # current one (a re-mesh would otherwise map an old node's history onto
-        # a different node).
-        if self._retained_transient:
-            mesh = store.preprocessed() if store is not None else None
-            if self._transient_geometry_compatible(mesh):
-                merged_transient = dict(self._retained_transient)
-                merged_transient.update(collected.get("transient") or {})
-                collected["transient"] = merged_transient
+        # run's transient (already collected above) takes precedence.  Both the
+        # current run's transient and the retained histories are tag-keyed to
+        # the mesh they were recorded against, so they are kept only while that
+        # mesh still matches the current one (a re-mesh would otherwise map an
+        # old node's history onto a different node).
+        self._merge_transient_histories(
+            collected, store.preprocessed() if store is not None else None
+        )
         self._merge_results_view_arrays(collected["static_arrays"])
 
         figures = dict(self._retained_figures)
@@ -242,6 +239,26 @@ class Session:
             return False
         current = self._node_tag_geometry(mesh)
         return all(current.get(tag) == coord for tag, coord in signature.items())
+
+    def _merge_transient_histories(self, collected: dict, mesh: Any) -> None:
+        """Fold the retained and last-run transient histories into *collected*.
+
+        :meth:`record_run` keeps the current run's transient merged into
+        :attr:`_retained_transient`, so the retained set (and its geometry
+        signature) is authoritative for both sources.  They are kept only while
+        that geometry still matches *mesh*: on a compatible mesh the retained
+        histories are folded in with the current run's transient taking
+        precedence; on an incompatible mesh both are dropped, so serialization
+        never pairs an old node's history with a replacement mesh.
+        """
+        if not self._retained_transient:
+            return
+        if self._transient_geometry_compatible(mesh):
+            merged_transient = dict(self._retained_transient)
+            merged_transient.update(collected.get("transient") or {})
+            collected["transient"] = merged_transient
+        else:
+            collected["transient"] = {}
 
     def _loaded_transient_geometry_compatible(self, mesh: Any) -> bool:
         """Whether the loaded transient blocks still match *mesh*'s nodes.
