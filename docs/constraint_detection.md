@@ -156,6 +156,17 @@ enforced by the **Penalty** constraint handler
    ``_edge_constraint_method == 'penalty'``, so this warning applies
    only when manually overriding ``solver_constraints`` in the config.
 
+.. warning::
+   **OpenSeesPy 3.8.0.0 leak (upstream).**  ``ops.equationConstraint()`` leaks
+   its multi-point constraint across ``ops.wipe()`` (there is no ``remove`` for
+   it).  A later ``Penalty`` / ``Lagrange`` handler re-processes the leaked
+   constraint and aborts with ``"Constrained Node does not exist in Domain"``
+   (process exit 255) when the domain no longer holds the constrained node tags
+   — in practice the ``check_hysteretic_backbone`` verb's 1-DOF rig, which
+   reuses tags 1/2.  Until OpenSeesPy clears the MPC in ``wipe()``, prefer the
+   verb's out-of-process path, or avoid ``constraint_method="penalty"`` in the
+   same process as a later ``Penalty`` / ``Lagrange`` analysis.
+
 **Shell element DOFs**: ``ShellMITC4`` has 6 DOFs per node (UX, UY, UZ, RX, RY, RZ).
 Constraining all 6 DOFs along incompatible edges is correct for both
 translational and rotational continuity.
