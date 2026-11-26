@@ -19,7 +19,11 @@ open" stub there, P43 keeps none.
 
 #### P42b (completed part) — IK-2005 generic-frame collapse (Medina frames, Fig 5.16)
 
-Source: `docs/ik2005_generic_frame_benchmark.md`; `docs/benchmark_roadmap.md` §3.
+Source: [`ik2005_generic_frame_benchmark.md`](../ik2005_generic_frame_benchmark.md); `docs/benchmark_roadmap.md` §3.
+
+The full root-cause analysis and the study conclusions live in
+[`ik2005_generic_frame_benchmark.md`](../ik2005_generic_frame_benchmark.md) →
+"Collapse criterion — root-cause analysis" and "Study summary and conclusions".
 
 **Status (2026-11-02 → closed 2026-11-26).**  The like-for-like IK-2005 match —
 the 12 Medina (2002) generic single-bay frames (`generic_frame_data.py`), the
@@ -57,8 +61,8 @@ collapse-capacity calibration remains open (kept as the P42b stub in
 
 #### P43 — Transient (time-history) results block in the unified NPZ schema
 
-Source: `docs/results_schema.md`; `docs/dev_notes.md` → *Results repository and
-the NumPy-typed seam*; `docs/nonlinear_dynamic_analysis.md`; P7.
+Source: [`results_schema.md`](../results_schema.md); `docs/dev_notes.md` →
+*Results repository and the NumPy-typed seam*; `docs/nonlinear_dynamic_analysis.md`; P7.
 
 **Status: ✅ Landed (2026-11-23).**  `AnalysisBuilder.run_transient_analysis()`
 (and `analysis/nonlinear_dynamic.py`) return an in-process time-history result —
