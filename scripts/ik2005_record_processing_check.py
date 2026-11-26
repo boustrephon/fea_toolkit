@@ -14,8 +14,8 @@ Sources are read in two tiers:
   already-corrected PEER versions of the wrong-component / processing-outlier
   records);
 * **downloads** — ``~/Downloads/UnscaledAccRecord*/`` NGA ``.AT2`` files matched
-  to the CESMD ``.csv`` by station code, selecting the NGA horizontal component
-  whose PGA matches IK-2005 Table 4.2.
+  to the CESMD ``.csv`` by event + station code, selecting the NGA horizontal
+  component whose PGA matches IK-2005 Table 4.2.
 
 All signals are resampled to a common 0.005 s before the spectral solve, so the
 comparison is on equal footing.
@@ -56,21 +56,25 @@ TABLE_PGA = {
     "SH87wsm": 0.172,
 }
 
-#: CESMD record id → NGA-West2 station abbreviation (parsed from ``RSN*_*_CODE*.AT2``).
+#: CESMD record id → (NGA-West2 event code, station abbreviation), parsed from
+#: ``RSN*_EVENT_STATION*.AT2`` (e.g. ``RSN987_NORTHR_CEN155.AT2`` → ``NORTHR`` /
+#: ``CEN``).  Grouping by *both* keeps a shared station abbreviation from two
+#: different earthquakes apart (e.g. ``WSM`` is Westmorland in both Imperial
+#: Valley and Superstition Hills).
 STATION_CODE = {
-    "LP89gmr": "GMR",
-    "NR94cen": "CEN",
-    "NR94cnp": "CNP",
-    "NR94far": "FAR",
-    "NR94fle": "FLE",
-    "NR94glp": "GLP",
-    "NR94lh1": "L01",
-    "NR94lv2": "LV2",
-    "NR94nya": "NYA",
-    "NR94stc": "STC",
-    "NR94stn": "STN",
-    "NR94ver": "VER",
-    "SH87wsm": "WSM",
+    "LP89gmr": ("LOMAP", "GMR"),
+    "NR94cen": ("NORTHR", "CEN"),
+    "NR94cnp": ("NORTHR", "CNP"),
+    "NR94far": ("NORTHR", "FAR"),
+    "NR94fle": ("NORTHR", "FLE"),
+    "NR94glp": ("NORTHR", "GLP"),
+    "NR94lh1": ("NORTHR", "L01"),
+    "NR94lv2": ("NORTHR", "LV2"),
+    "NR94nya": ("NORTHR", "NYA"),
+    "NR94stc": ("NORTHR", "STC"),
+    "NR94stn": ("NORTHR", "STN"),
+    "NR94ver": ("NORTHR", "VER"),
+    "SH87wsm": ("SUPERST", "WSM"),
 }
 
 
@@ -123,26 +127,26 @@ def main() -> int:
         accel_n, _ = _load_at2(at2_p)
         _report(rid, _sa(accel_c, dt_c), _sa(accel_n, dt_c), "(mirror)")
 
-    # ── Tier 2: downloads NGA .AT2 matched by station code ──
-    nga_files: dict[str, list[Path]] = {}
+    # ── Tier 2: downloads NGA .AT2 matched by event + station code ──
+    nga_files: dict[tuple[str, str], list[Path]] = {}
     for p in DOWNLOADS.glob("UnscaledAccRecord*/*.AT2"):
         if "-UP." in p.name:
             continue  # vertical component — skip
-        # e.g. "RSN987_NORTHR_CEN155.AT2" → station code "CEN"
+        # e.g. "RSN987_NORTHR_CEN155.AT2" → event "NORTHR", station "CEN"
         parts = p.name.split("_")
         if len(parts) < 3:
             continue
-        code = parts[2][:3] if not parts[2][0].isdigit() else parts[2]
-        nga_files.setdefault(code, []).append(p)
+        station = parts[2][:3] if not parts[2][0].isdigit() else parts[2]
+        nga_files.setdefault((parts[1], station), []).append(p)
 
-    for rid, code in STATION_CODE.items():
-        if code not in nga_files:
+    for rid, (event, code) in STATION_CODE.items():
+        if (event, code) not in nga_files:
             continue
         csv_p = MIRROR / f"{rid}.csv"
         if not csv_p.exists():
             continue
         accel_c, dt_c = _load_csv(csv_p)
-        candidates = nga_files[code]
+        candidates = nga_files[(event, code)]
         # Select the horizontal component whose PGA matches Table 4.2.
         best = min(candidates, key=lambda p: abs(_pga_g(_load_at2(p)[0]) - TABLE_PGA[rid]))
         accel_n, _ = _load_at2(best)

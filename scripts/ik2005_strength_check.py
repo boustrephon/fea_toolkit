@@ -100,17 +100,31 @@ def _converged_curve(res: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
 
 
 def peak_gamma(res: dict[str, Any], weight: float) -> float:
-    """Peak pushover base-shear coefficient ``Vmax/W``."""
+    """Peak pushover base-shear coefficient ``Vmax/W``.
+
+    Returns NaN (rather than raising on an empty maximum) when no step
+    converged past the zero-lateral state, so report generation — including
+    ``--all`` — can print an "unavailable" value and keep going.
+    """
     _disp, shear = _converged_curve(res)
+    if shear.size == 0:
+        return float("nan")
     return float(shear.max()) / weight
 
 
 def gamma_at_drift(res: dict[str, Any], weight: float, roof_h: float, drift_pct: float) -> float:
-    """Base-shear coefficient ``V/W`` at a roof-drift ratio (%)."""
+    """Base-shear coefficient ``V/W`` at a roof-drift ratio (%).
+
+    Returns NaN when the target drift falls outside the converged displacement
+    range (``np.interp`` would otherwise clamp to an endpoint, pretending a
+    non-converged step held a value), and for an empty converged curve.
+    """
     disp, shear = _converged_curve(res)
     if disp.size < 2:
         return float("nan")
     target = (drift_pct / 100.0) * roof_h
+    if target < disp.min() or target > disp.max():
+        return float("nan")
     return float(np.interp(target, disp, shear)) / weight
 
 
