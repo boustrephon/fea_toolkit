@@ -18,8 +18,8 @@ related: [sac_imk_collapse_benchmark.md, imk_deterioration_model.md, benchmark_r
 > run under the paper-correct 5 % Rayleigh damping on `(T1, T95)` with
 > non-convergence-only collapse.  **Result (see "Study summary and conclusions"
 > below):** only the two 3-storey frames pin a median (`0303` 4.40, `0306` 6.63);
-> every frame with N ≥ 6 has a *censored* median (more than half its records
-> survive the ladder).  The conclusion is a genuine cross-code (DRAIN-2DX vs
+> every frame with N ≥ 6 has a *censored* median (right-censored survivors leave
+> the middle order statistic unpinned).  The conclusion is a genuine cross-code (DRAIN-2DX vs
 > OpenSees) discrepancy — a faithful, internally-verified implementation
 > collapses far *later* than the paper reports — not a fixable error here.
 
@@ -74,10 +74,13 @@ the 95 %-participation mode (§5.3.1 / Appendix B.4 Eq B.8).
 **The ground motions** — the 40-record **LMSR-N** set ("Large Magnitude – Small
 Distance – New", Medina 2002; IK-2005 Table 4.2): ordinary California records,
 `Mw 6.5–6.9`, source-to-site `13–40 km`, NEHRP site class D, no pulse-type
-near-fault characteristics.  The 40 records are reproduced verbatim below, and
-their waveforms are confirmed to be the same set (PGA matched against Table 4.2;
-the two wrong-component records `NR94far`/`NR94stn` were corrected during this
-study).
+near-fault characteristics.  The 40 records are reproduced verbatim below; the
+waveforms come from the same stations, with the horizontal component at each
+station *selected* to match Table 4.2's PGA — a component-selection criterion,
+not proof that it is the paper's exact component, since Table 4.2 lists no
+component azimuth and the two horizontals can differ substantially in spectral
+acceleration.  The two wrong-component records `NR94far`/`NR94stn` were
+corrected during this study.
 
 | Record ID | Event | Year | Mw | Station | R (km) | PGA (g) |
 |---|---|---|---|---|---|---|
@@ -130,11 +133,13 @@ at elastic intensities, with the *dispersion* (not the median) growing as intens
 increases.  This is a record-free anchor we reproduce below.
 
 **IK-2005 (collapse).**  The headline result is the median MDOF collapse capacity
-`(Sa,c/g)/γ`-vs-period curve (Fig 5.16): it reaches a minimum of **≈ 3.3 at
-`T1 ≈ 1 s`** and is higher at both shorter (stiffer) and longer (more flexible)
-periods.  Point reads we use: `0909` (0.9 s) ≈ **3.4**, `0918` (1.8 s) ≈ **5.2**,
-`1224` (2.4 s) ≈ **3.0**; dispersion `σ_ln ≈ 0.42` at 0.9 s (Fig 5.18c).  Collapse
-is **dynamic instability** (non-convergence of the IDA), not a drift threshold.
+`(Sa,c/g)/γ`-vs-period curves (Fig 5.16) — one point per frame, with the six
+stiff (`T1 = 0.1N`) and six flexible (`T1 = 0.2N`) frames interleaving into two
+curves rather than a single monotonic one.  The stiff curve reaches a minimum of
+**≈ 3.3 at `T1 ≈ 1 s`** (its `0909` point reads ≈ 3.4).  Point reads on the
+flexible curve: `0918` (1.8 s) ≈ **5.2**, `1224` (2.4 s) ≈ **3.0**; dispersion
+`σ_ln ≈ 0.42` at 0.9 s (Fig 5.18c).  Collapse is **dynamic instability**
+(non-convergence of the IDA), not a drift threshold.
 
 ### 4. Our modelling approach and the changes we made
 
@@ -176,18 +181,20 @@ Rayleigh):
 |---|---|---|---|---|---|
 | 0303 | 3 | 0.3 | high (short-period) | **4.396** | pinned |
 | 0306 | 3 | 0.6 | high (short-period) | **6.628** | pinned |
-| 0606 | 6 | 0.6 | — | censored | >½ survive |
-| 0612 | 6 | 1.2 | — | censored | >½ survive |
-| 0909 | 9 | 0.9 | **≈ 3.4** | censored (≈9+, 29/40) | **2.6×+ overshoot** |
-| 0918 | 9 | 1.8 | ≈ 5.2 | censored | — |
-| 1212 | 12 | 1.2 | — | censored | >½ survive |
-| 1224 | 12 | 2.4 | ≈ 3.0 | censored | — |
-| 1515 | 15 | 1.5 | — | censored | >½ survive |
-| 1530 | 15 | 3.0 | — | censored | >½ survive |
-| 1818 | 18 | 1.8 | — | censored | >½ survive |
-| 1836 | 18 | 3.6 | — | censored | >½ survive |
+| 0606 | 6 | 0.6 | — | censored | 34/40 collapse |
+| 0612 | 6 | 1.2 | — | censored | 34/40 collapse |
+| 0909 | 9 | 0.9 | **≈ 3.4** | censored | 29/40 collapse; **overshoot** |
+| 0918 | 9 | 1.8 | ≈ 5.2 | censored | 32/40 collapse |
+| 1212 | 12 | 1.2 | — | censored | 28/40 collapse |
+| 1224 | 12 | 2.4 | ≈ 3.0 | censored | 30/40 collapse |
+| 1515 | 15 | 1.5 | — | censored | 24/40 collapse |
+| 1530 | 15 | 3.0 | — | censored | 29/40 collapse |
+| 1818 | 18 | 1.8 | — | censored | 30/40 collapse |
+| 1836 | 18 | 3.6 | — | censored | 30/40 collapse |
 
-"censored" = more than half the records survive the `max_scale = 128` ladder, so
+"censored" = the survivors are right-censored — each survivor's collapse
+capacity is only known to exceed its tested ladder (up to `max_scale = 128`),
+not by how much — so when those untested capacities straddle the middle rank(s),
 the 20th/21st-order-statistic median cannot be pinned (the code reports `None`
 rather than guess).
 
@@ -200,10 +207,12 @@ to ≤ 0.2–2 %, and the LMSR-N waveforms (PGA vs Table 4.2).  The MK-2003 drif
 anchor is reproduced to +2–13 %.
 
 **What does not.**  The **collapse capacity**.  Where the paper's `0909` collapses
-at ≈ 3.4, our faithful OpenSees model collapses only at ~9 g and above — and, for
-every taller frame, more than half the records do not collapse at all within the
-tested range.  The correct `(T1, T95)` damping makes the frames *more* robust,
-widening — not closing — the gap.
+at ≈ 3.4, our faithful OpenSees model collapses only at much higher intensities
+(29/40 collapse, with capacities spanning roughly 1–20 g and the rest
+right-censored above the tested ladder) — and, for every taller frame, the
+median is censored because the survivors' untested capacities leave the middle
+order statistic unpinned.  The correct `(T1, T95)` damping makes the frames
+*more* robust, widening — not closing — the gap.
 
 **Why.**  The internally-verified model leaves no fixable error on our side.  The
 remaining explanation is a **cross-code (DRAIN-2DX vs OpenSees) discrepancy** —
@@ -330,7 +339,7 @@ Rules applied (`.clinerules` §4.6):
    median **3.41** (σ_ln 0.55) was the **pre-fix baseline** (mass-proportional
    5 % damping + the 10 % drift proxy); under the paper-correct Rayleigh-on-
    (`T1`, `T95`) configuration with non-convergence-only collapse the `0909`
-   median is **censored** (29/40 collapse, ≈ 9 g and above) vs IK-2005's ≈ 3.3 —
+   median is **censored** (29/40 collapse, 11 right-censored survivors) vs IK-2005's ≈ 3.3 —
    a genuine cross-code gap.  See "Study summary and conclusions".
 
 First target: **`0909`** (N = 9, T1 = 0.9 s) — closest to the SAC 3-story's
@@ -342,8 +351,8 @@ period.
 > `T1 × 0.5`, not the paper's 95 %-participation mode).  The final 40-record
 > result under the correct `(T1, T95)` anchor is in the "Study summary and
 > conclusions" section at the top: only `0303` (4.40) and `0306` (6.63) pin a
-> median; every frame with N ≥ 6 is *censored* (more than half its records
-> survive the ladder).
+> median; every frame with N ≥ 6 is *censored* (right-censored survivors leave
+> the middle order statistic unpinned).
 
 The 33 locally-available LMSR-N records (40 − 7 PEER-only) were run through
 `collapse_capacity_sa("0909", …)` — P-Δ + held `1.4 × seismic mass` gravity,
@@ -451,6 +460,12 @@ choice of `×` vs flatline is the `flatline=` flag (default `False` = `×`).
 
 ## Results — all 12 frames (33 LMSR-N records)
 
+> ⚠️ Superseded — the "ours" column below is the **33-record, pre-fix** result
+> (mass-proportional damping + the 10 % drift proxy).  The final 40-record
+> result under the paper-correct `(T1, T95)` Rayleigh anchor is in the "Study
+> summary and conclusions" section at the top.  This section is kept for the
+> **Fig 5.16 paper readings** in the last column, which the summary cites.
+
 `scripts/run_ik2005_all_frames.py` ran `collapse_capacity_sa()` for every frame
 (33 records each, P-Δ + held gravity, peak-oriented IMK, `max_scale = 128`),
 archived per frame as `output/ik2005_<code>.npz` and summarised in
@@ -525,7 +540,11 @@ Rayleigh anchor was ``T1 × 0.5``).  The full 12-frame × 40-record re-run under
 the correct ``(T1, T95)`` anchor is **complete** (`output/ik2005_40record/`,
 `ik2005_all_frames_summary.{json,md}`): only `0303` (4.396) and `0306` (6.628)
 pin a median; every frame with N ≥ 6 is *censored*.  See the "Study summary and
-conclusions" section for the table and the close-out.  Re-run:
+conclusions" section for the table and the close-out.  The re-run is gated by
+`scripts/ik2005_validity_check.py`, which re-runs two unchanged records
+(`IV79cal`, `LP89cap`) against the `0909` archive and reproduced their collapse
+scales exactly (rel_diff = 0.0) on 2026-11-26 — the archived baseline is still
+reproducible under the current code.  Re-run:
 
 ```bash
 python scripts/run_ik2005_collapse.py --code 0909 --max-scale 128 \
@@ -534,11 +553,8 @@ python scripts/run_ik2005_all_frames.py --out-dir output/ik2005_40record
 ```
 
 No code change is needed — `fetched_ids()` returns 40 once the 7 ``.AT2`` files
-are in `data/ground_motion/local/`.  Record the 40-record `(Sa,c/g)/γ` here:
-
-| code | N | T1 (s) | ours `(Sa,c/g)/γ` (40 rec.) | σ_ln | paper (Fig 5.16) | Δ |
-|---|---|---|---|---|---|---|
-| *(pending)* | — | — | — | — | — | — |
+are in `data/ground_motion/local/`.  The 40-record `(Sa,c/g)/γ` results are
+tabulated in the "Study summary and conclusions" section above.
 
 ## IK-2003 validation (subset)
 
@@ -983,10 +999,12 @@ component whose PGA matches Table 4.2: `LP89agw` (Agnews, PGA 0.172 g),
 0.156 g), `SH87icc` (El Centro Imp. Co. Cent, 0.358 g), `SH87pls` (Plaster
 City, 0.186 g).
 
-**40-record re-run.**  The 7 PEER-only waveforms are now in the mirror as
-``<record_id>.AT2`` (e.g. ``LP89agw.AT2``); `fetched_ids()` returns 40, and the
-runners pick them up with no code change.  See "40-record re-run" under
-"Results".
+**40-record re-run.**  Before running the full benchmark, acquire the 7
+PEER-only waveforms (see "Downloading them" below) and place each in the mirror
+as ``<record_id>.AT2`` (e.g. ``LP89agw.AT2``).  A fresh checkout does **not**
+include them, and `fetched_ids()` returns 40 only once all seven are present —
+before that it returns the 33 open-archive records.  The runners then pick them
+up with no code change.  See "40-record re-run" under "Results".
 
 ### Downloading them (you, not the repo)
 
