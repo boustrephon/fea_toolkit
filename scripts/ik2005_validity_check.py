@@ -37,7 +37,10 @@ def _archive_collapse_scale(archive: str, rid: str) -> float | None:
     with np.load(archive, allow_pickle=False) as z:
         key = f"ida/{rid}/collapse_scale"
         if key not in z.files:
-            return None
+            # A missing key means the archive never recorded this record — an
+            # incomplete archive, not a survivor.  Raise so ``main`` reports an
+            # error instead of mistaking the absence for a NaN (survivor).
+            raise KeyError(f"{key!r} not found in {archive}")
         val = z[key].item()
     return None if (val is None or np.isnan(val)) else float(val)
 

@@ -12,7 +12,8 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-PY=/Users/andrew/Projects/OpenSeesPy/venv_opensees/bin/python
+# Use the active environment's interpreter by default; override with PYTHON=...
+PY="${PYTHON:-python}"
 OUT_DIR=output/ik2005_40record
 CODES=0909,0303,0306,0606,0612,0918,1212,1224,1515,1530,1818,1836
 
@@ -24,5 +25,8 @@ if ! "$PY" scripts/ik2005_validity_check.py; then
 fi
 
 echo "=== $(date) step 2/2: full 40-record run, frames: ${CODES} ==="
-"$PY" scripts/run_ik2005_all_frames.py --out-dir "$OUT_DIR" --codes "$CODES"
+if ! "$PY" scripts/run_ik2005_all_frames.py --out-dir "$OUT_DIR" --codes "$CODES"; then
+  echo "=== $(date) FULL RUN FAILED ==="
+  exit 1
+fi
 echo "=== $(date) DONE ==="
