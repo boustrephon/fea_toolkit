@@ -1,4 +1,16 @@
-"""Tests for shell edge constraint detection and application."""
+"""Tests for shell edge constraint detection and application.
+
+This file is deliberately named ``test_z_edge_constraints.py`` so pytest runs it
+**last**.  The penalty-method tests below use ``ops.equationConstraint()``, and
+OpenSeesPy 3.8.0.0 leaks that multi-point constraint across ``ops.wipe()``: a
+later ``Penalty`` / ``Lagrange`` constraint handler re-processes the leaked
+constraint and aborts with ``"Constrained Node does not exist in Domain"`` (the
+whole process dies — exit 255).  Running this module last keeps that leak from
+poisoning the tests that follow (e.g. the 1-DOF ``Hysteretic`` cyclic-check rig
+in ``test_isolate_base.py`` / ``test_link_nonlinear.py``, which use a ``Penalty``
+handler).  Upstream fix: OpenSeesPy must clear ``equationConstraint`` MPCs in
+``wipe()``.
+"""
 
 import openseespy.opensees as ops
 import pytest
