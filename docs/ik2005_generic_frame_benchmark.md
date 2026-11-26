@@ -552,9 +552,10 @@ python scripts/run_ik2005_collapse.py --code 0909 --max-scale 128 \
 python scripts/run_ik2005_all_frames.py --out-dir output/ik2005_40record
 ```
 
-No code change is needed — `fetched_ids()` returns 40 once the 7 ``.AT2`` files
-are in `data/ground_motion/local/`.  The 40-record `(Sa,c/g)/γ` results are
-tabulated in the "Study summary and conclusions" section above.
+No code change is needed — the full 40-record set is present once
+`missing_record_ids()` returns ``[]`` (it probes the mirror for all 40 records,
+channel suffix included).  The 40-record `(Sa,c/g)/γ` results are tabulated in
+the "Study summary and conclusions" section above.
 
 ## IK-2003 validation (subset)
 
@@ -1003,12 +1004,17 @@ City, 0.186 g).
 open-archive records** (CESMD + USGS NSMP — see "Downloading them" below), the
 **PEER replacement waveforms for `NR94far` and `NR94stn`** (their CESMD `CH1`
 components were the wrong horizontal — see "Record-processing check and
-component fixes"), and the **7 PEER-only waveforms**, placing each in the mirror
-as ``<record_id>.AT2`` (e.g. ``LP89agw.AT2``; the two corrected records as
-``NR94far.AT2`` / ``NR94stn.AT2``).  A fresh checkout does **not** include any
-of them, and `fetched_ids()` returns 40 only once the full set is present —
-before that it returns a partial set.  The runners then pick them up with no
-code change.  See "40-record re-run" under "Results".
+component fixes"), and the **7 PEER-only waveforms**.  Place the 7 PEER-only
+records and the two corrected replacement records in the mirror as unsuffixed
+``<record_id>.AT2`` (e.g. ``LP89agw.AT2``; ``NR94far.AT2`` / ``NR94stn.AT2``),
+but keep the **channel suffix** on the 14 multi-component USGS records
+(``<record_id>_<channel>.csv``, e.g. ``IV79cal_a.csv``) so their filenames match
+those checked by `missing_record_ids()`.  A fresh checkout does **not** include
+any of them; the full 40-record set is present only once `missing_record_ids()`
+returns ``[]`` — until then it returns the missing ids (``fetched_ids()`` always
+lists the 33 open-archive records and only probes the mirror for the 7 PEER-only
+ones).  The runners then pick them up with no code change.  See "40-record
+re-run" under "Results".
 
 ### Downloading them (you, not the repo)
 
