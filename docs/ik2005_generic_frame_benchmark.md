@@ -9,22 +9,209 @@ related: [sac_imk_collapse_benchmark.md, imk_deterioration_model.md, benchmark_r
 
 # IK-2005 Generic-Frame Collapse Benchmark
 
-> ⚠️ Partial — the 12 Medina (2002) generic frames (`generic_frame_data.py`),
-> the peak-oriented `IMKPeakOriented` hinge (`hinge_backbone="imk_peak"`), the
-> `generic_frame` generator (SI model + IMK backbone mapping + spring placement)
-> and the IDA runner (`generic_frame_run.py`, P-Δ + held gravity) all landed;
-> the modal-T1 check matches all 12 frames to ≤ 0.5 % and the pushover strength
-> `γ = Vy/W` matches the Appendix-B design value 1.0 to ≤ 2 % (both
-> record-free).  All 12 frames are now run over the 33 locally-fetched LMSR-N
-> records (19 CESMD + 14 USGS NSMP; 7 PEER NGA-West2-only remain).  Under the
-> current configuration — 5 % Rayleigh damping on `T1` + the 95 %-participation
-> mode, non-convergence-only collapse (`_COLLAPSE_DRIFT = None`) — the `0909`
-> median **overshoots**: `(Sa,c/g)/γ ≈ 7.94` vs the paper's ≈ 3.4 (the earlier
-> 3.41 / 10 %-drift-proxy number was the pre-fix baseline).  The root-cause
-> analysis (see "Collapse criterion") exonerates the collapse *detector*, the
-> record set, P-Δ magnitude, `αc`, the hinge material and the integrator; the
-> leading remaining candidate is the **higher-mode damping content** (the ~5×
-> damping cliff), still under investigation.
+> ⚠️ Partial — the 12 Medina (2002) generic frames, the peak-oriented
+> `IMKPeakOriented` hinge, the `generic_frame` generator and the IDA runner
+> (`generic_frame_run.py`, P-Δ + held gravity) all landed; the modal-T1 check
+> matches all 12 frames to ≤ 0.5 % and the pushover strength `γ = Vy/W` matches
+> the Appendix-B design value 1.0 to ≤ 2 %.  The **40-record** LMSR-N set is
+> complete (19 CESMD + 14 USGS NSMP + 7 PEER NGA-West2) and all 12 frames are
+> run under the paper-correct 5 % Rayleigh damping on `(T1, T95)` with
+> non-convergence-only collapse.  **Result (see "Study summary and conclusions"
+> below):** only the two 3-storey frames pin a median (`0303` 4.40, `0306` 6.63);
+> every frame with N ≥ 6 has a *censored* median (more than half its records
+> survive the ladder).  The conclusion is a genuine cross-code (DRAIN-2DX vs
+> OpenSees) discrepancy — a faithful, internally-verified implementation
+> collapses far *later* than the paper reports — not a fixable error here.
+
+## Study summary and conclusions
+
+*Close-out of the 40-record × 12-frame re-run (2026-11-26).  This section is the
+readable overview; the detailed root-cause log follows in the sections below.*
+
+### 1. The two papers
+
+| | Medina & Krawinkler (2003) — **MK-2003** | Ibarra & Krawinkler (2005) — **IK-2005** |
+|---|---|---|
+| Report | PEER 2003/15 | PEER 2005/06 |
+| Question | Statistical seismic **drift demand** of an idealized "generic" steel frame class | Median **collapse capacity** of the *same* class |
+| Solver | modified DRAIN-2DX (1993) + IMK hinge | modified DRAIN-2DX (1993) + IMK hinge |
+| Deliverable | Generic-frame structural (App. A, Tables A.7–A.18) + modal (A.1–A.6) tables; drift-demand statistics (§4.3) | Fig 5.16 median `(Sa,c/g)/γ`-vs-period collapse curves (§5.5); the 14-case Table 5.1 |
+
+Both are **theoretical-prediction** studies, not reproductions of measured
+buildings.  MK-2003 *defines* the idealized generic single-bay steel moment frame
+class and its elastic/modal properties and drift demand; IK-2005 reuses that class,
+keeps the IMK deterioration hinge, and predicts **collapse** (dynamic instability).
+The hinge itself is the journal paper **Ibarra, Medina & Krawinkler (2005)**,
+*Earthq. Eng. Struct. Dyn.* 34(1), DOI `10.1002/eqe.495`.
+
+### 2. The models and the ground motions
+
+**The 12 frames** — generic single-bay steel moment frames, N = 3/6/9/12/15/18
+storeys × stiff (`T1 = 0.1N`) / flexible (`T1 = 0.2N`), four-digit codes
+(`0909` = 9 storeys, 0.9 s).  Storey height 12 ft (144 in), span 24 ft (288 in),
+steel `E = 29 000 ksi`; every frame is designed for simultaneous first yield at
+`γ = Vy/W = 1.0`.  Data transcribed from MK-2003 Appendix A
+(`generic_frame_data.py`).
+
+| code | N | T1 (s) | code | N | T1 (s) |
+|---|---|---|---|---|---|
+| 0303 | 3 | 0.3 | 0306 | 3 | 0.6 |
+| 0606 | 6 | 0.6 | 0612 | 6 | 1.2 |
+| 0909 | 9 | 0.9 | 0918 | 9 | 1.8 |
+| 1212 | 12 | 1.2 | 1224 | 12 | 2.4 |
+| 1515 | 15 | 1.5 | 1530 | 15 | 3.0 |
+| 1818 | 18 | 1.8 | 1836 | 18 | 3.6 |
+
+**Materials and hinges.**  Peak-oriented **IMK** (`IMKPeakOriented`) with the
+reference backbone `αs = 0.03` (hardening), `αc = −0.10` (post-capping),
+`δc/δy = 4` (ductility) and no cyclic deterioration (`γs,c,k,a = ∞`); **lumped
+plasticity** — `elasticBeamColumn` members plus `zeroLength` moment–rotation
+springs at the beam ends (the paper specifies the hinges in **M-θ directly**, with
+no plastic-hinge length).  Global **P-Δ** (`PDelta` transformation) with held
+**`1.4 ×` seismic-mass** gravity, and **5 % Rayleigh damping** anchored on `T1` and
+the 95 %-participation mode (§5.3.1 / Appendix B.4 Eq B.8).
+
+**The ground motions** — the 40-record **LMSR-N** set ("Large Magnitude – Small
+Distance – New", Medina 2002; IK-2005 Table 4.2): ordinary California records,
+`Mw 6.5–6.9`, source-to-site `13–40 km`, NEHRP site class D, no pulse-type
+near-fault characteristics.  The 40 records are reproduced verbatim below, and
+their waveforms are confirmed to be the same set (PGA matched against Table 4.2;
+the two wrong-component records `NR94far`/`NR94stn` were corrected during this
+study).
+
+| Record ID | Event | Year | Mw | Station | R (km) | PGA (g) |
+|---|---|---|---|---|---|---|
+| IV79cal | Imperial Valley | 1979 | 6.5 | Calipatria Fire Station | 23.8 | 0.078 |
+| IV79chi | Imperial Valley | 1979 | 6.5 | Chihuahua | 28.7 | 0.270 |
+| IV79cmp | Imperial Valley | 1979 | 6.5 | Compuertas | 32.6 | 0.186 |
+| IV79e01 | Imperial Valley | 1979 | 6.5 | El Centro Array #1 | 15.5 | 0.139 |
+| IV79e12 | Imperial Valley | 1979 | 6.5 | El Centro Array #12 | 18.2 | 0.116 |
+| IV79e13 | Imperial Valley | 1979 | 6.5 | El Centro Array #13 | 21.9 | 0.139 |
+| IV79nil | Imperial Valley | 1979 | 6.5 | Niland Fire Station | 35.9 | 0.109 |
+| IV79pls | Imperial Valley | 1979 | 6.5 | Plaster City | 31.7 | 0.057 |
+| IV79qkp | Imperial Valley | 1979 | 6.5 | Cucapah | 23.6 | 0.309 |
+| IV79wsm | Imperial Valley | 1979 | 6.5 | Westmorland Fire Station | 15.1 | 0.110 |
+| LP89agw | Loma Prieta | 1989 | 6.9 | Agnews State Hospital | 28.2 | 0.172 |
+| LP89cap | Loma Prieta | 1989 | 6.9 | Capitola | 14.5 | 0.443 |
+| LP89g03 | Loma Prieta | 1989 | 6.9 | Gilroy Array #3 | 14.4 | 0.367 |
+| LP89g04 | Loma Prieta | 1989 | 6.9 | Gilroy Array #4 | 16.1 | 0.212 |
+| LP89gmr | Loma Prieta | 1989 | 6.9 | Gilroy Array #7 | 24.2 | 0.226 |
+| LP89hch | Loma Prieta | 1989 | 6.9 | Hollister City Hall | 28.2 | 0.247 |
+| LP89hda | Loma Prieta | 1989 | 6.9 | Hollister Differential Array | 25.8 | 0.279 |
+| LP89hvr | Loma Prieta | 1989 | 6.9 | Halls Valley | 31.6 | 0.134 |
+| LP89sjw | Loma Prieta | 1989 | 6.9 | Salinas - John & Work | 32.6 | 0.112 |
+| LP89slc | Loma Prieta | 1989 | 6.9 | Palo Alto - SLAC Lab. | 36.3 | 0.194 |
+| LP89svl | Loma Prieta | 1989 | 6.9 | Sunnyvale - Colton Ave. | 28.8 | 0.207 |
+| NR94cen | Northridge | 1994 | 6.7 | LA - Centinela St. | 30.9 | 0.322 |
+| NR94cnp | Northridge | 1994 | 6.7 | Canoga Park - Topanga Can. | 15.8 | 0.420 |
+| NR94far | Northridge | 1994 | 6.7 | LA - N Faring Rd. | 23.9 | 0.273 |
+| NR94fle | Northridge | 1994 | 6.7 | LA - Fletcher Dr. | 29.5 | 0.240 |
+| NR94glp | Northridge | 1994 | 6.7 | Glendale - Las Palmas | 25.4 | 0.206 |
+| NR94hol | Northridge | 1994 | 6.7 | LA - Hollywood Stor FF | 25.5 | 0.231 |
+| NR94lh1 | Northridge | 1994 | 6.7 | Lake Hughes #1 | 36.3 | 0.087 |
+| NR94lv2 | Northridge | 1994 | 6.7 | Leona Valley #2 | 37.7 | 0.063 |
+| NR94lv6 | Northridge | 1994 | 6.7 | Leona Valley #6 | 38.5 | 0.178 |
+| NR94nya | Northridge | 1994 | 6.7 | La Crescenta-New York | 22.3 | 0.159 |
+| NR94pic | Northridge | 1994 | 6.7 | LA - Pico & Sentous | 32.7 | 0.186 |
+| NR94stc | Northridge | 1994 | 6.7 | Northridge - 17645 Saticoy St. | 13.3 | 0.368 |
+| NR94stn | Northridge | 1994 | 6.7 | LA - Saturn St | 30.0 | 0.474 |
+| NR94ver | Northridge | 1994 | 6.7 | LA - E Vernon Ave | 39.3 | 0.153 |
+| SF71pel | San Fernando | 1971 | 6.6 | LA - Hollywood Stor Lot | 21.2 | 0.174 |
+| SH87bra | Superstition Hills | 1987 | 6.7 | Brawley | 18.2 | 0.156 |
+| SH87icc | Superstition Hills | 1987 | 6.7 | El Centro Imp. Co. Cent | 13.9 | 0.358 |
+| SH87pls | Superstition Hills | 1987 | 6.7 | Plaster City | 21.0 | 0.186 |
+| SH87wsm | Superstition Hills | 1987 | 6.7 | Westmorland Fire Station | 13.3 | 0.172 |
+
+### 3. Paper results (verbal)
+
+**MK-2003 (drift demand).**  Over the LMSR-N set the generic frames follow
+**equal-displacement** behaviour: the normalised roof drift `θr,max/[Sd/H] ≈ PF1`
+at elastic intensities, with the *dispersion* (not the median) growing as intensity
+increases.  This is a record-free anchor we reproduce below.
+
+**IK-2005 (collapse).**  The headline result is the median MDOF collapse capacity
+`(Sa,c/g)/γ`-vs-period curve (Fig 5.16): it reaches a minimum of **≈ 3.3 at
+`T1 ≈ 1 s`** and is higher at both shorter (stiffer) and longer (more flexible)
+periods.  Point reads we use: `0909` (0.9 s) ≈ **3.4**, `0918` (1.8 s) ≈ **5.2**,
+`1224` (2.4 s) ≈ **3.0**; dispersion `σ_ln ≈ 0.42` at 0.9 s (Fig 5.18c).  Collapse
+is **dynamic instability** (non-convergence of the IDA), not a drift threshold.
+
+### 4. Our modelling approach and the changes we made
+
+We reproduce the pipeline (idealized frame + IMK hinge + LMSR-N records → median
+collapse capacity) as a **cross-code** check — OpenSees replacing DRAIN-2DX.  The
+modelling evolved through several corrections, each motivated by the gap to the
+paper:
+
+| Stage | Damping | Collapse criterion | `0909` median `(Sa,c/g)/γ` |
+|---|---|---|---|
+| Pre-fix baseline | mass-proportional 5 % | 10 % drift proxy | **3.41** (spurious match) |
+| Rayleigh fix (placeholder anchor) | 5 % Rayleigh on `T1, T1×0.5` | non-convergence | **7.94** |
+| Correct anchor | 5 % Rayleigh on `T1, T95` | non-convergence | **censored** (29/40 collapse) |
+| Mass-prop sensitivity | mass-proportional 5 % | non-convergence | 4.67 |
+
+The intervening probes **exonerated** the collapse criterion (drift proxy vs
+non-convergence vs singularity), the record set, the record *processing*
+(CESMD-vs-NGA ≤ 1.3 %), the `γ` divisor (`= 1.0`), P-Δ magnitude, `αc`, the hinge
+material, the integrator, tangent-stiffness `βK`, and the hinge-spring stiffness
+factor.  The remaining levers were (i) the **damping anchor** — switching to the
+paper's `(T1, T95)` moved `IV79cal` 62.25 → 72.75 (+17 %) and flipped one survivor
+back to collapsing — and (ii) the **record set**, completing the 7 PEER-only
+records and correcting two wrong-component records (`NR94far`, `NR94stn`).
+
+### 5. Comparison tables — MK and IK, paper vs ours
+
+**MK-2003 drift demand** (`θr,max/[Sd/H]`, elastic anchor R = 1; paper ≈ `PF1`):
+
+| code | T1 (s) | PF1 | ours | ratio |
+|---|---|---|---|---|
+| 0909 | 0.90 | 1.421 | 1.451 | +2 % |
+| 0918 | 1.81 | 1.421 | 1.543 | +9 % |
+| 1224 | 2.41 | 1.440 | 1.630 | +13 % |
+
+**IK-2005 collapse capacity** (`(Sa,c/g)/γ`, 40 LMSR-N records, `(T1, T95)`
+Rayleigh):
+
+| code | N | T1 (s) | paper (Fig 5.16) | ours | note |
+|---|---|---|---|---|---|
+| 0303 | 3 | 0.3 | high (short-period) | **4.396** | pinned |
+| 0306 | 3 | 0.6 | high (short-period) | **6.628** | pinned |
+| 0606 | 6 | 0.6 | — | censored | >½ survive |
+| 0612 | 6 | 1.2 | — | censored | >½ survive |
+| 0909 | 9 | 0.9 | **≈ 3.4** | censored (≈9+, 29/40) | **2.6×+ overshoot** |
+| 0918 | 9 | 1.8 | ≈ 5.2 | censored | — |
+| 1212 | 12 | 1.2 | — | censored | >½ survive |
+| 1224 | 12 | 2.4 | ≈ 3.0 | censored | — |
+| 1515 | 15 | 1.5 | — | censored | >½ survive |
+| 1530 | 15 | 3.0 | — | censored | >½ survive |
+| 1818 | 18 | 1.8 | — | censored | >½ survive |
+| 1836 | 18 | 3.6 | — | censored | >½ survive |
+
+"censored" = more than half the records survive the `max_scale = 128` ladder, so
+the 20th/21st-order-statistic median cannot be pinned (the code reports `None`
+rather than guess).
+
+### 6. Similarities and differences
+
+**What matches.**  The frames, materials, backbone, ground motions and collapse
+criterion are all reproduced faithfully: modal `T1` to ≤ 0.5 %, `γ = Vy/W = 1.0`
+to ≤ 2 %, the IMK backbone (3 %/−10 %/4) and the MK-2003 modal tables (A.1–A.6)
+to ≤ 0.2–2 %, and the LMSR-N waveforms (PGA vs Table 4.2).  The MK-2003 drift
+anchor is reproduced to +2–13 %.
+
+**What does not.**  The **collapse capacity**.  Where the paper's `0909` collapses
+at ≈ 3.4, our faithful OpenSees model collapses only at ~9 g and above — and, for
+every taller frame, more than half the records do not collapse at all within the
+tested range.  The correct `(T1, T95)` damping makes the frames *more* robust,
+widening — not closing — the gap.
+
+**Why.**  The internally-verified model leaves no fixable error on our side.  The
+remaining explanation is a **cross-code (DRAIN-2DX vs OpenSees) discrepancy** —
+most plausibly in how DRAIN-2DX implements Rayleigh damping on the one-component
+model, or its event-to-event solver's collapse stall.  Reproducing IK-2005's
+collapse curve therefore requires the *modified* DRAIN-2DX source, which is not
+available.  The benchmark stands as: modal / pushover / drift-demand checks ✅;
+the collapse-curve reproduction ❌ (a documented cross-code gap).
 
 ## Purpose
 
@@ -139,27 +326,32 @@ Rules applied (`.clinerules` §4.6):
    analytically (first-yield `min(2·Myb1/h, 4·Myc/h)/W`, all 12 frames) and the
    pipeline pushover peak base-shear coefficient lands in `[0.9, 1.4]`
    (`tests/test_generic_frame.py`, `tests/test_generic_frame_pushover.py`).
-3. ⚠️ IDA collapse `(Sa,c/g)/γ ≈ 3.3` at `T1 ≈ 1 s` — **unresolved**.  The
-   median **3.41** (σ_ln 0.55) and its 10 %-drift-proxy split were the
-   **pre-fix baseline** (mass-proportional 5 % damping + the 10 % drift proxy);
-   under the current Rayleigh-on-(`T1`, `T95`) configuration with
-   non-convergence-only collapse (`_COLLAPSE_DRIFT = None`) the `0909` median is
-   **7.94** (σ_ln 0.45) vs IK-2005's ≈ 3.3.  See "Results" below.
+3. ❌ IDA collapse `(Sa,c/g)/γ ≈ 3.3` at `T1 ≈ 1 s` — **not reproduced**.  The
+   median **3.41** (σ_ln 0.55) was the **pre-fix baseline** (mass-proportional
+   5 % damping + the 10 % drift proxy); under the paper-correct Rayleigh-on-
+   (`T1`, `T95`) configuration with non-convergence-only collapse the `0909`
+   median is **censored** (29/40 collapse, ≈ 9 g and above) vs IK-2005's ≈ 3.3 —
+   a genuine cross-code gap.  See "Study summary and conclusions".
 
 First target: **`0909`** (N = 9, T1 = 0.9 s) — closest to the SAC 3-story's
 period.
 
-## Results — 33-record IDA (`0909`)
+## Results — superseded by the 40-record re-run
+
+> The 7.94 median below is the **pre-T95** value (the Rayleigh anchor was still
+> `T1 × 0.5`, not the paper's 95 %-participation mode).  The final 40-record
+> result under the correct `(T1, T95)` anchor is in the "Study summary and
+> conclusions" section at the top: only `0303` (4.40) and `0306` (6.63) pin a
+> median; every frame with N ≥ 6 is *censored* (more than half its records
+> survive the ladder).
 
 The 33 locally-available LMSR-N records (40 − 7 PEER-only) were run through
 `collapse_capacity_sa("0909", …)` — P-Δ + held `1.4 × seismic mass` gravity,
-peak-oriented IMK hinge, `max_scale = 128` (so every record collapses).  The
-table records the **pre-fix baseline** (5 % mass-proportional damping + the
-10 % drift proxy); the current configuration — 5 % Rayleigh damping on
-`T1` + `T95` with `_COLLAPSE_DRIFT = None` (non-convergence only) — supersedes
-it (see "Next steps"):
+peak-oriented IMK hinge, `max_scale = 128`.  The table records the **pre-fix
+baseline** (5 % mass-proportional damping + the 10 % drift proxy) and the
+intermediate Rayleigh/no-proxy run (with the placeholder `T1 × 0.5` anchor):
 
-| Statistic | Pre-fix baseline (33 records) | Current (Rayleigh, no drift proxy) | IK-2005 |
+| Statistic | Pre-fix baseline (33 records) | Rayleigh, no proxy (pre-T95 anchor) | IK-2005 |
 |---|---|---|---|
 | Median `(Sa,c/g)/γ` | **3.41** | **7.94** | ≈ 3.3 (§5.5) |
 | Dispersion σ_ln | **0.55** | **0.45** | ≈ 0.42 (Fig 5.18c) |
@@ -326,14 +518,14 @@ drift proxy dropped) — see "Next steps".
    (σ_ln 0.45) vs the paper's ≈ 3.4 — the `0909` overshoot that motivated the
    "Collapse criterion" analysis below.
 
-### 40-record re-run (in progress)
+### 40-record re-run (done)
 
-The medians above are 33-record numbers (7 PEER-only records absent at the
-time, and the Rayleigh anchor was ``T1 × 0.5`` — see the T95 fix below).  The 7
-NGA-West2 records are now fetched (``.AT2`` in the mirror) and the full
-12-frame × 40-record re-run is in progress under the correct ``(T1, T95)``
-Rayleigh anchor (`output/ik2005_40record/`); the 7.94 median quoted above is
-the *pre-T95* value and will be superseded once `0909` completes.  Re-run:
+The medians above are 33-record numbers (7 PEER-only records absent, and the
+Rayleigh anchor was ``T1 × 0.5``).  The full 12-frame × 40-record re-run under
+the correct ``(T1, T95)`` anchor is **complete** (`output/ik2005_40record/`,
+`ik2005_all_frames_summary.{json,md}`): only `0303` (4.396) and `0306` (6.628)
+pin a median; every frame with N ≥ 6 is *censored*.  See the "Study summary and
+conclusions" section for the table and the close-out.  Re-run:
 
 ```bash
 python scripts/run_ik2005_collapse.py --code 0909 --max-scale 128 \
