@@ -200,6 +200,16 @@ class TestReadPeerRecordHeaderVariants:
             times, _accel = read_peer_record(str(f))
         assert len(times) == 3
 
+    def test_positional_header_provides_time_step(self, tmp_path):
+        """A positional ``<NPTS> <DT> NPTS, DT`` header sets a non-default step."""
+        f = tmp_path / "positional.at2"
+        f.write_text("3 0.02 NPTS, DT\n0.1\n0.2\n0.3\n", encoding="utf-8")
+        times, accel = read_peer_record(str(f))
+        assert times.tolist() == pytest.approx([0.0, 0.02, 0.04])
+        assert accel.tolist() == pytest.approx(
+            [0.1 * DEFAULT_GRAVITY_MS2, 0.2 * DEFAULT_GRAVITY_MS2, 0.3 * DEFAULT_GRAVITY_MS2]
+        )
+
 
 class TestSelectComponentByPGA:
     """``select_component_by_pga`` picks the component matching a paper's PGA."""

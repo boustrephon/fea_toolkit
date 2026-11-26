@@ -221,6 +221,13 @@ _DT_RE = re.compile(rf"(?:^|[\s,])DT\s*=\s*({_FLOAT_VALUE_RE})", re.IGNORECASE)
 #: ``NPTS = <int>`` on a header line.
 _NPTS_RE = re.compile(r"(?:^|\s)NPTS\s*=\s*(\d+)", re.IGNORECASE)
 
+#: Positional header form ``<NPTS> <DT> NPTS, DT`` — an older PEER header where
+#: the two values precede their labels (e.g. ``18000 0.0050 NPTS, DT``).
+_POSITIONAL_NPTS_DT_RE = re.compile(
+    rf"^\s*(\d+)\s+({_FLOAT_VALUE_RE})\s*[,]?\s*NPTS\s*[,]?\s*DT\b",
+    re.IGNORECASE,
+)
+
 
 def read_peer_record(path: str) -> tuple[np.ndarray, np.ndarray]:
     """Read a PEER NGA strong motion record.
@@ -229,8 +236,9 @@ def read_peer_record(path: str) -> tuple[np.ndarray, np.ndarray]:
     acceleration values in g, one per line.  ``DT`` (time step) and
     ``NPTS`` (sample count) are read from the header; ``DT`` tolerates
     scientific notation, a leading-dot form and a trailing-dot form (as in
-    ``DT=5.E-03``), and ``NPTS`` is checked against the number of values
-    parsed so a truncated record warns.
+    ``DT=5.E-03``), and the older positional ``<NPTS> <DT> NPTS, DT`` form
+    (e.g. ``18000 0.0050 NPTS, DT``) is also recognised.  ``NPTS`` is
+    checked against the number of values parsed so a truncated record warns.
 
     Args:
         path: Path to the ``.AT2`` file.
@@ -265,6 +273,15 @@ def read_peer_record(path: str) -> tuple[np.ndarray, np.ndarray]:
             m_npts = _NPTS_RE.search(stripped)
             if m_npts:
                 npts = int(m_npts.group(1))
+            # Positional header form: ``<NPTS> <DT> NPTS, DT`` (an older PEER
+            # header where the values precede their labels).  Fill in only the
+            # values the key=value forms did not already set.
+            m_pos = _POSITIONAL_NPTS_DT_RE.search(stripped)
+            if m_pos:
+                if m_npts is None:
+                    npts = int(m_pos.group(1))
+                if m_dt is None:
+                    dt = float(m_pos.group(2))
             continue  # skip recognized header metadata
         try:
             float(stripped.split()[0])
