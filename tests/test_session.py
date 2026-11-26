@@ -219,3 +219,44 @@ def test_record_run_modal_only_preserves_compatible_histories():
 
     assert "A" in session._retained_transient
     assert session._retained_transient_geometry == {7: (1.0, 2.0, 3.0)}
+
+
+def test_merge_results_view_arrays_skips_transient_blocks():
+    """A loaded repository's transient blocks do not leak into static arrays."""
+    import numpy as np
+
+    from fea_toolkit.io.results_repository import NpzResultsRepository
+    from fea_toolkit.io.results_schema import make_transient_key
+
+    repo_arrays = {
+        "node_tag": np.array([1, 2]),
+        "static_case_labels": np.array(["DEAD"]),
+        "static/DEAD/node_dx": np.array([0.0, 0.0]),
+        make_transient_key("A", "transient/{case}/time"): np.arange(3),
+    }
+    session = Session()
+    session.views.add_results("results:DEAD", "DEAD", NpzResultsRepository(repo_arrays))
+
+    arrays: dict = {}
+    session._merge_results_view_arrays(arrays)
+
+    assert "static/DEAD/node_dx" in arrays
+    assert not any(key.startswith("transient/") for key in arrays)
+
+
+def test_reconcile_analysis_types_keeps_transient_only_when_a_block_remains():
+    """``analysis_types`` drops ``"transient"`` once no transient block survives."""
+    import numpy as np
+
+    from fea_toolkit.io.results_schema import make_transient_key
+
+    arrays = {"analysis_types": np.array(["static", "transient", "rs"])}
+    Session._reconcile_analysis_types(arrays)
+    assert list(arrays["analysis_types"]) == ["static", "rs"]
+
+    arrays = {
+        "analysis_types": np.array(["static", "transient"]),
+        make_transient_key("A", "transient/{case}/time"): np.arange(3),
+    }
+    Session._reconcile_analysis_types(arrays)
+    assert list(arrays["analysis_types"]) == ["static", "transient"]

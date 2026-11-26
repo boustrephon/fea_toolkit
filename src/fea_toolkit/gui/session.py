@@ -122,11 +122,17 @@ class Session:
         )
         # Fold in nonlinear-dynamic payloads retained from earlier completed
         # runs, so a later (e.g. modal) run cannot erase them.  The current
-        # run's transient (already collected above) takes precedence.
+        # run's transient (already collected above) takes precedence.  The
+        # retained histories are tag-keyed to the mesh they were recorded
+        # against, so they are folded in only while that mesh still matches the
+        # current one (a re-mesh would otherwise map an old node's history onto
+        # a different node).
         if self._retained_transient:
-            merged_transient = dict(self._retained_transient)
-            merged_transient.update(collected.get("transient") or {})
-            collected["transient"] = merged_transient
+            mesh = store.preprocessed() if store is not None else None
+            if self._transient_geometry_compatible(mesh):
+                merged_transient = dict(self._retained_transient)
+                merged_transient.update(collected.get("transient") or {})
+                collected["transient"] = merged_transient
         self._merge_results_view_arrays(collected["static_arrays"])
 
         figures = dict(self._retained_figures)
@@ -166,6 +172,7 @@ class Session:
             self._drop_incompatible_loaded_transient(merged)
             merged.update(results_arrays)
             results_arrays = merged
+        self._reconcile_analysis_types(results_arrays)
         return {
             "manifest": manifest,
             "sap": store.raw(),
@@ -587,6 +594,29 @@ class Session:
             arrays["analysis_types"] = np.array([name], dtype=str)
 
     @staticmethod
+    def _reconcile_analysis_types(arrays: dict) -> None:
+        """Drop ``"transient"`` from ``analysis_types`` when no transient block remains.
+
+        ``analysis_types`` is appended while the transient block is being
+        assembled, but that block can be pruned afterwards (an incompatible
+        loaded transient is dropped in :meth:`to_bundle`).  Reconcile the
+        declared list against the final arrays: ``"transient"`` is kept only
+        when a ``transient/<case>/…`` block is still present, while every other
+        declared analysis type is preserved.
+        """
+        import numpy as np
+
+        from ..io.results_schema import transient_case_names
+
+        declared = arrays.get("analysis_types")
+        if declared is None or len(declared) == 0:
+            return
+        names = [str(v) for v in declared]
+        if "transient" in names and not transient_case_names(arrays):
+            names = [n for n in names if n != "transient"]
+            arrays["analysis_types"] = np.array(names, dtype=str)
+
+    @staticmethod
     def _append_static_case_labels(arrays: dict, labels: Any) -> None:
         """Append *labels* to ``static_case_labels``, without duplicating.
 
@@ -641,6 +671,12 @@ class Session:
         run, not only ``last_run``'s.  Geometry and file-level arrays come from
         the first repository that supplies them (identical across runs of one
         model).
+
+        Transient blocks are **not** merged here: they are not static cases, and
+        a loaded repository's transient history is already carried by
+        :attr:`_retained_results_arrays` (reconciled in :meth:`to_bundle`), so
+        merging it here would leak a stale or incompatible transient into the
+        static-array layer.
         """
         seen = set()
         for view in self.views.views():
@@ -651,5 +687,6 @@ class Session:
                     repo_arrays = repository.to_arrays()
                     self._append_static_case_labels(arrays, repo_arrays.get("static_case_labels"))
                     for key, value in repo_arrays.items():
-                        if key != "static_case_labels":
-                            arrays.setdefault(key, value)
+                        if key == "static_case_labels" or key.startswith("transient/"):
+                            continue
+                        arrays.setdefault(key, value)
