@@ -9,10 +9,11 @@ related: [ground_motion_data.md, ik2005_generic_frame_benchmark.md, _pending_wor
 
 # NGA-West2 waveform download — guidance
 
-## 0. Next session — runbook (registration: Mon–Fri, 8 AM–8 PM PST)
+## 0. Next session — runbook (registration & sign-in: Mon–Fri, 8 AM–8 PM PST)
 
-NGA-West2 **registration** is only open **Mon–Fri, 8 AM–8 PM PST**; existing
-members can sign in and download at any time.  Within the registration window:
+NGA-West2 **registration and sign-in** are only open **Mon–Fri, 8 AM–8 PM PST**:
+the same window applies to signing in as to registering, so existing members
+cannot sign in outside it.  Within that window:
 
 ```bash
 cd <your fea_toolkit checkout>          # e.g. ~/Projects/fea_toolkit
@@ -48,9 +49,11 @@ are copied to `data/ground_motion/local/<record_id>.AT2` (gitignored).  If the
 ## 1. Purpose
 
 The 40-record LMSR-N set (IK-2005 Table 4.2, Medina 2002) drives the IK-2005
-generic-frame collapse benchmark and its MK-2003 modal anchors.  33 of the 40
-are already fetched from open archives (CESMD + USGS NSMP); **7 exist only in
-PEER NGA-West2** and need an interactive download under a PEER account.
+generic-frame collapse benchmark and its MK-2003 modal anchors.  **S1 is
+complete (2026-11-26)** — all 40 records are fetched (33 from the open CESMD +
+USGS NSMP archives, 7 from PEER NGA-West2).  This document is retained as the
+guidance for that download (and to re-run it) and for the **S2** follow-up of
+replacing all 40 with NGA-West2 originals for full provenance.
 
 This document is the corrected, repo-specific guidance for that download.  It
 replaces the earlier generic "ObsPy + Selenium" proposal with what this project

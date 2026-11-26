@@ -999,12 +999,16 @@ component whose PGA matches Table 4.2: `LP89agw` (Agnews, PGA 0.172 g),
 0.156 g), `SH87icc` (El Centro Imp. Co. Cent, 0.358 g), `SH87pls` (Plaster
 City, 0.186 g).
 
-**40-record re-run.**  Before running the full benchmark, acquire the 7
-PEER-only waveforms (see "Downloading them" below) and place each in the mirror
-as ``<record_id>.AT2`` (e.g. ``LP89agw.AT2``).  A fresh checkout does **not**
-include them, and `fetched_ids()` returns 40 only once all seven are present —
-before that it returns the 33 open-archive records.  The runners then pick them
-up with no code change.  See "40-record re-run" under "Results".
+**40-record re-run.**  Before running the full benchmark, acquire the **33
+open-archive records** (CESMD + USGS NSMP — see "Downloading them" below), the
+**PEER replacement waveforms for `NR94far` and `NR94stn`** (their CESMD `CH1`
+components were the wrong horizontal — see "Record-processing check and
+component fixes"), and the **7 PEER-only waveforms**, placing each in the mirror
+as ``<record_id>.AT2`` (e.g. ``LP89agw.AT2``; the two corrected records as
+``NR94far.AT2`` / ``NR94stn.AT2``).  A fresh checkout does **not** include any
+of them, and `fetched_ids()` returns 40 only once the full set is present —
+before that it returns a partial set.  The runners then pick them up with no
+code change.  See "40-record re-run" under "Results".
 
 ### Downloading them (you, not the repo)
 

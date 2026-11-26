@@ -908,7 +908,8 @@ Consequences — all now handled:
 - Linear factor expansion is offered only where the result really is linear
   (`expand_linear_combination` raises otherwise); `Envelope` and `SRSS` are
   handled as operators by `generate_combination_results`, while
-  `Absolute Add` / `Range Add` raise as unsupported (a future extension).
+  `Range Add` raises as unsupported (a future extension; `Absolute Add` is
+  handled by `_generate_absolute` — see Step 4).
 - `entries` is an ordered list, so repeated references — legal per the quote
   above — are preserved; the ETABS-side `combo_func` stores the same
   `(name, factor)` shape.
@@ -1301,35 +1302,37 @@ so it is only exact when the member ends are actually fixed.
 
 The code comment at both fallback sites points here.
 
-#### P51 — Download the 7 PEER NGA-West2-only LMSR-N records (IK-2005 / MK-2003)
+#### P51 — 40-record LMSR-N acquisition + collapse re-run (IK-2005 / MK-2003)
 
 Source: `docs/nga_west2_download_guidance.md`;
 `docs/ik2005_generic_frame_benchmark.md` §"Acquisition status".
 
-**What.**  The 40-record LMSR-N set is 33/40 fetched; the 7 remaining records
-exist only in PEER NGA-West2 (`LP89agw` `LP89sjw` `NR94lv6` `NR94pic` `SH87bra`
-`SH87icc` `SH87pls`).  Fetching them unblocks the 40-record IK-2005 / MK-2003
-collapse re-run.  **S1 (this item)** fetches those 7; **S2 (staged)** replaces
-all 40 with NGA-West2 originals for full provenance.
+**What.**  **S1 (this item) — ✅ complete (2026-11-26).**  All 40 LMSR-N records
+are fetched (19 CESMD + 14 USGS NSMP + 7 PEER NGA-West2), the two wrong-component
+records (`NR94far`, `NR94stn`) were corrected, and the 40-record × 12-frame
+IK-2005 / MK-2003 collapse re-run is complete (see
+`docs/ik2005_generic_frame_benchmark.md` → "Study summary and conclusions", and
+`docs/history/_done_log.md`).  **S2 (staged, open)** replaces all 40 with
+NGA-West2 originals for full provenance.
 
-**Landed so far (2026-11-23).**  The offline core is in place and tested:
-`read_peer_record` hardened (scientific-notation / leading-dot `DT`, `NPTS`
-truncation warning), `io.ground_motion.select_component_by_pga`, the
+**Landed (2026-11-26).**  The 7 PEER-only records were fetched (search by
+event+station, not the hand-guessed RSNs) and the offline core is in place and
+tested: `read_peer_record` hardened (scientific-notation / leading-dot `DT`,
+`NPTS` truncation warning), `io.ground_motion.select_component_by_pga`, the
 `scripts/fetch_peer_records.py` manifest + vertical filter + RSN grouping +
-PGA-based component selection, and the `[nga-download]` extra.  Remaining is
-the **live run** — look up the 7 RSNs by event+station, then
-`--download --rsns …`, which needs a human to complete NGA-West2 login and any
-verification.
+PGA-based component selection, and the `[nga-download]` extra.  The 40-record ×
+12-frame re-run is archived under `output/ik2005_40record/`.
 
 **Where.** `scripts/fetch_peer_records.py`;
 `src/fea_toolkit/io/ground_motion.py`; `tests/test_fetch_peer_records.py`,
 `tests/test_ground_motion.py`.
 
-**S2 follow-up (staged).**  A full-40 provenance upgrade needs (a) a validated
-40-record RSN/station mapping (the hand-guessed RSNs are unreliable), (b) a
-decision on how the 14 USGS multi-component records are stored — `_load_record`
-appends the channel suffix, so a single `<record_id>.AT2` is ignored for those
-(store `<record_id>_<channel>.AT2` or drop them from `USGS_CHANNELS`).
+**S2 follow-up (staged, open).**  A full-40 provenance upgrade needs (a) a
+validated 40-record RSN/station mapping (the hand-guessed RSNs are unreliable),
+(b) a decision on how the 14 USGS multi-component records are stored —
+`_load_record` appends the channel suffix, so a single `<record_id>.AT2` is
+ignored for those (store `<record_id>_<channel>.AT2` or drop them from
+`USGS_CHANNELS`).
 
 #### Closed items (README reconciliation, 2026-08-25)
 - **Deeper opstool result-post-processing integration** — closed as **no

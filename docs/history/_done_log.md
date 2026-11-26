@@ -44,8 +44,10 @@ explain the gap, and the record set is essentially correct.
 **Close-out (2026-11-26).**  The 40-record × 12-frame re-run under the correct
 `(T1, T95)` Rayleigh anchor is complete (`output/ik2005_40record/`).  Only the
 two 3-storey frames pin a median (`0303` 4.396, `0306` 6.628); every frame with
-N ≥ 6 is *censored* (more than half its records survive the `max_scale = 128`
-ladder).  A Rayleigh-anchor probe confirmed the correct T95 anchor is one lever
+N ≥ 6 is *censored* (fewer than half its records collapse, and the survivors'
+unknown positions in the capacity ordering — each bounded only by its own
+`max_scale = 128` ladder limit — leave the middle order statistic unpinned).
+A Rayleigh-anchor probe confirmed the correct T95 anchor is one lever
 (`IV79cal` 62.25 → 72.75, +17 %) but not the whole story.  **Conclusion:** the
 IK-2005 collapse curve is **not reproducible from the OpenSees side** — a genuine
 cross-code (DRAIN-2DX vs OpenSees) discrepancy, not a fixable error here;
