@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 # Overnight IK-2005 40-record re-run.
 #
+# Step 0 gates step 1: the complete 40-record set must be present in the
+# ground-motion mirror, otherwise the run is held (a partial set would produce
+# partial archives that look "complete" on resume).
+#
 # Step 1 gates step 2: a quick validity check re-runs two unchanged records on
 # frame 0909 and compares them against the archived non-convergence re-run.  If
 # it passes, the full 12-frame / 40-record matrix launches (0909 headline frame
 # first); if it fails, the long run is held.
 #
-# Frame-level resume: run_ik2005_all_frames.py skips a frame whose archive
-# already exists in the out-dir, so re-running this script after an interrupt
-# only re-does the in-progress frame.
+# Frame-level resume: run_ik2005_all_frames.py skips a frame whose *complete*
+# (full 40-record) archive already exists in the out-dir and re-runs a partial
+# archive, so re-running this script after an interrupt only re-does the
+# in-progress frame.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -18,13 +23,20 @@ OUT_DIR=output/ik2005_40record
 CODES=0909,0303,0306,0606,0612,0918,1212,1224,1515,1530,1818,1836
 
 echo "=== $(date) IK-2005 40-record overnight run ==="
-echo "=== $(date) step 1/2: validity check (0909 vs archive) ==="
+echo "=== $(date) step 0/3: complete 40-record set check ==="
+if ! "$PY" -c \
+  'from fea_toolkit.benchmarks.ik2005_records import missing_record_ids as _m; _x = _m(); print("missing:", ", ".join(_x) if _x else "none (40/40 present)"); raise SystemExit(1 if _x else 0)'; then
+  echo "=== $(date) INCOMPLETE RECORD SET — holding, not launching the run ==="
+  exit 1
+fi
+
+echo "=== $(date) step 1/3: validity check (0909 vs archive) ==="
 if ! "$PY" scripts/ik2005_validity_check.py; then
   echo "=== $(date) VALIDITY CHECK FAILED — holding, not launching the long run ==="
   exit 1
 fi
 
-echo "=== $(date) step 2/2: full 40-record run, frames: ${CODES} ==="
+echo "=== $(date) step 2/3: full 40-record run, frames: ${CODES} ==="
 if ! "$PY" scripts/run_ik2005_all_frames.py --out-dir "$OUT_DIR" --codes "$CODES"; then
   echo "=== $(date) FULL RUN FAILED ==="
   exit 1

@@ -13,6 +13,8 @@ from fea_toolkit.benchmarks.ik2005_records import (
     PEER_ONLY,
     USGS_CHANNELS,
     fetched_ids,
+    ground_motion_dir,
+    missing_record_ids,
     peer_only_ids,
     peer_only_present,
 )
@@ -61,3 +63,22 @@ def test_usgs_channels_reference_only_fetched_records():
     assert set(USGS_CHANNELS) <= set(fetched_ids())
     assert not (set(USGS_CHANNELS) & PEER_ONLY)
     assert len(USGS_CHANNELS) == 14
+
+
+def test_missing_record_ids_reports_all_absent_in_a_clean_mirror():
+    """Unlike ``fetched_ids``, ``missing_record_ids`` probes the whole mirror."""
+    # The autouse fixture redirects the mirror to an empty tmp_path, so every
+    # one of the 40 records is absent.
+    assert set(missing_record_ids()) == set(LMSR_N_IDS)
+
+
+def test_missing_record_ids_recognises_an_open_archive_record():
+    """A present open-archive waveform drops its id from the missing list."""
+    root = ground_motion_dir()
+    (root / "local").mkdir(parents=True, exist_ok=True)
+    # IV79cal is a USGS multi-component record whose selected channel is "a".
+    (root / "local" / "IV79cal_a.csv").write_text("0,0\n0.005,1\n", encoding="utf-8")
+
+    missing = missing_record_ids()
+    assert "IV79cal" not in missing
+    assert "LP89cap" in missing

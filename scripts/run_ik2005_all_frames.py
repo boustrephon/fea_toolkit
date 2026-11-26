@@ -6,8 +6,11 @@ Extends ``scripts/run_ik2005_npz.py`` (single frame) to all 12 frames
 run over the 40 LMSR-N records, its ``ida`` block is archived
 to ``<out-dir>/ik2005_<code>.npz``, and the per-frame summary (median
 ``(Sa,c/g)/γ``, σ_ln) is appended to ``<out-dir>/ik2005_all_frames_summary.json``
-**incrementally** — so the run is safe to kill and resume: a frame whose archive
-already exists is skipped.
+**incrementally** — so the run is safe to kill and resume: a frame whose
+*complete* (full-record) archive already exists is skipped, while a partial
+archive from an interrupted run is re-run.  A full run also refuses to start
+unless the complete 40-record set is present in the mirror, and exits nonzero
+if any requested frame fails.
 
 At the end it writes a combined markdown table
 (``<out-dir>/ik2005_all_frames_summary.md``) and a
@@ -33,7 +36,12 @@ import numpy as np
 from fea_toolkit.benchmarks import generic_frame as gf
 from fea_toolkit.benchmarks import generic_frame_run as gfr
 from fea_toolkit.benchmarks.generic_frame_data import FRAME_CODES, FRAME_DATA
-from fea_toolkit.benchmarks.ik2005_records import USGS_CHANNELS, fetched_ids, peer_only_ids
+from fea_toolkit.benchmarks.ik2005_records import (
+    USGS_CHANNELS,
+    fetched_ids,
+    missing_record_ids,
+    peer_only_ids,
+)
 from fea_toolkit.io.npz_writer import write_results_npz
 
 #: Seed ladder (record scale factors) — same as the ``0909`` reference run.
@@ -54,6 +62,21 @@ def _load(path: str) -> dict:
 def _save(path: str, data: dict) -> None:
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, sort_keys=True)
+
+
+def _archive_record_count(path: str) -> Optional[int]:
+    """Number of records archived in *path*, or ``None`` when it does not exist.
+
+    An archive is only "complete" when it records the full requested set
+    (``ida/record_id`` size == ``len(record_ids)``); a partial archive from an
+    earlier interrupted run is re-run rather than skipped.
+    """
+    if not os.path.exists(path):
+        return None
+    with np.load(path) as z:
+        if "ida/record_id" not in z.files:
+            return 0
+        return int(z["ida/record_id"].size)
 
 
 def _seed_existing(summary: dict, out_dir: str) -> None:
@@ -180,6 +203,18 @@ def main(argv: Optional[list[str]] = None) -> int:
     codes = FRAME_CODES if args.codes is None else tuple(c.strip() for c in args.codes.split(","))
     record_ids = fetched_ids()
     skipped = [rid for rid in peer_only_ids() if rid not in record_ids]
+    if not args.limit:
+        # A full (non-smoke) run claims the complete 40-record set.  fetched_ids()
+        # only probes the mirror for the 7 PEER-only records, so check the whole
+        # mirror directly — an archive run over a partial set is not "complete".
+        missing = missing_record_ids()
+        if missing:
+            print(
+                f"{_ts()}  INCOMPLETE RECORD SET — {len(missing)} of 40 records "
+                f"missing from the mirror: {', '.join(missing)}",
+                flush=True,
+            )
+            return 2
     if args.limit:
         record_ids = record_ids[: args.limit]
 
@@ -195,10 +230,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         flush=True,
     )
 
+    any_failed = False
     for idx, code in enumerate(codes, 1):
         out = os.path.join(args.out_dir, f"ik2005_{code}.npz")
-        if os.path.exists(out) and not args.force:
-            print(f"{_ts()}  [{idx}/{len(codes)}] {code}: archive exists — skip", flush=True)
+        if not args.force and _archive_record_count(out) == len(record_ids):
+            print(
+                f"{_ts()}  [{idx}/{len(codes)}] {code}: complete archive exists — skip",
+                flush=True,
+            )
             continue
         n_storeys = FRAME_DATA[code]["N"]
         t1 = FRAME_DATA[code]["T1"]
@@ -244,6 +283,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 flush=True,
             )
         except Exception as exc:  # keep the long run alive past one bad frame
+            any_failed = True
             print(f"{_ts()}    ✗ FAILED: {exc!r}", flush=True)
             summary[code] = {
                 "code": code,
@@ -258,7 +298,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not args.no_plot:
         _write_plot(summary, args.out_dir)
     print(f"{_ts()}  done — {len(summary)} frames in {summary_path}", flush=True)
-    return 0
+    return 1 if any_failed else 0
 
 
 if __name__ == "__main__":

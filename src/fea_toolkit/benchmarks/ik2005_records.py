@@ -149,3 +149,28 @@ def fetched_ids() -> list[str]:
 def peer_only_ids() -> list[str]:
     """Return the PEER NGA-West2-only record IDs, in table order."""
     return [rid for rid in LMSR_N_IDS if rid in PEER_ONLY]
+
+
+def missing_record_ids() -> list[str]:
+    """Return the LMSR-N IDs whose waveform is absent from the mirror.
+
+    Unlike :func:`fetched_ids` — which always lists the 33 open-archive records
+    and only checks the mirror for the 7 PEER-only records — this checks the
+    actual mirror for **all 40**: an ID counts as present when a ``.AT2`` or
+    ``.csv`` file exists (a USGS multi-component record stores its selected
+    channel as ``<record_id>_<channel>.csv``).  A full 40-record re-run is only
+    ready once this returns ``[]``.
+    """
+    root = ground_motion_dir()
+    missing: list[str] = []
+    for rid in LMSR_N_IDS:
+        channel = USGS_CHANNELS.get(rid)
+        suffix = f"_{channel}" if channel else ""
+        found = any(
+            (root / sub / f"{rid}{suffix}{ext}").exists()
+            for sub in ("local", "public")
+            for ext in (".AT2", ".csv")
+        )
+        if not found:
+            missing.append(rid)
+    return missing
