@@ -10,6 +10,22 @@ category: [archive]
 > [`_pending_work.md`](../_pending_work.md) on 2026-10-27.  Nothing here is
 > open work; the live plan lives in `_pending_work.md`.
 
+## DONE (2026-11-26 — IK-2005 generic-frame collapse: investigation closed)
+
+P42b (IK-2005 generic-frame collapse) was brought to a close.  The 40-record ×
+12-frame re-run under the paper-correct `(T1, T95)` Rayleigh damping is complete
+(`output/ik2005_40record/`); the conclusion — recorded in
+`ik2005_generic_frame_benchmark.md` → "Study summary and conclusions" — is that
+the paper's median collapse curve is **not reproducible from the OpenSees side**:
+only `0303` (4.396) and `0306` (6.628) pin a median, every frame with N ≥ 6 is
+*censored*, and the root cause is a genuine cross-code (DRAIN-2DX vs OpenSees)
+discrepancy, not a fixable modelling error.  Validated and passing: modal T1
+(≤ 0.5 %), `γ = Vy/W = 1.0` (≤ 2 %), the IMK backbone, the MK-2003 modal tables,
+the IK-2003 drift anchor (+2–13 %), and the IDA driver (ladder + bisection +
+censored median).  P42b stays in `_pending_work.md` as ⚠️ partial — the
+collapse-capacity calibration remains open — with the close-out status recorded
+there.
+
 ## DONE (2026-11-23 — planning-spine refresh: P41/P42/P48/P49 landed parts archived)
 
 Relocated from `_pending_work.md` on 2026-11-23.  The workflow/GUI front is

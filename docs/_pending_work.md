@@ -322,6 +322,20 @@ longer than Table 4.2 (51–92 s vs 36–40 s) but a truncation test shows the c
 length difference already pushes us *toward* 3.4, not away — the record set is
 essentially correct and is **not** the explanation.
 
+**Close-out (2026-11-26).**  The 40-record × 12-frame re-run under the correct
+`(T1, T95)` Rayleigh anchor is complete (`output/ik2005_40record/`).  Only the
+two 3-storey frames pin a median (`0303` 4.396, `0306` 6.628); every frame with
+N ≥ 6 is *censored* (more than half its records survive the `max_scale = 128`
+ladder).  A Rayleigh-anchor probe confirmed the correct T95 anchor is one lever
+(`IV79cal` 62.25 → 72.75, +17 %) but not the whole story — the completed record
+set and the `NR94far`/`NR94stn` component fixes also contribute survivors.
+**Conclusion:** the IK-2005 collapse curve is **not reproducible from the
+OpenSees side** — a genuine cross-code (DRAIN-2DX vs OpenSees) discrepancy, not a
+fixable error here; reproducing it would need the modified DRAIN-2DX source.  The
+modal / pushover / drift-demand checks all pass (see the benchmark doc's "Study
+summary and conclusions"), so the tools are validated for linear and
+moderate-nonlinear use; collapse-capacity calibration remains open.
+
 **Where.** `benchmarks/generic_frame*.py`; `benchmarks/ik2005_records.py`;
 `opensees/_elements.py` (`hinge_backbone="imk_peak"`);
 `tests/test_generic_frame*.py`.

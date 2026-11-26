@@ -1189,3 +1189,60 @@ backbone (Appendix B.3, Eq B.4–B.7).
 - Ibarra & Krawinkler (2005), PEER 2005/06 (global collapse).
 - Medina & Krawinkler (2003), PEER 2003/15 (frame data, Appendix A).
 - Ibarra, Medina & Krawinkler (2005), EESD 34(12). `10.1002/eqe.495`.
+
+## Summary and Conclusions
+
+### Why we ran this benchmark
+
+The point of reproducing MK-2003 / IK-2005 was never to match one paper's
+numbers for their own sake.  It was to **validate the modelling toolchain**
+(generic frame → IMK hinge → P-Δ + gravity → Rayleigh damping → IDA) so that it
+can be trusted for the studies that follow — both **linear** (modal, pushover,
+drift demand) and **nonlinear** (collapse / IDA).
+
+### What the study validated
+
+The record-free, closed-form checks each pin a different layer of the toolchain,
+and all pass:
+
+| Layer | Check | Result |
+|---|---|---|
+| Units / geometry | SI conversion, `E`, `I`, `Kc`, masses | modal `T1` ≤ 0.5 % (all 12 frames) |
+| Linear modal | mode shapes, `Ti/T1`, `PFi`, `MPi`, `ξi` | MK-2003 Tables A.1–A.6 to ≤ 0.2–2 % |
+| Static strength | `γ = Vy/W` | = 1.0 to ≤ 2 % (pushover peak in [0.9, 1.4]) |
+| Hinge material | IMK backbone (3 % / −10 % / 4), M-θ mapping | verified (single-member cyclic + instrumented post-capping) |
+| Nonlinear drift | `θr,max/[Sd/H] ≈ PF1` (equal-displacement) | +2–13 % (IK-2003 §4.3) |
+| Ground motions | 40 LMSR-N records, `Sa(T1)`, processing | PGA vs Table 4.2; CESMD-vs-NGA ≤ 1.3 % |
+| IDA driver | ladder + bisection + non-convergence + censored median | runs correctly; censoring is principled |
+
+### What it did *not* validate
+
+The one thing the benchmark set out to reproduce and could not is the
+**system-level collapse capacity** (`(Sa,c/g)/γ` vs period).  Our faithful model
+collapses far *later* than IK-2005 reports — and, with the correct `(T1, T95)`
+damping, so much later that most frames' medians are off-scale (censored).  The
+investigation exonerated every fixable lever on our side; the residual is a
+cross-code (DRAIN-2DX vs OpenSees) discrepancy that cannot be resolved without the
+modified DRAIN-2DX source.
+
+### How well has the purpose been achieved?
+
+**For linear and moderate-nonlinear use — well achieved.**  Modal analysis,
+pushover strength, drift demand and the IMK hinge are each independently verified
+against closed-form or tabulated references at ≤ 2 % (the drift anchor at
++2–13 %).  These are the tools the further *linear* studies depend on, and they
+can now be used with high confidence.
+
+**For collapse prediction — qualified.**  The IDA / collapse machinery is verified
+to *run* correctly and to treat censored survivors honestly, and the hinge
+material is verified to enter post-capping correctly.  But the *absolute* collapse
+capacity is not independently calibrated: the only published reference is itself a
+cross-code prediction we cannot reproduce.  Collapse results should therefore be
+treated as **internally consistent and trend-reliable, but with an unresolved
+absolute-calibration question** — exactly the situation that warrants sensitivity
+studies (damping, `αc`, P-Δ) rather than a single headline number.
+
+In short: the toolchain is **validated for the elastic / moderate-nonlinear
+regime** (modal, pushover, drift) and **mechanically sound but not absolutely
+calibrated** for collapse.  That is the honest scope of what this benchmark
+delivered.
