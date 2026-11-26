@@ -1,16 +1,4 @@
-"""Tests for shell edge constraint detection and application.
-
-This file is deliberately named ``test_z_edge_constraints.py`` so pytest runs it
-**last**.  The penalty-method tests below use ``ops.equationConstraint()``, and
-OpenSeesPy 3.8.0.0 leaks that multi-point constraint across ``ops.wipe()``: a
-later ``Penalty`` / ``Lagrange`` constraint handler re-processes the leaked
-constraint and aborts with ``"Constrained Node does not exist in Domain"`` (the
-whole process dies — exit 255).  Running this module last keeps that leak from
-poisoning the tests that follow (e.g. the 1-DOF ``Hysteretic`` cyclic-check rig
-in ``test_isolate_base.py`` / ``test_link_nonlinear.py``, which use a ``Penalty``
-handler).  Upstream fix: OpenSeesPy must clear ``equationConstraint`` MPCs in
-``wipe()``.
-"""
+"""Tests for shell edge constraint detection and application."""
 
 import openseespy.opensees as ops
 import pytest
@@ -238,17 +226,20 @@ class TestApplyEdgeConstraints:
         ops.wipe()
 
 
-# ``ops.equationConstraint`` only exists in OpenSeesPy >= 3.8.0.0.  On Linux
-# that build (openseespylinux 3.8.0.0) is published for Python >= 3.12 only,
-# so Python 3.9-3.11 resolves OpenSeesPy 3.7.1.2, which lacks the command.
-_HAS_EQUATION_CONSTRAINT = hasattr(ops, "equationConstraint")
+def _record_equation_constraints(monkeypatch):
+    """Record ``ops.equationConstraint`` calls instead of emitting the real MPC.
+
+    OpenSeesPy 3.8.0.0 leaks the equation MPC across ``ops.wipe()`` (see
+    ``docs/constraint_detection.md``), which later crashes a ``Penalty`` /
+    ``Lagrange`` handler — so the penalty tests pin the *emitted arguments*
+    without creating the real (leaking) constraint.  ``raising=False`` lets the
+    mock run on older OpenSeesPy builds that lack the command.
+    """
+    calls = []
+    monkeypatch.setattr(ops, "equationConstraint", lambda *args: calls.append(args), raising=False)
+    return calls
 
 
-@pytest.mark.skipif(
-    not _HAS_EQUATION_CONSTRAINT,
-    reason="ops.equationConstraint requires OpenSeesPy >= 3.8.0.0 "
-    "(on Linux that build needs Python >= 3.12)",
-)
 class TestApplyEdgeConstraintsPenalty:
     """Tests for AnalysisBuilder.apply_edge_constraints() with penalty method."""
 
@@ -270,8 +261,9 @@ class TestApplyEdgeConstraintsPenalty:
             ops.node(int(nid), node.x, node.y, node.z)
         return builder, ops
 
-    def test_penalty_apply_by_explicit_edges(self):
-        """Explicit (coarse_edges, fine_nodes) creates MPCs with penalty."""
+    def test_penalty_apply_by_explicit_edges(self, monkeypatch):
+        """Explicit (coarse_edges, fine_nodes) emits the weighted equation MPCs."""
+        calls = _record_equation_constraints(monkeypatch)
         builder, ops = self._make_builder()
         n = builder.apply_edge_constraints(
             coarse_edges=[(1, 2)],
@@ -279,13 +271,40 @@ class TestApplyEdgeConstraintsPenalty:
             tolerance=1e-4,
             verbose=False,
         )
-        # Penalty creates 1 equationConstraint per slave → 2 for 2 slaves
         assert n == 2, f"Expected 2 penalty constraints, got {n}"
         assert builder._edge_constraint_method == "penalty"
+        # 2 slaves × 6 DOFs; each ties the slave DOF to the weighted master pair.
+        # Slave 5 sits at 2/6 of the 1–2 span (N1=2/3, N2=1/3); slave 6 at 4/6
+        # (N1=1/3, N2=2/3).
+        assert len(calls) == 12
+        for dof in range(1, 7):
+            assert calls[dof - 1] == (
+                5,
+                dof,
+                1.0,
+                1,
+                dof,
+                pytest.approx(-2.0 / 3.0),
+                2,
+                dof,
+                pytest.approx(-1.0 / 3.0),
+            )
+            assert calls[6 + (dof - 1)] == (
+                6,
+                dof,
+                1.0,
+                1,
+                dof,
+                pytest.approx(-1.0 / 3.0),
+                2,
+                dof,
+                pytest.approx(-2.0 / 3.0),
+            )
         ops.wipe()
 
-    def test_penalty_no_match_returns_zero(self):
+    def test_penalty_no_match_returns_zero(self, monkeypatch):
         """No matching slave nodes → zero constraints applied."""
+        _record_equation_constraints(monkeypatch)
         builder, ops = self._make_builder()
         n = builder.apply_edge_constraints(
             coarse_edges=[(3, 4)],
@@ -297,8 +316,9 @@ class TestApplyEdgeConstraintsPenalty:
         assert builder._edge_constraint_method is None
         ops.wipe()
 
-    def test_penalty_flag_persists(self):
+    def test_penalty_flag_persists(self, monkeypatch):
         """_edge_constraint_method stays 'penalty' after successful apply."""
+        _record_equation_constraints(monkeypatch)
         builder, ops = self._make_builder()
         assert builder._edge_constraint_method is None
         builder.apply_edge_constraints(
@@ -318,8 +338,9 @@ class TestApplyEdgeConstraintsPenalty:
         assert builder._edge_constraint_method == "penalty"
         ops.wipe()
 
-    def test_penalty_with_no_edges_returns_zero(self):
+    def test_penalty_with_no_edges_returns_zero(self, monkeypatch):
         """No edges provided → 0 constraints, no crash."""
+        _record_equation_constraints(monkeypatch)
         builder, ops = self._make_builder()
         n = builder.apply_edge_constraints(
             coarse_edges=[],
