@@ -5,12 +5,12 @@ status: "draft"
 tags: [planning, work-log, internal]
 category: [planning]
 ---
-# Pending work — fea_toolkit (2026-11-23)
+# Pending work — fea_toolkit (2026-11-26)
 
 ## Strategy — the next steps
 
 > This log is the single source of truth for pending work; this section is the
-> *sequencing layer* over it (maintained 2026-11-23).  The standalone plan
+> *sequencing layer* over it (maintained 2026-11-26).  The standalone plan
 > documents are historical records — `analysis_builder_migration_plan.md`,
 > `csm_test_model_plan.md`, `deprecation_plan.md` and `linting_fix_plan.md`
 > are ✅ complete and tagged `category: [archive]` (P9's Phase 3 triage resolved 2026-10-11 — baseline renewed,
@@ -51,20 +51,20 @@ category: [planning]
    the `Ctrl+K` palette, the command echo and `Recipe.from_python` (see the P31
    entry below).
 
-**Next — physics / feature gaps (re-ranked 2026-11-23).**  The workflow/GUI
+**Next — physics / feature gaps (re-ranked 2026-11-26).**  The workflow/GUI
 front is complete: the near-term workflow-layer items, the six-item GUI
 follow-up batch and **P31 / P35 / P46** all landed, and **P49 — link-element
 support — landed 2026-11-22** ahead of the physics tranche (GitHub issue #3:
 parsing, per-DOF emitters, bearing elements, the `check_hysteretic_backbone` +
 `isolate_base` verbs, and the E-Defense LRB-CLB / TPB + Morgan & Mahin FP
 benchmarks — only its *deferred limitations* remain, see the P49 entry).  The
-remaining physics/feature tranche, in order: **P43 items 5–6** (make the
-schema-v4 transient result block consumable — the primary next feature, plan
-below), **P19** (member-interior force stations), **P6b / P39** (SD-section
-fidelity), **P7** (Python-native NLD), then **P23 / P25** (GUI polish +
-classic support symbols) and **P42b** (the IK-2005 collapse investigation —
-research, not a fixable defect).  **P50** and **P25** each need a decision
-before implementation.
+remaining physics/feature tranche, in order: **P19** (member-interior force
+stations), **P6b / P39** (SD-section fidelity), **P7** (Python-native NLD),
+then **P23 / P25** (GUI polish + classic support symbols).  **P43** (the
+schema-v4 transient block) and **P42b** (the IK-2005 collapse investigation)
+are now closed out — P42b leaves *collapse-capacity calibration* as the open
+research question.  **P50** and **P25** each need a decision before
+implementation.
 
 **Opportunistic — Tier 4.**  ~~P9 (linting Phase 3 triage)~~ ✅ **resolved
 2026-10-11** — fresh `npx pyright src/` baseline recorded, no new real bugs,
@@ -208,7 +208,7 @@ warranted — `pushover_step_stride` and the per-block flags are the answer):
 
 ## PENDING (active — not yet done)
 
-> Priority-ordered register of **open** work (maintained 2026-11-23).  Every
+> Priority-ordered register of **open** work (maintained 2026-11-26).  Every
 > item is cross-referenced to its source document.  Completed work — the
 > Tier 1–2 physics items, the Tier 3 workflow/GUI batch (P20–P38), and the
 > deferred-housekeeping closures — is recorded in the
