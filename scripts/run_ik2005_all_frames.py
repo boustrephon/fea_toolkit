@@ -7,10 +7,10 @@ run over the 40 LMSR-N records, its ``ida`` block is archived
 to ``<out-dir>/ik2005_<code>.npz``, and the per-frame summary (median
 ``(Sa,c/g)/γ``, σ_ln) is appended to ``<out-dir>/ik2005_all_frames_summary.json``
 **incrementally** — so the run is safe to kill and resume: a frame whose
-*complete* (full-record) archive already exists is skipped, while a partial
-archive from an interrupted run is re-run.  A full run also refuses to start
-unless the complete 40-record set is present in the mirror, and exits nonzero
-if any requested frame fails.
+archive already records exactly the requested record IDs is skipped, while a
+partial (or unreadable) archive from an interrupted run is re-run.  A full run
+also refuses to start unless the complete 40-record set is present in the
+mirror, and exits nonzero if any requested frame fails.
 
 At the end it writes a combined markdown table
 (``<out-dir>/ik2005_all_frames_summary.md``) and a
@@ -64,41 +64,53 @@ def _save(path: str, data: dict) -> None:
         json.dump(data, fh, indent=2, sort_keys=True)
 
 
-def _archive_record_count(path: str) -> Optional[int]:
-    """Number of records archived in *path*, or ``None`` when it does not exist.
+def _archive_record_ids(path: str) -> Optional[list[str]]:
+    """The record IDs archived in *path*, or ``None`` when it cannot be read.
 
-    An archive is only "complete" when it records the full requested set
-    (``ida/record_id`` size == ``len(record_ids)``); a partial archive from an
-    earlier interrupted run is re-run rather than skipped.
+    ``None`` means "treat as incomplete" — *path* does not exist, or ``np.load``
+    cannot read it (a corrupt or interrupted write) — so the caller re-runs the
+    frame instead of skipping it.  ``[]`` means the archive exists but carries
+    no ``ida/record_id`` array.  A complete archive is one whose stored IDs
+    equal the requested ``record_ids`` (order included).
     """
     if not os.path.exists(path):
         return None
-    with np.load(path) as z:
-        if "ida/record_id" not in z.files:
-            return 0
-        return int(z["ida/record_id"].size)
+    try:
+        with np.load(path) as z:
+            if "ida/record_id" not in z.files:
+                return []
+            return [str(r) for r in z["ida/record_id"]]
+    except Exception:
+        return None
 
 
 def _seed_existing(summary: dict, out_dir: str) -> None:
-    """Back-fill already-written archives (e.g. ``0909``) into the summary."""
+    """Back-fill already-written archives (e.g. ``0909``) into the summary.
+
+    An archive that cannot be read (``np.load`` fails on a corrupt or
+    interrupted write) is treated as incomplete: it is left out of the summary,
+    so the main loop re-runs that frame and later frames keep processing.
+    """
     for code in FRAME_CODES:
         if code in summary:
             continue
         path = os.path.join(out_dir, f"ik2005_{code}.npz")
         if not os.path.exists(path):
             continue
-        z = np.load(path)
-        summary[code] = {
-            "code": code,
-            "N": FRAME_DATA[code]["N"],
-            "T1": FRAME_DATA[code]["T1"],
-            "n_records": int(z["ida/record_id"].size),
-            "median_collapse_sa_gamma": float(z["ida/median_collapse_Sa_T1_gamma"]),
-            "sigma_ln": float(z["ida/sigma_ln"]),
-            "elapsed_s": None,
-            "source": "archive",
-        }
-        z.close()
+        try:
+            with np.load(path) as z:
+                summary[code] = {
+                    "code": code,
+                    "N": FRAME_DATA[code]["N"],
+                    "T1": FRAME_DATA[code]["T1"],
+                    "n_records": int(z["ida/record_id"].size),
+                    "median_collapse_sa_gamma": float(z["ida/median_collapse_Sa_T1_gamma"]),
+                    "sigma_ln": float(z["ida/sigma_ln"]),
+                    "elapsed_s": None,
+                    "source": "archive",
+                }
+        except Exception:
+            continue
 
 
 def _record_count_suffix(rows: list) -> str:
@@ -233,7 +245,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     any_failed = False
     for idx, code in enumerate(codes, 1):
         out = os.path.join(args.out_dir, f"ik2005_{code}.npz")
-        if not args.force and _archive_record_count(out) == len(record_ids):
+        if not args.force and _archive_record_ids(out) == list(record_ids):
             print(
                 f"{_ts()}  [{idx}/{len(codes)}] {code}: complete archive exists — skip",
                 flush=True,
