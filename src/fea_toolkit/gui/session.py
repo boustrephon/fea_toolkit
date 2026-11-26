@@ -65,6 +65,12 @@ class Session:
     #: uses an incompatible geometry (a tag that moved would otherwise map an
     #: earlier node's displacement onto a different node).
     _retained_transient_geometry: dict = field(default_factory=dict, repr=False)
+    #: ``{node_tag: (x, y, z)}`` of the mesh the loaded results archive's
+    #: transient blocks were keyed against (:meth:`from_bundle`), kept so
+    #: :meth:`to_bundle` can drop those blocks once the working document is
+    #: re-meshed (a tag that moved would otherwise map an old node's history
+    #: onto a new node).
+    _retained_results_geometry: dict = field(default_factory=dict, repr=False)
 
     def reset(self) -> None:
         """Clear the document state, leaving the workflow recipe untouched.
@@ -82,6 +88,7 @@ class Session:
         self.hidden_elem_ids.clear()
         self.last_run = None
         self._retained_results_arrays.clear()
+        self._retained_results_geometry.clear()
         self._retained_transient.clear()
         self._retained_transient_geometry.clear()
 
@@ -152,6 +159,11 @@ class Session:
             # re-run omitted cannot be revived from the retained archive.
             merged = dict(self._retained_results_arrays)
             self._drop_transient_blocks(merged, results_arrays)
+            # Loaded transient blocks are tag-keyed against the mesh they were
+            # saved with; drop any whose tags no longer match the current mesh
+            # (a re-mesh would otherwise map an old node's history onto a new
+            # node).
+            self._drop_incompatible_loaded_transient(merged)
             merged.update(results_arrays)
             results_arrays = merged
         return {
@@ -163,7 +175,7 @@ class Session:
             "tables": tables,
         }
 
-    def record_run(self, run: Any) -> None:
+    def record_run(self, run: Any, mesh: Any = None) -> None:
         """Record a completed run, retaining its nonlinear-dynamic payloads.
 
         Sets ``last_run`` and folds any completed NLD transient payloads into
@@ -176,20 +188,30 @@ class Session:
         mesh they were recorded against keeps its node tags at the same
         coordinates; a run over an incompatible mesh first invalidates them, so
         :meth:`to_bundle` cannot fold an earlier node's displacement onto a
-        different node.
+        different node.  *mesh* is the topology that produced the run's
+        transient result; when omitted it falls back to the store's prepared
+        mesh, but a caller that installs the mesh *after* this call (the recipe
+        controller presents a geometry result after recording the run) must pass
+        it explicitly so the signature matches the producing mesh.
         """
         self.last_run = run
         if run is None:
             return
         from .project import collect_project_results
 
-        transient = collect_project_results(run.results).get("transient") or {}
-        if not transient:
-            return
-        mesh = self.store.preprocessed() if self.store is not None else None
+        if mesh is None:
+            mesh = self.store.preprocessed() if self.store is not None else None
+        # Invalidate retained histories whose node tags no longer match the
+        # current mesh — before the transient early return below — so a later
+        # modal-only run over a re-meshed model also drops them, while a
+        # modal-only run over a compatible mesh preserves them.
         if self._retained_transient and not self._transient_geometry_compatible(mesh):
             self._retained_transient.clear()
             self._retained_transient_geometry.clear()
+
+        transient = collect_project_results(run.results).get("transient") or {}
+        if not transient:
+            return
         self._retained_transient.update(transient)
         self._retained_transient_geometry = self._node_tag_geometry(mesh)
 
@@ -213,6 +235,39 @@ class Session:
             return False
         current = self._node_tag_geometry(mesh)
         return all(current.get(tag) == coord for tag, coord in signature.items())
+
+    def _loaded_transient_geometry_compatible(self, mesh: Any) -> bool:
+        """Whether the loaded transient blocks still match *mesh*'s nodes.
+
+        The transient blocks loaded by :meth:`from_bundle` are tag-keyed against
+        the mesh they were saved with; once the document is re-meshed those tags
+        no longer point at the same nodes.  An empty signature (no mesh was
+        loaded) cannot be verified, so it reads as incompatible.
+        """
+        signature = self._retained_results_geometry
+        if not signature:
+            return False
+        current = self._node_tag_geometry(mesh)
+        return all(current.get(tag) == coord for tag, coord in signature.items())
+
+    def _drop_incompatible_loaded_transient(self, base: dict) -> None:
+        """Drop *base*'s loaded transient blocks when their mesh is incompatible.
+
+        The transient blocks loaded by :meth:`from_bundle` are tag-keyed against
+        the mesh they were saved with; once the working document is re-meshed
+        those tags no longer point at the same nodes.  Drop the whole transient
+        block so an old node's displacement history cannot be revived onto a new
+        node.
+        """
+        mesh = self.store.preprocessed() if self.store is not None else None
+        if self._loaded_transient_geometry_compatible(mesh):
+            return
+        from ..io.results_schema import transient_case_names
+
+        for case in transient_case_names(base):
+            prefix = f"transient/{case}/"
+            for key in [k for k in base if k.startswith(prefix)]:
+                del base[key]
 
     @staticmethod
     def _drop_transient_blocks(base: dict, incoming: dict) -> None:
@@ -267,6 +322,13 @@ class Session:
         # transient block is not represented by a static RESULTS view.
         session._retained_results_arrays = (
             dict(repository.to_arrays()) if repository is not None else {}
+        )
+        # The loaded transient blocks are tag-keyed against the loaded mesh;
+        # remember that signature so a later save over a re-meshed document can
+        # drop them (a tag that moved would otherwise map an old node's history
+        # onto a new node).
+        session._retained_results_geometry = (
+            session._node_tag_geometry(mesh) if mesh is not None else {}
         )
         project = manifest.get("project") or {}
         source_label = project.get("source_label", "")

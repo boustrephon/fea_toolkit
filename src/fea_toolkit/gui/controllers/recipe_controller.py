@@ -363,7 +363,12 @@ class RecipeController:
             # entries the run changed back into the window's store, so selections
             # the user added or edited while the run was in flight survive.
             self._merge_named_selections(run.document)
-        self._window._session.record_run(run)
+        # The run's NLD result was produced against the mesh the run's geometry
+        # step emitted; pass it explicitly, because the geometry result is only
+        # installed into the store by the presentation loop below (after this
+        # call), so reading the store here would record the *previous* mesh.
+        producing_mesh = getattr(run.document, "model", None) if run.document is not None else None
+        self._window._session.record_run(run, mesh=producing_mesh)
         # Persist each step's outcome onto the recipe (a step that ran "ok" is
         # unchecked), so the run state survives save → reopen.  Only when the
         # recipe is still the one the run started from — an edited recipe would

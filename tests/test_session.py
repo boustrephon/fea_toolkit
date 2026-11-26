@@ -148,3 +148,74 @@ def test_to_bundle_round_trips_through_the_zip_codec(tmp_path):
     assert [step.verb for step in restored.recipe] == ["mesh"]
     assert restored.hidden_elem_ids == set()
     assert restored.last_run is None
+
+
+def test_record_run_stores_the_producing_mesh_signature():
+    """``record_run`` keys the retained transient to the mesh it was passed."""
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    session = Session()
+    node = SimpleNamespace(node_tag=7, x=1.0, y=2.0, z=3.0)
+    mesh = SimpleNamespace(nodes={7: node})
+    result = SimpleNamespace(
+        kind="nonlinear_dynamic",
+        label="A",
+        payload=SimpleNamespace(
+            data={
+                "times": np.arange(2, dtype=float) * 0.01,
+                "displacements": {7: np.zeros((2, 3))},
+            }
+        ),
+    )
+    run = SimpleNamespace(results=[result])
+
+    session.record_run(run, mesh=mesh)
+
+    assert session._retained_transient_geometry == {7: (1.0, 2.0, 3.0)}
+    assert "A" in session._retained_transient
+
+
+def test_record_run_modal_only_invalidates_stale_retained_histories():
+    """A modal-only run over a re-meshed model drops stale retained histories."""
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    session = Session()
+    session._retained_transient = {
+        "A": {"times": np.arange(2), "displacements": {7: np.zeros((2, 3))}}
+    }
+    session._retained_transient_geometry = {7: (1.0, 2.0, 3.0)}
+
+    moved = SimpleNamespace(node_tag=7, x=9.0, y=9.0, z=9.0)
+    mesh = SimpleNamespace(nodes={7: moved})
+    run = SimpleNamespace(results=[])
+
+    session.record_run(run, mesh=mesh)
+
+    assert session._retained_transient == {}
+    assert session._retained_transient_geometry == {}
+
+
+def test_record_run_modal_only_preserves_compatible_histories():
+    """A modal-only run over a compatible mesh preserves retained histories."""
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    session = Session()
+    session._retained_transient = {
+        "A": {"times": np.arange(2), "displacements": {7: np.zeros((2, 3))}}
+    }
+    session._retained_transient_geometry = {7: (1.0, 2.0, 3.0)}
+
+    node = SimpleNamespace(node_tag=7, x=1.0, y=2.0, z=3.0)
+    mesh = SimpleNamespace(nodes={7: node})
+    run = SimpleNamespace(results=[])
+
+    session.record_run(run, mesh=mesh)
+
+    assert "A" in session._retained_transient
+    assert session._retained_transient_geometry == {7: (1.0, 2.0, 3.0)}
