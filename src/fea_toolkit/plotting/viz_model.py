@@ -2425,10 +2425,15 @@ def plot_transient_animation(
         if _node_xyz
         else 0.0
     )
-    peak = max(
-        (float(np.max(np.linalg.norm(hist[:, :3], axis=1))) for hist in history_by_tag.values()),
-        default=0.0,
-    )
+    # Skip empty (or malformed) node histories before taking the maximum, so an
+    # unrecorded node cannot prevent the nonempty nodes from displaying.
+    _peak_norms: list = []
+    for hist in history_by_tag.values():
+        arr = np.asarray(hist, dtype=float)
+        if arr.ndim != 2 or arr.shape[0] == 0:
+            continue
+        _peak_norms.append(float(np.max(np.linalg.norm(arr[:, :3], axis=1))))
+    peak = max(_peak_norms, default=0.0)
     if scale is None:
         factor = (float(amplitude) / 100.0) * max(_span, 1e-12) / max(peak, 1e-12)
     else:
