@@ -9,9 +9,10 @@ related: [ground_motion_data.md, ik2005_generic_frame_benchmark.md, _pending_wor
 
 # NGA-West2 waveform download — guidance
 
-## 0. Next session — runbook (8 AM–8 PM PST only)
+## 0. Next session — runbook (registration: Mon–Fri, 8 AM–8 PM PST)
 
-NGA-West2 is only reachable **Mon–Fri, 8 AM–8 PM PST**.  Within that window:
+NGA-West2 **registration** is only open **Mon–Fri, 8 AM–8 PM PST**; existing
+members can sign in and download at any time.  Within the registration window:
 
 ```bash
 cd <your fea_toolkit checkout>          # e.g. ~/Projects/fea_toolkit
