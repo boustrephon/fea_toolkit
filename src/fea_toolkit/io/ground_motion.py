@@ -214,8 +214,9 @@ def is_direct_url(url: str) -> bool:
 #: ``DT=5.E-03``) — the ways NGA-West2 writes ``DT``.
 _FLOAT_VALUE_RE = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?"
 
-#: ``DT = <value>`` on a header line (whitespace around ``=`` tolerated).
-_DT_RE = re.compile(rf"(?:^|\s)DT\s*=\s*({_FLOAT_VALUE_RE})", re.IGNORECASE)
+#: ``DT = <value>`` on a header line (whitespace around ``=`` tolerated, and a
+#: comma before ``DT`` — NGA-West2's ``NPTS=  5, DT=  0.005`` header form).
+_DT_RE = re.compile(rf"(?:^|[\s,])DT\s*=\s*({_FLOAT_VALUE_RE})", re.IGNORECASE)
 
 #: ``NPTS = <int>`` on a header line.
 _NPTS_RE = re.compile(r"(?:^|\s)NPTS\s*=\s*(\d+)", re.IGNORECASE)

@@ -185,6 +185,14 @@ class TestReadPeerRecordHeaderVariants:
         assert times.tolist() == pytest.approx([0.0, 0.005, 0.01])
         assert accel.tolist() == pytest.approx([0.1 * DEFAULT_GRAVITY_MS2] * 3)
 
+    def test_dt_comma_delimited_on_same_header_line(self, tmp_path):
+        """``DT`` after a comma delimiter with no space (``NPTS=  3,DT=  0.005``) is recognised."""
+        f = tmp_path / "comma.at2"
+        f.write_text("NPTS=  3,DT=  0.005\n0.1\n0.1\n0.1\n", encoding="utf-8")
+        times, accel = read_peer_record(str(f))
+        assert times.tolist() == pytest.approx([0.0, 0.005, 0.01])
+        assert accel.tolist() == pytest.approx([0.1 * DEFAULT_GRAVITY_MS2] * 3)
+
     def test_npts_mismatch_warns(self, tmp_path):
         f = tmp_path / "trunc.at2"
         f.write_text("NPTS=5\nDT=0.005\n0.1\n0.1\n0.1\n", encoding="utf-8")
