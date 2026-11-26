@@ -1183,9 +1183,12 @@ def collect_transient_arrays(transient_results: dict[str, Any]) -> dict[str, np.
             raise ValueError(f"transient case {case!r} is missing the required 'direction'")
 
         arrays[make_transient_key(case, "transient/{case}/time")] = times
-        # ``base_shear`` is optional: a re-run that records only displacements
-        # must omit the field, so a previously-saved base_shear is dropped by the
-        # caller's whole-block merge rather than revived from a stale archive.
+        # ``base_shear`` is optional: the reader already treats it as optional
+        # (``transient_nodal_displacements`` returns ``None`` when absent), so
+        # the writer must not hard-require it — a transient that records only
+        # displacements could otherwise be read but never written.  Emitting it
+        # only when present also lets a re-run that omits it drop a
+        # previously-saved base_shear via the caller's whole-block merge.
         if res.get("base_shear") is not None:
             arrays[make_transient_key(case, "transient/{case}/base_shear")] = np.asarray(
                 res["base_shear"], dtype=float
